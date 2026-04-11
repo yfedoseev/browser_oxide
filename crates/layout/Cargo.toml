@@ -1,0 +1,15 @@
+[package]
+name = "layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Layout engine (taffy-based) for browser_oxide — getBoundingClientRect, offsetWidth, getComputedStyle"
+
+[dependencies]
+dom = { path = "../dom" }
+css_parser = { path = "../css_parser" }
+css_values = { path = "../css_values" }
+css_cascade = { path = "../css_cascade" }
+taffy = "0.7"
+serde = { version = "1", features = ["derive"] }

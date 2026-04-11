@@ -1,0 +1,47 @@
+[package]
+name = "net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Stealth HTTP client with Chrome TLS/HTTP2 fingerprint impersonation (boring2/BoringSSL)"
+
+[dependencies]
+stealth = { path = "../stealth" }
+
+# TLS (BoringSSL)
+boring2 = { version = "4.15", features = ["pq-experimental", "cert-compression"] }
+tokio-boring2 = "4.15"
+webpki-root-certs = "0.26"
+
+# HTTP/2 (wreq's fork of h2 with PseudoOrder/SettingsOrder support)
+http2 = { version = "0.5", features = ["unstable"] }
+
+# HTTP/1.1
+httparse = "1"
+
+# Compression
+flate2 = "1"
+brotli = "7"
+zstd = "0.13"
+
+# Core
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+url = "2"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"
+
+# HTTP/3 (QUIC)
+quinn = "0.11"
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+webpki-roots = "0.26"
+http = "1"
+bytes = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

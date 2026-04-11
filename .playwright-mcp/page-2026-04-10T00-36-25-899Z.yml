@@ -1,0 +1,48 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - button "Сервисы" [ref=e7] [cursor=pointer]:
+          - img [ref=e9]
+        - link "Алиса" [ref=e13] [cursor=pointer]:
+          - /url: https://alice.yandex.ru/?utm_source=yandex&utm_campaign=morda_header_oknyx&utm_medium=interface
+          - img [ref=e14]
+        - link "Войти" [ref=e17] [cursor=pointer]:
+          - /url: https://passport.yandex.ru/auth?retpath=https%3A%2F%2Fsso.passport.yandex.ru%2Fpush%3Fretpath%3Dhttps%253A%252F%252Fya.ru%252F%253Fnr%253D1%2526redirect_ts%253D1775781381.00000%26uuid%3D74026d2c-5d26-4716-97b4-9c075bcfa773&msid=1775781384137997-3954684906265483615-balancer-l7leveler-kubr-yp-vla-27-BAL&origin=home_yaru_desktop_new
+        - button "Профиль, вход не выполнен" [ref=e21] [cursor=pointer]:
+          - img [ref=e23]
+      - complementary "Уведомления" [ref=e25]:
+        - generic [ref=e26]:
+          - 'link "В выходные: слабый дождь · +13⁠…⁠+15⁠° · слабый ветер до 3 м⁠/⁠с, порывы до 8 м⁠/⁠с" [ref=e27] [cursor=pointer]':
+            - /url: https://yandex.ru/pogoda/103571?lat=49.106795&lon=-122.659984&utm_content=GroupedWeekend&utm_medium=alert&utm_source=morda#d_11
+            - 'generic "В выходные: слабый дождь · +13⁠…⁠+15⁠° · слабый ветер до 3 м⁠/⁠с, порывы до 8 м⁠/⁠с" [ref=e28]':
+              - generic [ref=e29]: "В выходные: слабый дождь · +13⁠…⁠+15⁠° · слабый ветер до 3 м⁠/⁠с, порывы до 8 м⁠/⁠с"
+          - button "Закрыть"
+    - generic [ref=e32]:
+      - search "Поиск в интернете" [ref=e33]:
+        - generic [ref=e36]:
+          - combobox "Найдётся всё" [active] [ref=e39]
+          - generic [ref=e40]:
+            - button "Клавиатура":
+              - img
+          - button "Голосовой поиск" [ref=e42] [cursor=pointer]:
+            - generic:
+              - img
+          - button "Поиск по картинке" [ref=e44] [cursor=pointer]:
+            - img [ref=e45]
+      - complementary "Информеры" [ref=e48]:
+        - link "Погода в Лэнгли 17°, Пасмурно" [ref=e49] [cursor=pointer]:
+          - /url: https://yandex.ru/pogoda/103571?lat=49.106795&lon=-122.659984&utm_campaign=informer&utm_content=main_informer&utm_medium=web&utm_source=home
+          - generic [ref=e51]: +17°
+        - generic [ref=e52]:
+          - heading "Курсы ЦБ РФ" [level=2] [ref=e53]
+          - link "USD ЦБ 77,84" [ref=e55] [cursor=pointer]:
+            - /url: https://ya.ru/search/?lr=103571&search_source=ya_morda_stocks&text=USD+%D0%A6%D0%91&wiz=finance
+            - generic [ref=e56]: USD 77,84
+          - link "EUR ЦБ 90,88" [ref=e58] [cursor=pointer]:
+            - /url: https://ya.ru/search/?lr=103571&search_source=ya_morda_stocks&text=EUR+%D0%A6%D0%91&wiz=finance
+            - generic [ref=e59]: EUR 90,88
+        - link "Ваш город определён как Лэнгли" [ref=e61] [cursor=pointer]:
+          - /url: https://ya.ru/tune/geo?retpath=https%3A%2F%2Fya.ru%2F%3Fnr%3D1%26redirect_ts%3D1775781381.00000&nosync=1
+          - text: Лэнгли
+  - alert

@@ -1,0 +1,39 @@
+[package]
+name = "browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Top-level headless browser API: Page, script execution, content extraction"
+
+[features]
+default = []
+# Propagates to js_runtime → canvas so the full WebGL OSMesa backend
+# is linked. Off by default because OSMesa adds ~15 MB to the binary
+# and per the adidas probe investigation WebGL is NOT on the critical
+# path for any currently-tracked blocker site.
+webgl-render = ["js_runtime/webgl-render"]
+
+[dependencies]
+dom = { path = "../dom" }
+html_parser = { path = "../html_parser" }
+js_runtime = { path = "../js_runtime" }
+event_loop = { path = "../event_loop" }
+css_selectors = { path = "../css_selectors" }
+net = { path = "../net" }
+stealth = { path = "../stealth" }
+deno_core = "0.311"
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+url = "2"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+protocol = { path = "../protocol" }
+stealth = { path = "../stealth" }
+net = { path = "../net" }
+serde_json = "1"
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+url = "2"

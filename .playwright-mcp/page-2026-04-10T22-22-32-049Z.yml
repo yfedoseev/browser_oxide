@@ -1,0 +1,623 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - banner [ref=e5]:
+      - button "Open information on adidas advantages, offers and more." [ref=e6] [cursor=pointer]:
+        - generic [ref=e9]:
+          - generic [ref=e10]: SCORE UP TO 40% OFF
+          - img [ref=e11]
+      - generic [ref=e13]:
+        - navigation "Customer information." [ref=e14]:
+          - list [ref=e15]:
+            - listitem [ref=e16]:
+              - link "store finder" [ref=e17] [cursor=pointer]:
+                - /url: /us/stores
+            - listitem [ref=e18]:
+              - link "help" [ref=e19] [cursor=pointer]:
+                - /url: /us/help
+            - listitem [ref=e20]:
+              - link "orders and returns" [ref=e21] [cursor=pointer]:
+                - /url: /us/order-tracker
+            - listitem [ref=e22]:
+              - link "gift cards" [ref=e23] [cursor=pointer]:
+                - /url: /us/giftcards
+            - listitem [ref=e24]:
+              - button "Become an adiClub member." [ref=e25] [cursor=pointer]: join adiClub
+            - listitem [ref=e26]:
+              - button "Change delivery location or change language" [ref=e28] [cursor=pointer]
+        - generic [ref=e29]:
+          - link "Homepage" [ref=e30] [cursor=pointer]:
+            - /url: /us
+          - list "Main Navigation" [ref=e32]:
+            - listitem [ref=e33]:
+              - link "MEN" [ref=e34] [cursor=pointer]:
+                - /url: /us/men?grid=true
+            - listitem [ref=e35]:
+              - link "WOMEN" [ref=e36] [cursor=pointer]:
+                - /url: /us/women?grid=true
+            - listitem [ref=e37]:
+              - link "KIDS" [ref=e38] [cursor=pointer]:
+                - /url: /us/kids?grid=true
+            - listitem [ref=e39]:
+              - button "SPORTS" [ref=e40]
+            - listitem [ref=e41]:
+              - link "SALE" [ref=e42] [cursor=pointer]:
+                - /url: /us/sale
+            - listitem [ref=e43]:
+              - link "NEW & TRENDING" [ref=e44] [cursor=pointer]:
+                - /url: /us/new_arrivals
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - textbox "Search" [ref=e47]
+              - img [ref=e49] [cursor=pointer]
+            - button "Sign up or Log in to adiClub" [ref=e51] [cursor=pointer]:
+              - img [ref=e52]
+              - generic [ref=e55]: "1"
+            - link "Go to wishlist" [ref=e56] [cursor=pointer]:
+              - /url: /us/wishlists
+              - img [ref=e57]
+            - link "Go to bag" [ref=e59] [cursor=pointer]:
+              - /url: /us/cart
+              - img [ref=e60]
+              - generic [ref=e63]: "0"
+    - generic [ref=e64]:
+      - link "adiClub members save up to 40% on tons of styles." [ref=e68] [cursor=pointer]:
+        - /url: /us/members_deals
+        - paragraph [ref=e69]: adiClub members save up to 40% on tons of styles.
+        - img [ref=e70]
+      - generic [ref=e73]:
+        - 'img "Three side-by-side images of people with vintage cars in adidas gear: left, a girl sits in a red car wearing a red and white t-shirt and gray sneakers; middle, legs in black socks and blue sneakers; right, a boy and girl stand in full adidas outfits." [ref=e76]'
+        - generic [ref=e78]:
+          - generic [ref=e79]:
+            - heading "SPEZIAL" [level=1] [ref=e81]
+            - paragraph [ref=e82]: From the field to the street.
+          - link "SHOP NOW" [ref=e85] [cursor=pointer]:
+            - /url: /us/spezial
+            - generic [ref=e86]: SHOP NOW
+            - img [ref=e87]
+      - region "Content carousel" [ref=e91]:
+        - generic [ref=e92]: Use left and right arrow keys to navigate between items.
+        - generic [ref=e93]:
+          - button "Previous" [disabled]:
+            - generic: Previous
+            - img
+        - button "Next" [ref=e95] [cursor=pointer]:
+          - generic [ref=e96]: Next
+          - img [ref=e97]
+        - list [ref=e99]:
+          - listitem "Carousel item 1" [ref=e100]:
+            - link "SHOP NOW" [ref=e101] [cursor=pointer]:
+              - /url: /us/originals-golf
+              - generic [ref=e102]:
+                - img "Two individuals, a woman and a man, are standing in a room with wooden paneled walls. The woman is wearing a green dress and a sun hat, while the man is wearing a patterned shirt, khaki shorts, and sunglasses." [ref=e106]
+                - generic [ref=e107]:
+                  - generic [ref=e108]:
+                    - heading "ORIGINALS GOLF" [level=4] [ref=e110]
+                    - paragraph [ref=e111]: Vibrant new looks for the season opener.
+                  - button "SHOP NOW" [ref=e113]:
+                    - generic [ref=e114]: SHOP NOW
+          - listitem "Carousel item 2" [ref=e115]:
+            - link "SHOP NOW" [ref=e116] [cursor=pointer]:
+              - /url: /us/boston_marathon
+              - generic [ref=e117]:
+                - img "Two individuals, a man and a woman, are jogging together on a path surrounded by trees and foliage in an outdoor setting." [ref=e121]
+                - generic [ref=e122]:
+                  - generic [ref=e123]:
+                    - heading "2026 BOSTON MARATHON® COLLECTION" [level=4] [ref=e125]
+                    - paragraph [ref=e126]: Celebrate the tradition of blue and yellow and the 26.2 mile journey.
+                  - generic:
+                    - list
+                  - button "SHOP NOW" [ref=e128]:
+                    - generic [ref=e129]: SHOP NOW
+          - listitem "Carousel item 3" [ref=e130]:
+            - link "SHOP NOW" [ref=e131] [cursor=pointer]:
+              - /url: /us/fifa_world_cup-jerseys
+              - generic [ref=e132]:
+                - img "The image displays a collection of various soccer jerseys, including national team jerseys from Spain, Italy, Germany, and others, hanging on a display rack against a dark background." [ref=e136]
+                - generic [ref=e137]:
+                  - generic [ref=e138]:
+                    - heading "FIFA WORLD CUP 26™ AWAY JERSEYS" [level=4] [ref=e140]
+                    - paragraph [ref=e141]: Turn national symbols into wearable style.
+                  - button "SHOP NOW" [ref=e143]:
+                    - generic [ref=e144]: SHOP NOW
+          - listitem "Carousel item 4" [ref=e145]:
+            - link "SHOP NOW" [ref=e146] [cursor=pointer]:
+              - /url: /us/adistar
+              - generic [ref=e147]:
+                - img "The image shows a person's lower body wearing a pair of distressed denim jeans and black athletic shoes standing on a rocky surface with a bright, sunlit background." [ref=e151]
+                - generic [ref=e152]:
+                  - generic [ref=e153]:
+                    - heading "ADISTAR XLG 2.0" [level=4] [ref=e155]
+                    - paragraph [ref=e156]: Designed with bold proportions for those who dare to stand out.
+                  - button "SHOP NOW" [ref=e158]:
+                    - generic [ref=e159]: SHOP NOW
+          - listitem "Carousel item 5" [ref=e160]:
+            - link "SHOP NOW" [ref=e161] [cursor=pointer]:
+              - /url: /us/adizero-running
+              - generic [ref=e162]:
+                - img "A blurred, monochrome image of a white athletic shoe with laces, set against a plain background." [ref=e166]
+                - generic [ref=e167]:
+                  - generic [ref=e168]:
+                    - heading "ADIZERO EVO SL" [level=4] [ref=e170]
+                    - paragraph [ref=e171]: Inspired by speed, made for race-day style.
+                  - button "SHOP NOW" [ref=e173]:
+                    - generic [ref=e174]: SHOP NOW
+        - generic [ref=e175]: Showing items 1 to 5 of 5
+      - generic [ref=e177]:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - img "A completely white background."
+              - paragraph: FAST, FREE DELIVERY
+              - link "SHOP NOW" [ref=e180] [cursor=pointer]:
+                - /url: /us/prime
+                - generic [ref=e181]: SHOP NOW
+                - img [ref=e182]
+      - generic [ref=e185]:
+        - heading "RELATED RESOURCES" [level=4] [ref=e187]
+        - list [ref=e190]:
+          - listitem [ref=e191]:
+            - link "How To Clean Shoes" [ref=e193] [cursor=pointer]:
+              - /url: /us/blog/how-to-clean-shoes
+              - generic [ref=e197]:
+                - strong [ref=e199]: How To Clean Shoes
+                - paragraph [ref=e200]: Get down and dirty with adidas and learn how to clean your sneakers the right way.
+          - listitem [ref=e201]:
+            - link "The adidas Samba Size Guide" [ref=e203] [cursor=pointer]:
+              - /url: /us/blog/982564-the-adidas-samba-size-guide
+              - generic [ref=e204]:
+                - img "Three styles of adidas Samba with gray gradient background." [ref=e207]
+                - generic [ref=e208]:
+                  - strong [ref=e210]: The adidas Samba Size Guide
+                  - paragraph [ref=e211]: Tired of asking are Sambas true to size? Check out our official adidas Samba size chart for all you need to find your perfect Samba style and fit today.
+          - listitem [ref=e212]:
+            - 'link "Ace the Looks: How to Style a Tennis Skirt" [ref=e214] [cursor=pointer]':
+              - /url: /us/blog/ace-the-looks-how-to-style-a-tennis-skirt
+              - generic [ref=e218]:
+                - strong [ref=e220]: "Ace the Looks: How to Style a Tennis Skirt"
+                - paragraph [ref=e221]: Are you ready to serve? Learn how to style your tennis skirt outfits with adidas.
+          - listitem [ref=e222]:
+            - link "How To Style A Soccer Jersey" [ref=e224] [cursor=pointer]:
+              - /url: /us/blog/1033157-how-to-style-a-soccer-jersey
+              - generic [ref=e228]:
+                - strong [ref=e230]: How To Style A Soccer Jersey
+                - paragraph [ref=e231]: Learn how to style a soccer jersey with effortless outfit ideas, layering tips, and accessories. Elevate your look from game day to everyday and casual style.
+          - listitem [ref=e232]:
+            - link "6 Creative Ways To Lace Up Your Sneakers With Instructions" [ref=e234] [cursor=pointer]:
+              - /url: /us/blog/342736-6-creative-ways-to-lace-up-your-sneakers-with-instructions
+              - generic [ref=e238]:
+                - strong [ref=e240]: 6 Creative Ways To Lace Up Your Sneakers With Instructions
+                - paragraph [ref=e241]: Take your sneaker game to the next level with our guide on how to tie shoelaces in different styles. From straight lacing to ladder lacing—we cover them all!
+          - listitem [ref=e242]:
+            - link "Ways To Avoid Exercise Burnout" [ref=e244] [cursor=pointer]:
+              - /url: /us/blog/991670-ways-to-avoid-exercise-burnout
+              - generic [ref=e248]:
+                - strong [ref=e250]: Ways To Avoid Exercise Burnout
+                - paragraph [ref=e251]: Feeling over the workout before even starting? Learn the signs of gym burnout and how to avoid it so you can get back to enjoying your training.
+          - listitem [ref=e252]:
+            - 'link "Let''s Lunge: How To Properly Do A Lunge" [ref=e254] [cursor=pointer]':
+              - /url: /us/blog/1033826-lets-lunge-how-to-properly-do-a-lunge
+              - generic [ref=e258]:
+                - strong [ref=e260]: "Let's Lunge: How To Properly Do A Lunge"
+                - paragraph [ref=e261]: Show your legs some love by learning how to properly do a lunge, plus three other lunge variations for a strong lower body.
+          - listitem [ref=e262]:
+            - link "How To Lace Running Shoes" [ref=e264] [cursor=pointer]:
+              - /url: /us/blog/342735-how-to-lace-running-shoes
+              - generic [ref=e268]:
+                - strong [ref=e270]: How To Lace Running Shoes
+                - paragraph [ref=e271]: Whether you have wide feet, numb toes, or a heel that lifts with every step, learn how to tie running shoes to alleviate these common running shoe issues.
+    - generic [ref=e273]:
+      - generic [ref=e274]:
+        - heading "FRESH LOOKS FOR SPRING" [level=3] [ref=e276]
+        - list [ref=e278]:
+          - listitem [ref=e279]:
+            - link "Spring Clothes & Shoes" [ref=e280] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/spring
+          - listitem [ref=e281]:
+            - link "Floral Shoes" [ref=e282] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/floral-shoes
+          - listitem [ref=e283]:
+            - link "Skirts & Dresses" [ref=e284] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/skirts_dresses
+          - listitem [ref=e285]:
+            - link "Denim Jackets" [ref=e286] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/denim-jackets
+          - listitem [ref=e287]:
+            - link "Sandals" [ref=e288] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/sandals
+      - generic [ref=e289]:
+        - heading "SOCCER MUST-HAVES" [level=3] [ref=e291]
+        - list [ref=e293]:
+          - listitem [ref=e294]:
+            - link "FIFA World Cup™ Streetwear" [ref=e295] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/casual-fifa_world_cup
+          - listitem [ref=e296]:
+            - link "Custom Soccer Jerseys" [ref=e297] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/soccer-jerseys-personalisable
+          - listitem [ref=e298]:
+            - link "Best Selling Soccer Jerseys" [ref=e299] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/best_sellers-soccer-jerseys
+          - listitem [ref=e300]:
+            - link "Predator Cleats" [ref=e301] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/predator-cleats
+          - listitem [ref=e302]:
+            - link "Soccer Jackets" [ref=e303] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/soccer-jackets
+      - generic [ref=e304]:
+        - heading "WARM-WEATHER TRAINING" [level=3] [ref=e306]
+        - list [ref=e308]:
+          - listitem [ref=e309]:
+            - link "Running Shorts" [ref=e310] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/running-shorts
+          - listitem [ref=e311]:
+            - link "Race Day Shoes" [ref=e312] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/race-shoes
+          - listitem [ref=e313]:
+            - link "Swim Clothes & Shoes" [ref=e314] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/swim
+          - listitem [ref=e315]:
+            - link "Volleyball Shorts" [ref=e316] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/volleyball-shorts
+          - listitem [ref=e317]:
+            - link "Golf Shorts" [ref=e318] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/golf-shorts
+      - generic [ref=e319]:
+        - heading "STAND-OUT STYLES" [level=3] [ref=e321]
+        - list [ref=e323]:
+          - listitem [ref=e324]:
+            - link "Sportstyle Clothes and Shoes" [ref=e325] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/sportstyle
+          - listitem [ref=e326]:
+            - link "Jeans" [ref=e327] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/denim-pants
+          - listitem [ref=e328]:
+            - link "Animal Print Shoes" [ref=e329] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/animal-shoes
+          - listitem [ref=e330]:
+            - link "Denim Shorts" [ref=e331] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/denim-shorts
+          - listitem [ref=e332]:
+            - link "Low Profile Sneakers" [ref=e333] [cursor=pointer]:
+              - /url: https://www.adidas.com/us/low_profile
+    - generic [ref=e335]:
+      - generic [ref=e336]:
+        - heading "Sneakers, Activewear and Sporting Goods" [level=1] [ref=e337]
+        - paragraph [ref=e338]:
+          - text: Calling all athletes. Gear up for your favorite sport with adidas sneakers and activewear for men and women. From running to soccer and the gym to the trail, performance workout clothes and shoes keep you feeling your best. Find sport-specific sneakers to support your passion, and shop versatile activewear and accessories that support everyday comfort. adidas has you covered with world-class performance, quality and unmatched comfort to fit your style. Explore the full range of adidas gear today.
+          - text: Founded on performance, adidas sporting goods equipment supports athletes at all levels. Men, women and kids will find their best form in sneakers and activewear made to perform under pressure. adidas sportswear breathes, manages sweat and helps support working muscles. Explore sport-specific clothes and gear for basketball, soccer, or the yoga studio. Runners will find a range of sneakers for training, racing and trail runs. Gym users will find tops, tees and tanks that support focused efforts with adidas CLIMACOOL to feel cool and dry. Explore warm-ups featuring four-way stretch to support mobility. Find a new outdoor jacket that helps protect against wind and rain. Lace up new athletic shoes that energize every step with adidas Boost cushioning. With sizes and styles for all ages, we have sporting goods for the whole family. Dedicated training demands dedicated workout clothes. Experience the latest performance fabrics and sneaker technologies to get the most out of your next training session.
+      - img [ref=e340]
+    - img [ref=e342]:
+      - generic "adiclub-logo"
+      - generic "alert-error"
+      - generic "alert-info"
+      - generic "alert-success"
+      - generic "alert-warning"
+      - generic "broken-image"
+      - generic "checkmark"
+      - generic "contact-email"
+      - generic "contact-phone"
+      - generic "customization"
+      - generic "forbidden"
+      - generic "locked"
+      - generic "logo"
+      - generic "personalisation-flag"
+      - generic "personalization"
+      - generic "product"
+      - generic "rating-active"
+      - generic "rating-inactive"
+      - generic "size-guide"
+      - generic "tooltip"
+      - generic "usp-checkmark"
+      - generic "usp-delivery-cash"
+      - generic "usp-delivery-delay"
+      - generic "usp-delivery-evening"
+      - generic "usp-delivery-same-day"
+      - generic "usp-delivery-store"
+      - generic "usp-delivery"
+      - generic "usp-exchange"
+      - generic "usp-free-returns"
+      - generic "usp-gift-card"
+      - generic "usp-klarna"
+      - generic "usp-sale"
+      - generic "arrow-back"
+      - generic "arrow-down"
+      - generic "arrow-left-long"
+      - generic "arrow-left"
+      - generic "arrow-right-long"
+      - generic "arrow-right"
+      - generic "arrow-up"
+      - generic "bag-active"
+      - generic "bag-inactive"
+      - generic "calendar-active"
+      - generic "calendar-inactive"
+      - generic "chat"
+      - generic "checkbox-checkmark"
+      - generic "checkmark-full"
+      - generic "clipboard"
+      - generic "close"
+      - generic "cross-small"
+      - generic "download"
+      - generic "dropdown"
+      - generic "edit"
+      - generic "external-link"
+      - generic "filter"
+      - generic "fullscreen"
+      - generic "hamburger"
+      - generic "hd-filled"
+      - generic "hd-outline"
+      - generic "hide-active"
+      - generic "hide-inactive"
+      - generic "locate-target"
+      - generic "lock"
+      - generic "minus"
+      - generic "notification-active"
+      - generic "notification-inactive"
+      - generic "pause-outline"
+      - generic "pin-small"
+      - generic "pin"
+      - generic "play-filled"
+      - generic "play-outline"
+      - generic "plus"
+      - generic "profile"
+      - generic "reload"
+      - generic "sd-filled"
+      - generic "sd-outline"
+      - generic "search"
+      - generic "share"
+      - generic "sound-off-filled"
+      - generic "sound-off-outline"
+      - generic "sound-on-filled"
+      - generic "sound-on-outline"
+      - generic "subtitles-cc-filled"
+      - generic "subtitles-cc-outline"
+      - generic "subtitles-filled"
+      - generic "subtitles-outline"
+      - generic "wishlist-active"
+      - generic "wishlist-inactive"
+      - generic "zoom-out"
+      - generic "zoom"
+      - generic "apple"
+      - generic "facebook"
+      - generic "google"
+      - generic "instagram-filled"
+      - generic "instagram"
+      - generic "messenger"
+      - generic "pinterest"
+      - generic "runtastic"
+      - generic "tiktok-default"
+      - generic "tiktok"
+      - generic "twitter"
+      - generic "vk"
+      - generic "whatsapp"
+      - generic "yahoo"
+      - generic "youtube"
+    - contentinfo [ref=e345]:
+      - generic [ref=e346]:
+        - heading "JOIN OUR ADICLUB & GET 15% OFF" [level=2] [ref=e347]
+        - button "SIGN UP FOR FREE" [ref=e349] [cursor=pointer]:
+          - generic [ref=e350]: SIGN UP FOR FREE
+          - img [ref=e351]
+      - list [ref=e354]:
+        - listitem [ref=e355]:
+          - heading "PRODUCTS" [level=5] [ref=e356]
+          - list [ref=e357]:
+            - listitem [ref=e358]:
+              - link "Shoes" [ref=e359] [cursor=pointer]:
+                - /url: /us/shoes
+            - listitem [ref=e360]:
+              - link "Clothing" [ref=e361] [cursor=pointer]:
+                - /url: /us/clothing
+            - listitem [ref=e362]:
+              - link "Accessories" [ref=e363] [cursor=pointer]:
+                - /url: /us/accessories
+            - listitem [ref=e364]:
+              - link "Gift Cards" [ref=e365] [cursor=pointer]:
+                - /url: /us/giftcards
+            - listitem [ref=e366]
+            - listitem [ref=e368]:
+              - link "New Arrivals" [ref=e369] [cursor=pointer]:
+                - /url: /us/new_arrivals
+            - listitem [ref=e370]:
+              - link "Best Sellers" [ref=e371] [cursor=pointer]:
+                - /url: /us/best_sellers
+            - listitem [ref=e372]:
+              - link "Release Dates" [ref=e373] [cursor=pointer]:
+                - /url: /us/release-dates
+            - listitem [ref=e374]:
+              - link "SALE" [ref=e375] [cursor=pointer]:
+                - /url: /us/sale
+        - listitem [ref=e376]:
+          - heading "Sports" [level=5] [ref=e377]
+          - list [ref=e378]:
+            - listitem [ref=e379]:
+              - link "Soccer" [ref=e380] [cursor=pointer]:
+                - /url: /us/soccer
+            - listitem [ref=e381]:
+              - link "Running" [ref=e382] [cursor=pointer]:
+                - /url: /us/running
+            - listitem [ref=e383]:
+              - link "Basketball" [ref=e384] [cursor=pointer]:
+                - /url: /us/basketball
+            - listitem [ref=e385]:
+              - link "Football" [ref=e386] [cursor=pointer]:
+                - /url: /us/football
+            - listitem [ref=e387]:
+              - link "Outdoor" [ref=e388] [cursor=pointer]:
+                - /url: /us/outdoor
+            - listitem [ref=e389]:
+              - link "Golf" [ref=e390] [cursor=pointer]:
+                - /url: /us/golf
+            - listitem [ref=e391]:
+              - link "Baseball" [ref=e392] [cursor=pointer]:
+                - /url: /us/baseball
+            - listitem [ref=e393]:
+              - link "Tennis" [ref=e394] [cursor=pointer]:
+                - /url: /us/tennis
+            - listitem [ref=e395]:
+              - link "Skateboarding" [ref=e396] [cursor=pointer]:
+                - /url: /us/skateboarding
+            - listitem [ref=e397]:
+              - link "Workout" [ref=e398] [cursor=pointer]:
+                - /url: /us/workout
+        - listitem [ref=e399]:
+          - heading "Collections" [level=5] [ref=e400]
+          - list [ref=e401]:
+            - listitem [ref=e402]:
+              - link "adicolor" [ref=e403] [cursor=pointer]:
+                - /url: /us/adicolor
+            - listitem [ref=e404]:
+              - link "Ultraboost" [ref=e405] [cursor=pointer]:
+                - /url: /us/ultraboost
+            - listitem [ref=e406]:
+              - link "Forum" [ref=e407] [cursor=pointer]:
+                - /url: /us/forum
+            - listitem [ref=e408]:
+              - link "Superstar" [ref=e409] [cursor=pointer]:
+                - /url: /us/superstar
+            - listitem [ref=e410]:
+              - link "Running Shoes" [ref=e411] [cursor=pointer]:
+                - /url: /us/running-shoes
+            - listitem [ref=e412]:
+              - link "adilette" [ref=e413] [cursor=pointer]:
+                - /url: /us/adilette
+            - listitem [ref=e414]:
+              - link "Stan Smith" [ref=e415] [cursor=pointer]:
+                - /url: /us/stan_smith
+            - listitem [ref=e416]:
+              - link "adizero" [ref=e417] [cursor=pointer]:
+                - /url: /us/adizero
+            - listitem [ref=e418]:
+              - link "Tiro" [ref=e419] [cursor=pointer]:
+                - /url: /us/tiro
+            - listitem [ref=e420]:
+              - link "Cloudfoam Pure" [ref=e421] [cursor=pointer]:
+                - /url: /us/cloudfoam_pure
+        - listitem [ref=e422]:
+          - heading "SUPPORT" [level=5] [ref=e423]
+          - list [ref=e424]:
+            - listitem [ref=e425]:
+              - link "Help" [ref=e426] [cursor=pointer]:
+                - /url: /us/help
+            - listitem [ref=e427]:
+              - link "Returns & Exchanges" [ref=e428] [cursor=pointer]:
+                - /url: /us/help/us-returns-refunds/how-do-i-return-my-products
+            - listitem [ref=e429]:
+              - link "Shipping" [ref=e430] [cursor=pointer]:
+                - /url: /us/help/us-delivery/when-will-my-order-arrive
+            - listitem [ref=e431]:
+              - link "Order Tracker" [ref=e432] [cursor=pointer]:
+                - /url: /us/order-tracker
+            - listitem [ref=e433]:
+              - link "Store Locator" [ref=e434] [cursor=pointer]:
+                - /url: /us/stores
+            - listitem [ref=e435]:
+              - link "Size Charts" [ref=e436] [cursor=pointer]:
+                - /url: /us/help/size_charts
+            - listitem [ref=e437]:
+              - link "Gift Card Balance" [ref=e438] [cursor=pointer]:
+                - /url: https://wbiprod.storedvalue.com/wbir/clients/adidas
+            - listitem [ref=e439]:
+              - link "How to Clean Shoes" [ref=e440] [cursor=pointer]:
+                - /url: /us/blog/how-to-clean-shoes
+            - listitem [ref=e441]:
+              - link "Bra Fit Guide" [ref=e442] [cursor=pointer]:
+                - /url: /us/blog/444197-how-should-a-sports-bra-fit
+            - listitem [ref=e443]:
+              - link "Breathing for Running" [ref=e444] [cursor=pointer]:
+                - /url: /us/blog/783395-how-to-breathe-while-running
+            - listitem [ref=e445]:
+              - link "Promotions" [ref=e446] [cursor=pointer]:
+                - /url: /us/promotions
+            - listitem [ref=e447]:
+              - link "Sitemap" [ref=e448] [cursor=pointer]:
+                - /url: https://www.adidas.com/glass/sitemaps/adidas/US/en/html-sitemap/index.html
+        - listitem [ref=e449]:
+          - heading "COMPANY INFO" [level=5] [ref=e450]
+          - list [ref=e451]:
+            - listitem [ref=e452]:
+              - link "About Us" [ref=e453] [cursor=pointer]:
+                - /url: https://www.adidas-group.com/en/about/profile
+            - listitem [ref=e454]:
+              - link "Student Discount" [ref=e455] [cursor=pointer]:
+                - /url: /us/students
+            - listitem [ref=e456]:
+              - link "Military & Healthcare Discount" [ref=e457] [cursor=pointer]:
+                - /url: /us/discount-programs
+            - listitem [ref=e458]:
+              - link "adidas Stories" [ref=e459] [cursor=pointer]:
+                - /url: /us/blog
+            - listitem [ref=e460]:
+              - link "adidas Apps" [ref=e461] [cursor=pointer]:
+                - /url: /us/mobileapps
+            - listitem [ref=e462]:
+              - link "Impact" [ref=e463] [cursor=pointer]:
+                - /url: /us/go/campaign/impact
+            - listitem [ref=e464]:
+              - link "People" [ref=e465] [cursor=pointer]:
+                - /url: /us/go/campaign/impact/people
+            - listitem [ref=e466]:
+              - link "Planet" [ref=e467] [cursor=pointer]:
+                - /url: /us/go/campaign/impact/planet
+            - listitem [ref=e468]:
+              - link "adiClub" [ref=e469] [cursor=pointer]:
+                - /url: /us/adiclub
+            - listitem [ref=e470]:
+              - link "Affiliates" [ref=e471] [cursor=pointer]:
+                - /url: /us/help/us-company-information/what-is-our-affiliate-program
+            - listitem [ref=e472]:
+              - link "Press" [ref=e473] [cursor=pointer]:
+                - /url: https://www.adidas-group.com/en/media/media-contact/
+            - listitem [ref=e474]:
+              - link "Careers" [ref=e475] [cursor=pointer]:
+                - /url: https://careers.adidas-group.com/?brand=adidas
+            - listitem [ref=e476]:
+              - link "California Transparency in Supply Chains Act" [ref=e477] [cursor=pointer]:
+                - /url: https://www.adidas-group.com/media/filer_public/64/c8/64c8d12f-d7b4-4547-a1f2-8d2945861140/adidas_policy_on_modern_slavery_2023.pdf
+            - listitem [ref=e478]:
+              - link "Responsible Disclosure" [ref=e479] [cursor=pointer]:
+                - /url: /us/responsible-disclosure
+            - listitem [ref=e480]:
+              - link "Transparency in Coverage" [ref=e481] [cursor=pointer]:
+                - /url: https://aetnaresource.com/n/adidas
+        - listitem [ref=e482]:
+          - heading "FOLLOW US" [level=5] [ref=e483]
+          - list [ref=e484]:
+            - listitem [ref=e485]:
+              - link "Facebook - adidas" [ref=e486] [cursor=pointer]:
+                - /url: https://www.facebook.com/adidas
+                - img [ref=e487]
+            - listitem [ref=e489]:
+              - link "Instagram - adidas" [ref=e490] [cursor=pointer]:
+                - /url: https://www.instagram.com/adidas/
+                - img [ref=e491]
+            - listitem [ref=e493]:
+              - link "X - adidas" [ref=e494] [cursor=pointer]:
+                - /url: https://x.com/adidas
+                - img [ref=e495]
+            - listitem [ref=e497]:
+              - link "Pinterest - adidas" [ref=e498] [cursor=pointer]:
+                - /url: https://www.pinterest.com/adidas/
+                - img [ref=e499]
+            - listitem [ref=e501]:
+              - link "TikTok - adidas" [ref=e502] [cursor=pointer]:
+                - /url: https://www.tiktok.com/@adidas?lang=en
+                - img [ref=e503]
+            - listitem [ref=e505]:
+              - link "Youtube - adidas" [ref=e506] [cursor=pointer]:
+                - /url: https://www.youtube.com/c/adidas
+                - img [ref=e507]
+      - separator [ref=e510]
+      - list [ref=e511]:
+        - listitem [ref=e512]:
+          - button "Your Privacy Choices" [ref=e513] [cursor=pointer]:
+            - generic [ref=e514]: Your Privacy Choices
+          - img "California Consumer Privacy Act (CCPA) Opt-Out Icon" [ref=e516]
+        - listitem [ref=e528]:
+          - link "Privacy Policy" [ref=e529] [cursor=pointer]:
+            - /url: /us/help/us-company-information/what-is-the-privacy-policy
+        - listitem [ref=e530]:
+          - link "Terms and Conditions" [ref=e531] [cursor=pointer]:
+            - /url: /us/help/us-company-information/what-are-the-terms-and-conditions
+      - generic "© 2026 adidas America, Inc." [ref=e533]
+  - alert [ref=e534]

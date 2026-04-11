@@ -1,0 +1,18 @@
+[package]
+name = "workers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Web Workers (separate V8 isolates) for browser_oxide"
+
+[dependencies]
+js_runtime = { path = "../js_runtime" }
+dom = { path = "../dom" }
+deno_core = "0.311"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

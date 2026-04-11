@@ -1,0 +1,15 @@
+[package]
+name = "html_parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "html5ever integration producing a browser_oxide DOM"
+
+[dependencies]
+dom = { path = "../dom" }
+html5ever = "0.29"
+markup5ever = "0.14"
+
+[dev-dependencies]
+css_selectors = { path = "../css_selectors" }

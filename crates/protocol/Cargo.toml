@@ -1,0 +1,24 @@
+[package]
+name = "protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Chrome DevTools Protocol (CDP) server for browser_oxide"
+
+[dependencies]
+browser = { path = "../browser" }
+dom = { path = "../dom" }
+js_runtime = { path = "../js_runtime" }
+stealth = { path = "../stealth" }
+net = { path = "../net" }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

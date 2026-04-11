@@ -1,0 +1,36 @@
+[package]
+name = "canvas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Canvas 2D rendering (skia-safe), WebGL stubs, AudioContext fingerprint"
+
+[features]
+default = []
+webgl-render = ["glow"]
+
+[dependencies]
+# Chrome's Skia via safe Rust bindings. Default features kept so the
+# prebuilt binaries distributed via skia-bindings match — disabling
+# default-features forces a full source build that requires
+# `git-sync-deps` to fetch the entire Skia tree.
+skia-safe = "0.93"
+png = "0.17"
+base64 = "0.22"
+thiserror = "2"
+ab_glyph = "0.2"
+# Used for Blink-compatible PeriodicWave inverse-FFT wavetable generation
+# (crates/canvas/src/periodic_wave.rs). Pure Rust, MIT.
+rustfft = "6"
+# T1.2 font stack: fontdb (MIT/Apache-2.0) is the face database,
+# rustybuzz (MIT) is a HarfBuzz port for text shaping, swash
+# (Apache-2.0) is the glyph rasterizer. All pure Rust, all clean for
+# our MIT/Apache-2.0 policy.
+fontdb = { version = "0.18", default-features = false }
+rustybuzz = "0.18"
+swash = "0.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+glow = { version = "0.14", optional = true }
+
+[dev-dependencies]

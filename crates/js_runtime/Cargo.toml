@@ -1,0 +1,43 @@
+[package]
+name = "js_runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "V8 JavaScript runtime with DOM bindings for browser_oxide"
+
+[features]
+default = []
+# Enable real WebGL rendering via OSMesa+glow. Transitively enables
+# the canvas crate's `webgl-render` feature so WebGLContext is
+# available and `op_webgl_*` ops become non-stub.
+webgl-render = ["canvas/webgl-render"]
+
+[dependencies]
+dom = { path = "../dom" }
+html_parser = { path = "../html_parser" }
+css_selectors = { path = "../css_selectors" }
+css_parser = { path = "../css_parser" }
+stealth = { path = "../stealth" }
+net = { path = "../net" }
+canvas = { path = "../canvas" }
+layout = { path = "../layout" }
+deno_core = "0.311"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+url = "2"
+rand = "0.8"
+thiserror = "2"
+base64 = "0.22"
+sha1 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+rand_core = "0.6"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+lazy_static = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

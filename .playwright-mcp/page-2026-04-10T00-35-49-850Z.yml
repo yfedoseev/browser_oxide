@@ -1,0 +1,17 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - img "warning" [ref=e5]
+    - heading "Доступ ограничен" [level=1] [ref=e6]
+    - paragraph [ref=e7]: "Инцидент: fab_20260410003549_01KNTD225P2JF3JWTGK73Z3MD8"
+    - generic [ref=e8]:
+      - paragraph [ref=e9]: "Чтобы решить проблему, попробуйте сделать это:"
+      - list [ref=e10]:
+        - listitem [ref=e11]: Немного подождать и нажать на кнопку «Обновить»
+        - listitem [ref=e12]: Отключить VPN, если он используется
+        - listitem [ref=e13]: Обновить версию браузера или мобильного приложения
+        - listitem [ref=e14]: Подключиться к другому WI-FI или мобильной сети
+        - listitem [ref=e15]: Перезагрузить домашний роутер, если используется домашний WI-FI
+    - paragraph [ref=e16]: Если ничего не помогает, пожалуйста, обратитесь в службу поддержки
+  - generic [ref=e17]:
+    - button "Обновить" [ref=e18] [cursor=pointer]
+    - button "Служба поддержки" [ref=e20] [cursor=pointer]

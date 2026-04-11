@@ -1,0 +1,20 @@
+- generic [ref=e4]:
+  - img [ref=e5]
+  - generic [ref=e11]:
+    - heading "Что-то не так..." [level=1] [ref=e12]
+    - paragraph [ref=e13]: Подозрительная активность. Пожалуйста, подождите.
+    - paragraph [ref=e14]: "ID: c6aba94b455faefc07853c6f1e8109de"
+    - paragraph [ref=e15]: "IP: 2001:569:728c:f600:216:3eff:feef:8cf3"
+    - generic [ref=e16]:
+      - img [ref=e17]
+      - paragraph [ref=e19]: Новая попытка через 00:59
+  - generic [ref=e20]:
+    - paragraph [ref=e21]: "Что делать:"
+    - list [ref=e22]:
+      - listitem [ref=e23]: Подождите, страница обновится автоматически.
+      - listitem [ref=e24]: Если не помогло — очистите кэш и cookie в браузере, потом перезагрузите страницу.
+      - listitem [ref=e25]:
+        - text: "Ошибка не исчезла? Пишите в поддержку:"
+        - button "captcha-support@rwb.ru" [ref=e26] [cursor=pointer]:
+          - generic [ref=e27]: captcha-support@rwb.ru
+          - img [ref=e28]

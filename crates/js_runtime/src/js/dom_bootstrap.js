@@ -1,0 +1,1449 @@
+((globalThis) => {
+    const core = Deno.core;
+    const ops = core.ops;
+    const _nodeIds = new WeakMap();
+    const _nodeCache = new Map();
+
+    function _getNodeId(node) {
+        const id = _nodeIds.get(node);
+        if (id === undefined) throw new Error("Invalid node");
+        return id;
+    }
+
+    function _wrapNode(nodeId) {
+        if (nodeId === null || nodeId === undefined || nodeId === -1) return null;
+        const cached = _nodeCache.get(nodeId);
+        if (cached) {
+            const obj = cached.deref();
+            if (obj) return obj;
+        }
+        const nodeType = ops.op_dom_get_node_type(nodeId);
+        let node;
+        switch (nodeType) {
+            case 1:
+                node = new Element(nodeId);
+                _retargetElementProto(node);
+                break;
+            case 3: node = new Text(nodeId); break;
+            case 8: node = new Comment(nodeId); break;
+            case 9: node = _document; break;
+            case 11: node = new DocumentFragment(nodeId); break;
+            default: node = new Node(nodeId); break;
+        }
+        _nodeCache.set(nodeId, new WeakRef(node));
+        return node;
+    }
+
+    class NodeList {
+        constructor(ids) {
+            this._ids = ids;
+            // Populate numeric indices for bracket access (Chrome behavior)
+            for (let i = 0; i < ids.length; i++) {
+                this[i] = _wrapNode(ids[i]);
+            }
+        }
+        get length() { return this._ids.length; }
+        item(index) { return index < this._ids.length ? _wrapNode(this._ids[index]) : null; }
+        forEach(cb, thisArg) {
+            for (let i = 0; i < this._ids.length; i++) {
+                cb.call(thisArg, this[i], i, this);
+            }
+        }
+        entries() {
+            const self = this;
+            let i = 0;
+            return { next() { return i < self.length ? { value: [i, self[i++]], done: false } : { done: true }; }, [Symbol.iterator]() { return this; } };
+        }
+        keys() {
+            const self = this;
+            let i = 0;
+            return { next() { return i < self.length ? { value: i++, done: false } : { done: true }; }, [Symbol.iterator]() { return this; } };
+        }
+        values() { return this[Symbol.iterator](); }
+        [Symbol.iterator]() {
+            let i = 0;
+            const self = this;
+            return {
+                next() {
+                    if (i < self.length) return { value: self[i++], done: false };
+                    return { done: true };
+                }
+            };
+        }
+    }
+
+    class DOMTokenList {
+        #nodeId;
+        constructor(nodeId) { this.#nodeId = nodeId; }
+        add(cls) { ops.op_dom_class_list_add(this.#nodeId, cls); }
+        remove(cls) { ops.op_dom_class_list_remove(this.#nodeId, cls); }
+        toggle(cls) {
+            if (this.contains(cls)) { this.remove(cls); return false; }
+            this.add(cls); return true;
+        }
+        contains(cls) {
+            const attr = ops.op_dom_get_attribute(this.#nodeId, "class");
+            return attr ? attr.split(/\s+/).includes(cls) : false;
+        }
+        get value() { return ops.op_dom_get_attribute(this.#nodeId, "class") || ""; }
+        get length() { return this.value.split(/\s+/).filter(Boolean).length; }
+        toString() { return this.value; }
+    }
+
+    // EventTarget is the base of the DOM prototype chain in real Chrome:
+    //   EventTarget ← Node ← Element ← HTMLElement ← HTMLDivElement etc.
+    // Anti-bot probes check `document instanceof EventTarget === true`
+    // and walk Object.getPrototypeOf chains expecting this layout.
+    class EventTarget {
+        constructor() {}
+        addEventListener(type, listener, options) {
+            // Override is installed on Node.prototype below; this base exists
+            // only to anchor the prototype chain so `x instanceof EventTarget`
+            // returns true for every DOM node.
+        }
+        removeEventListener(type, listener, options) {}
+        dispatchEvent(event) { return true; }
+    }
+    globalThis.EventTarget = EventTarget;
+
+    class Node extends EventTarget {
+        constructor(nodeId) {
+            super();
+            _nodeIds.set(this, nodeId);
+        }
+        // nodeType constants
+        static ELEMENT_NODE = 1;
+        static TEXT_NODE = 3;
+        static COMMENT_NODE = 8;
+        static DOCUMENT_NODE = 9;
+        static DOCUMENT_FRAGMENT_NODE = 11;
+        static DOCUMENT_TYPE_NODE = 10;
+        static PROCESSING_INSTRUCTION_NODE = 7;
+        static ATTRIBUTE_NODE = 2;
+        static CDATA_SECTION_NODE = 4;
+
+        get nodeType() { return ops.op_dom_get_node_type(_getNodeId(this)); }
+        get nodeName() {
+            const type = this.nodeType;
+            if (type === 1) return ops.op_dom_get_tag_name(_getNodeId(this)).toUpperCase();
+            if (type === 3) return "#text";
+            if (type === 8) return "#comment";
+            if (type === 9) return "#document";
+            if (type === 11) return "#document-fragment";
+            return "";
+        }
+        get nodeValue() {
+            const type = this.nodeType;
+            if (type === 3 || type === 8) return ops.op_dom_get_text_content(_getNodeId(this));
+            return null;
+        }
+        set nodeValue(val) {
+            const type = this.nodeType;
+            if (type === 3 || type === 8) ops.op_dom_set_text_content(_getNodeId(this), String(val));
+        }
+        get ownerDocument() {
+            return this.nodeType === 9 ? null : _document;
+        }
+        get isConnected() {
+            let n = this;
+            while (n) {
+                if (n.nodeType === 9) return true;
+                n = n.parentNode;
+            }
+            return false;
+        }
+        get baseURI() {
+            return globalThis.location?.href || "about:blank";
+        }
+        get parentNode() { return _wrapNode(ops.op_dom_get_parent(_getNodeId(this))); }
+        get parentElement() {
+            const p = this.parentNode;
+            return p && p.nodeType === 1 ? p : null;
+        }
+        get childNodes() { return new NodeList(ops.op_dom_get_children(_getNodeId(this))); }
+        get firstChild() { return _wrapNode(ops.op_dom_get_first_child(_getNodeId(this))); }
+        get lastChild() { return _wrapNode(ops.op_dom_get_last_child(_getNodeId(this))); }
+        get nextSibling() { return _wrapNode(ops.op_dom_get_next_sibling(_getNodeId(this))); }
+        get previousSibling() { return _wrapNode(ops.op_dom_get_prev_sibling(_getNodeId(this))); }
+        get textContent() { return ops.op_dom_get_text_content(_getNodeId(this)); }
+        set textContent(val) { ops.op_dom_set_text_content(_getNodeId(this), String(val)); }
+        appendChild(child) {
+            ops.op_dom_append_child(_getNodeId(this), _getNodeId(child));
+            // Dynamic script loading: when a <script src="..."> is appended to the DOM,
+            // fetch and execute the script, then fire "load" event (like a real browser).
+            // This is how challenge scripts (Wildberries, Cloudflare, DataDome) load their solvers.
+            const childTag = child.tagName?.toLowerCase?.() || child.nodeName?.toLowerCase?.() || '';
+            // Check both JS property (.src) and DOM attribute (getAttribute('src'))
+            // Scripts set src via property: script.src = url (not setAttribute)
+            const childSrc = (childTag === 'script') ? (child.src || child.getAttribute?.('src')) : null;
+            // Inline script: <script>...code...</script> inserted via createElement + textContent.
+            // Real Chrome executes these synchronously on insertion. Rare in WB's WBAAS flow but
+            // common for other antibot solvers and for site-level bootstrap code.
+            if (childTag === 'script' && !childSrc) {
+                const code = child.textContent || child.innerText || '';
+                if (code && code.trim()) {
+                    try { (0, eval)(code); } catch (e) { /* execution error — real browsers swallow these */ }
+                }
+            }
+            if (childTag === 'script' && childSrc) {
+                // Dynamic script detected
+                const src = childSrc;
+                const scriptEl = child;
+                // Resolve relative URLs
+                let fullUrl = src;
+                if (!src.startsWith('http') && !src.startsWith('data:')) {
+                    try { fullUrl = new URL(src, globalThis.location?.href || 'about:blank').href; } catch(e) {}
+                }
+                // Async fetch + execute
+                (async () => {
+                    try {
+                        const resp = await globalThis.fetch(fullUrl);
+                        if (resp.ok) {
+                            const code = await resp.text();
+                            try {
+                                (0, eval)(code); // indirect eval = global scope
+                            } catch(e) {
+                                if (scriptEl.onerror) scriptEl.onerror(e);
+                                scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                                return;
+                            }
+                            if (scriptEl.onload) scriptEl.onload(new Event('load'));
+                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
+                        } else {
+                            if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                        }
+                    } catch(e) {
+                        if (scriptEl.onerror) scriptEl.onerror(e);
+                        scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                    }
+                })();
+            }
+            return child;
+        }
+        removeChild(child) {
+            ops.op_dom_remove_child(_getNodeId(this), _getNodeId(child));
+            return child;
+        }
+        replaceChild(newChild, oldChild) {
+            const parent = _getNodeId(this);
+            const oldId = _getNodeId(oldChild);
+            const newId = _getNodeId(newChild);
+            ops.op_dom_insert_before(parent, newId, oldId);
+            ops.op_dom_remove_child(parent, oldId);
+            return oldChild;
+        }
+        insertBefore(newChild, refChild) {
+            if (refChild === null || refChild === undefined) return this.appendChild(newChild);
+            ops.op_dom_insert_before(_getNodeId(this), _getNodeId(newChild), _getNodeId(refChild));
+            return newChild;
+        }
+        cloneNode(deep = false) {
+            const newId = ops.op_dom_clone_node(_getNodeId(this), !!deep);
+            return _wrapNode(newId);
+        }
+        contains(other) {
+            if (!other) return false;
+            if (other === this) return true;
+            let p = other.parentNode;
+            while (p) {
+                if (p === this) return true;
+                p = p.parentNode;
+            }
+            return false;
+        }
+        hasChildNodes() { return ops.op_dom_get_children(_getNodeId(this)).length > 0; }
+        getRootNode() {
+            let n = this;
+            while (n.parentNode) n = n.parentNode;
+            return n;
+        }
+        normalize() {
+            // Merge adjacent text nodes
+            const children = ops.op_dom_get_children(_getNodeId(this));
+            let prevTextId = null;
+            for (const cid of children) {
+                if (ops.op_dom_get_node_type(cid) === 3) {
+                    if (prevTextId !== null) {
+                        const prevText = ops.op_dom_get_text_content(prevTextId);
+                        const curText = ops.op_dom_get_text_content(cid);
+                        ops.op_dom_set_text_content(prevTextId, prevText + curText);
+                        ops.op_dom_remove_child(_getNodeId(this), cid);
+                    } else {
+                        prevTextId = cid;
+                    }
+                } else {
+                    prevTextId = null;
+                }
+            }
+        }
+        isEqualNode(other) {
+            if (!other) return false;
+            if (this === other) return true;
+            if (this.nodeType !== other.nodeType) return false;
+            if (this.nodeType === 1) return this.outerHTML === other.outerHTML;
+            return this.textContent === other.textContent;
+        }
+        isSameNode(other) { return this === other; }
+        compareDocumentPosition(other) {
+            if (this === other) return 0;
+            if (this.contains(other)) return 20; // DOCUMENT_POSITION_CONTAINED_BY | FOLLOWING
+            if (other.contains(this)) return 10; // DOCUMENT_POSITION_CONTAINS | PRECEDING
+            return 4; // DOCUMENT_POSITION_FOLLOWING
+        }
+        // _getNodeId bridge for event_bootstrap
+        _getNodeId() { return _getNodeId(this); }
+    }
+
+    function _createStyleProxy(nodeId) {
+        const cache = {};
+        const raw = ops.op_dom_get_attribute(nodeId, "style") || "";
+        for (const part of raw.split(";")) {
+            const idx = part.indexOf(":");
+            if (idx > 0) cache[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
+        }
+        function flush() {
+            const parts = [];
+            for (const k in cache) { if (cache[k] !== "") parts.push(k + ": " + cache[k]); }
+            ops.op_dom_set_attribute(nodeId, "style", parts.join("; "));
+        }
+        const toKebab = (p) => p.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+        return new Proxy({
+            setProperty(name, value) { cache[name] = String(value); flush(); },
+            getPropertyValue(name) { return cache[name] || ""; },
+            removeProperty(name) { const old = cache[name] || ""; delete cache[name]; flush(); return old; },
+            get cssText() { return ops.op_dom_get_attribute(nodeId, "style") || ""; },
+            set cssText(val) {
+                for (const k in cache) delete cache[k];
+                for (const part of val.split(";")) {
+                    const idx = part.indexOf(":");
+                    if (idx > 0) cache[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
+                }
+                flush();
+            },
+        }, {
+            get(target, prop) {
+                if (prop === "setProperty" || prop === "getPropertyValue" || prop === "removeProperty") return target[prop].bind(target);
+                if (prop === "cssText") return ops.op_dom_get_attribute(nodeId, "style") || "";
+                if (typeof prop === "string") return cache[toKebab(prop)] || "";
+                return undefined;
+            },
+            set(target, prop, value) {
+                if (prop === "cssText") {
+                    for (const k in cache) delete cache[k];
+                    for (const part of String(value).split(";")) {
+                        const idx = part.indexOf(":");
+                        if (idx > 0) cache[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
+                    }
+                    flush();
+                    return true;
+                }
+                cache[toKebab(prop)] = String(value);
+                flush();
+                return true;
+            }
+        });
+    }
+
+    class Element extends Node {
+        get tagName() { return ops.op_dom_get_tag_name(_getNodeId(this)).toUpperCase(); }
+        get localName() { return ops.op_dom_get_tag_name(_getNodeId(this)); }
+        get id() { return ops.op_dom_get_attribute(_getNodeId(this), "id") || ""; }
+        set id(val) { ops.op_dom_set_attribute(_getNodeId(this), "id", String(val)); }
+        get className() { return ops.op_dom_get_attribute(_getNodeId(this), "class") || ""; }
+        set className(val) { ops.op_dom_set_attribute(_getNodeId(this), "class", String(val)); }
+        // HTML attribute-backed properties (script.src, link.href, img.src, etc.)
+        get src() { return this.getAttribute("src") || ""; }
+        set src(val) { this.setAttribute("src", String(val)); }
+        get href() { return this.getAttribute("href") || ""; }
+        set href(val) { this.setAttribute("href", String(val)); }
+        get type() { return this.getAttribute("type") || ""; }
+        set type(val) { this.setAttribute("type", String(val)); }
+        get rel() { return this.getAttribute("rel") || ""; }
+        set rel(val) { this.setAttribute("rel", String(val)); }
+        get async() { return this.hasAttribute("async"); }
+        set async(val) { if (val) this.setAttribute("async", ""); else this.removeAttribute("async"); }
+        get defer() { return this.hasAttribute("defer"); }
+        set defer(val) { if (val) this.setAttribute("defer", ""); else this.removeAttribute("defer"); }
+        get crossOrigin() { return this.getAttribute("crossorigin"); }
+        set crossOrigin(val) { if (val != null) this.setAttribute("crossorigin", String(val)); else this.removeAttribute("crossorigin"); }
+        get integrity() { return this.getAttribute("integrity") || ""; }
+        set integrity(val) { this.setAttribute("integrity", String(val)); }
+        get referrerPolicy() { return this.getAttribute("referrerpolicy") || ""; }
+        set referrerPolicy(val) { this.setAttribute("referrerpolicy", String(val)); }
+        get classList() { return new DOMTokenList(_getNodeId(this)); }
+        get innerHTML() { return ops.op_dom_get_inner_html(_getNodeId(this)); }
+        set innerHTML(val) { ops.op_dom_set_inner_html(_getNodeId(this), String(val)); }
+        get outerHTML() { return ops.op_dom_get_outer_html(_getNodeId(this)); }
+        get children() {
+            return new NodeList(ops.op_dom_get_child_elements(_getNodeId(this)));
+        }
+        get firstElementChild() {
+            const els = ops.op_dom_get_child_elements(_getNodeId(this));
+            return els.length > 0 ? _wrapNode(els[0]) : null;
+        }
+        get lastElementChild() {
+            const els = ops.op_dom_get_child_elements(_getNodeId(this));
+            return els.length > 0 ? _wrapNode(els[els.length - 1]) : null;
+        }
+        getAttribute(name) { return ops.op_dom_get_attribute(_getNodeId(this), name); }
+        setAttribute(name, value) { ops.op_dom_set_attribute(_getNodeId(this), name, String(value)); }
+        removeAttribute(name) { ops.op_dom_remove_attribute(_getNodeId(this), name); }
+        hasAttribute(name) { return ops.op_dom_has_attribute(_getNodeId(this), name); }
+        querySelector(sel) {
+            const id = ops.op_dom_query_selector(_getNodeId(this), sel);
+            return id !== null ? _wrapNode(id) : null;
+        }
+        querySelectorAll(sel) {
+            return new NodeList(ops.op_dom_query_selector_all(_getNodeId(this), sel));
+        }
+        matches(sel) {
+            const all = ops.op_dom_query_selector_all(
+                ops.op_dom_get_parent(_getNodeId(this)) || ops.op_dom_document_node(),
+                sel
+            );
+            return all.includes(_getNodeId(this));
+        }
+        closest(sel) {
+            let el = this;
+            while (el) {
+                if (el.matches && el.matches(sel)) return el;
+                el = el.parentElement;
+            }
+            return null;
+        }
+        getElementsByTagName(tag) {
+            return new NodeList(ops.op_dom_get_elements_by_tag_name(_getNodeId(this), tag));
+        }
+        getElementsByClassName(cls) {
+            return new NodeList(ops.op_dom_get_elements_by_class_name(_getNodeId(this), cls));
+        }
+        // Layout APIs (wired to taffy via layout_ext ops)
+        getBoundingClientRect() {
+            return ops.op_layout_get_bounding_rect(_getNodeId(this));
+        }
+        getClientRects() { return [this.getBoundingClientRect()]; }
+        get offsetWidth() { return ops.op_layout_get_offset_width(_getNodeId(this)); }
+        get offsetHeight() { return ops.op_layout_get_offset_height(_getNodeId(this)); }
+        get offsetTop() { return ops.op_layout_get_offset_top(_getNodeId(this)); }
+        get offsetLeft() { return ops.op_layout_get_offset_left(_getNodeId(this)); }
+        get clientWidth() { return this.offsetWidth; }
+        get clientHeight() { return this.offsetHeight; }
+        get scrollWidth() { return this.offsetWidth; }
+        get scrollHeight() { return this.offsetHeight; }
+        get scrollTop() { return 0; }
+        set scrollTop(v) {}
+        get scrollLeft() { return 0; }
+        set scrollLeft(v) {}
+        get offsetParent() { return this.parentElement; }
+        // --- Modern DOM manipulation ---
+        remove() {
+            const parent = ops.op_dom_get_parent(_getNodeId(this));
+            if (parent !== -1 && parent !== null) {
+                ops.op_dom_remove_child(parent, _getNodeId(this));
+            }
+        }
+        append(...nodes) {
+            for (const node of nodes) {
+                if (typeof node === "string") {
+                    this.appendChild(_document.createTextNode(node));
+                } else {
+                    this.appendChild(node);
+                }
+            }
+        }
+        prepend(...nodes) {
+            const first = this.firstChild;
+            for (const node of nodes) {
+                const n = typeof node === "string" ? _document.createTextNode(node) : node;
+                if (first) {
+                    this.insertBefore(n, first);
+                } else {
+                    this.appendChild(n);
+                }
+            }
+        }
+        after(...nodes) {
+            const parent = this.parentNode;
+            if (!parent) return;
+            const next = this.nextSibling;
+            for (const node of nodes) {
+                const n = typeof node === "string" ? _document.createTextNode(node) : node;
+                if (next) {
+                    parent.insertBefore(n, next);
+                } else {
+                    parent.appendChild(n);
+                }
+            }
+        }
+        before(...nodes) {
+            const parent = this.parentNode;
+            if (!parent) return;
+            for (const node of nodes) {
+                const n = typeof node === "string" ? _document.createTextNode(node) : node;
+                parent.insertBefore(n, this);
+            }
+        }
+        replaceWith(...nodes) {
+            const parent = this.parentNode;
+            if (!parent) return;
+            const next = this.nextSibling;
+            this.remove();
+            for (const node of nodes) {
+                const n = typeof node === "string" ? _document.createTextNode(node) : node;
+                if (next) {
+                    parent.insertBefore(n, next);
+                } else {
+                    parent.appendChild(n);
+                }
+            }
+        }
+        replaceChildren(...nodes) {
+            // Remove all existing children
+            while (this.firstChild) this.removeChild(this.firstChild);
+            this.append(...nodes);
+        }
+        // --- insertAdjacent family ---
+        insertAdjacentHTML(position, html) {
+            ops.op_dom_insert_adjacent_html(_getNodeId(this), position, html);
+        }
+        insertAdjacentElement(position, element) {
+            const parent = this.parentNode;
+            switch (position) {
+                case "beforebegin":
+                    if (parent) parent.insertBefore(element, this);
+                    break;
+                case "afterbegin":
+                    this.insertBefore(element, this.firstChild);
+                    break;
+                case "beforeend":
+                    this.appendChild(element);
+                    break;
+                case "afterend":
+                    if (parent) {
+                        const next = this.nextSibling;
+                        if (next) parent.insertBefore(element, next);
+                        else parent.appendChild(element);
+                    }
+                    break;
+            }
+            return element;
+        }
+        insertAdjacentText(position, text) {
+            const textNode = _document.createTextNode(text);
+            this.insertAdjacentElement(position, textNode);
+        }
+        toggleAttribute(name, force) {
+            if (force !== undefined) {
+                if (force) { this.setAttribute(name, ""); return true; }
+                else { this.removeAttribute(name); return false; }
+            }
+            if (this.hasAttribute(name)) { this.removeAttribute(name); return false; }
+            this.setAttribute(name, ""); return true;
+        }
+        // --- Attribute helpers ---
+        get attributes() {
+            // Minimal NamedNodeMap-like object
+            const el = this;
+            return new Proxy([], {
+                get(target, prop) {
+                    if (prop === "length") return 0; // simplified
+                    if (prop === "getNamedItem") return (name) => {
+                        const val = el.getAttribute(name);
+                        return val ? { name, value: val, specified: true } : null;
+                    };
+                    return undefined;
+                }
+            });
+        }
+        get dataset() {
+            const el = this;
+            return new Proxy({}, {
+                get(target, prop) {
+                    const attr = "data-" + prop.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+                    return el.getAttribute(attr) || undefined;
+                },
+                set(target, prop, value) {
+                    const attr = "data-" + prop.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+                    el.setAttribute(attr, String(value));
+                    return true;
+                }
+            });
+        }
+        get nextElementSibling() {
+            let n = this.nextSibling;
+            while (n) {
+                if (n.nodeType === 1) return n;
+                n = n.nextSibling;
+            }
+            return null;
+        }
+        get previousElementSibling() {
+            let n = this.previousSibling;
+            while (n) {
+                if (n.nodeType === 1) return n;
+                n = n.previousSibling;
+            }
+            return null;
+        }
+        get childElementCount() {
+            return ops.op_dom_get_child_elements(_getNodeId(this)).length;
+        }
+        // element.style — CSSStyleDeclaration proxy
+        get style() {
+            if (!this._style) this._style = _createStyleProxy(_getNodeId(this));
+            return this._style;
+        }
+        // Interaction stubs
+        click() { this.dispatchEvent(new Event("click", { bubbles: true })); }
+        focus() { this.dispatchEvent(new Event("focus")); }
+        blur() { this.dispatchEvent(new Event("blur")); }
+        checkVisibility() { return true; }
+        animate() { return { finished: Promise.resolve(), cancel() {}, play() {}, pause() {} }; }
+        getAnimations() { return []; }
+        attachShadow(init = {}) {
+            const mode = init.mode || "open";
+            const shadowId = ops.op_dom_attach_shadow(_getNodeId(this), mode);
+            const shadowRoot = _wrap(shadowId);
+            // ShadowRoot inherits Node methods (appendChild, querySelector, etc.)
+            Object.defineProperties(shadowRoot, {
+                mode: { value: mode, enumerable: true },
+                host: { value: this, enumerable: true },
+                innerHTML: {
+                    get() { return ops.op_dom_get_inner_html(shadowId); },
+                    set(html) { ops.op_dom_set_inner_html(shadowId, html); },
+                },
+            });
+            if (mode === "open") this._shadowRoot = shadowRoot;
+            return shadowRoot;
+        }
+        get shadowRoot() { return this._shadowRoot || null; }
+    }
+
+    // Full DOM prototype chain:
+    //   EventTarget ← Node ← Element ← HTMLElement ← HTML*Element
+    // Subclasses are mostly empty markers for instanceof checks. When an
+    // element is created via _wrapNode, we do setPrototypeOf based on the
+    // tag name to select the right specific class (HTMLDivElement etc.)
+    // without having to create a dedicated Rust-side dispatch.
+    class HTMLElement extends Element {}
+    class HTMLDivElement extends HTMLElement {}
+    class HTMLSpanElement extends HTMLElement {}
+    class HTMLParagraphElement extends HTMLElement {}
+    class HTMLHeadingElement extends HTMLElement {}
+    class HTMLAnchorElement extends HTMLElement {}
+    class HTMLImageElement extends HTMLElement {}
+    class HTMLInputElement extends HTMLElement {}
+    class HTMLFormElement extends HTMLElement {}
+    class HTMLButtonElement extends HTMLElement {}
+    class HTMLSelectElement extends HTMLElement {}
+    class HTMLTextAreaElement extends HTMLElement {}
+    class HTMLCanvasElement extends HTMLElement {}
+    class HTMLScriptElement extends HTMLElement {}
+    class HTMLStyleElement extends HTMLElement {}
+    class HTMLLinkElement extends HTMLElement {}
+    class HTMLMetaElement extends HTMLElement {}
+    class HTMLTableElement extends HTMLElement {}
+    class HTMLIFrameElement extends HTMLElement {}
+    class HTMLVideoElement extends HTMLElement {}
+    class HTMLAudioElement extends HTMLElement {}
+    class HTMLBodyElement extends HTMLElement {}
+    class HTMLHeadElement extends HTMLElement {}
+    class HTMLHtmlElement extends HTMLElement {}
+    class HTMLUListElement extends HTMLElement {}
+    class HTMLOListElement extends HTMLElement {}
+    class HTMLLIElement extends HTMLElement {}
+    class HTMLTableRowElement extends HTMLElement {}
+    class HTMLTableCellElement extends HTMLElement {}
+    class HTMLTableSectionElement extends HTMLElement {}
+    class HTMLLabelElement extends HTMLElement {}
+    class HTMLOptionElement extends HTMLElement {}
+    class HTMLTemplateElement extends HTMLElement {}
+    class HTMLPreElement extends HTMLElement {}
+    class HTMLQuoteElement extends HTMLElement {}
+
+    // Tag → specific HTML*Element prototype map. Anything not listed falls
+    // back to HTMLElement.prototype.
+    const _tagToProto = {
+        div: HTMLDivElement.prototype,
+        span: HTMLSpanElement.prototype,
+        p: HTMLParagraphElement.prototype,
+        h1: HTMLHeadingElement.prototype,
+        h2: HTMLHeadingElement.prototype,
+        h3: HTMLHeadingElement.prototype,
+        h4: HTMLHeadingElement.prototype,
+        h5: HTMLHeadingElement.prototype,
+        h6: HTMLHeadingElement.prototype,
+        a: HTMLAnchorElement.prototype,
+        img: HTMLImageElement.prototype,
+        input: HTMLInputElement.prototype,
+        form: HTMLFormElement.prototype,
+        button: HTMLButtonElement.prototype,
+        select: HTMLSelectElement.prototype,
+        textarea: HTMLTextAreaElement.prototype,
+        canvas: HTMLCanvasElement.prototype,
+        script: HTMLScriptElement.prototype,
+        style: HTMLStyleElement.prototype,
+        link: HTMLLinkElement.prototype,
+        meta: HTMLMetaElement.prototype,
+        table: HTMLTableElement.prototype,
+        iframe: HTMLIFrameElement.prototype,
+        video: HTMLVideoElement.prototype,
+        audio: HTMLAudioElement.prototype,
+        body: HTMLBodyElement.prototype,
+        head: HTMLHeadElement.prototype,
+        html: HTMLHtmlElement.prototype,
+        ul: HTMLUListElement.prototype,
+        ol: HTMLOListElement.prototype,
+        li: HTMLLIElement.prototype,
+        tr: HTMLTableRowElement.prototype,
+        td: HTMLTableCellElement.prototype,
+        th: HTMLTableCellElement.prototype,
+        thead: HTMLTableSectionElement.prototype,
+        tbody: HTMLTableSectionElement.prototype,
+        tfoot: HTMLTableSectionElement.prototype,
+        label: HTMLLabelElement.prototype,
+        option: HTMLOptionElement.prototype,
+        template: HTMLTemplateElement.prototype,
+        pre: HTMLPreElement.prototype,
+        blockquote: HTMLQuoteElement.prototype,
+        q: HTMLQuoteElement.prototype,
+    };
+
+    // Adjust an Element instance's prototype to the tag-specific subclass
+    // so `el instanceof HTMLDivElement` works as in real Chrome.
+    function _retargetElementProto(el) {
+        try {
+            const tag = ops.op_dom_get_tag_name(_getNodeId(el)).toLowerCase();
+            const proto = _tagToProto[tag] || HTMLElement.prototype;
+            Object.setPrototypeOf(el, proto);
+        } catch {}
+    }
+
+    class Text extends Node {
+        get data() { return ops.op_dom_get_text_content(_getNodeId(this)); }
+        set data(val) { ops.op_dom_set_text_content(_getNodeId(this), String(val)); }
+        get length() { return this.data.length; }
+        get wholeText() { return this.data; }
+    }
+
+    class Comment extends Node {
+        get data() { return ops.op_dom_get_text_content(_getNodeId(this)); }
+        set data(val) { ops.op_dom_set_text_content(_getNodeId(this), String(val)); }
+    }
+
+    class DocumentFragment extends Node {}
+
+    class Document extends Node {
+        get documentElement() {
+            const els = ops.op_dom_get_child_elements(ops.op_dom_document_node());
+            return els.length > 0 ? _wrapNode(els[0]) : null;
+        }
+        get head() { return this.querySelector("head"); }
+        get body() { return this.querySelector("body"); }
+        get title() {
+            const el = this.querySelector("title");
+            return el ? el.textContent : "";
+        }
+        set title(val) {
+            let el = this.querySelector("title");
+            if (el) { el.textContent = val; }
+        }
+        getElementById(id) {
+            const nodeId = ops.op_dom_get_element_by_id(id);
+            return nodeId !== null ? _wrapNode(nodeId) : null;
+        }
+        getElementsByTagName(tag) {
+            return new NodeList(ops.op_dom_get_elements_by_tag_name(ops.op_dom_document_node(), tag));
+        }
+        getElementsByClassName(cls) {
+            return new NodeList(ops.op_dom_get_elements_by_class_name(ops.op_dom_document_node(), cls));
+        }
+        querySelector(sel) {
+            const id = ops.op_dom_query_selector(ops.op_dom_document_node(), sel);
+            return id !== null ? _wrapNode(id) : null;
+        }
+        querySelectorAll(sel) {
+            return new NodeList(ops.op_dom_query_selector_all(ops.op_dom_document_node(), sel));
+        }
+        createElement(tag) {
+            return _wrapNode(ops.op_dom_create_element(tag));
+        }
+        createTextNode(text) {
+            return _wrapNode(ops.op_dom_create_text_node(text));
+        }
+        createDocumentFragment() {
+            return _wrapNode(ops.op_dom_create_document_fragment());
+        }
+        createComment(text) {
+            // Comment nodes have nodeType 8 in the DOM; use text node with special handling
+            const id = ops.op_dom_create_text_node(""); // TODO: proper comment op
+            return _wrapNode(id);
+        }
+        createEvent(type) {
+            // Legacy event factory
+            return new Event(type);
+        }
+        createRange() {
+            return new Range();
+        }
+        createTreeWalker(root, whatToShow, filter) {
+            return { currentNode: root, nextNode() { return null; }, previousNode() { return null; } };
+        }
+        createNodeIterator(root, whatToShow, filter) {
+            return { nextNode() { return null; }, previousNode() { return null; } };
+        }
+        importNode(node, deep) { return node.cloneNode(deep); }
+        adoptNode(node) {
+            // Detach from current parent, adopt into this document
+            if (node.parentNode) node.parentNode.removeChild(node);
+            return node;
+        }
+        createAttribute(name) {
+            return { name, value: "", specified: true };
+        }
+        // document.open/close — reset and finalize document stream
+        open() { return this; }
+        close() {}
+        write(html) { ops.op_dom_document_write(String(html)); }
+        writeln(html) { ops.op_dom_document_write(String(html) + "\n"); }
+        // Selection and editing
+        execCommand(command, showUI, value) { return false; }
+        queryCommandSupported(command) { return false; }
+        queryCommandEnabled(command) { return false; }
+        getSelection() { return globalThis.getSelection ? globalThis.getSelection() : null; }
+        // Point-based queries
+        elementFromPoint(x, y) { return this.body; }
+        elementsFromPoint(x, y) { return this.body ? [this.body] : []; }
+        caretPositionFromPoint(x, y) { return null; }
+        hasFocus() { return true; }  // Anti-bot: must return true
+        get readyState() { return "complete"; }
+        get URL() { return globalThis.location?.href || "about:blank"; }
+        get documentURI() { return this.URL; }
+        get domain() { return globalThis.location?.hostname || ""; }
+        get location() { return globalThis.location; }
+        set location(val) { if (globalThis.location) globalThis.location.href = val; }
+        get referrer() { return ""; }
+        get hidden() { return false; }
+        get visibilityState() { return "visible"; }
+        get cookie() {
+            // Unified cookie jar: returns the mirror of net::cookies for this origin.
+            // The mirror is refreshed synchronously on every page navigation and after
+            // each fetch() response via _syncCookiesFromNet().
+            if (!globalThis.__jsCookies) globalThis.__jsCookies = {};
+            return Object.entries(globalThis.__jsCookies)
+                .map(([k, v]) => `${k}=${v}`)
+                .join("; ");
+        }
+        set cookie(val) {
+            // Parse "name=value; path=/; ..." — update local mirror AND push to net::cookies.
+            if (!globalThis.__jsCookies) globalThis.__jsCookies = {};
+            const parts = String(val).split(";");
+            const [name, ...rest] = (parts[0] || "").split("=");
+            const key = name.trim();
+            const value = rest.join("=").trim();
+            if (!key) return;
+            // Check for max-age=0 or expires in the past (delete cookie)
+            const lower = String(val).toLowerCase();
+            if (lower.includes("max-age=0") || lower.includes("max-age=-")) {
+                delete globalThis.__jsCookies[key];
+            } else {
+                globalThis.__jsCookies[key] = value;
+            }
+            // Fire-and-forget propagation to the net layer. Safe because the next
+            // fetch()/navigation reads from the shared jar.
+            try {
+                const url = globalThis.location?.href;
+                if (url && url !== "about:blank" && globalThis.Deno?.core?.ops?.op_cookie_set) {
+                    globalThis.Deno.core.ops.op_cookie_set(url, String(val));
+                }
+            } catch (e) { /* ignore */ }
+        }
+        get characterSet() { return "UTF-8"; }
+        get charset() { return "UTF-8"; }
+        get contentType() { return "text/html"; }
+        get compatMode() { return "CSS1Compat"; }
+        // document.implementation — the DOMImplementation API. fpCollect and
+        // several bot tests call createHTMLDocument() to verify the surface.
+        get implementation() {
+            return {
+                createHTMLDocument(title) {
+                    // Return a stub document with just enough of the Document
+                    // API to satisfy fingerprinters. Real browsers return a
+                    // fully functional Document, but our stubs never read it.
+                    return {
+                        title: title || "",
+                        body: { innerHTML: "", appendChild: () => {} },
+                        head: { appendChild: () => {} },
+                        documentElement: { innerHTML: "" },
+                        createElement(tag) {
+                            return { tagName: tag.toUpperCase(), innerHTML: "", appendChild: () => {} };
+                        },
+                        createTextNode(t) { return { nodeValue: t }; },
+                        querySelector() { return null; },
+                        querySelectorAll() { return []; },
+                    };
+                },
+                createDocument(ns, qualifiedName, doctype) {
+                    return this.createHTMLDocument("");
+                },
+                createDocumentType(qualifiedName, publicId, systemId) {
+                    return { name: qualifiedName, publicId, systemId };
+                },
+                hasFeature() { return true; },
+            };
+        }
+        get doctype() { return null; }
+        get defaultView() { return globalThis; }
+        get activeElement() { return this.body; }
+        get scripts() { return this.getElementsByTagName("script"); }
+        get forms() { return this.getElementsByTagName("form"); }
+        get images() { return this.getElementsByTagName("img"); }
+        get links() { return this.getElementsByTagName("a"); }
+        get styleSheets() {
+            const count = ops.op_dom_get_stylesheet_count();
+            const sheets = [];
+            for (let i = 0; i < count; i++) {
+                sheets.push(new CSSStyleSheet(i));
+            }
+            return sheets;
+        }
+        get fullscreenElement() { return null; }
+        get pointerLockElement() { return null; }
+        exitFullscreen() { return Promise.resolve(); }
+        exitPointerLock() {}
+    }
+
+    // --- CSSOM ---
+    class CSSStyleSheet {
+        constructor(index) { this._index = index; }
+        get type() { return "text/css"; }
+        get disabled() { return false; }
+        get ownerNode() { return null; }
+        get parentStyleSheet() { return null; }
+        get title() { return null; }
+        get media() { return { length: 0, mediaText: "" }; }
+        get cssRules() {
+            const raw = ops.op_dom_get_stylesheet_rules(this._index);
+            return raw.map(r => new CSSStyleRule(r));
+        }
+        get rules() { return this.cssRules; }
+        insertRule(_rule, _index) { return 0; }
+        deleteRule(_index) {}
+    }
+
+    class CSSStyleRule {
+        constructor({ selector_text, css_text, rule_type }) {
+            this.selectorText = selector_text;
+            this.cssText = css_text;
+            this.type = rule_type;
+            // Parse declarations into style-like object
+            const styleObj = {};
+            const declMatch = css_text.match(/\{([^}]*)\}/);
+            if (declMatch) {
+                for (const part of declMatch[1].split(";")) {
+                    const [prop, ...vals] = part.split(":");
+                    if (prop && vals.length) {
+                        const p = prop.trim();
+                        const v = vals.join(":").trim();
+                        styleObj[p] = v;
+                        // Also set camelCase version
+                        const camel = p.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+                        if (camel !== p) styleObj[camel] = v;
+                    }
+                }
+            }
+            this.style = styleObj;
+        }
+    }
+
+    // --- DOMRect ---
+    class DOMRect {
+        constructor(x = 0, y = 0, width = 0, height = 0) {
+            this.x = x; this.y = y; this.width = width; this.height = height;
+        }
+        get top() { return this.y; }
+        get left() { return this.x; }
+        get bottom() { return this.y + this.height; }
+        get right() { return this.x + this.width; }
+        toJSON() { return { x: this.x, y: this.y, width: this.width, height: this.height, top: this.top, left: this.left, bottom: this.bottom, right: this.right }; }
+    }
+
+    // --- Range (minimal) ---
+    class Range {
+        constructor() {
+            this.startContainer = null; this.startOffset = 0;
+            this.endContainer = null; this.endOffset = 0;
+            this.collapsed = true; this.commonAncestorContainer = null;
+        }
+        setStart(node, offset) { this.startContainer = node; this.startOffset = offset; this.collapsed = false; }
+        setEnd(node, offset) { this.endContainer = node; this.endOffset = offset; }
+        collapse(toStart) { this.collapsed = true; }
+        cloneRange() { return new Range(); }
+        getBoundingClientRect() { return new DOMRect(); }
+        getClientRects() { return []; }
+        createContextualFragment(html) {
+            const div = _document.createElement("div");
+            div.innerHTML = html;
+            const frag = _document.createDocumentFragment();
+            while (div.firstChild) frag.appendChild(div.firstChild);
+            return frag;
+        }
+        toString() { return ""; }
+    }
+
+    // --- Selection (minimal) ---
+    class Selection {
+        get anchorNode() { return null; }
+        get anchorOffset() { return 0; }
+        get focusNode() { return null; }
+        get focusOffset() { return 0; }
+        get isCollapsed() { return true; }
+        get rangeCount() { return 0; }
+        getRangeAt(i) { return new Range(); }
+        addRange(range) {}
+        removeRange(range) {}
+        removeAllRanges() {}
+        collapse(node, offset) {}
+        toString() { return ""; }
+    }
+    const _selection = new Selection();
+
+    // Create the global document
+    const _document = new Document(ops.op_dom_document_node());
+    _nodeCache.set(ops.op_dom_document_node(), new WeakRef(_document));
+
+    // Set globals
+    // Symbol.toStringTag on every DOM class — Akamai BMP v3 and DataDome
+    // check Object.prototype.toString.call(node) and expect the Chrome
+    // WebIDL brand name like "[object HTMLDivElement]". Without these
+    // tags every node shows as "[object Object]" which is an instant bot
+    // signal.
+    const _tag = (cls, name) => {
+        try {
+            Object.defineProperty(cls.prototype, Symbol.toStringTag, {
+                value: name, configurable: true,
+            });
+        } catch {}
+    };
+    _tag(EventTarget, "EventTarget");
+    _tag(Node, "Node");
+    _tag(Element, "Element");
+    _tag(HTMLElement, "HTMLElement");
+    _tag(HTMLDivElement, "HTMLDivElement");
+    _tag(HTMLSpanElement, "HTMLSpanElement");
+    _tag(HTMLParagraphElement, "HTMLParagraphElement");
+    _tag(HTMLHeadingElement, "HTMLHeadingElement");
+    _tag(HTMLAnchorElement, "HTMLAnchorElement");
+    _tag(HTMLImageElement, "HTMLImageElement");
+    _tag(HTMLInputElement, "HTMLInputElement");
+    _tag(HTMLFormElement, "HTMLFormElement");
+    _tag(HTMLButtonElement, "HTMLButtonElement");
+    _tag(HTMLSelectElement, "HTMLSelectElement");
+    _tag(HTMLTextAreaElement, "HTMLTextAreaElement");
+    _tag(HTMLCanvasElement, "HTMLCanvasElement");
+    _tag(HTMLScriptElement, "HTMLScriptElement");
+    _tag(HTMLStyleElement, "HTMLStyleElement");
+    _tag(HTMLLinkElement, "HTMLLinkElement");
+    _tag(HTMLMetaElement, "HTMLMetaElement");
+    _tag(HTMLTableElement, "HTMLTableElement");
+    _tag(HTMLIFrameElement, "HTMLIFrameElement");
+    _tag(HTMLVideoElement, "HTMLVideoElement");
+    _tag(HTMLAudioElement, "HTMLAudioElement");
+    _tag(HTMLBodyElement, "HTMLBodyElement");
+    _tag(HTMLHeadElement, "HTMLHeadElement");
+    _tag(HTMLHtmlElement, "HTMLHtmlElement");
+    _tag(HTMLUListElement, "HTMLUListElement");
+    _tag(HTMLOListElement, "HTMLOListElement");
+    _tag(HTMLLIElement, "HTMLLIElement");
+    _tag(HTMLTableRowElement, "HTMLTableRowElement");
+    _tag(HTMLTableCellElement, "HTMLTableCellElement");
+    _tag(HTMLTableSectionElement, "HTMLTableSectionElement");
+    _tag(HTMLLabelElement, "HTMLLabelElement");
+    _tag(HTMLOptionElement, "HTMLOptionElement");
+    _tag(HTMLTemplateElement, "HTMLTemplateElement");
+    _tag(HTMLPreElement, "HTMLPreElement");
+    _tag(HTMLQuoteElement, "HTMLQuoteElement");
+    _tag(Text, "Text");
+    _tag(Comment, "Comment");
+    _tag(DocumentFragment, "DocumentFragment");
+    // Chrome exposes document as HTMLDocument (which extends Document).
+    _tag(Document, "HTMLDocument");
+    _tag(NodeList, "NodeList");
+    _tag(DOMTokenList, "DOMTokenList");
+
+    globalThis.document = _document;
+    globalThis.Node = Node;
+    globalThis.Element = Element;
+    // Expose the real HTMLElement subclasses — the prototype chain is
+    // EventTarget ← Node ← Element ← HTMLElement ← HTML*Element so that
+    // `el instanceof HTMLDivElement` etc. works as in real Chrome.
+    globalThis.HTMLElement = HTMLElement;
+    globalThis.HTMLDivElement = HTMLDivElement;
+    globalThis.HTMLSpanElement = HTMLSpanElement;
+    globalThis.HTMLParagraphElement = HTMLParagraphElement;
+    globalThis.HTMLHeadingElement = HTMLHeadingElement;
+    globalThis.HTMLAnchorElement = HTMLAnchorElement;
+    globalThis.HTMLImageElement = HTMLImageElement;
+    globalThis.HTMLInputElement = HTMLInputElement;
+    globalThis.HTMLFormElement = HTMLFormElement;
+    globalThis.HTMLButtonElement = HTMLButtonElement;
+    globalThis.HTMLSelectElement = HTMLSelectElement;
+    globalThis.HTMLTextAreaElement = HTMLTextAreaElement;
+    globalThis.HTMLCanvasElement = HTMLCanvasElement;
+    globalThis.HTMLScriptElement = HTMLScriptElement;
+    globalThis.HTMLStyleElement = HTMLStyleElement;
+    globalThis.HTMLLinkElement = HTMLLinkElement;
+    globalThis.HTMLMetaElement = HTMLMetaElement;
+    globalThis.HTMLTableElement = HTMLTableElement;
+    globalThis.HTMLIFrameElement = HTMLIFrameElement;
+    globalThis.HTMLVideoElement = HTMLVideoElement;
+    globalThis.HTMLAudioElement = HTMLAudioElement;
+    globalThis.HTMLBodyElement = HTMLBodyElement;
+    globalThis.HTMLHeadElement = HTMLHeadElement;
+    globalThis.HTMLHtmlElement = HTMLHtmlElement;
+    globalThis.HTMLUListElement = HTMLUListElement;
+    globalThis.HTMLOListElement = HTMLOListElement;
+    globalThis.HTMLLIElement = HTMLLIElement;
+    globalThis.HTMLTableRowElement = HTMLTableRowElement;
+    globalThis.HTMLTableCellElement = HTMLTableCellElement;
+    globalThis.HTMLTableSectionElement = HTMLTableSectionElement;
+    globalThis.HTMLLabelElement = HTMLLabelElement;
+    globalThis.HTMLOptionElement = HTMLOptionElement;
+    globalThis.HTMLTemplateElement = HTMLTemplateElement;
+    globalThis.HTMLPreElement = HTMLPreElement;
+    globalThis.HTMLQuoteElement = HTMLQuoteElement;
+    globalThis.SVGElement = Element;
+    globalThis.Text = Text;
+    globalThis.Comment = Comment;
+    globalThis.DocumentFragment = DocumentFragment;
+    globalThis.Document = Document;
+    globalThis.NodeList = NodeList;
+    globalThis.DOMTokenList = DOMTokenList;
+    globalThis.DOMRect = DOMRect;
+    globalThis.DOMRectReadOnly = DOMRect;
+    globalThis.Range = Range;
+    globalThis.Selection = Selection;
+    globalThis.getSelection = function() { return _selection; };
+
+    // Image constructor — new Image(width, height)
+    globalThis.Image = class Image {
+        constructor(width, height) {
+            const el = _document.createElement("img");
+            if (width !== undefined) el.setAttribute("width", String(width));
+            if (height !== undefined) el.setAttribute("height", String(height));
+            // Copy properties onto el
+            el.naturalWidth = 0;
+            el.naturalHeight = 0;
+            el.complete = false;
+            el.src = "";
+            return el;
+        }
+    };
+
+    // DOMParser
+    globalThis.DOMParser = class DOMParser {
+        parseFromString(str, type) {
+            // Returns a minimal document-like object
+            const frag = _document.createElement("div");
+            frag.innerHTML = str;
+            return {
+                documentElement: frag,
+                body: frag,
+                querySelector(sel) { return frag.querySelector(sel); },
+                querySelectorAll(sel) { return frag.querySelectorAll(sel); },
+                getElementById(id) { return frag.querySelector("#" + id); },
+            };
+        }
+    };
+
+    // --- MutationObserver (real implementation) ---
+    const _moObservers = []; // { observer, target, options }
+
+    class MutationRecord {
+        constructor(type, target) {
+            this.type = type;
+            this.target = target;
+            this.addedNodes = [];
+            this.removedNodes = [];
+            this.attributeName = null;
+            this.oldValue = null;
+            this.previousSibling = null;
+            this.nextSibling = null;
+        }
+    }
+
+    class MutationObserver {
+        constructor(callback) {
+            this._callback = callback;
+            this._records = [];
+            this._active = false;
+            this._targets = new Map(); // nodeId → options
+        }
+        observe(target, options = {}) {
+            const nodeId = _getNodeId(target);
+            this._targets.set(nodeId, { target, options });
+            this._active = true;
+            _moObservers.push(this);
+        }
+        disconnect() {
+            this._active = false;
+            this._targets.clear();
+            const idx = _moObservers.indexOf(this);
+            if (idx !== -1) _moObservers.splice(idx, 1);
+        }
+        takeRecords() {
+            const r = this._records.slice();
+            this._records = [];
+            return r;
+        }
+        _notify(record) {
+            if (!this._active) return;
+            this._records.push(record);
+            // Schedule microtask to deliver
+            if (this._records.length === 1) {
+                Promise.resolve().then(() => {
+                    if (!this._active) return;
+                    const batch = this._records.slice();
+                    this._records = [];
+                    if (batch.length > 0) this._callback(batch, this);
+                });
+            }
+        }
+    }
+
+    // Notify matching observers of a mutation
+    function _notifyMO(type, targetNodeId, init) {
+        for (const obs of _moObservers) {
+            if (!obs._active) continue;
+            // Check if this observer watches this target (or subtree ancestor)
+            let matched = obs._targets.has(targetNodeId);
+            if (!matched) {
+                // Check subtree: walk ancestors
+                for (const [watchedId, { options }] of obs._targets) {
+                    if (options.subtree) {
+                        // Walk up from targetNodeId to see if watchedId is ancestor
+                        let nid = targetNodeId;
+                        while (nid !== -1 && nid !== null) {
+                            if (nid === watchedId) { matched = true; break; }
+                            nid = ops.op_dom_get_parent(nid);
+                        }
+                    }
+                    if (matched) break;
+                }
+            }
+            if (!matched) continue;
+
+            // Check options match
+            const opts = obs._targets.get(targetNodeId)?.options ||
+                         [...obs._targets.values()].find(v => v.options.subtree)?.options || {};
+            if (type === "childList" && !opts.childList) continue;
+            if (type === "attributes" && !opts.attributes) continue;
+            if (type === "characterData" && !opts.characterData) continue;
+
+            const record = new MutationRecord(type, init.target || null);
+            if (init.addedNodes) record.addedNodes = init.addedNodes;
+            if (init.removedNodes) record.removedNodes = init.removedNodes;
+            if (init.attributeName) record.attributeName = init.attributeName;
+            obs._notify(record);
+        }
+    }
+
+    // Custom element lifecycle helper
+    function _ceConnected(el) {
+        if (el && el._ceUpgraded && typeof el.connectedCallback === "function") {
+            try { el.connectedCallback(); } catch (e) { console.error(e); }
+        }
+    }
+    function _ceDisconnected(el) {
+        if (el && el._ceUpgraded && typeof el.disconnectedCallback === "function") {
+            try { el.disconnectedCallback(); } catch (e) { console.error(e); }
+        }
+    }
+
+    // Wrap DOM mutation methods to fire MO notifications + CE lifecycle
+    const _origAppendChild = Node.prototype.appendChild;
+    Node.prototype.appendChild = function(child) {
+        const result = _origAppendChild.call(this, child);
+        if (_moObservers.length > 0) {
+            _notifyMO("childList", _getNodeId(this), { target: this, addedNodes: [child] });
+        }
+        _ceConnected(child);
+        return result;
+    };
+
+    const _origRemoveChild = Node.prototype.removeChild;
+    Node.prototype.removeChild = function(child) {
+        _ceDisconnected(child);
+        const result = _origRemoveChild.call(this, child);
+        if (_moObservers.length > 0) {
+            _notifyMO("childList", _getNodeId(this), { target: this, removedNodes: [child] });
+        }
+        return result;
+    };
+
+    const _origInsertBefore = Node.prototype.insertBefore;
+    Node.prototype.insertBefore = function(newChild, refChild) {
+        const result = _origInsertBefore.call(this, newChild, refChild);
+        if (_moObservers.length > 0) {
+            _notifyMO("childList", _getNodeId(this), { target: this, addedNodes: [newChild] });
+        }
+        _ceConnected(newChild);
+        return result;
+    };
+
+    const _origSetAttribute = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function(name, value) {
+        const oldVal = this.getAttribute(name);
+        _origSetAttribute.call(this, name, value);
+        if (_moObservers.length > 0) {
+            _notifyMO("attributes", _getNodeId(this), { target: this, attributeName: name });
+        }
+        // Custom element attributeChangedCallback
+        if (this._ceUpgraded && typeof this.attributeChangedCallback === "function") {
+            const observed = this.constructor.observedAttributes;
+            if (Array.isArray(observed) && observed.includes(name)) {
+                try { this.attributeChangedCallback(name, oldVal, value); } catch (e) { console.error(e); }
+            }
+        }
+    };
+
+    const _origRemoveAttribute = Element.prototype.removeAttribute;
+    Element.prototype.removeAttribute = function(name) {
+        const oldVal = this.getAttribute(name);
+        _origRemoveAttribute.call(this, name);
+        if (_moObservers.length > 0) {
+            _notifyMO("attributes", _getNodeId(this), { target: this, attributeName: name });
+        }
+        // Custom element attributeChangedCallback
+        if (this._ceUpgraded && typeof this.attributeChangedCallback === "function") {
+            const observed = this.constructor.observedAttributes;
+            if (Array.isArray(observed) && observed.includes(name)) {
+                try { this.attributeChangedCallback(name, oldVal, null); } catch (e) { console.error(e); }
+            }
+        }
+    };
+
+    // Element.remove() also triggers childList on parent
+    const _origRemove = Element.prototype.remove;
+    Element.prototype.remove = function() {
+        const parent = this.parentNode;
+        _ceDisconnected(this);
+        _origRemove.call(this);
+        if (_moObservers.length > 0 && parent) {
+            _notifyMO("childList", _getNodeId(parent), { target: parent, removedNodes: [this] });
+        }
+    };
+
+    globalThis.MutationObserver = MutationObserver;
+    globalThis.MutationRecord = MutationRecord;
+
+    // --- iframe support (contentWindow / contentDocument) ---
+    //
+    // Kasada, Castle, CreepJS, and DataDome all perform iframe-realm checks:
+    // they create or find an <iframe>, access `.contentWindow`, then pull
+    // native constructors (TextEncoder, Function, Array, ...) from the iframe
+    // window to compare against the main window's versions. A mismatch
+    // reveals monkey-patching; an `undefined` contentWindow reveals a headless
+    // browser that doesn't support iframes.
+    //
+    // We install `contentWindow` and `contentDocument` as GETTERS on
+    // HTMLIFrameElement.prototype so EVERY iframe — whether parsed from HTML
+    // or created via document.createElement — returns a valid window-shaped
+    // Proxy that falls through to globalThis for any unknown property. The
+    // per-iframe state is cached in a WeakMap keyed by the element.
+
+    const _iframeState = new WeakMap();
+    function _getIframeWindow(el) {
+        let state = _iframeState.get(el);
+        if (state) return state.contentWindow;
+        const iframeDoc = {
+            documentElement: null,
+            head: null,
+            body: null,
+            title: "",
+            readyState: "complete",
+            visibilityState: "visible",
+            hidden: false,
+            hasFocus() { return false; },
+            querySelector() { return null; },
+            querySelectorAll() { return new NodeList([]); },
+            getElementById() { return null; },
+            getElementsByTagName() { return new NodeList([]); },
+            createElement(tag) { return _document.createElement(tag); },
+            createTextNode(text) { return _document.createTextNode(text); },
+            write() {},
+            writeln() {},
+            open() { return this; },
+            close() {},
+        };
+        const iframeLocals = {
+            document: iframeDoc,
+            location: { href: "about:blank" },
+            parent: globalThis,
+            top: globalThis,
+            self: null,
+            frames: [],
+            postMessage(msg, origin) {
+                Promise.resolve().then(() => {
+                    globalThis.dispatchEvent(new MessageEvent("message", { data: msg, origin: origin || "" }));
+                });
+            },
+        };
+        const iframeWindow = new Proxy(iframeLocals, {
+            get(target, prop) {
+                if (prop in target) return target[prop];
+                try { return globalThis[prop]; } catch { return undefined; }
+            },
+            has(target, prop) {
+                return prop in target || prop in globalThis;
+            },
+            getOwnPropertyDescriptor(target, prop) {
+                if (prop in target) {
+                    return Object.getOwnPropertyDescriptor(target, prop);
+                }
+                return undefined;
+            },
+        });
+        iframeLocals.self = iframeWindow;
+        state = { contentWindow: iframeWindow, contentDocument: iframeDoc };
+        _iframeState.set(el, state);
+        return iframeWindow;
+    }
+    function _getIframeDocument(el) {
+        _getIframeWindow(el); // ensure state is built
+        return _iframeState.get(el).contentDocument;
+    }
+
+    // Install on HTMLIFrameElement.prototype — covers parsed AND created iframes.
+    if (typeof HTMLIFrameElement !== 'undefined') {
+        Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+            get: function() { return _getIframeWindow(this); },
+            configurable: true,
+            enumerable: true,
+        });
+        Object.defineProperty(HTMLIFrameElement.prototype, 'contentDocument', {
+            get: function() { return _getIframeDocument(this); },
+            configurable: true,
+            enumerable: true,
+        });
+    }
+
+    // Keep the createElement customElements-upgrade hook — still needed for
+    // user-defined custom elements.
+    const _origCreateElement = Document.prototype.createElement;
+    Document.prototype.createElement = function(tag) {
+        const el = _origCreateElement.call(this, tag);
+        const ceEntry = globalThis._customElementsRegistry && globalThis._customElementsRegistry.get(tag.toLowerCase());
+        if (ceEntry) {
+            Object.setPrototypeOf(el, ceEntry.constructor.prototype);
+            try { ceEntry.constructor.call(el); } catch (e) { console.error(e); }
+            el._ceUpgraded = true;
+        }
+        return el;
+    };
+
+    // Minimal window stub
+    globalThis.window = globalThis;
+    globalThis.self = globalThis;
+})(globalThis);

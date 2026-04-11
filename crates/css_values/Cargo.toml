@@ -1,0 +1,11 @@
+[package]
+name = "css_values"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "CSS property value parsing and typed representations"
+
+[dependencies]
+css_parser = { path = "../css_parser" }
+thiserror = "2"

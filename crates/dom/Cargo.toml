@@ -1,0 +1,11 @@
+[package]
+name = "dom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Arena-allocated DOM tree with Shadow DOM support"
+
+[dependencies]
+css_selectors = { path = "../css_selectors" }
+thiserror = "2"

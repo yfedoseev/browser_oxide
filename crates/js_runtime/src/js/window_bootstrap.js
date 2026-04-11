@@ -1,0 +1,3321 @@
+((globalThis) => {
+    const ops = Deno.core.ops;
+
+    // Helper: read from stealth profile or use default
+    const _p = (key, fallback) => {
+        if (ops.op_has_stealth_profile()) {
+            const v = ops.op_get_profile_value(key);
+            return v !== "" ? v : fallback;
+        }
+        return fallback;
+    };
+    const _pInt = (key, fallback) => {
+        const v = _p(key, "");
+        return v !== "" ? parseInt(v, 10) : fallback;
+    };
+    const _pFloat = (key, fallback) => {
+        const v = _p(key, "");
+        return v !== "" ? parseFloat(v) : fallback;
+    };
+    const _pJson = (key, fallback) => {
+        const v = _p(key, "");
+        if (v !== "") try { return JSON.parse(v); } catch {}
+        return fallback;
+    };
+
+    // ================================================================
+    // Prototype-install helpers — kNoScriptId-safe layout
+    // ================================================================
+    // Real Chrome: DOM-wrapped objects (navigator, screen, history, etc.)
+    // have ZERO own properties; every data/accessor lives on the class's
+    // prototype. Kasada/Castle probes call
+    // Object.getOwnPropertyDescriptor(obj, 'x') — if the result is
+    // defined, they take a path that flags the accessor as "fake native"
+    // (V8 kNoScriptId guard, May 2025 patch). Installing on the prototype
+    // makes the own-descriptor probe return undefined, matching Chrome.
+    //
+    // _defProtoGetter(proto, name, getter)  → accessor on proto, masked toString
+    // _defProtoMethod(proto, name, fn)      → method on proto, masked toString
+    // _makeProtoInstance(Cls)               → Object.create(Cls.prototype)
+
+    const _defProtoGetter = (proto, name, getter) => {
+        Object.defineProperty(proto, name, {
+            get: getter,
+            set: undefined,
+            enumerable: true,
+            configurable: true,
+        });
+        try {
+            const d = Object.getOwnPropertyDescriptor(proto, name);
+            Object.defineProperty(d.get, 'name', { value: `get ${name}`, configurable: true });
+            Object.defineProperty(d.get, 'toString', {
+                value: function toString() { return `function get ${name}() { [native code] }`; },
+                configurable: true,
+            });
+        } catch {}
+    };
+    const _defProtoMethod = (proto, name, fn) => {
+        Object.defineProperty(proto, name, {
+            value: fn, writable: true, enumerable: true, configurable: true,
+        });
+        try {
+            Object.defineProperty(fn, 'name', { value: name, configurable: true });
+            Object.defineProperty(fn, 'toString', {
+                value: function toString() { return `function ${name}() { [native code] }`; },
+                configurable: true,
+            });
+        } catch {}
+    };
+
+    // ================================================================
+    // Navigator class + prototype — kNoScriptId-safe layout
+    // ================================================================
+    class Navigator {}
+    globalThis.Navigator = Navigator;
+    const _NavProto = Navigator.prototype;
+    const _defNav = (name, getter) => _defProtoGetter(_NavProto, name, getter);
+    const _defNavMethod = (name, fn) => _defProtoMethod(_NavProto, name, fn);
+
+    // Stable-object references — object getters return the same reference
+    // on every call, matching the behavior of real DOM-wrapped properties.
+    //
+    // Each of these navigator sub-objects is an instance of a properly-named
+    // class (NetworkInformation, MediaDevices, StorageManager, Bluetooth, …)
+    // so that `Object.getPrototypeOf(nav.X).constructor.name` and
+    // `Object.prototype.toString.call(nav.X)` return Chrome-shaped values.
+    // Sensor VMs (e.g., Akamai BMP v3) inspect these brands and refuse to
+    // upgrade trust if they see "[object Object]".
+    class NetworkInformation {}
+    Object.defineProperty(NetworkInformation.prototype, Symbol.toStringTag, {
+        value: "NetworkInformation", configurable: true,
+    });
+    globalThis.NetworkInformation = NetworkInformation;
+    const _navConnection = Object.create(NetworkInformation.prototype);
+    Object.defineProperty(_navConnection, 'effectiveType', { get: () => _p("connection_effective_type", "4g"), enumerable: true });
+    Object.defineProperty(_navConnection, 'rtt', { get: () => _pInt("connection_rtt", 50), enumerable: true });
+    Object.defineProperty(_navConnection, 'downlink', { get: () => _pFloat("connection_downlink", 10), enumerable: true });
+    Object.defineProperty(_navConnection, 'saveData', { get: () => false, enumerable: true });
+    Object.defineProperty(_navConnection, 'type', { get: () => 'wifi', enumerable: true });
+    Object.defineProperty(_navConnection, 'downlinkMax', { get: () => Infinity, enumerable: true });
+
+    const _navPlugins = { length: _pInt("plugins_count", 5), item() { return null; }, namedItem() { return null; }, refresh() {} };
+    const _navMimeTypes = { length: 2, item() { return null; }, namedItem() { return null; } };
+
+    class MediaDevices {}
+    Object.defineProperty(MediaDevices.prototype, Symbol.toStringTag, {
+        value: "MediaDevices", configurable: true,
+    });
+    MediaDevices.prototype.enumerateDevices = function () { return Promise.resolve(_pJson("media_devices", [])); };
+    MediaDevices.prototype.getUserMedia = function () { return Promise.reject(new Error("Permission denied")); };
+    MediaDevices.prototype.getDisplayMedia = function () { return Promise.reject(new Error("Permission denied")); };
+    MediaDevices.prototype.getSupportedConstraints = function () {
+        return { aspectRatio: true, autoGainControl: true, brightness: true, channelCount: true, colorTemperature: true, contrast: true, deviceId: true, displaySurface: true, echoCancellation: true, exposureCompensation: true, exposureMode: true, exposureTime: true, facingMode: true, focusDistance: true, focusMode: true, frameRate: true, groupId: true, height: true, iso: true, latency: true, noiseSuppression: true, pan: true, pointsOfInterest: true, resizeMode: true, sampleRate: true, sampleSize: true, saturation: true, sharpness: true, suppressLocalAudioPlayback: true, tilt: true, torch: true, whiteBalanceMode: true, width: true, zoom: true };
+    };
+    MediaDevices.prototype.addEventListener = function () {};
+    MediaDevices.prototype.removeEventListener = function () {};
+    MediaDevices.prototype.dispatchEvent = function () { return true; };
+    globalThis.MediaDevices = MediaDevices;
+    const _navMediaDevices = Object.create(MediaDevices.prototype);
+
+    class PermissionStatus {
+        constructor(name) { this._name = name; }
+        get name() { return this._name; }
+        get state() { return "prompt"; }
+        get onchange() { return null; }
+        set onchange(_v) {}
+        addEventListener() {}
+        removeEventListener() {}
+        dispatchEvent() { return true; }
+    }
+    Object.defineProperty(PermissionStatus.prototype, Symbol.toStringTag, {
+        value: "PermissionStatus", configurable: true,
+    });
+    globalThis.PermissionStatus = PermissionStatus;
+
+    class Permissions {}
+    Object.defineProperty(Permissions.prototype, Symbol.toStringTag, {
+        value: "Permissions", configurable: true,
+    });
+    Permissions.prototype.query = function query(desc) {
+        return Promise.resolve(new PermissionStatus(desc && desc.name));
+    };
+    globalThis.Permissions = Permissions;
+    const _navPermissions = Object.create(Permissions.prototype);
+
+    const _navCredentials = {};
+
+    class Bluetooth {}
+    Object.defineProperty(Bluetooth.prototype, Symbol.toStringTag, {
+        value: "Bluetooth", configurable: true,
+    });
+    Bluetooth.prototype.getAvailability = function () { return Promise.resolve(false); };
+    Bluetooth.prototype.requestDevice = function () { return Promise.reject(new DOMException("User denied", "NotFoundError")); };
+    Bluetooth.prototype.addEventListener = function () {};
+    Bluetooth.prototype.removeEventListener = function () {};
+    Bluetooth.prototype.dispatchEvent = function () { return true; };
+    globalThis.Bluetooth = Bluetooth;
+    const _navBluetooth = Object.create(Bluetooth.prototype);
+
+    const _navUsb = {};
+    const _navSerial = {};
+    const _navHid = {};
+    const _navKeyboard = {};
+    const _navLocks = {};
+
+    class StorageManager {}
+    Object.defineProperty(StorageManager.prototype, Symbol.toStringTag, {
+        value: "StorageManager", configurable: true,
+    });
+    StorageManager.prototype.estimate = function () {
+        return Promise.resolve({ quota: 1073741824, usage: 0 });
+    };
+    StorageManager.prototype.persist = function () { return Promise.resolve(false); };
+    StorageManager.prototype.persisted = function () { return Promise.resolve(false); };
+    globalThis.StorageManager = StorageManager;
+    const _navStorage = Object.create(StorageManager.prototype);
+
+    class ServiceWorkerContainer {
+        constructor() {
+            this.controller = null;
+            this.oncontrollerchange = null;
+            this.onmessage = null;
+            this.ready = Promise.resolve({
+                active: null, installing: null, waiting: null, scope: "/",
+                unregister() { return Promise.resolve(true); },
+            });
+        }
+    }
+    Object.defineProperty(ServiceWorkerContainer.prototype, Symbol.toStringTag, {
+        value: "ServiceWorkerContainer", configurable: true,
+    });
+    ServiceWorkerContainer.prototype.register = function (scriptURL, options) {
+        return Promise.resolve({
+            scope: (options && options.scope) || "/",
+            active: { scriptURL, state: "activated" },
+            installing: null,
+            waiting: null,
+            updateViaCache: "imports",
+            update() { return Promise.resolve(this); },
+            unregister() { return Promise.resolve(true); },
+            addEventListener() {},
+            removeEventListener() {},
+        });
+    };
+    ServiceWorkerContainer.prototype.getRegistrations = function () { return Promise.resolve([]); };
+    ServiceWorkerContainer.prototype.getRegistration = function () { return Promise.resolve(undefined); };
+    ServiceWorkerContainer.prototype.startMessages = function () {};
+    ServiceWorkerContainer.prototype.addEventListener = function () {};
+    ServiceWorkerContainer.prototype.removeEventListener = function () {};
+    globalThis.ServiceWorkerContainer = ServiceWorkerContainer;
+    const _navServiceWorker = new ServiceWorkerContainer();
+    const _navClipboard = { readText() { return Promise.resolve(""); }, writeText() { return Promise.resolve(); } };
+    const _navGeolocation = {};
+    const _navWakeLock = {};
+    const _navMediaSession = {};
+    const _navScheduling = { isInputPending() { return false; } };
+    const _navUserActivation = { isActive: false, hasBeenActive: false };
+    const _navLanguagesCache = Object.freeze(_pJson("languages", ["en-US", "en"]));
+
+    // Scalar getters — read from stealth profile each call (idempotent).
+    _defNav('userAgent', () => _p("user_agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
+    _defNav('platform', () => _p("platform", "Linux x86_64"));
+    _defNav('vendor', () => _p("vendor", "Google Inc."));
+    _defNav('vendorSub', () => _p("vendor_sub", ""));
+    _defNav('productSub', () => _p("product_sub", "20030107"));
+    _defNav('appVersion', () => _p("app_version", "5.0 (X11; Linux x86_64) AppleWebKit/537.36"));
+    _defNav('appCodeName', () => "Mozilla");
+    _defNav('appName', () => "Netscape");
+    _defNav('product', () => "Gecko");
+    _defNav('language', () => _p("language", "en-US"));
+    _defNav('languages', () => _navLanguagesCache);
+    _defNav('onLine', () => true);
+    _defNav('cookieEnabled', () => true);
+    _defNav('hardwareConcurrency', () => _pInt("hardware_concurrency", 8));
+    _defNav('deviceMemory', () => _pInt("device_memory", 8));
+    _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
+    _defNav('pdfViewerEnabled', () => _p("pdf_viewer_enabled", "true") === "true");
+    _defNav('webdriver', () => undefined);
+
+    // Object getters — stable references.
+    _defNav('connection', () => _navConnection);
+    _defNav('plugins', () => _navPlugins);
+    _defNav('mimeTypes', () => _navMimeTypes);
+    _defNav('mediaDevices', () => _navMediaDevices);
+    _defNav('permissions', () => _navPermissions);
+    _defNav('credentials', () => _navCredentials);
+    _defNav('bluetooth', () => _navBluetooth);
+    _defNav('usb', () => _navUsb);
+    _defNav('serial', () => _navSerial);
+    _defNav('hid', () => _navHid);
+    _defNav('keyboard', () => _navKeyboard);
+    _defNav('locks', () => _navLocks);
+    _defNav('storage', () => _navStorage);
+    _defNav('serviceWorker', () => _navServiceWorker);
+    _defNav('clipboard', () => _navClipboard);
+    _defNav('geolocation', () => _navGeolocation);
+    _defNav('wakeLock', () => _navWakeLock);
+    _defNav('mediaSession', () => _navMediaSession);
+    _defNav('scheduling', () => _navScheduling);
+    _defNav('userActivation', () => _navUserActivation);
+
+    // Prototype methods.
+    _defNavMethod('javaEnabled', function javaEnabled() { return false; });
+    _defNavMethod('sendBeacon', function sendBeacon(url, data) { return true; });
+    _defNavMethod('getBattery', function getBattery() {
+        return Promise.resolve({
+            charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1.0,
+            addEventListener() {}, removeEventListener() {},
+            onchargingchange: null, onchargingtimechange: null,
+            ondischargingtimechange: null, onlevelchange: null,
+        });
+    });
+    _defNavMethod('getUserMedia', function getUserMedia(constraints, success, error) {
+        if (error) error(new Error("Permission denied"));
+        return undefined;
+    });
+    _defNavMethod('webkitGetUserMedia', function webkitGetUserMedia(c, s, e) { if (e) e(new Error("Permission denied")); });
+    _defNavMethod('mozGetUserMedia', function mozGetUserMedia(c, s, e) { if (e) e(new Error("Permission denied")); });
+    // Additional Navigator.prototype methods that Akamai BMP v3 walks via
+    // computed names (per the research agent). Missing any of these causes
+    // `nqz[computed_name](...) is not a function` errors in the sensor VM.
+    _defNavMethod('vibrate', function vibrate(pattern) { return false; });
+    _defNavMethod('getGamepads', function getGamepads() { return [null, null, null, null]; });
+    _defNavMethod('registerProtocolHandler', function registerProtocolHandler(scheme, url) {});
+    _defNavMethod('unregisterProtocolHandler', function unregisterProtocolHandler(scheme, url) {});
+    _defNavMethod('requestMediaKeySystemAccess', function requestMediaKeySystemAccess(keySystem, configs) {
+        return Promise.reject(new DOMException("Not supported", "NotSupportedError"));
+    });
+    _defNavMethod('canShare', function canShare(data) { return false; });
+    _defNavMethod('share', function share(data) {
+        return Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+    });
+    _defNavMethod('clearAppBadge', function clearAppBadge() { return Promise.resolve(); });
+    _defNavMethod('setAppBadge', function setAppBadge(count) { return Promise.resolve(); });
+
+    // Symbol.toStringTag — Akamai BMP v3 checks Object.prototype.toString.call(navigator)
+    // and expects "[object Navigator]". Without this, it returns "[object Object]".
+    Object.defineProperty(_NavProto, Symbol.toStringTag, {
+        value: "Navigator", configurable: true,
+    });
+
+    // Instantiate — zero own properties.
+    globalThis.navigator = Object.create(_NavProto);
+
+    // location — Proxy-based, tracks URL components and navigation requests
+    const _locationData = {
+        href: "about:blank",
+        protocol: "https:",
+        host: "",
+        hostname: "",
+        port: "",
+        pathname: "/",
+        search: "",
+        hash: "",
+        origin: "null",
+    };
+
+    function _parseLocationUrl(url) {
+        try {
+            const u = new URL(url, _locationData.href !== "about:blank" ? _locationData.href : undefined);
+            _locationData.href = u.href;
+            _locationData.protocol = u.protocol;
+            _locationData.host = u.host;
+            _locationData.hostname = u.hostname;
+            _locationData.port = u.port;
+            _locationData.pathname = u.pathname;
+            _locationData.search = u.search;
+            _locationData.hash = u.hash;
+            _locationData.origin = u.origin;
+        } catch {
+            _locationData.href = String(url);
+        }
+    }
+
+    // Pending-navigation signal — generic primitive used by the Rust driver
+    // to loop through challenge flows. Any location.reload/assign/replace or
+    // location.href = ... sets this; <meta http-equiv="refresh"> does too.
+    // Matches the behavior of a real browser's navigation algorithm without
+    // any per-engine awareness.
+    globalThis.__pendingNavigation = null;
+
+    globalThis.location = new Proxy(_locationData, {
+        get(target, prop) {
+            if (prop === "assign") {
+                return (url) => {
+                    _parseLocationUrl(url);
+                    globalThis.__pendingNavigation = {
+                        url: _locationData.href,
+                        kind: "assign",
+                    };
+                };
+            }
+            if (prop === "replace") {
+                return (url) => {
+                    _parseLocationUrl(url);
+                    globalThis.__pendingNavigation = {
+                        url: _locationData.href,
+                        kind: "replace",
+                    };
+                };
+            }
+            if (prop === "reload") {
+                return () => {
+                    globalThis.__pendingNavigation = {
+                        url: _locationData.href,
+                        kind: "reload",
+                    };
+                };
+            }
+            if (prop === "toString") return () => target.href;
+            if (prop === Symbol.toPrimitive) return () => target.href;
+            if (prop === "ancestorOrigins") return { length: 0, item: () => null, contains: () => false };
+            return target[prop];
+        },
+        set(target, prop, value) {
+            if (prop === "href") {
+                _parseLocationUrl(value);
+                globalThis.__pendingNavigation = {
+                    url: _locationData.href,
+                    kind: "assign",
+                };
+                return true;
+            }
+            if (prop === "hash") {
+                target.hash = String(value).startsWith('#') ? value : '#' + value;
+                target.href = target.origin + target.pathname + target.search + target.hash;
+                return true;
+            }
+            target[prop] = value;
+            return true;
+        },
+    });
+
+    // Frame-tree globals: top/parent/frames/self all point to this window
+    // (we only emulate a single browsing context). Real browsers: when a page
+    // is not in a frame, top === parent === window.
+    globalThis.top = globalThis;
+    globalThis.parent = globalThis;
+    globalThis.frames = globalThis;
+    globalThis.opener = null;
+
+    // screen — prototype-backed so own-descriptor probe returns undefined.
+    class Screen {}
+    globalThis.Screen = Screen;
+    const _ScreenProto = Screen.prototype;
+    const _screenOrientation = { type: "landscape-primary", angle: 0, onchange: null };
+    // ScreenOrientation is its own interface in Chrome, so expose it too.
+    class ScreenOrientation {}
+    globalThis.ScreenOrientation = ScreenOrientation;
+    Object.setPrototypeOf(_screenOrientation, ScreenOrientation.prototype);
+    _defProtoGetter(_ScreenProto, 'width', () => _pInt("screen_width", 1920));
+    _defProtoGetter(_ScreenProto, 'height', () => _pInt("screen_height", 1080));
+    _defProtoGetter(_ScreenProto, 'availWidth', () => _pInt("screen_avail_width", 1920));
+    _defProtoGetter(_ScreenProto, 'availHeight', () => _pInt("screen_avail_height", 1040));
+    _defProtoGetter(_ScreenProto, 'availLeft', () => 0);
+    _defProtoGetter(_ScreenProto, 'availTop', () => 0);
+    _defProtoGetter(_ScreenProto, 'colorDepth', () => _pInt("screen_color_depth", 24));
+    _defProtoGetter(_ScreenProto, 'pixelDepth', () => 24);
+    _defProtoGetter(_ScreenProto, 'orientation', () => _screenOrientation);
+    _defProtoGetter(_ScreenProto, 'isExtended', () => false);
+    Object.defineProperty(_ScreenProto, Symbol.toStringTag, { value: "Screen", configurable: true });
+    Object.defineProperty(ScreenOrientation.prototype, Symbol.toStringTag, { value: "ScreenOrientation", configurable: true });
+    globalThis.screen = Object.create(_ScreenProto);
+
+    // Misc globals anti-bot checks for
+    globalThis.isSecureContext = true;
+    globalThis.crossOriginIsolated = false;
+    globalThis.origin = "null";
+    globalThis.innerWidth = _pInt("inner_width", 1920);
+    globalThis.innerHeight = _pInt("inner_height", 1080);
+    globalThis.outerWidth = _pInt("outer_width", 1920);
+    globalThis.outerHeight = _pInt("outer_height", 1080);
+    globalThis.devicePixelRatio = _pFloat("device_pixel_ratio", 1);
+    globalThis.screenX = 0;
+    globalThis.screenY = 0;
+    globalThis.pageXOffset = 0;
+    globalThis.pageYOffset = 0;
+    globalThis.scrollX = 0;
+    globalThis.scrollY = 0;
+
+    globalThis.scrollTo = function(xOrOptions, y) {
+        if (typeof xOrOptions === "object" && xOrOptions !== null) {
+            globalThis.scrollX = xOrOptions.left || 0;
+            globalThis.pageXOffset = globalThis.scrollX;
+            globalThis.scrollY = xOrOptions.top || 0;
+            globalThis.pageYOffset = globalThis.scrollY;
+        } else {
+            globalThis.scrollX = xOrOptions || 0;
+            globalThis.pageXOffset = globalThis.scrollX;
+            globalThis.scrollY = y || 0;
+            globalThis.pageYOffset = globalThis.scrollY;
+        }
+    };
+    globalThis.scroll = globalThis.scrollTo;
+    globalThis.scrollBy = function(xOrOptions, y) {
+        if (typeof xOrOptions === "object" && xOrOptions !== null) {
+            globalThis.scrollTo(globalThis.scrollX + (xOrOptions.left || 0), globalThis.scrollY + (xOrOptions.top || 0));
+        } else {
+            globalThis.scrollTo(globalThis.scrollX + (xOrOptions || 0), globalThis.scrollY + (y || 0));
+        }
+    };
+
+    // window.chrome (CRITICAL — every antibot system checks this object).
+    //
+    // Real Chrome: `window.chrome` is a special non-configurable plain
+    // object; it is NOT wrapped in a named class like Navigator/Screen.
+    // Its sub-namespaces (chrome.app, chrome.runtime, chrome.csi,
+    // chrome.loadTimes) are also plain objects, but `chrome.loadTimes`
+    // and `chrome.csi` are actual native functions whose .toString()
+    // returns the native-code shape.
+    //
+    // Probes to defend:
+    // 1. typeof chrome === 'object'
+    // 2. chrome.loadTimes.toString() contains '[native code]'
+    // 3. chrome.csi.toString() contains '[native code]'
+    // 4. chrome.runtime.onMessage / onConnect presence for extension contexts
+    // 5. Object.getOwnPropertyNames(chrome).length > 0 in real Chrome,
+    //    so leaving chrome as a plain object here is CORRECT — we don't
+    //    want zero own properties like navigator.
+    const _chromeCsi = function csi() {
+        return { startE: Date.now(), onloadT: Date.now(), pageT: Date.now(), tran: 15 };
+    };
+    const _chromeLoadTimes = function loadTimes() {
+        return {
+            commitLoadTime: Date.now()/1000, connectionInfo: "h2",
+            finishDocumentLoadTime: Date.now()/1000, finishLoadTime: Date.now()/1000,
+            firstPaintAfterLoadTime: 0, firstPaintTime: Date.now()/1000,
+            navigationType: "Other", npnNegotiatedProtocol: "h2",
+            requestTime: Date.now()/1000, startLoadTime: Date.now()/1000,
+            wasAlternateProtocolAvailable: false, wasFetchedViaSpdy: true, wasNpnNegotiated: true,
+        };
+    };
+    Object.defineProperty(_chromeCsi, 'toString', {
+        value: function toString() { return 'function csi() { [native code] }'; },
+        configurable: true,
+    });
+    Object.defineProperty(_chromeLoadTimes, 'toString', {
+        value: function toString() { return 'function loadTimes() { [native code] }'; },
+        configurable: true,
+    });
+    globalThis.chrome = {
+        app: {
+            isInstalled: false,
+            InstallState: {DISABLED:"disabled",INSTALLED:"installed",NOT_INSTALLED:"not_installed"},
+            RunningState: {CANNOT_RUN:"cannot_run",READY_TO_RUN:"ready_to_run",RUNNING:"running"},
+        },
+        runtime: {
+            OnInstalledReason: {CHROME_UPDATE:"chrome_update",INSTALL:"install",SHARED_MODULE_UPDATE:"shared_module_update",UPDATE:"update"},
+            PlatformOs: {ANDROID:"android",CROS:"cros",LINUX:"linux",MAC:"mac",WIN:"win"},
+            PlatformArch: {ARM:"arm",ARM64:"arm64",MIPS:"mips",MIPS64:"mips64",X86_32:"x86-32",X86_64:"x86-64"},
+            PlatformNaclArch: {ARM:"arm",MIPS:"mips",MIPS64:"mips64",X86_32:"x86-32",X86_64:"x86-64"},
+            RequestUpdateCheckStatus: {NO_UPDATE:"no_update",THROTTLED:"throttled",UPDATE_AVAILABLE:"update_available"},
+            OnRestartRequiredReason: {APP_UPDATE:"app_update",OS_UPDATE:"os_update",PERIODIC:"periodic"},
+            id: undefined,
+            onConnect: null,
+            onMessage: null,
+            connect() {},
+            sendMessage() {},
+        },
+        csi: _chromeCsi,
+        loadTimes: _chromeLoadTimes,
+    };
+
+    // navigator.userAgentData (Client Hints API)
+    //
+    // All values are derived from the active StealthProfile so they stay
+    // consistent with the HTTP `Sec-CH-UA-*` headers set by chrome_headers().
+    // Inconsistency between header Client Hints and navigator.userAgentData is
+    // itself a detection signal (CreepJS, FingerprintJS, Yandex Antirobot).
+    //
+    // Chrome only exposes high-entropy values via getHighEntropyValues(), which
+    // returns a Promise. The low-entropy values (brands/mobile/platform) are
+    // always visible on the sync object.
+    (function setupUaData() {
+        const browserMajor = _p("browser_version", "130.0.6723.91").split(".")[0];
+        const browserFullVersion = _p("browser_version", "130.0.6723.91");
+        const osName = _p("os_name", "Linux");
+        const osVersion = _p("os_version", "");
+        // Chrome reports platform-version as a zero-padded triple.
+        const platformVersion = (() => {
+            const v = osVersion || "";
+            if (osName === "Linux") return ""; // Chrome on Linux reports empty
+            const parts = v.split(".");
+            if (parts.length >= 3) return v;
+            if (parts.length === 2) return parts[0] + "." + parts[1] + ".0";
+            if (parts.length === 1 && parts[0]) return parts[0] + ".0.0";
+            return "";
+        })();
+        // Architecture derives from navigator.platform (Win32/MacIntel/Linux x86_64 → x86)
+        const platformStr = _p("platform", "Linux x86_64");
+        const architecture = /arm|aarch/i.test(platformStr) ? "arm" : "x86";
+        const bitness = "64";
+
+        const lowEntropyBrands = Object.freeze([
+            Object.freeze({ brand: "Chromium", version: browserMajor }),
+            Object.freeze({ brand: "Google Chrome", version: browserMajor }),
+            Object.freeze({ brand: "Not?A_Brand", version: "99" }),
+        ]);
+        const fullVersionList = Object.freeze([
+            Object.freeze({ brand: "Chromium", version: browserFullVersion }),
+            Object.freeze({ brand: "Google Chrome", version: browserFullVersion }),
+            Object.freeze({ brand: "Not?A_Brand", version: "99.0.0.0" }),
+        ]);
+
+        // The superset object used by getHighEntropyValues()
+        const allHints = {
+            architecture,
+            bitness,
+            brands: lowEntropyBrands,
+            fullVersionList,
+            mobile: false,
+            model: "",
+            platform: osName,
+            platformVersion,
+            uaFullVersion: browserFullVersion,
+            wow64: false,
+        };
+
+        // NavigatorUAData — stable object served via a Navigator.prototype
+        // getter so the instance has no own 'userAgentData' property.
+        const _navUaData = {
+            brands: lowEntropyBrands,
+            mobile: false,
+            platform: osName,
+            getHighEntropyValues(hints) {
+                const result = {
+                    brands: lowEntropyBrands,
+                    mobile: false,
+                    platform: osName,
+                };
+                if (Array.isArray(hints)) {
+                    for (const key of hints) {
+                        if (key in allHints) {
+                            result[key] = allHints[key];
+                        }
+                    }
+                }
+                return Promise.resolve(result);
+            },
+            toJSON() {
+                return {
+                    brands: lowEntropyBrands.map(b => ({ brand: b.brand, version: b.version })),
+                    mobile: false,
+                    platform: osName,
+                };
+            },
+        };
+        _defNav('userAgentData', () => _navUaData);
+    })();
+
+    // Notification
+    globalThis.Notification = class Notification { static permission = "default"; };
+
+    // PluginArray / MimeTypeArray — navigator.plugins and navigator.mimeTypes
+    // return instances, but some bot tests (fpCollect, bot.sannysoft) check
+    // that the GLOBAL classes exist via `typeof PluginArray !== 'undefined'`
+    // or use them with `instanceof`.
+    if (!globalThis.PluginArray) {
+        globalThis.PluginArray = class PluginArray {
+            constructor() { this.length = 0; }
+            item() { return null; }
+            namedItem() { return null; }
+            refresh() {}
+            [Symbol.iterator]() { let i = 0; return { next: () => ({ done: i++ >= this.length, value: null }) }; }
+        };
+    }
+    if (!globalThis.MimeTypeArray) {
+        globalThis.MimeTypeArray = class MimeTypeArray {
+            constructor() { this.length = 0; }
+            item() { return null; }
+            namedItem() { return null; }
+            [Symbol.iterator]() { let i = 0; return { next: () => ({ done: i++ >= this.length, value: null }) }; }
+        };
+    }
+    if (!globalThis.Plugin) {
+        globalThis.Plugin = class Plugin {
+            constructor() { this.name = ""; this.description = ""; this.filename = ""; this.length = 0; }
+            item() { return null; }
+            namedItem() { return null; }
+        };
+    }
+    if (!globalThis.MimeType) {
+        globalThis.MimeType = class MimeType {
+            constructor() { this.type = ""; this.description = ""; this.suffixes = ""; this.enabledPlugin = null; }
+        };
+    }
+
+    // Worker / SharedWorker / ServiceWorker classes. Our runtime has a
+    // crates/workers module but doesn't auto-expose the constructor to JS.
+    // Several fingerprint probes check `typeof Worker === 'function'` as a
+    // presence test, and CreepJS spawns a Worker to cross-check navigator.
+    // This is a minimal stub that lets fingerprint probes pass their
+    // Real Worker — spawns an OS thread with its own V8 isolate, drives
+    // a poll loop that delivers parent←worker messages to onmessage.
+    if (!globalThis.Worker) {
+        const _wops = Deno.core.ops;
+
+        function _resolveWorkerScript(url) {
+            const s = String(url);
+            if (s.startsWith('blob:')) {
+                try { return _wops.op_blob_fetch_text(s) || ''; } catch (e) { return ''; }
+            }
+            // Non-blob URLs are not supported in the MVP.
+            return '';
+        }
+
+        globalThis.Worker = class Worker {
+            constructor(scriptURL, options) {
+                this._url = String(scriptURL);
+                this._options = options || {};
+                this._name = (options && options.name) || '';
+                // `type: 'module'` enables ES module semantics for the
+                // worker body (import.meta.url, async module eval,
+                // top-level await). Default is 'classic'.
+                this._type = (options && options.type) || 'classic';
+                const isModule = this._type === 'module';
+                this.onmessage = null;
+                this.onerror = null;
+                this.onmessageerror = null;
+                this._listeners = { message: [], messageerror: [], error: [] };
+
+                const script = _resolveWorkerScript(this._url);
+                if (!script) {
+                    // Script resolution failed; defer to next tick and fire error.
+                    this._id = 0;
+                    const self = this;
+                    Promise.resolve().then(() => {
+                        self._fireEvent('error', {
+                            type: 'error',
+                            message: 'Worker script could not be resolved: ' + self._url,
+                            filename: self._url,
+                            lineno: 0,
+                            colno: 0,
+                        });
+                    });
+                    return;
+                }
+
+                this._id = _wops.op_worker_spawn(script, this._name, isModule);
+                if (this._id <= 0) {
+                    this._id = 0;
+                    return;
+                }
+
+                // Drain parent←worker messages every 5ms. We use setInterval
+                // so the poll keeps firing while the main event loop is live.
+                const self = this;
+                this._pollTimer = setInterval(() => {
+                    if (!self._id) return;
+                    const deserializer =
+                        globalThis.__boxide && globalThis.__boxide.deserializeFromWire;
+                    for (let i = 0; i < 32; i++) {
+                        const raw = _wops.op_worker_poll_from_worker(self._id);
+                        if (!raw) return;
+                        let payload = null;
+                        try { payload = JSON.parse(raw); } catch (e) { continue; }
+                        const data = deserializer
+                            ? deserializer(payload && payload.data)
+                            : payload && payload.data;
+                        const event = {
+                            type: 'message',
+                            data,
+                            origin: '',
+                            lastEventId: '',
+                            source: null,
+                            ports: [],
+                            timeStamp: Date.now(),
+                        };
+                        self._fireEvent('message', event);
+                    }
+                }, 5);
+            }
+
+            _fireEvent(type, event) {
+                const arr = this._listeners[type];
+                if (arr) {
+                    for (const fn of arr.slice()) {
+                        try { fn.call(this, event); } catch (e) {}
+                    }
+                }
+                const on = this['on' + type];
+                if (typeof on === 'function') {
+                    try { on.call(this, event); } catch (e) {}
+                }
+            }
+
+            postMessage(message, transfer) {
+                if (!this._id) return;
+                // Transferables: accepted as an array. Each entry (an
+                // ArrayBuffer or view) is reachable from the message
+                // and will be serialized with it. Real browsers
+                // detach the source after transfer — V8 detachment
+                // isn't exposed here, so the source stays readable.
+                // For fingerprint-shape probes this is acceptable.
+                const transferList = Array.isArray(transfer) ? transfer : [];
+                for (const t of transferList) {
+                    if (
+                        t !== null &&
+                        !(t instanceof ArrayBuffer) &&
+                        !(ArrayBuffer.isView && ArrayBuffer.isView(t))
+                    ) {
+                        throw new TypeError(
+                            "postMessage: transferable must be an ArrayBuffer or view"
+                        );
+                    }
+                }
+                // Wire-serialize so ArrayBuffer/TypedArray/Map/Set/
+                // Date/RegExp survive the JSON hop to the worker.
+                let wire;
+                try {
+                    wire =
+                        (globalThis.__boxide &&
+                            globalThis.__boxide.serializeForWire &&
+                            globalThis.__boxide.serializeForWire(message)) ||
+                        message;
+                } catch (e) {
+                    // DataCloneError (e.g. function inside message).
+                    // Propagate to the caller so they see the same
+                    // error Chrome would throw.
+                    throw e;
+                }
+                let payload;
+                try {
+                    payload = JSON.stringify({ data: wire });
+                } catch (_e) {
+                    payload = JSON.stringify({ data: null });
+                }
+                _wops.op_worker_post_to_worker(this._id, payload);
+            }
+
+            terminate() {
+                if (this._id) {
+                    try { _wops.op_worker_terminate(this._id); } catch (e) {}
+                    this._id = 0;
+                }
+                if (this._pollTimer) {
+                    clearInterval(this._pollTimer);
+                    this._pollTimer = null;
+                }
+            }
+
+            addEventListener(type, listener) {
+                if (!this._listeners[type]) this._listeners[type] = [];
+                this._listeners[type].push(listener);
+            }
+            removeEventListener(type, listener) {
+                const arr = this._listeners[type];
+                if (!arr) return;
+                const i = arr.indexOf(listener);
+                if (i >= 0) arr.splice(i, 1);
+            }
+            dispatchEvent(event) {
+                this._fireEvent(event && event.type, event);
+                return true;
+            }
+        };
+        Object.defineProperty(globalThis.Worker.prototype, Symbol.toStringTag, {
+            value: 'Worker',
+            configurable: true,
+        });
+    }
+    if (!globalThis.SharedWorker) {
+        globalThis.SharedWorker = class SharedWorker {
+            constructor(scriptURL, options) {
+                this.port = {
+                    onmessage: null,
+                    postMessage() {},
+                    start() {},
+                    close() {},
+                    addEventListener() {},
+                    removeEventListener() {},
+                };
+                this.onerror = null;
+                this._url = String(scriptURL);
+            }
+            addEventListener() {}
+            removeEventListener() {}
+            dispatchEvent() { return true; }
+        };
+    }
+    if (!globalThis.ServiceWorker) {
+        globalThis.ServiceWorker = class ServiceWorker {
+            constructor() {
+                this.scriptURL = "";
+                this.state = "activated";
+                this.onstatechange = null;
+            }
+            postMessage() {}
+            addEventListener() {}
+            removeEventListener() {}
+            dispatchEvent() { return true; }
+        };
+    }
+    if (!globalThis.WorkerGlobalScope) {
+        // WorkerGlobalScope is the class that Worker's `self` is an instance
+        // of. fpCollect checks `typeof WorkerGlobalScope === 'function'`.
+        globalThis.WorkerGlobalScope = class WorkerGlobalScope {};
+    }
+    if (!globalThis.DedicatedWorkerGlobalScope) {
+        globalThis.DedicatedWorkerGlobalScope = class DedicatedWorkerGlobalScope extends globalThis.WorkerGlobalScope {};
+    }
+
+    // ================================================================
+    // Batch 2: additional Web API stubs for fingerprint coverage
+    // Chrome 131 exposes these as globals; fingerprint probes do
+    // `typeof X === 'function'` checks against them.
+    //
+    // Bisect on 2026-04-10 confirmed these don't regress Akamai BMP sites
+    // — homedepot's L3/L2 flip was Akamai's stochastic trust-profile
+    // scoring, not our code.
+    // ================================================================
+
+    if (!globalThis.FileReader) {
+        globalThis.FileReader = class FileReader {
+            static EMPTY = 0;
+            static LOADING = 1;
+            static DONE = 2;
+            constructor() {
+                this.readyState = 0;
+                this.result = null;
+                this.error = null;
+                this.onload = null;
+                this.onloadstart = null;
+                this.onloadend = null;
+                this.onprogress = null;
+                this.onerror = null;
+                this.onabort = null;
+            }
+            readAsText(blob) { this.readyState = 2; this.result = ""; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
+            readAsDataURL(blob) { this.readyState = 2; this.result = "data:application/octet-stream;base64,"; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
+            readAsArrayBuffer(blob) { this.readyState = 2; this.result = new ArrayBuffer(0); if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
+            readAsBinaryString(blob) { this.readyState = 2; this.result = ""; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
+            abort() { this.readyState = 2; }
+            addEventListener() {}
+            removeEventListener() {}
+            dispatchEvent() { return true; }
+        };
+    }
+
+    if (!globalThis.ImageBitmap) {
+        globalThis.ImageBitmap = class ImageBitmap {
+            constructor() { this.width = 0; this.height = 0; }
+            close() {}
+        };
+    }
+    if (!globalThis.createImageBitmap) {
+        globalThis.createImageBitmap = function() { return Promise.resolve(new globalThis.ImageBitmap()); };
+    }
+
+    if (!globalThis.DOMPoint) {
+        globalThis.DOMPoint = class DOMPoint {
+            constructor(x, y, z, w) {
+                this.x = x || 0;
+                this.y = y || 0;
+                this.z = z || 0;
+                this.w = w === undefined ? 1 : w;
+            }
+            matrixTransform() { return new DOMPoint(this.x, this.y, this.z, this.w); }
+            toJSON() { return { x: this.x, y: this.y, z: this.z, w: this.w }; }
+            static fromPoint(p) { return new DOMPoint(p?.x, p?.y, p?.z, p?.w); }
+        };
+        globalThis.DOMPointReadOnly = globalThis.DOMPoint;
+    }
+
+    if (!globalThis.DOMMatrix) {
+        globalThis.DOMMatrix = class DOMMatrix {
+            constructor(init) {
+                this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0;
+                this.m11 = 1; this.m12 = 0; this.m13 = 0; this.m14 = 0;
+                this.m21 = 0; this.m22 = 1; this.m23 = 0; this.m24 = 0;
+                this.m31 = 0; this.m32 = 0; this.m33 = 1; this.m34 = 0;
+                this.m41 = 0; this.m42 = 0; this.m43 = 0; this.m44 = 1;
+                this.is2D = true;
+                this.isIdentity = true;
+            }
+            multiply() { return new DOMMatrix(); }
+            translate() { return new DOMMatrix(); }
+            scale() { return new DOMMatrix(); }
+            rotate() { return new DOMMatrix(); }
+            inverse() { return new DOMMatrix(); }
+            transformPoint(p) { return new DOMPoint(p?.x, p?.y, p?.z, p?.w); }
+            toString() { return "matrix(1, 0, 0, 1, 0, 0)"; }
+            toFloat32Array() { return new Float32Array(16); }
+            toFloat64Array() { return new Float64Array(16); }
+            static fromMatrix(m) { return new DOMMatrix(); }
+            static fromFloat32Array() { return new DOMMatrix(); }
+            static fromFloat64Array() { return new DOMMatrix(); }
+        };
+        globalThis.DOMMatrixReadOnly = globalThis.DOMMatrix;
+        globalThis.WebKitCSSMatrix = globalThis.DOMMatrix;
+    }
+
+    // Path2D DELIBERATELY NOT STUBBED. Our JS-class stub creates non-native
+    // method descriptors which Akamai BMP detects via `Object
+    // .getOwnPropertyDescriptor(Path2D.prototype, 'addPath')` — a class
+    // method is a data descriptor, real Chrome's is a native accessor.
+    // Homedepot's Akamai config regresses from L3 → L2 interstitial when
+    // a fake Path2D is present. Better to report `typeof Path2D ===
+    // 'undefined'` than to lie unconvincingly. Verified via bisect
+    // 2026-04-10 by toggling this single addition on/off.
+    // PerformanceObserver / PerformanceEntry / ReportingObserver
+    if (!globalThis.PerformanceObserver) {
+        globalThis.PerformanceObserver = class PerformanceObserver {
+            constructor(cb) { this._cb = cb; }
+            observe() {}
+            disconnect() {}
+            takeRecords() { return []; }
+        };
+        // Real Chrome exposes supportedEntryTypes as a static GETTER, not a
+        // data property. Fingerprinters do Object.getOwnPropertyDescriptor
+        // and a data descriptor is distinctive.
+        Object.defineProperty(globalThis.PerformanceObserver, "supportedEntryTypes", {
+            get() {
+                return ["element", "event", "first-input", "largest-contentful-paint",
+                        "layout-shift", "longtask", "mark", "measure", "navigation",
+                        "paint", "resource", "visibility-state"];
+            },
+            configurable: true,
+            enumerable: true,
+        });
+    }
+    if (!globalThis.PerformanceEntry) {
+        globalThis.PerformanceEntry = class PerformanceEntry {
+            constructor() { this.name = ""; this.entryType = ""; this.startTime = 0; this.duration = 0; }
+            toJSON() { return { name: this.name, entryType: this.entryType, startTime: this.startTime, duration: this.duration }; }
+        };
+    }
+
+    if (!globalThis.ReportingObserver) {
+        globalThis.ReportingObserver = class ReportingObserver {
+            constructor() {}
+            observe() {}
+            disconnect() {}
+            takeRecords() { return []; }
+        };
+    }
+
+    // Streams, channels, EventSource, compression — second batch-2 block
+    if (!globalThis.ReadableStream) {
+        globalThis.ReadableStream = class ReadableStream {
+            constructor() { this.locked = false; }
+            getReader() { return { read: () => Promise.resolve({ done: true, value: undefined }), releaseLock() {}, closed: Promise.resolve(), cancel: () => Promise.resolve() }; }
+            pipeTo() { return Promise.resolve(); }
+            pipeThrough(t) { return t.readable; }
+            tee() { return [new ReadableStream(), new ReadableStream()]; }
+            cancel() { return Promise.resolve(); }
+        };
+    }
+    if (!globalThis.WritableStream) {
+        globalThis.WritableStream = class WritableStream {
+            constructor() { this.locked = false; }
+            getWriter() { return { write: () => Promise.resolve(), close: () => Promise.resolve(), abort: () => Promise.resolve(), releaseLock() {}, closed: Promise.resolve(), ready: Promise.resolve() }; }
+            close() { return Promise.resolve(); }
+            abort() { return Promise.resolve(); }
+        };
+    }
+    if (!globalThis.TransformStream) {
+        globalThis.TransformStream = class TransformStream {
+            constructor() {
+                this.readable = new globalThis.ReadableStream();
+                this.writable = new globalThis.WritableStream();
+            }
+        };
+    }
+    if (!globalThis.ReadableStreamDefaultReader) globalThis.ReadableStreamDefaultReader = class ReadableStreamDefaultReader {};
+    if (!globalThis.WritableStreamDefaultWriter) globalThis.WritableStreamDefaultWriter = class WritableStreamDefaultWriter {};
+
+    if (!globalThis.BroadcastChannel) {
+        globalThis.BroadcastChannel = class BroadcastChannel {
+            constructor(name) { this.name = name; this.onmessage = null; this.onmessageerror = null; }
+            postMessage() {}
+            close() {}
+            addEventListener() {}
+            removeEventListener() {}
+            dispatchEvent() { return true; }
+        };
+    }
+
+    if (!globalThis.MessageChannel) {
+        globalThis.MessageChannel = class MessageChannel {
+            constructor() {
+                this.port1 = { onmessage: null, postMessage() {}, start() {}, close() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } };
+                this.port2 = { onmessage: null, postMessage() {}, start() {}, close() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } };
+            }
+        };
+    }
+    if (!globalThis.MessagePort) {
+        globalThis.MessagePort = class MessagePort {
+            constructor() { this.onmessage = null; this.onmessageerror = null; }
+            postMessage() {}
+            start() {}
+            close() {}
+            addEventListener() {}
+            removeEventListener() {}
+            dispatchEvent() { return true; }
+        };
+    }
+
+    if (!globalThis.EventSource) {
+        globalThis.EventSource = class EventSource {
+            static CONNECTING = 0;
+            static OPEN = 1;
+            static CLOSED = 2;
+            constructor(url) {
+                this.url = String(url);
+                this.readyState = 0;
+                this.withCredentials = false;
+                this.onopen = null;
+                this.onmessage = null;
+                this.onerror = null;
+            }
+            close() { this.readyState = 2; }
+            addEventListener() {}
+            removeEventListener() {}
+            dispatchEvent() { return true; }
+        };
+    }
+
+    // CompressionStream / DecompressionStream (Chrome 80+)
+    if (!globalThis.CompressionStream) {
+        globalThis.CompressionStream = class CompressionStream {
+            constructor() {
+                this.readable = new globalThis.ReadableStream();
+                this.writable = new globalThis.WritableStream();
+            }
+        };
+    }
+    if (!globalThis.DecompressionStream) {
+        globalThis.DecompressionStream = class DecompressionStream {
+            constructor() {
+                this.readable = new globalThis.ReadableStream();
+                this.writable = new globalThis.WritableStream();
+            }
+        };
+    }
+    // end batch 2
+
+    // speechSynthesis — prototype-backed; bot tests check getVoices().length > 0
+    class SpeechSynthesis {}
+    globalThis.SpeechSynthesis = SpeechSynthesis;
+    const _SSProto = SpeechSynthesis.prototype;
+    const _ssVoices = [
+        {name:"Google US English",lang:"en-US",localService:false,default:true,voiceURI:"Google US English"},
+        {name:"Google UK English Female",lang:"en-GB",localService:false,default:false,voiceURI:"Google UK English Female"},
+        {name:"Google UK English Male",lang:"en-GB",localService:false,default:false,voiceURI:"Google UK English Male"},
+    ];
+    _defProtoGetter(_SSProto, 'pending', () => false);
+    _defProtoGetter(_SSProto, 'speaking', () => false);
+    _defProtoGetter(_SSProto, 'paused', () => false);
+    _defProtoGetter(_SSProto, 'onvoiceschanged', () => null);
+    _defProtoMethod(_SSProto, 'getVoices', function getVoices() { return _ssVoices.slice(); });
+    _defProtoMethod(_SSProto, 'speak', function speak() {});
+    _defProtoMethod(_SSProto, 'cancel', function cancel() {});
+    _defProtoMethod(_SSProto, 'pause', function pause() {});
+    _defProtoMethod(_SSProto, 'resume', function resume() {});
+    Object.defineProperty(_SSProto, Symbol.toStringTag, { value: "SpeechSynthesis", configurable: true });
+    globalThis.speechSynthesis = Object.create(_SSProto);
+
+    // Performance stub state — installed on Performance.prototype below.
+    const _perfMemory = {
+        jsHeapSizeLimit: 2172649472,
+        totalJSHeapSize: 10000000,
+        usedJSHeapSize: 8000000,
+    };
+
+    // =========================================================
+    // P1 FIX: Intl timezone consistency (§P1 item 13)
+    // Yandex Antirobot and other scorers cross-check the IANA timezone
+    // reported by `Intl.DateTimeFormat().resolvedOptions().timeZone` against
+    // the IP geolocation and the `timezone` header hint. V8 uses the process
+    // TZ env var (whatever the machine says), so a Moscow profile run from a
+    // US datacenter would report `America/New_York`, which is an instant tell.
+    //
+    // Monkey-patch: override the default timeZone option on Intl.DateTimeFormat
+    // so resolvedOptions() returns the profile timezone. Also patch
+    // Date.prototype.getTimezoneOffset to return the profile's UTC offset.
+    // =========================================================
+    if (ops.op_has_stealth_profile && ops.op_has_stealth_profile()) {
+        const profileTz = ops.op_get_profile_value("timezone") || "";
+        if (profileTz && globalThis.Intl && globalThis.Intl.DateTimeFormat) {
+            const _OrigDTF = globalThis.Intl.DateTimeFormat;
+            const _OrigFmt = globalThis.Intl.DateTimeFormat.prototype;
+            // Wrap the constructor
+            const PatchedDTF = function DateTimeFormat(locales, options) {
+                const opts = Object.assign({}, options || {});
+                if (!opts.timeZone) opts.timeZone = profileTz;
+                return new _OrigDTF(locales, opts);
+            };
+            // Preserve prototype chain so `instanceof Intl.DateTimeFormat` works
+            PatchedDTF.prototype = _OrigFmt;
+            PatchedDTF.supportedLocalesOf = _OrigDTF.supportedLocalesOf.bind(_OrigDTF);
+            Object.defineProperty(globalThis.Intl, "DateTimeFormat", {
+                value: PatchedDTF,
+                writable: true,
+                configurable: true,
+            });
+
+            // Compute the UTC offset for the profile timezone at the current instant.
+            // V8 supports IANA timezones natively via Intl, so we can use Intl to
+            // derive the offset without needing a full tz database.
+            const _profileOffsetMinutes = (() => {
+                try {
+                    // Trick: format a known UTC timestamp in the profile tz, parse the result.
+                    const now = new Date();
+                    const fmt = new _OrigDTF("en-US", {
+                        timeZone: profileTz,
+                        year: "numeric", month: "2-digit", day: "2-digit",
+                        hour: "2-digit", minute: "2-digit", second: "2-digit",
+                        hour12: false,
+                    });
+                    const parts = fmt.formatToParts(now);
+                    const get = (t) => parts.find((p) => p.type === t)?.value;
+                    const tzDate = new Date(Date.UTC(
+                        parseInt(get("year"), 10),
+                        parseInt(get("month"), 10) - 1,
+                        parseInt(get("day"), 10),
+                        parseInt(get("hour"), 10),
+                        parseInt(get("minute"), 10),
+                        parseInt(get("second"), 10),
+                    ));
+                    return Math.round((now.getTime() - tzDate.getTime()) / 60000);
+                } catch (e) {
+                    return 0;
+                }
+            })();
+
+            // Patch Date.prototype.getTimezoneOffset
+            const _origGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+            Date.prototype.getTimezoneOffset = function () {
+                return _profileOffsetMinutes;
+            };
+            Object.defineProperty(Date.prototype.getTimezoneOffset, "toString", {
+                value: () => "function getTimezoneOffset() { [native code] }",
+                configurable: true,
+            });
+        }
+    }
+
+    // =========================================================
+    // P1 FIX: PerformanceNavigationTiming + PerformanceResourceTiming
+    // Akamai Bot Manager's sensor_data reads performance.getEntriesByType
+    // ('navigation') and ('resource') to verify timing consistency against
+    // expected Chrome distributions. Returning empty arrays is a tell.
+    //
+    // We synthesize a realistic set of entries based on the time the page
+    // has been loaded, with sub-timings that look like a real Chrome on
+    // broadband.
+    // =========================================================
+    if (globalThis.performance) {
+        const _perfOrigin = Date.now();
+        // Navigation timing constants (relative to the navigation start)
+        const _perfNav = {
+            name: globalThis.location?.href || "about:blank",
+            entryType: "navigation",
+            startTime: 0,
+            duration: 0,
+            initiatorType: "navigation",
+            nextHopProtocol: "h2",
+            workerStart: 0,
+            redirectStart: 0,
+            redirectEnd: 0,
+            fetchStart: 0.1,
+            domainLookupStart: 2.1,
+            domainLookupEnd: 15.2,
+            connectStart: 15.2,
+            secureConnectionStart: 28.5,
+            connectEnd: 78.3,
+            requestStart: 78.4,
+            responseStart: 145.6,
+            responseEnd: 189.2,
+            transferSize: 45678,
+            encodedBodySize: 45000,
+            decodedBodySize: 156789,
+            serverTiming: [],
+            unloadEventStart: 0,
+            unloadEventEnd: 0,
+            domInteractive: 320.5,
+            domContentLoadedEventStart: 325.1,
+            domContentLoadedEventEnd: 328.7,
+            domComplete: 512.3,
+            loadEventStart: 512.3,
+            loadEventEnd: 515.9,
+            type: "navigate",
+            redirectCount: 0,
+            activationStart: 0,
+        };
+        const _perfTimingStart = _perfOrigin - Math.round(_perfNav.loadEventEnd);
+        const _perfTiming = {
+            navigationStart: _perfTimingStart,
+            unloadEventStart: 0,
+            unloadEventEnd: 0,
+            redirectStart: 0,
+            redirectEnd: 0,
+            fetchStart: _perfTimingStart + Math.round(_perfNav.fetchStart),
+            domainLookupStart: _perfTimingStart + Math.round(_perfNav.domainLookupStart),
+            domainLookupEnd: _perfTimingStart + Math.round(_perfNav.domainLookupEnd),
+            connectStart: _perfTimingStart + Math.round(_perfNav.connectStart),
+            connectEnd: _perfTimingStart + Math.round(_perfNav.connectEnd),
+            secureConnectionStart: _perfTimingStart + Math.round(_perfNav.secureConnectionStart),
+            requestStart: _perfTimingStart + Math.round(_perfNav.requestStart),
+            responseStart: _perfTimingStart + Math.round(_perfNav.responseStart),
+            responseEnd: _perfTimingStart + Math.round(_perfNav.responseEnd),
+            domLoading: _perfTimingStart + Math.round(_perfNav.responseStart),
+            domInteractive: _perfTimingStart + Math.round(_perfNav.domInteractive),
+            domContentLoadedEventStart: _perfTimingStart + Math.round(_perfNav.domContentLoadedEventStart),
+            domContentLoadedEventEnd: _perfTimingStart + Math.round(_perfNav.domContentLoadedEventEnd),
+            domComplete: _perfTimingStart + Math.round(_perfNav.domComplete),
+            loadEventStart: _perfTimingStart + Math.round(_perfNav.loadEventStart),
+            loadEventEnd: _perfTimingStart + Math.round(_perfNav.loadEventEnd),
+        };
+        const _perfNavigation = {
+            type: 0,
+            redirectCount: 0,
+            TYPE_NAVIGATE: 0,
+            TYPE_RELOAD: 1,
+            TYPE_BACK_FORWARD: 2,
+            TYPE_RESERVED: 255,
+        };
+
+        let _resourceEntries = null;
+        const _buildResourceEntries = () => {
+            if (_resourceEntries) return _resourceEntries;
+            const base = _perfNav.fetchStart;
+            const origin = globalThis.location?.origin || "https://example.com";
+            const mk = (name, startOffset, duration, type, size) => ({
+                name,
+                entryType: "resource",
+                startTime: base + startOffset,
+                duration,
+                initiatorType: type,
+                nextHopProtocol: "h2",
+                workerStart: 0,
+                redirectStart: 0,
+                redirectEnd: 0,
+                fetchStart: base + startOffset,
+                domainLookupStart: base + startOffset,
+                domainLookupEnd: base + startOffset,
+                connectStart: base + startOffset,
+                connectEnd: base + startOffset,
+                secureConnectionStart: base + startOffset,
+                requestStart: base + startOffset + 5,
+                responseStart: base + startOffset + duration - 15,
+                responseEnd: base + startOffset + duration,
+                transferSize: size + 300,
+                encodedBodySize: size,
+                decodedBodySize: size * 3,
+                serverTiming: [],
+                renderBlockingStatus: "non-blocking",
+            });
+            _resourceEntries = [
+                mk(`${origin}/favicon.ico`, 25, 42, "img", 1024),
+                mk(`${origin}/static/main.css`, 30, 55, "link", 12500),
+                mk(`${origin}/static/main.js`, 35, 88, "script", 48600),
+                mk(`${origin}/static/vendor.js`, 40, 142, "script", 185400),
+                mk(`${origin}/static/fonts/Inter.woff2`, 60, 32, "css", 24800),
+            ];
+            return _resourceEntries;
+        };
+        const _navEntry = () => {
+            _perfNav.duration = Math.max(performance.now(), _perfNav.loadEventEnd);
+            return _perfNav;
+        };
+
+        // ================================================================
+        // Install on Performance.prototype — not on the instance.
+        // ================================================================
+        // deno_core only provides `performance.now()` natively; everything
+        // else is our JS. Previously we assigned stubs directly to the
+        // instance, which left 14 own properties (Chrome has zero) and
+        // exposed raw JS source via `getEntries.toString()`. Now we build
+        // a Performance class, install every accessor/method on the
+        // prototype, reparent the existing performance instance to it,
+        // and strip the legacy own properties.
+        let Performance;
+        if (typeof globalThis.Performance === 'function') {
+            Performance = globalThis.Performance;
+        } else {
+            Performance = class Performance {};
+            globalThis.Performance = Performance;
+        }
+        const _PerfProto = Performance.prototype;
+        Object.defineProperty(_PerfProto, Symbol.toStringTag, { value: "Performance", configurable: true });
+
+        // Preserve the native `now` before we reparent — deno_core installs
+        // it as an own property on the instance with a native-code toString.
+        const _origNow = globalThis.performance.now && globalThis.performance.now.bind(globalThis.performance);
+
+        _defProtoGetter(_PerfProto, 'memory', () => _perfMemory);
+        _defProtoGetter(_PerfProto, 'timing', () => _perfTiming);
+        _defProtoGetter(_PerfProto, 'timeOrigin', () => _perfTimingStart);
+        _defProtoGetter(_PerfProto, 'navigation', () => _perfNavigation);
+        _defProtoGetter(_PerfProto, 'onresourcetimingbufferfull', () => null);
+
+        _defProtoMethod(_PerfProto, 'getEntries', function getEntries() {
+            return [_navEntry(), ..._buildResourceEntries()];
+        });
+        _defProtoMethod(_PerfProto, 'getEntriesByType', function getEntriesByType(type) {
+            if (type === "navigation") return [_navEntry()];
+            if (type === "resource") return _buildResourceEntries();
+            if (type === "mark" || type === "measure") return [];
+            if (type === "paint") {
+                return [
+                    { name: "first-paint", entryType: "paint", startTime: 156.3, duration: 0 },
+                    { name: "first-contentful-paint", entryType: "paint", startTime: 189.7, duration: 0 },
+                ];
+            }
+            return [];
+        });
+        _defProtoMethod(_PerfProto, 'getEntriesByName', function getEntriesByName(name, type) {
+            return globalThis.performance
+                .getEntries()
+                .filter((e) => e.name === name && (!type || e.entryType === type));
+        });
+        _defProtoMethod(_PerfProto, 'mark', function mark(name) {
+            return { name, entryType: "mark", startTime: performance.now(), duration: 0 };
+        });
+        _defProtoMethod(_PerfProto, 'measure', function measure(name, startMark, endMark) {
+            return { name, entryType: "measure", startTime: 0, duration: 0 };
+        });
+        _defProtoMethod(_PerfProto, 'clearMarks', function clearMarks() {});
+        _defProtoMethod(_PerfProto, 'clearMeasures', function clearMeasures() {});
+        _defProtoMethod(_PerfProto, 'clearResourceTimings', function clearResourceTimings() {
+            _resourceEntries = null;
+        });
+        _defProtoMethod(_PerfProto, 'setResourceTimingBufferSize', function setResourceTimingBufferSize() {});
+        _defProtoMethod(_PerfProto, 'toJSON', function toJSON() {
+            return { timeOrigin: _perfTimingStart };
+        });
+
+        if (_origNow) {
+            _defProtoMethod(_PerfProto, 'now', function now() { return _origNow(); });
+        }
+
+        // Reparent the existing performance instance onto Performance.prototype
+        // and strip the legacy own properties. Matches real Chrome, which has
+        // zero own properties on the performance instance.
+        try {
+            Object.setPrototypeOf(globalThis.performance, _PerfProto);
+        } catch (e) { /* immutable proto — fall back below */ }
+        for (const p of Object.getOwnPropertyNames(globalThis.performance)) {
+            try { delete globalThis.performance[p]; } catch {}
+        }
+        // If setPrototypeOf failed (rare) we fall back to a fresh instance
+        // that still exposes `now` via a captured closure.
+        if (Object.getPrototypeOf(globalThis.performance) !== _PerfProto) {
+            globalThis.performance = Object.create(_PerfProto);
+        }
+    }
+
+    // ================================================================
+    // Crypto / SubtleCrypto classes + prototype — kNoScriptId-safe.
+    // ================================================================
+    // Real Chrome exposes `window.crypto` as an instance of `Crypto`
+    // with all methods on `Crypto.prototype` and a `subtle` accessor
+    // returning an instance of `SubtleCrypto`. The `digest` method is
+    // native-code backed; Kasada and DataDome both call it to hash
+    // challenge payloads (SHA-256 over TextEncoder-produced bytes).
+    //
+    // Previously we had `globalThis.crypto = {}` with `getRandomValues`
+    // and `randomUUID` as own properties, and NO `subtle` at all —
+    // causing `crypto.subtle.digest` to throw "Cannot read properties
+    // of undefined (reading 'digest')". Now we expose full classes
+    // backed by Rust ops for real SHA-1/256/384/512 digest.
+    class Crypto {}
+    globalThis.Crypto = Crypto;
+    const _CryptoProto = Crypto.prototype;
+
+    class SubtleCrypto {}
+    globalThis.SubtleCrypto = SubtleCrypto;
+    const _SubtleProto = SubtleCrypto.prototype;
+    const _subtleInstance = Object.create(_SubtleProto);
+
+    // Coerce BufferSource → Uint8Array for op bridging.
+    const _toBytes = (src) => {
+        if (src == null) return new Uint8Array(0);
+        if (src instanceof Uint8Array) return src;
+        if (src instanceof ArrayBuffer) return new Uint8Array(src);
+        if (ArrayBuffer.isView(src)) return new Uint8Array(src.buffer, src.byteOffset, src.byteLength);
+        return new Uint8Array(src);
+    };
+
+    _defProtoMethod(_SubtleProto, 'digest', function digest(algorithm, data) {
+        try {
+            const algName = typeof algorithm === 'string' ? algorithm : (algorithm && algorithm.name) || "";
+            const bytes = _toBytes(data);
+            const out = ops.op_crypto_digest(String(algName), bytes);
+            // Real Web Crypto returns a Promise<ArrayBuffer>.
+            return Promise.resolve(out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength));
+        } catch (e) {
+            return Promise.reject(e);
+        }
+    });
+    // Stubs for sign/verify/encrypt/decrypt/generateKey/importKey/exportKey/deriveKey/deriveBits/wrapKey/unwrapKey.
+    // Real implementations are expensive; most antibots only call digest(),
+    // so we expose the methods as native-shaped no-ops that reject.
+    const _subtleNotImplemented = (name) => function (...args) {
+        return Promise.reject(new DOMException(`${name} not implemented`, "NotSupportedError"));
+    };
+    for (const m of ['sign','verify','encrypt','decrypt','generateKey','importKey','exportKey','deriveKey','deriveBits','wrapKey','unwrapKey']) {
+        _defProtoMethod(_SubtleProto, m, _subtleNotImplemented(m));
+    }
+
+    // Crypto.prototype.getRandomValues — backed by the Rust op.
+    _defProtoMethod(_CryptoProto, 'getRandomValues', function getRandomValues(arr) {
+        if (!ArrayBuffer.isView(arr)) {
+            throw new TypeError("getRandomValues expects an ArrayBufferView");
+        }
+        if (arr.byteLength > 65536) {
+            throw new DOMException("QuotaExceededError", "QuotaExceededError");
+        }
+        // We need a Uint8Array view to pass to the op.
+        const u8 = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+        ops.op_crypto_random_fill(u8);
+        return arr;
+    });
+    _defProtoMethod(_CryptoProto, 'randomUUID', function randomUUID() {
+        // Generate 16 random bytes, then format per RFC 4122 v4.
+        const b = new Uint8Array(16);
+        ops.op_crypto_random_fill(b);
+        b[6] = (b[6] & 0x0f) | 0x40; // version
+        b[8] = (b[8] & 0x3f) | 0x80; // variant
+        const hex = [];
+        for (let i = 0; i < 16; i++) hex.push(b[i].toString(16).padStart(2, '0'));
+        return `${hex.slice(0,4).join('')}-${hex.slice(4,6).join('')}-${hex.slice(6,8).join('')}-${hex.slice(8,10).join('')}-${hex.slice(10,16).join('')}`;
+    });
+    _defProtoGetter(_CryptoProto, 'subtle', () => _subtleInstance);
+
+    Object.defineProperty(_CryptoProto, Symbol.toStringTag, { value: "Crypto", configurable: true });
+    Object.defineProperty(_SubtleProto, Symbol.toStringTag, { value: "SubtleCrypto", configurable: true });
+
+    // Reparent or create the crypto instance.
+    let _cryptoInstance = Object.create(_CryptoProto);
+    globalThis.crypto = _cryptoInstance;
+
+    // ================================================================
+    // TextEncoder / TextDecoder — Chrome-shaped, kNoScriptId-safe.
+    // ================================================================
+    // deno_core at our version ships without deno_web, so we have no
+    // native TextEncoder. Our JS stub must match Chrome's exact shape
+    // because Kasada's ips.js (and CreepJS, and Castle) probe it:
+    //
+    //   1. new TextEncoder().encoding === "utf-8"   (a GETTER on proto)
+    //   2. TextEncoder.prototype.encodeInto exists
+    //   3. TextEncoder.toString().includes("[native code]")
+    //   4. TextEncoder.prototype.encode.toString().includes("[native code]")
+    //   5. Object.getOwnPropertyDescriptor(TextEncoder.prototype, 'encoding')
+    //      returns an accessor descriptor ({ get: ƒ, set: undefined, ... })
+    //
+    // Prior bug: we exposed a plain `class TextEncoder { encode(){...} }`,
+    // which failed every one of these probes. Kasada's TextEncoder probe
+    // (the one that throws "Cannot read properties of undefined") was
+    // most likely `new TextEncoder().encoding.charCodeAt(0)` — `encoding`
+    // was undefined, so `.charCodeAt` threw.
+    if (!globalThis.TextEncoder || !TextEncoder.prototype.encodeInto) {
+        class TextEncoder {
+            constructor() {}
+            encode(str) {
+                str = String(str == null ? "" : str);
+                const buf = [];
+                for (let i = 0; i < str.length; i++) {
+                    let c = str.charCodeAt(i);
+                    // UTF-16 surrogate pair handling
+                    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < str.length) {
+                        const low = str.charCodeAt(i + 1);
+                        if (low >= 0xDC00 && low <= 0xDFFF) {
+                            c = 0x10000 + ((c - 0xD800) << 10) + (low - 0xDC00);
+                            i++;
+                        }
+                    }
+                    if (c < 0x80) {
+                        buf.push(c);
+                    } else if (c < 0x800) {
+                        buf.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+                    } else if (c < 0x10000) {
+                        buf.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+                    } else {
+                        buf.push(
+                            0xf0 | (c >> 18),
+                            0x80 | ((c >> 12) & 0x3f),
+                            0x80 | ((c >> 6) & 0x3f),
+                            0x80 | (c & 0x3f),
+                        );
+                    }
+                }
+                return new Uint8Array(buf);
+            }
+            encodeInto(source, destination) {
+                if (!(destination instanceof Uint8Array)) {
+                    throw new TypeError("encodeInto destination must be a Uint8Array");
+                }
+                source = String(source == null ? "" : source);
+                let read = 0;
+                let written = 0;
+                for (let i = 0; i < source.length; i++) {
+                    let c = source.charCodeAt(i);
+                    let extraChar = 0;
+                    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < source.length) {
+                        const low = source.charCodeAt(i + 1);
+                        if (low >= 0xDC00 && low <= 0xDFFF) {
+                            c = 0x10000 + ((c - 0xD800) << 10) + (low - 0xDC00);
+                            extraChar = 1;
+                        }
+                    }
+                    let bytes;
+                    if (c < 0x80) bytes = [c];
+                    else if (c < 0x800) bytes = [0xc0 | (c >> 6), 0x80 | (c & 0x3f)];
+                    else if (c < 0x10000) bytes = [0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)];
+                    else bytes = [0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)];
+                    if (written + bytes.length > destination.length) break;
+                    for (let j = 0; j < bytes.length; j++) destination[written + j] = bytes[j];
+                    written += bytes.length;
+                    read += 1 + extraChar;
+                    if (extraChar) i++;
+                }
+                return { read, written };
+            }
+        }
+        globalThis.TextEncoder = TextEncoder;
+        // `encoding` is a GETTER on TextEncoder.prototype that always returns "utf-8".
+        _defProtoGetter(TextEncoder.prototype, 'encoding', () => "utf-8");
+        // Mask encode, encodeInto, and the constructor as native.
+        _defProtoMethod(TextEncoder.prototype, 'encode', TextEncoder.prototype.encode);
+        _defProtoMethod(TextEncoder.prototype, 'encodeInto', TextEncoder.prototype.encodeInto);
+        try {
+            Object.defineProperty(TextEncoder, 'toString', {
+                value: function toString() { return 'function TextEncoder() { [native code] }'; },
+                configurable: true,
+            });
+            Object.defineProperty(TextEncoder, 'name', { value: 'TextEncoder', configurable: true });
+        } catch {}
+    }
+    if (!globalThis.TextDecoder || !('encoding' in TextDecoder.prototype)) {
+        class TextDecoder {
+            constructor(label = "utf-8", options = {}) {
+                this._label = String(label).toLowerCase();
+                this._fatal = !!options.fatal;
+                this._ignoreBOM = !!options.ignoreBOM;
+            }
+            decode(buf, options) {
+                if (buf === undefined) return "";
+                let bytes;
+                if (buf instanceof ArrayBuffer) bytes = new Uint8Array(buf);
+                else if (ArrayBuffer.isView(buf)) bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+                else bytes = new Uint8Array(buf);
+                let str = "";
+                let i = 0;
+                // Skip BOM unless ignoreBOM is set
+                if (!this._ignoreBOM && bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+                    i = 3;
+                }
+                while (i < bytes.length) {
+                    const b0 = bytes[i];
+                    if (b0 < 0x80) { str += String.fromCharCode(b0); i++; }
+                    else if ((b0 & 0xe0) === 0xc0 && i + 1 < bytes.length) {
+                        const cp = ((b0 & 0x1f) << 6) | (bytes[i+1] & 0x3f);
+                        str += String.fromCharCode(cp); i += 2;
+                    }
+                    else if ((b0 & 0xf0) === 0xe0 && i + 2 < bytes.length) {
+                        const cp = ((b0 & 0x0f) << 12) | ((bytes[i+1] & 0x3f) << 6) | (bytes[i+2] & 0x3f);
+                        str += String.fromCharCode(cp); i += 3;
+                    }
+                    else if ((b0 & 0xf8) === 0xf0 && i + 3 < bytes.length) {
+                        let cp = ((b0 & 0x07) << 18) | ((bytes[i+1] & 0x3f) << 12) | ((bytes[i+2] & 0x3f) << 6) | (bytes[i+3] & 0x3f);
+                        cp -= 0x10000;
+                        str += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3ff));
+                        i += 4;
+                    }
+                    else {
+                        // Invalid byte — fatal throws, otherwise emits replacement char U+FFFD
+                        if (this._fatal) throw new TypeError("The encoded data was not valid.");
+                        str += "\uFFFD"; i++;
+                    }
+                }
+                return str;
+            }
+        }
+        globalThis.TextDecoder = TextDecoder;
+        _defProtoGetter(TextDecoder.prototype, 'encoding', function encoding() { return this._label || "utf-8"; });
+        _defProtoGetter(TextDecoder.prototype, 'fatal', function fatal() { return this._fatal; });
+        _defProtoGetter(TextDecoder.prototype, 'ignoreBOM', function ignoreBOM() { return this._ignoreBOM; });
+        _defProtoMethod(TextDecoder.prototype, 'decode', TextDecoder.prototype.decode);
+        try {
+            Object.defineProperty(TextDecoder, 'toString', {
+                value: function toString() { return 'function TextDecoder() { [native code] }'; },
+                configurable: true,
+            });
+            Object.defineProperty(TextDecoder, 'name', { value: 'TextDecoder', configurable: true });
+        } catch {}
+    }
+
+    // atob / btoa
+    if (!globalThis.atob) {
+        globalThis.atob = function(s) {
+            // Minimal base64 decode
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let out = "";
+            s = s.replace(/[^A-Za-z0-9+/]/g, "");
+            for (let i = 0; i < s.length; i += 4) {
+                const a = chars.indexOf(s[i]), b = chars.indexOf(s[i+1]);
+                const c = chars.indexOf(s[i+2]), d = chars.indexOf(s[i+3]);
+                out += String.fromCharCode((a << 2) | (b >> 4));
+                if (c !== -1) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+                if (d !== -1) out += String.fromCharCode(((c & 3) << 6) | d);
+            }
+            return out;
+        };
+    }
+    if (!globalThis.btoa) {
+        globalThis.btoa = function(s) {
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let out = "";
+            for (let i = 0; i < s.length; i += 3) {
+                const a = s.charCodeAt(i), b = s.charCodeAt(i+1), c = s.charCodeAt(i+2);
+                out += chars[a >> 2] + chars[((a & 3) << 4) | (b >> 4)];
+                out += (isNaN(b) ? "=" : chars[((b & 15) << 2) | (c >> 6)]);
+                out += (isNaN(c) ? "=" : chars[c & 63]);
+            }
+            return out;
+        };
+    }
+
+    // localStorage / sessionStorage stubs (in-memory)
+    const _storageData = { local: {}, session: {} };
+    function makeStorage(type) {
+        return new Proxy(_storageData[type], {
+            get(target, key) {
+                if (key === "getItem") return (k) => target[k] ?? null;
+                if (key === "setItem") return (k, v) => { target[k] = String(v); };
+                if (key === "removeItem") return (k) => { delete target[k]; };
+                if (key === "clear") return () => { for (const k in target) delete target[k]; };
+                if (key === "key") return (i) => Object.keys(target)[i] ?? null;
+                if (key === "length") return Object.keys(target).length;
+                return target[key];
+            },
+            set(target, key, value) { target[key] = String(value); return true; },
+        });
+    }
+    globalThis.localStorage = makeStorage("local");
+    globalThis.sessionStorage = makeStorage("session");
+
+    // MutationObserver — real implementation in dom_bootstrap.js
+
+    // IntersectionObserver — fires immediately since all elements are "in viewport" in headless
+    globalThis.IntersectionObserver = class IntersectionObserver {
+        constructor(callback, options = {}) {
+            this._callback = callback;
+            this._options = options;
+            this._elements = new Set();
+        }
+        observe(target) {
+            this._elements.add(target);
+            // In headless mode, all elements are considered intersecting
+            Promise.resolve().then(() => {
+                if (!this._elements.has(target)) return;
+                const entry = {
+                    target,
+                    isIntersecting: true,
+                    intersectionRatio: 1.0,
+                    boundingClientRect: target.getBoundingClientRect ? target.getBoundingClientRect() : {},
+                    intersectionRect: target.getBoundingClientRect ? target.getBoundingClientRect() : {},
+                    rootBounds: null,
+                    time: performance.now(),
+                };
+                this._callback([entry], this);
+            });
+        }
+        unobserve(target) { this._elements.delete(target); }
+        disconnect() { this._elements.clear(); }
+        takeRecords() { return []; }
+    };
+
+    // ResizeObserver — fires on observe() with current dimensions
+    globalThis.ResizeObserver = class ResizeObserver {
+        constructor(callback) {
+            this._callback = callback;
+            this._elements = new Set();
+        }
+        observe(target) {
+            this._elements.add(target);
+            Promise.resolve().then(() => {
+                if (!this._elements.has(target)) return;
+                const entry = {
+                    target,
+                    contentRect: target.getBoundingClientRect ? target.getBoundingClientRect() : { x: 0, y: 0, width: 0, height: 0 },
+                    borderBoxSize: [{ inlineSize: target.offsetWidth || 0, blockSize: target.offsetHeight || 0 }],
+                    contentBoxSize: [{ inlineSize: target.offsetWidth || 0, blockSize: target.offsetHeight || 0 }],
+                };
+                this._callback([entry], this);
+            });
+        }
+        unobserve(target) { this._elements.delete(target); }
+        disconnect() { this._elements.clear(); }
+    };
+
+    // requestIdleCallback stub
+    globalThis.requestIdleCallback = function(cb) {
+        return setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 }), 1);
+    };
+    globalThis.cancelIdleCallback = clearTimeout;
+
+    // getComputedStyle — reads inline style from actual element, falls back to CSS defaults
+    globalThis.getComputedStyle = function(element, pseudoElt) {
+        const nodeId = element && typeof element._getNodeId === "function" ? element._getNodeId() : 0;
+        return new Proxy({}, {
+            get(target, prop) {
+                if (prop === "getPropertyValue") {
+                    return (name) => ops.op_dom_get_computed_style(nodeId, name);
+                }
+                if (prop === "setProperty" || prop === "removeProperty") {
+                    return () => {}; // read-only
+                }
+                if (typeof prop === "string") {
+                    const kebab = prop.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+                    return ops.op_dom_get_computed_style(nodeId, kebab);
+                }
+                return undefined;
+            }
+        });
+    };
+
+    // XMLHttpRequest stub (built on fetch)
+    // XMLHttpRequest — must extend EventTarget and expose the full Chrome
+    // shape. Akamai BMP v3 monkey-patches `XMLHttpRequest.prototype.send`
+    // and walks computed-name chains through the instance, so any missing
+    // property (upload, responseType, withCredentials, timeout, response,
+    // responseXML, abort, dispatchEvent, etc.) surfaces as
+    //   `nqz[<computed>.<computed>.<computed>.<computed>] is not a function`
+    // during sensor execution.
+    globalThis.XMLHttpRequest = class XMLHttpRequest extends EventTarget {
+        constructor() {
+            super();
+            this.readyState = 0;
+            this.status = 0;
+            this.statusText = "";
+            this.responseText = "";
+            this.responseXML = null;
+            this.response = "";
+            this.responseType = "";
+            this.responseURL = "";
+            this.withCredentials = false;
+            this.timeout = 0;
+            this._method = "GET";
+            this._url = "";
+            this._async = true;
+            this._headers = {};
+            this._respHeaders = {};
+            this._aborted = false;
+            // Event handler properties — match Chrome's XHR interface.
+            this.onreadystatechange = null;
+            this.onload = null;
+            this.onloadstart = null;
+            this.onloadend = null;
+            this.onerror = null;
+            this.onabort = null;
+            this.ontimeout = null;
+            this.onprogress = null;
+            // upload — XMLHttpRequestUpload, also an EventTarget.
+            this.upload = new (class XMLHttpRequestUpload extends EventTarget {
+                constructor() {
+                    super();
+                    this.onload = null;
+                    this.onloadstart = null;
+                    this.onloadend = null;
+                    this.onerror = null;
+                    this.onabort = null;
+                    this.ontimeout = null;
+                    this.onprogress = null;
+                }
+            })();
+        }
+        static UNSENT = 0;
+        static OPENED = 1;
+        static HEADERS_RECEIVED = 2;
+        static LOADING = 3;
+        static DONE = 4;
+        open(method, url, async = true, user, password) {
+            this._method = String(method || "GET").toUpperCase();
+            this._url = String(url || "");
+            this._async = async !== false;
+            this._headers = {};
+            this._respHeaders = {};
+            this._aborted = false;
+            this.readyState = 1;
+            this.status = 0;
+            this.statusText = "";
+            this.responseText = "";
+            this.response = "";
+            this.responseURL = "";
+            try {
+                const ev = new Event("readystatechange");
+                if (typeof this.dispatchEvent === 'function') this.dispatchEvent(ev);
+                if (this.onreadystatechange) this.onreadystatechange.call(this, ev);
+            } catch {}
+        }
+        setRequestHeader(name, value) {
+            this._headers[String(name)] = String(value);
+        }
+        overrideMimeType(mime) { this._overrideMime = String(mime); }
+        send(body) {
+            const xhr = this;
+            if (xhr._aborted) return;
+            const fireEvent = (type) => {
+                try {
+                    const ev = new Event(type);
+                    if (typeof xhr.dispatchEvent === 'function') xhr.dispatchEvent(ev);
+                    const handler = xhr['on' + type];
+                    if (typeof handler === 'function') handler.call(xhr, ev);
+                } catch {}
+            };
+            fireEvent('loadstart');
+            fetch(xhr._url, {
+                method: xhr._method,
+                headers: xhr._headers,
+                body,
+                credentials: xhr.withCredentials ? 'include' : 'same-origin',
+            })
+                .then(async (resp) => {
+                    if (xhr._aborted) return;
+                    xhr.status = resp.status;
+                    xhr.statusText = resp.statusText || "";
+                    xhr.responseURL = resp.url || xhr._url;
+                    try {
+                        if (resp.headers && typeof resp.headers.forEach === 'function') {
+                            resp.headers.forEach((v, k) => { xhr._respHeaders[String(k).toLowerCase()] = String(v); });
+                        }
+                    } catch {}
+                    xhr.readyState = 2;
+                    fireEvent('readystatechange');
+                    xhr.readyState = 3;
+                    fireEvent('readystatechange');
+                    xhr.responseText = await resp.text();
+                    xhr.response = xhr.responseText;
+                    xhr.readyState = 4;
+                    fireEvent('readystatechange');
+                    fireEvent('load');
+                    fireEvent('loadend');
+                })
+                .catch((e) => {
+                    if (xhr._aborted) return;
+                    xhr.readyState = 4;
+                    fireEvent('readystatechange');
+                    fireEvent('error');
+                    fireEvent('loadend');
+                });
+        }
+        abort() {
+            this._aborted = true;
+            this.readyState = 0;
+            try {
+                const ev = new Event("abort");
+                if (typeof this.dispatchEvent === 'function') this.dispatchEvent(ev);
+                if (this.onabort) this.onabort.call(this, ev);
+            } catch {}
+        }
+        getResponseHeader(name) {
+            return this._respHeaders[String(name).toLowerCase()] || null;
+        }
+        getAllResponseHeaders() {
+            return Object.entries(this._respHeaders)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join("\r\n");
+        }
+    };
+
+    // WebSocket — real connections via tokio-tungstenite ops
+    globalThis.WebSocket = class WebSocket {
+        static CONNECTING = 0;
+        static OPEN = 1;
+        static CLOSING = 2;
+        static CLOSED = 3;
+        constructor(url, protocols) {
+            this.url = url;
+            this.readyState = WebSocket.CONNECTING;
+            this.onopen = null;
+            this.onmessage = null;
+            this.onclose = null;
+            this.onerror = null;
+            this._wsId = -1;
+
+            // Connect asynchronously
+            ops.op_ws_connect(String(url)).then((result) => {
+                if (result.ok) {
+                    this._wsId = result.id;
+                    this.readyState = WebSocket.OPEN;
+                    if (this.onopen) this.onopen(new Event("open"));
+                    // Start receive loop
+                    this._pollMessages();
+                } else {
+                    this.readyState = WebSocket.CLOSED;
+                    if (this.onerror) this.onerror(new Event("error"));
+                    if (this.onclose) this.onclose(new CloseEvent("close", { code: 1006, reason: result.error }));
+                }
+            }).catch((e) => {
+                this.readyState = WebSocket.CLOSED;
+                if (this.onerror) this.onerror(new Event("error"));
+            });
+        }
+        async _pollMessages() {
+            while (this.readyState === WebSocket.OPEN && this._wsId >= 0) {
+                try {
+                    const msg = await ops.op_ws_recv(this._wsId);
+                    if (!msg && msg !== "") {
+                        // Connection closed
+                        this.readyState = WebSocket.CLOSED;
+                        if (this.onclose) this.onclose(new CloseEvent("close", { code: 1000 }));
+                        break;
+                    }
+                    if (msg !== "" && this.onmessage) {
+                        this.onmessage(new MessageEvent("message", { data: msg }));
+                    }
+                } catch (e) {
+                    this.readyState = WebSocket.CLOSED;
+                    if (this.onerror) this.onerror(new Event("error"));
+                    break;
+                }
+            }
+        }
+        send(data) {
+            if (this.readyState === WebSocket.OPEN && this._wsId >= 0) {
+                ops.op_ws_send(this._wsId, String(data));
+            }
+        }
+        close(code, reason) {
+            if (this._wsId >= 0) {
+                ops.op_ws_close(this._wsId);
+                this._wsId = -1;
+            }
+            this.readyState = WebSocket.CLOSED;
+            if (this.onclose) this.onclose(new CloseEvent("close", { code: code || 1000, reason: reason || "" }));
+        }
+        get bufferedAmount() { return 0; }
+        get extensions() { return ""; }
+        get protocol() { return ""; }
+        get binaryType() { return "blob"; }
+        set binaryType(v) {}
+    };
+
+    // CloseEvent for WebSocket
+    if (!globalThis.CloseEvent) {
+        globalThis.CloseEvent = class CloseEvent extends Event {
+            constructor(type, options = {}) {
+                super(type, options);
+                this.code = options.code || 1000;
+                this.reason = options.reason || "";
+                this.wasClean = options.wasClean !== undefined ? options.wasClean : true;
+            }
+        };
+    }
+
+    // --- history — prototype-backed ---
+    const _historyStack = [{ state: null, title: "", url: globalThis.location?.href || "about:blank" }];
+    let _historyIndex = 0;
+    class History {}
+    globalThis.History = History;
+    const _HistoryProto = History.prototype;
+    _defProtoGetter(_HistoryProto, 'length', () => _historyStack.length);
+    _defProtoGetter(_HistoryProto, 'state', () => _historyStack[_historyIndex]?.state || null);
+    _defProtoGetter(_HistoryProto, 'scrollRestoration', () => "auto");
+    _defProtoMethod(_HistoryProto, 'pushState', function pushState(state, title, url) {
+        _historyStack.splice(_historyIndex + 1);
+        _historyStack.push({ state, title, url: url || "" });
+        _historyIndex = _historyStack.length - 1;
+    });
+    _defProtoMethod(_HistoryProto, 'replaceState', function replaceState(state, title, url) {
+        _historyStack[_historyIndex] = { state, title, url: url || "" };
+    });
+    _defProtoMethod(_HistoryProto, 'back', function back() { if (_historyIndex > 0) _historyIndex--; });
+    _defProtoMethod(_HistoryProto, 'forward', function forward() { if (_historyIndex < _historyStack.length - 1) _historyIndex++; });
+    _defProtoMethod(_HistoryProto, 'go', function go(delta) {
+        const idx = _historyIndex + (delta || 0);
+        if (idx >= 0 && idx < _historyStack.length) _historyIndex = idx;
+    });
+    Object.defineProperty(_HistoryProto, Symbol.toStringTag, { value: "History", configurable: true });
+    globalThis.history = Object.create(_HistoryProto);
+
+    // --- matchMedia ---
+    globalThis.matchMedia = function(query) {
+        // Evaluate common media queries based on our stealth profile
+        let matches = false;
+        if (query.includes("prefers-color-scheme: light")) matches = true;
+        if (query.includes("prefers-reduced-motion: no-preference")) matches = true;
+        const widthMatch = query.match(/\(min-width:\s*(\d+)px\)/);
+        if (widthMatch && globalThis.innerWidth >= parseInt(widthMatch[1])) matches = true;
+        const maxWidthMatch = query.match(/\(max-width:\s*(\d+)px\)/);
+        if (maxWidthMatch && globalThis.innerWidth <= parseInt(maxWidthMatch[1])) matches = true;
+        return {
+            matches,
+            media: query,
+            onchange: null,
+            addListener(cb) {},  // deprecated
+            removeListener(cb) {},  // deprecated
+            addEventListener(type, cb) {},
+            removeEventListener(type, cb) {},
+            dispatchEvent(event) { return true; },
+        };
+    };
+
+    // --- window.open/close/postMessage ---
+    globalThis.open = function(url, target, features) { return null; };
+    globalThis.close = function() {};
+    globalThis.postMessage = function(message, targetOrigin, transfer) {
+        // Fire message event asynchronously
+        Promise.resolve().then(() => {
+            const event = new MessageEvent("message", {
+                data: message,
+                origin: targetOrigin || globalThis.location?.origin || "",
+            });
+            globalThis.dispatchEvent(event);
+        });
+    };
+    globalThis.stop = function() {};
+    globalThis.print = function() {};
+    globalThis.confirm = function(msg) { return true; };
+    globalThis.alert = function(msg) {};
+    globalThis.prompt = function(msg, def) { return def || null; };
+
+    // --- AbortController / AbortSignal ---
+    class AbortSignal {
+        constructor() {
+            this.aborted = false;
+            this.reason = undefined;
+            this._listeners = [];
+        }
+        addEventListener(type, cb) {
+            if (type === "abort") this._listeners.push(cb);
+        }
+        removeEventListener(type, cb) {
+            if (type === "abort") this._listeners = this._listeners.filter(l => l !== cb);
+        }
+        throwIfAborted() {
+            if (this.aborted) throw this.reason;
+        }
+        static abort(reason) {
+            const sig = new AbortSignal();
+            sig.aborted = true;
+            sig.reason = reason || new DOMException("The operation was aborted.", "AbortError");
+            return sig;
+        }
+        static timeout(ms) {
+            const sig = new AbortSignal();
+            setTimeout(() => {
+                sig.aborted = true;
+                sig.reason = new DOMException("The operation timed out.", "TimeoutError");
+                for (const cb of sig._listeners) cb();
+            }, ms);
+            return sig;
+        }
+    }
+
+    class AbortController {
+        constructor() {
+            this.signal = new AbortSignal();
+        }
+        abort(reason) {
+            if (this.signal.aborted) return;
+            this.signal.aborted = true;
+            this.signal.reason = reason || new DOMException("The operation was aborted.", "AbortError");
+            for (const cb of this.signal._listeners) cb();
+        }
+    }
+
+    globalThis.AbortController = AbortController;
+    globalThis.AbortSignal = AbortSignal;
+
+    // --- DOMException ---
+    if (!globalThis.DOMException) {
+        globalThis.DOMException = class DOMException extends Error {
+            constructor(message, name) {
+                super(message);
+                this.name = name || "Error";
+                this.code = 0;
+            }
+        };
+    }
+
+    // --- URLSearchParams ---
+    if (!globalThis.URLSearchParams) {
+        globalThis.URLSearchParams = class URLSearchParams {
+            #params;
+            constructor(init) {
+                this.#params = [];
+                if (typeof init === "string") {
+                    const s = init.startsWith("?") ? init.slice(1) : init;
+                    for (const pair of s.split("&")) {
+                        const [k, ...v] = pair.split("=");
+                        if (k) this.#params.push([decodeURIComponent(k), decodeURIComponent(v.join("="))]);
+                    }
+                } else if (init && typeof init === "object") {
+                    for (const [k, v] of Object.entries(init)) {
+                        this.#params.push([String(k), String(v)]);
+                    }
+                }
+            }
+            get(name) { const p = this.#params.find(([k]) => k === name); return p ? p[1] : null; }
+            getAll(name) { return this.#params.filter(([k]) => k === name).map(([, v]) => v); }
+            has(name) { return this.#params.some(([k]) => k === name); }
+            set(name, value) {
+                let found = false;
+                this.#params = this.#params.filter(([k]) => { if (k === name && !found) { found = true; return true; } return k !== name; });
+                if (found) { this.#params.find(([k]) => k === name)[1] = String(value); }
+                else { this.#params.push([name, String(value)]); }
+            }
+            append(name, value) { this.#params.push([String(name), String(value)]); }
+            delete(name) { this.#params = this.#params.filter(([k]) => k !== name); }
+            toString() { return this.#params.map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&"); }
+            forEach(cb, thisArg) { for (const [k, v] of this.#params) cb.call(thisArg, v, k, this); }
+            keys() { return this.#params.map(([k]) => k)[Symbol.iterator](); }
+            values() { return this.#params.map(([, v]) => v)[Symbol.iterator](); }
+            entries() { return this.#params[Symbol.iterator](); }
+            [Symbol.iterator]() { return this.entries(); }
+            get size() { return this.#params.length; }
+        };
+    }
+
+    // --- URL ---
+    if (!globalThis.URL) {
+        globalThis.URL = class URL {
+            constructor(url, base) {
+                let full = String(url);
+                if (base && !full.match(/^[a-z]+:\/\//i)) {
+                    const b = String(base);
+                    if (full.startsWith('//')) {
+                        const proto = b.match(/^([a-z]+:)/i);
+                        full = (proto ? proto[1] : 'https:') + full;
+                    } else if (full.startsWith('/')) {
+                        const m = b.match(/^([a-z]+:\/\/[^/]+)/i);
+                        full = m ? m[1] + full : full;
+                    } else {
+                        full = b.replace(/[^/]*$/, '') + full;
+                    }
+                }
+                const m = full.match(/^([a-z]+):\/\/([^/:]+)(?::(\d+))?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/i);
+                if (m) {
+                    this.protocol = m[1].toLowerCase() + ':';
+                    this.hostname = m[2];
+                    this.port = m[3] || '';
+                    this.pathname = m[4] || '/';
+                    this.search = m[5] || '';
+                    this.hash = m[6] || '';
+                    this.host = this.port ? this.hostname + ':' + this.port : this.hostname;
+                    this.origin = this.protocol + '//' + this.host;
+                    this.href = this.origin + this.pathname + this.search + this.hash;
+                } else {
+                    this.href = full;
+                    this.protocol = ''; this.hostname = ''; this.port = '';
+                    this.pathname = full; this.search = ''; this.hash = '';
+                    this.host = ''; this.origin = 'null';
+                }
+                this.username = ''; this.password = '';
+                this.searchParams = new URLSearchParams(this.search);
+            }
+            toString() { return this.href; }
+            toJSON() { return this.href; }
+            static createObjectURL(obj) {
+                // Allocate a stable blob URL backed by the Rust BlobRegistry
+                // so Workers (and blob: fetches) can resolve to the bytes.
+                const u = 'blob:' + (globalThis.location && globalThis.location.origin || 'null') + '/' + _randomUUID();
+                let data;
+                let contentType = '';
+                if (obj && obj._data instanceof Uint8Array) {
+                    data = obj._data;
+                    // Preserve Blob.type so fetch(blob:URL) can echo it
+                    // back as the Response's content-type header.
+                    contentType = String(obj.type || '');
+                } else if (obj instanceof Uint8Array) {
+                    data = obj;
+                } else if (typeof obj === 'string') {
+                    data = new TextEncoder().encode(obj);
+                } else {
+                    data = new Uint8Array();
+                }
+                try { Deno.core.ops.op_blob_register(u, data, contentType); } catch (e) {}
+                return u;
+            }
+            static revokeObjectURL(url) {
+                try { Deno.core.ops.op_blob_revoke(url); } catch (e) {}
+            }
+        };
+    }
+    // Small helper for URL allocation
+    function _randomUUID() {
+        if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+            try { return globalThis.crypto.randomUUID(); } catch (e) {}
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    // --- FormData ---
+    globalThis.FormData = class FormData {
+        #data;
+        constructor() { this.#data = []; }
+        append(name, value) { this.#data.push([String(name), value]); }
+        delete(name) { this.#data = this.#data.filter(([k]) => k !== name); }
+        get(name) { const p = this.#data.find(([k]) => k === name); return p ? p[1] : null; }
+        getAll(name) { return this.#data.filter(([k]) => k === name).map(([, v]) => v); }
+        has(name) { return this.#data.some(([k]) => k === name); }
+        set(name, value) { this.delete(name); this.append(name, value); }
+        forEach(cb, thisArg) { for (const [k, v] of this.#data) cb.call(thisArg, v, k, this); }
+        keys() { return this.#data.map(([k]) => k)[Symbol.iterator](); }
+        values() { return this.#data.map(([, v]) => v)[Symbol.iterator](); }
+        entries() { return this.#data[Symbol.iterator](); }
+        [Symbol.iterator]() { return this.entries(); }
+    };
+
+    // --- customElements registry with lifecycle ---
+    const _customElementsRegistry = new Map();
+    const _whenDefinedPromises = new Map(); // name -> { promise, resolve }
+
+    function _tryCallLifecycle(el, name, ...args) {
+        try { if (typeof el[name] === "function") el[name](...args); } catch (e) { console.error(e); }
+    }
+
+    function _upgradeElement(el, entry) {
+        if (el._ceUpgraded) return;
+        el._ceUpgraded = true;
+        // Set prototype to the custom element class
+        Object.setPrototypeOf(el, entry.constructor.prototype);
+        try { entry.constructor.call(el); } catch (e) { console.error(e); }
+    }
+
+    // CustomElementRegistry — prototype-backed, matches real Chrome class name.
+    class CustomElementRegistry {}
+    globalThis.CustomElementRegistry = CustomElementRegistry;
+    const _CERProto = CustomElementRegistry.prototype;
+    _defProtoMethod(_CERProto, 'define', function define(name, constructor, options) {
+        const lowerName = name.toLowerCase();
+        _customElementsRegistry.set(lowerName, { constructor, options });
+        const pending = _whenDefinedPromises.get(lowerName);
+        if (pending) { pending.resolve(constructor); _whenDefinedPromises.delete(lowerName); }
+        try {
+            const existing = document.querySelectorAll(lowerName);
+            for (let i = 0; i < existing.length; i++) {
+                const el = existing[i];
+                _upgradeElement(el, { constructor });
+                _tryCallLifecycle(el, "connectedCallback");
+            }
+        } catch (e) {}
+    });
+    _defProtoMethod(_CERProto, 'get', function get(name) {
+        const entry = _customElementsRegistry.get(name.toLowerCase());
+        return entry ? entry.constructor : undefined;
+    });
+    _defProtoMethod(_CERProto, 'whenDefined', function whenDefined(name) {
+        const lowerName = name.toLowerCase();
+        if (_customElementsRegistry.has(lowerName)) return Promise.resolve(_customElementsRegistry.get(lowerName).constructor);
+        if (!_whenDefinedPromises.has(lowerName)) {
+            let resolve;
+            const promise = new Promise(r => { resolve = r; });
+            _whenDefinedPromises.set(lowerName, { promise, resolve });
+        }
+        return _whenDefinedPromises.get(lowerName).promise;
+    });
+    _defProtoMethod(_CERProto, 'upgrade', function upgrade(root) {
+        for (const [name, entry] of _customElementsRegistry) {
+            try {
+                const els = root.querySelectorAll(name);
+                for (let i = 0; i < els.length; i++) _upgradeElement(els[i], entry);
+            } catch (e) {}
+        }
+    });
+    Object.defineProperty(_CERProto, Symbol.toStringTag, { value: "CustomElementRegistry", configurable: true });
+    globalThis.customElements = Object.create(_CERProto);
+
+    // Store reference for DOM hooks
+    globalThis._customElementsRegistry = _customElementsRegistry;
+
+    // --- Blob ---
+    if (!globalThis.Blob) {
+        const _encoder = new TextEncoder();
+        const _decoder = new TextDecoder();
+
+        globalThis.Blob = class Blob {
+            constructor(parts = [], options = {}) {
+                this.type = options.type || "";
+                // Convert all parts to Uint8Array and concatenate
+                const arrays = parts.map(p => {
+                    if (typeof p === "string") return _encoder.encode(p);
+                    if (p instanceof ArrayBuffer) return new Uint8Array(p);
+                    if (ArrayBuffer.isView(p)) return new Uint8Array(p.buffer, p.byteOffset, p.byteLength);
+                    if (p instanceof Blob) return p._data;
+                    return _encoder.encode(String(p));
+                });
+                const totalLen = arrays.reduce((s, a) => s + a.byteLength, 0);
+                const merged = new Uint8Array(totalLen);
+                let offset = 0;
+                for (const a of arrays) { merged.set(a, offset); offset += a.byteLength; }
+                this._data = merged;
+                this.size = totalLen;
+            }
+            text() { return Promise.resolve(_decoder.decode(this._data)); }
+            arrayBuffer() {
+                const buf = this._data.buffer.slice(
+                    this._data.byteOffset,
+                    this._data.byteOffset + this._data.byteLength
+                );
+                return Promise.resolve(buf);
+            }
+            slice(start = 0, end = this.size, type = "") {
+                const sliced = this._data.slice(start, end);
+                const b = new Blob([], { type });
+                b._data = sliced;
+                b.size = sliced.byteLength;
+                return b;
+            }
+        };
+    }
+
+    // --- OffscreenCanvas ---
+    // Chrome since 69 ships OffscreenCanvas as a global. Sensor VMs detect
+    // its absence as a "not really Chrome" signal. We expose a minimal class
+    // that satisfies constructor checks and typeof checks; `getContext` is a
+    // no-op stub that returns null (the sensor VM falls through to fallback
+    // paths when null is returned).
+    if (!globalThis.OffscreenCanvas) {
+        class OffscreenCanvas {
+            constructor(width, height) {
+                this.width = width | 0;
+                this.height = height | 0;
+            }
+            getContext(_type, _opts) { return null; }
+            transferToImageBitmap() {
+                // Minimal ImageBitmap stub — not callable for real rendering.
+                return { width: this.width, height: this.height, close() {} };
+            }
+            convertToBlob(options) {
+                return Promise.resolve(new Blob([], { type: (options && options.type) || "image/png" }));
+            }
+        }
+        Object.defineProperty(OffscreenCanvas.prototype, Symbol.toStringTag, {
+            value: "OffscreenCanvas", configurable: true,
+        });
+        globalThis.OffscreenCanvas = OffscreenCanvas;
+    }
+
+    // --- File (extends Blob) ---
+    if (!globalThis.File) {
+        globalThis.File = class File extends Blob {
+            constructor(parts, name, options = {}) {
+                super(parts, options);
+                this.name = name;
+                this.lastModified = options.lastModified || Date.now();
+            }
+        };
+    }
+
+    // --- IndexedDB ---
+    //
+    // In-memory implementation backed by JS Maps plus a sorted keys
+    // array per store for ordered cursor iteration. Spec compliance
+    // is scoped to the fingerprint-probe subset: open → upgrade →
+    // transaction → put/get/delete/clear/count/getAll/openCursor,
+    // IDBKeyRange (bound/only/lower/upper), version upgrade lifecycle,
+    // deep-clone isolation on put/get so stored values don't leak
+    // mutations back to the caller. Persistent storage is NOT
+    // implemented — every page load starts with an empty DB registry,
+    // which is fine for scraping (no cross-session state).
+    if (!globalThis.indexedDB || !globalThis.indexedDB._browserOxideReal) {
+        // Process-global registry so the same origin's opens get the
+        // same underlying state within a page load.
+        const _dbRegistry = new Map();
+
+        // Deep-clone via structuredClone when available, else a JSON
+        // fallback. structuredClone isn't strictly installed yet at
+        // IDB definition time in the bootstrap order, so we pick it
+        // up lazily.
+        function _clone(v) {
+            if (typeof globalThis.structuredClone === "function") {
+                try { return globalThis.structuredClone(v); } catch (_e) {}
+            }
+            try { return JSON.parse(JSON.stringify(v)); } catch (_e) { return v; }
+        }
+
+        // Compare keys per IndexedDB key ordering:
+        // number < Date < string < array (with element-wise comparison).
+        // Simplified to number/string here — sufficient for fingerprint
+        // probes which key by number or small string.
+        function _keyCmp(a, b) {
+            if (typeof a === typeof b) {
+                if (a < b) return -1;
+                if (a > b) return 1;
+                return 0;
+            }
+            // Cross-type: number < string.
+            if (typeof a === "number") return -1;
+            if (typeof b === "number") return 1;
+            return 0;
+        }
+
+        function _extractKey(value, keyPath) {
+            if (!keyPath) return undefined;
+            if (Array.isArray(keyPath)) {
+                return keyPath.map((p) => value?.[p]);
+            }
+            const parts = String(keyPath).split(".");
+            let cur = value;
+            for (const p of parts) {
+                if (cur == null) return undefined;
+                cur = cur[p];
+            }
+            return cur;
+        }
+
+        class IDBRequest {
+            constructor(source) {
+                this.result = undefined;
+                this.error = null;
+                this.source = source || null;
+                this.transaction = null;
+                this.readyState = "pending";
+                this.onsuccess = null;
+                this.onerror = null;
+                this._listeners = { success: [], error: [] };
+            }
+            addEventListener(type, listener) {
+                if (!this._listeners[type]) this._listeners[type] = [];
+                this._listeners[type].push(listener);
+            }
+            removeEventListener(type, listener) {
+                const arr = this._listeners[type];
+                if (!arr) return;
+                const i = arr.indexOf(listener);
+                if (i >= 0) arr.splice(i, 1);
+            }
+            _fireSuccess() {
+                this.readyState = "done";
+                queueMicrotask(() => {
+                    const ev = { target: this, type: "success" };
+                    if (typeof this.onsuccess === "function") {
+                        try { this.onsuccess(ev); } catch (_e) {}
+                    }
+                    for (const l of (this._listeners.success || []).slice()) {
+                        try { l.call(this, ev); } catch (_e) {}
+                    }
+                });
+            }
+            _fireError(err) {
+                this.readyState = "done";
+                this.error = err;
+                queueMicrotask(() => {
+                    const ev = { target: this, type: "error" };
+                    if (typeof this.onerror === "function") {
+                        try { this.onerror(ev); } catch (_e) {}
+                    }
+                    for (const l of (this._listeners.error || []).slice()) {
+                        try { l.call(this, ev); } catch (_e) {}
+                    }
+                });
+            }
+        }
+
+        class IDBOpenDBRequest extends IDBRequest {
+            constructor() {
+                super();
+                this.onupgradeneeded = null;
+                this.onblocked = null;
+            }
+        }
+
+        class IDBKeyRange {
+            constructor(lower, upper, lowerOpen, upperOpen) {
+                this.lower = lower;
+                this.upper = upper;
+                this.lowerOpen = !!lowerOpen;
+                this.upperOpen = !!upperOpen;
+            }
+            includes(key) {
+                if (this.lower !== undefined) {
+                    const c = _keyCmp(key, this.lower);
+                    if (c < 0) return false;
+                    if (c === 0 && this.lowerOpen) return false;
+                }
+                if (this.upper !== undefined) {
+                    const c = _keyCmp(key, this.upper);
+                    if (c > 0) return false;
+                    if (c === 0 && this.upperOpen) return false;
+                }
+                return true;
+            }
+            static bound(lower, upper, lowerOpen = false, upperOpen = false) {
+                return new IDBKeyRange(lower, upper, lowerOpen, upperOpen);
+            }
+            static only(value) {
+                return new IDBKeyRange(value, value, false, false);
+            }
+            static lowerBound(lower, open = false) {
+                return new IDBKeyRange(lower, undefined, open, false);
+            }
+            static upperBound(upper, open = false) {
+                return new IDBKeyRange(undefined, upper, false, open);
+            }
+        }
+
+        class IDBCursor {
+            constructor(store, range, direction) {
+                this.source = store;
+                this.direction = direction || "next";
+                this._store = store;
+                this._range = range;
+                // Snapshot the store's key order at cursor creation.
+                this._keys = store._sortedKeys().filter((k) =>
+                    !range || range.includes(k)
+                );
+                if (this.direction === "prev" || this.direction === "prevunique") {
+                    this._keys.reverse();
+                }
+                this._idx = -1;
+                this.key = undefined;
+                this.primaryKey = undefined;
+                this.value = undefined;
+            }
+            _advanceTo(idx) {
+                this._idx = idx;
+                if (idx < this._keys.length) {
+                    this.key = this._keys[idx];
+                    this.primaryKey = this.key;
+                    this.value = _clone(this._store._data.get(this.key));
+                } else {
+                    this.key = undefined;
+                    this.primaryKey = undefined;
+                    this.value = undefined;
+                }
+            }
+            continue(_targetKey) {
+                // Advance the request that produced this cursor.
+                this._step();
+            }
+            advance(count) {
+                for (let i = 0; i < count; i++) this._step();
+            }
+            _step() {
+                this._advanceTo(this._idx + 1);
+                if (this._request) {
+                    const done = this._idx >= this._keys.length;
+                    this._request.result = done ? null : this;
+                    this._request._fireSuccess();
+                }
+            }
+        }
+
+        class IDBObjectStore {
+            constructor(name, options, transaction) {
+                this.name = name;
+                this.keyPath = (options && options.keyPath) || null;
+                this.indexNames = [];
+                this.autoIncrement = !!(options && options.autoIncrement);
+                this.transaction = transaction || null;
+                this._data = new Map();
+                this._nextKey = 1;
+            }
+            _sortedKeys() {
+                return [...this._data.keys()].sort(_keyCmp);
+            }
+            _resolveKey(value, explicitKey) {
+                if (this.keyPath) {
+                    const extracted = _extractKey(value, this.keyPath);
+                    if (extracted !== undefined) return extracted;
+                    if (this.autoIncrement) return this._nextKey++;
+                    return undefined;
+                }
+                if (explicitKey !== undefined) return explicitKey;
+                if (this.autoIncrement) return this._nextKey++;
+                return undefined;
+            }
+            put(value, key) {
+                const r = new IDBRequest(this);
+                const resolvedKey = this._resolveKey(value, key);
+                if (resolvedKey === undefined) {
+                    r._fireError(new Error("DataError: no key"));
+                    return r;
+                }
+                this._data.set(resolvedKey, _clone(value));
+                if (this.autoIncrement && typeof resolvedKey === "number" && resolvedKey >= this._nextKey) {
+                    this._nextKey = resolvedKey + 1;
+                }
+                r.result = resolvedKey;
+                r._fireSuccess();
+                return r;
+            }
+            add(value, key) {
+                const r = new IDBRequest(this);
+                const resolvedKey = this._resolveKey(value, key);
+                if (resolvedKey === undefined) {
+                    r._fireError(new Error("DataError: no key"));
+                    return r;
+                }
+                if (this._data.has(resolvedKey)) {
+                    r._fireError(new Error("ConstraintError: key exists"));
+                    return r;
+                }
+                this._data.set(resolvedKey, _clone(value));
+                r.result = resolvedKey;
+                r._fireSuccess();
+                return r;
+            }
+            get(key) {
+                const r = new IDBRequest(this);
+                if (key instanceof IDBKeyRange) {
+                    for (const k of this._sortedKeys()) {
+                        if (key.includes(k)) {
+                            r.result = _clone(this._data.get(k));
+                            r._fireSuccess();
+                            return r;
+                        }
+                    }
+                    r.result = undefined;
+                } else {
+                    const v = this._data.get(key);
+                    r.result = v === undefined ? undefined : _clone(v);
+                }
+                r._fireSuccess();
+                return r;
+            }
+            getAll(queryOrRange, count) {
+                const r = new IDBRequest(this);
+                const out = [];
+                const limit = count ?? Infinity;
+                for (const k of this._sortedKeys()) {
+                    if (out.length >= limit) break;
+                    if (queryOrRange == null) {
+                        out.push(_clone(this._data.get(k)));
+                    } else if (queryOrRange instanceof IDBKeyRange) {
+                        if (queryOrRange.includes(k)) out.push(_clone(this._data.get(k)));
+                    } else if (_keyCmp(k, queryOrRange) === 0) {
+                        out.push(_clone(this._data.get(k)));
+                    }
+                }
+                r.result = out;
+                r._fireSuccess();
+                return r;
+            }
+            getAllKeys(queryOrRange, count) {
+                const r = new IDBRequest(this);
+                const out = [];
+                const limit = count ?? Infinity;
+                for (const k of this._sortedKeys()) {
+                    if (out.length >= limit) break;
+                    if (queryOrRange == null) {
+                        out.push(k);
+                    } else if (queryOrRange instanceof IDBKeyRange) {
+                        if (queryOrRange.includes(k)) out.push(k);
+                    } else if (_keyCmp(k, queryOrRange) === 0) {
+                        out.push(k);
+                    }
+                }
+                r.result = out;
+                r._fireSuccess();
+                return r;
+            }
+            delete(key) {
+                const r = new IDBRequest(this);
+                if (key instanceof IDBKeyRange) {
+                    for (const k of this._sortedKeys()) {
+                        if (key.includes(k)) this._data.delete(k);
+                    }
+                } else {
+                    this._data.delete(key);
+                }
+                r._fireSuccess();
+                return r;
+            }
+            clear() {
+                const r = new IDBRequest(this);
+                this._data.clear();
+                r._fireSuccess();
+                return r;
+            }
+            count(query) {
+                const r = new IDBRequest(this);
+                if (query == null) {
+                    r.result = this._data.size;
+                } else if (query instanceof IDBKeyRange) {
+                    let n = 0;
+                    for (const k of this._data.keys()) {
+                        if (query.includes(k)) n++;
+                    }
+                    r.result = n;
+                } else {
+                    r.result = this._data.has(query) ? 1 : 0;
+                }
+                r._fireSuccess();
+                return r;
+            }
+            openCursor(range, direction) {
+                const r = new IDBRequest(this);
+                let rangeObj = null;
+                if (range instanceof IDBKeyRange) rangeObj = range;
+                else if (range != null) rangeObj = IDBKeyRange.only(range);
+                const cursor = new IDBCursor(this, rangeObj, direction);
+                cursor._request = r;
+                // First step — null if no keys, cursor otherwise.
+                queueMicrotask(() => cursor._step());
+                return r;
+            }
+            createIndex(name, _keyPath, _options) {
+                if (!this.indexNames.includes(name)) this.indexNames.push(name);
+                return {
+                    name,
+                    get: (k) => this.get(k),
+                    getAll: (q, c) => this.getAll(q, c),
+                };
+            }
+            index(name) {
+                return {
+                    name,
+                    get: (k) => this.get(k),
+                    getAll: (q, c) => this.getAll(q, c),
+                };
+            }
+        }
+
+        class IDBTransaction {
+            constructor(db, storeNames, mode) {
+                this._db = db;
+                this._storeNames = storeNames;
+                this.mode = mode || "readonly";
+                this.db = db;
+                this.error = null;
+                this.oncomplete = null;
+                this.onerror = null;
+                this.onabort = null;
+                this._listeners = { complete: [], error: [], abort: [] };
+                this._active = true;
+                // Fire oncomplete on the next microtask after the
+                // caller's sync op chain finishes (matches Chrome).
+                queueMicrotask(() => this._complete());
+            }
+            objectStore(name) {
+                if (!this._db._stores.has(name)) {
+                    // Transactions can't create stores — spec throws
+                    // NotFoundError. The one exception is an
+                    // upgrade transaction, where createObjectStore
+                    // was called synchronously on the db.
+                    throw new Error("NotFoundError: store " + name);
+                }
+                const store = this._db._stores.get(name);
+                store.transaction = this;
+                return store;
+            }
+            commit() {
+                this._complete();
+            }
+            abort() {
+                this._active = false;
+                const ev = { target: this, type: "abort" };
+                if (typeof this.onabort === "function") {
+                    queueMicrotask(() => { try { this.onabort(ev); } catch (_e) {} });
+                }
+            }
+            addEventListener(type, listener) {
+                if (!this._listeners[type]) this._listeners[type] = [];
+                this._listeners[type].push(listener);
+            }
+            removeEventListener(type, listener) {
+                const arr = this._listeners[type];
+                if (!arr) return;
+                const i = arr.indexOf(listener);
+                if (i >= 0) arr.splice(i, 1);
+            }
+            _complete() {
+                if (!this._active) return;
+                this._active = false;
+                const ev = { target: this, type: "complete" };
+                if (typeof this.oncomplete === "function") {
+                    try { this.oncomplete(ev); } catch (_e) {}
+                }
+                for (const l of (this._listeners.complete || []).slice()) {
+                    try { l.call(this, ev); } catch (_e) {}
+                }
+            }
+        }
+
+        class IDBDatabase {
+            constructor(name, version) {
+                this.name = name;
+                this.version = version;
+                this._stores = new Map();
+                this.objectStoreNames = [];
+                this.onclose = null;
+                this.onversionchange = null;
+                this.onabort = null;
+                this.onerror = null;
+            }
+            createObjectStore(name, options) {
+                if (this._stores.has(name)) {
+                    throw new Error("ConstraintError: store already exists");
+                }
+                const store = new IDBObjectStore(name, options, null);
+                this._stores.set(name, store);
+                this.objectStoreNames.push(name);
+                return store;
+            }
+            deleteObjectStore(name) {
+                this._stores.delete(name);
+                this.objectStoreNames = this.objectStoreNames.filter((n) => n !== name);
+            }
+            transaction(storeNames, mode) {
+                const names = Array.isArray(storeNames) ? storeNames : [storeNames];
+                return new IDBTransaction(this, names, mode);
+            }
+            close() {}
+        }
+
+        class IDBFactory {
+            constructor() {
+                this._browserOxideReal = true;
+            }
+            open(name, version) {
+                const req = new IDBOpenDBRequest();
+                const targetVersion = version || 1;
+                let db = _dbRegistry.get(name);
+                const oldVersion = db ? db.version : 0;
+                if (!db) {
+                    db = new IDBDatabase(name, targetVersion);
+                    _dbRegistry.set(name, db);
+                } else if (db.version < targetVersion) {
+                    db.version = targetVersion;
+                }
+                req.result = db;
+
+                // Fire onupgradeneeded before onsuccess if the version
+                // jumped. Spec: the upgradeneeded handler runs in an
+                // upgrade-mode transaction that commits before success.
+                queueMicrotask(() => {
+                    if (oldVersion < targetVersion) {
+                        const tx = new IDBTransaction(db, [], "versionchange");
+                        req.transaction = tx;
+                        const ev = {
+                            target: req,
+                            oldVersion,
+                            newVersion: targetVersion,
+                            type: "upgradeneeded",
+                        };
+                        if (typeof req.onupgradeneeded === "function") {
+                            try { req.onupgradeneeded(ev); } catch (_e) {}
+                        }
+                        // Override the auto-commit microtask — we
+                        // complete the versionchange tx synchronously
+                        // once the handler returns.
+                        tx._complete();
+                        req.transaction = null;
+                    }
+                    req._fireSuccess();
+                });
+                return req;
+            }
+            deleteDatabase(name) {
+                const r = new IDBOpenDBRequest();
+                _dbRegistry.delete(name);
+                r._fireSuccess();
+                return r;
+            }
+            databases() {
+                return Promise.resolve(
+                    [..._dbRegistry.entries()].map(([name, db]) => ({
+                        name,
+                        version: db.version,
+                    }))
+                );
+            }
+            cmp(a, b) {
+                return _keyCmp(a, b);
+            }
+        }
+
+        globalThis.indexedDB = new IDBFactory();
+        globalThis.IDBFactory = IDBFactory;
+        globalThis.IDBDatabase = IDBDatabase;
+        globalThis.IDBTransaction = IDBTransaction;
+        globalThis.IDBObjectStore = IDBObjectStore;
+        globalThis.IDBRequest = IDBRequest;
+        globalThis.IDBOpenDBRequest = IDBOpenDBRequest;
+        globalThis.IDBKeyRange = IDBKeyRange;
+        globalThis.IDBCursor = IDBCursor;
+    }
+
+    // ================================================================
+    // WebRTC leak prevention — block real IP exposure via ICE candidates
+    // ================================================================
+    globalThis.RTCPeerConnection = class RTCPeerConnection {
+        constructor(config) {
+            this.localDescription = null;
+            this.remoteDescription = null;
+            this.signalingState = "stable";
+            this.iceConnectionState = "new";
+            this.iceGatheringState = "new";
+            this.connectionState = "new";
+            this.onicecandidate = null;
+            this.oniceconnectionstatechange = null;
+            this.onsignalingstatechange = null;
+            this.ondatachannel = null;
+            this.ontrack = null;
+            this._channels = [];
+        }
+        createDataChannel(label, options) {
+            const ch = { label, readyState: "connecting", send() {}, close() {}, onopen: null, onmessage: null, onerror: null, onclose: null };
+            this._channels.push(ch);
+            return ch;
+        }
+        createOffer() {
+            return Promise.resolve({ type: "offer", sdp: "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n" });
+        }
+        createAnswer() {
+            return Promise.resolve({ type: "answer", sdp: "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n" });
+        }
+        setLocalDescription(desc) {
+            this.localDescription = desc;
+            // Fire empty ICE candidate (signals gathering complete without leaking IP)
+            setTimeout(() => {
+                if (this.onicecandidate) this.onicecandidate({ candidate: null });
+                this.iceGatheringState = "complete";
+            }, 10);
+            return Promise.resolve();
+        }
+        setRemoteDescription(desc) { this.remoteDescription = desc; return Promise.resolve(); }
+        addIceCandidate(c) { return Promise.resolve(); }
+        addTrack() { return { track: null }; }
+        addStream() {}
+        removeTrack() {}
+        getStats() { return Promise.resolve(new Map()); }
+        getSenders() { return []; }
+        getReceivers() { return []; }
+        getTransceivers() { return []; }
+        close() {
+            this.signalingState = "closed";
+            this.iceConnectionState = "closed";
+            this.connectionState = "closed";
+        }
+        addEventListener() {}
+        removeEventListener() {}
+    };
+    globalThis.RTCPeerConnection.generateCertificate = () => Promise.resolve({});
+    globalThis.webkitRTCPeerConnection = globalThis.RTCPeerConnection;
+    globalThis.RTCSessionDescription = class RTCSessionDescription { constructor(d) { this.type = d?.type; this.sdp = d?.sdp; } };
+    globalThis.RTCIceCandidate = class RTCIceCandidate { constructor(c) { this.candidate = c?.candidate || ""; this.sdpMid = c?.sdpMid; this.sdpMLineIndex = c?.sdpMLineIndex; } };
+
+    // ================================================================
+    // Font enumeration spoofing — return OS-appropriate fonts
+    // ================================================================
+    {
+        const _osName = _p("os_name", "Linux");
+        // Chrome default fonts by OS
+        const _fontsByOS = {
+            "Windows": ["Arial","Arial Black","Calibri","Cambria","Comic Sans MS","Consolas","Courier New","Georgia","Impact","Lucida Console","Segoe UI","Tahoma","Times New Roman","Trebuchet MS","Verdana"],
+            "macOS": ["Arial","Arial Black","Courier New","Georgia","Helvetica","Helvetica Neue","Lucida Grande","Menlo","Monaco","SF Pro","Times New Roman","Trebuchet MS","Verdana"],
+            "Linux": ["Arial","Courier New","DejaVu Sans","DejaVu Sans Mono","DejaVu Serif","Liberation Mono","Liberation Sans","Liberation Serif","Noto Sans","Times New Roman","Ubuntu","Verdana"],
+        };
+        const _fonts = _fontsByOS[_osName] || _fontsByOS["Linux"];
+        const _fontSet = new Set(_fonts.map(f => f.toLowerCase()));
+
+        globalThis.FontFace = class FontFace {
+            constructor(family, source) { this.family = family; this.status = "loaded"; }
+            load() { return Promise.resolve(this); }
+        };
+
+        // document.fonts (FontFaceSet)
+        if (globalThis.document) {
+            Object.defineProperty(globalThis.document, 'fonts', {
+                value: {
+                    check(font, text) {
+                        // Parse font family from CSS font shorthand (e.g. "12px Arial", "bold 14px 'Times New Roman'")
+                        // Strip size/weight prefix: everything before the last number+unit
+                        const stripped = font.replace(/^[^"']*?\d+(\.\d+)?(px|pt|em|rem|%|vh|vw)\s*/, '');
+                        const parts = stripped.split(',');
+                        return parts.some(p => {
+                            const name = p.replace(/["']/g, '').trim().toLowerCase();
+                            return name.length > 0 && _fontSet.has(name);
+                        });
+                    },
+                    ready: Promise.resolve(),
+                    status: "loaded",
+                    forEach() {},
+                    entries() { return [][Symbol.iterator](); },
+                    keys() { return [][Symbol.iterator](); },
+                    values() { return [][Symbol.iterator](); },
+                    [Symbol.iterator]() { return [][Symbol.iterator](); },
+                    size: _fonts.length,
+                    add() {},
+                    delete() { return false; },
+                    has() { return true; },
+                    clear() {},
+                    addEventListener() {},
+                    removeEventListener() {},
+                },
+                configurable: true,
+            });
+        }
+    }
+
+    // ================================================================
+    // Permissions API — consistent Chrome-like responses
+    // ================================================================
+    {
+        // Override the basic stub with proper PermissionStatus objects
+        const _permissionDefaults = {
+            "geolocation": "prompt",
+            "notifications": "prompt",
+            "push": "prompt",
+            "midi": "prompt",
+            "camera": "prompt",
+            "microphone": "prompt",
+            "speaker": "prompt",
+            "clipboard-read": "prompt",
+            "clipboard-write": "granted",
+            "payment-handler": "prompt",
+            "persistent-storage": "prompt",
+            "background-sync": "granted",
+            "ambient-light-sensor": "prompt",
+            "accelerometer": "prompt",
+            "gyroscope": "prompt",
+            "magnetometer": "prompt",
+            "accessibility-events": "prompt",
+        };
+
+        if (navigator.permissions) {
+            navigator.permissions.query = function(desc) {
+                const state = _permissionDefaults[desc?.name] || "prompt";
+                const status = {
+                    state,
+                    name: desc?.name,
+                    onchange: null,
+                    addEventListener() {},
+                    removeEventListener() {},
+                };
+                Object.defineProperty(status, 'toString', { value: () => `[object PermissionStatus]` });
+                return Promise.resolve(status);
+            };
+        }
+    }
+
+    // ================================================================
+    // Battery API — realistic values (already exists but enhance)
+    // ================================================================
+    // Already defined above in navigator — the existing implementation is sufficient.
+
+    // ================================================================
+    // Speech synthesis — OS-specific voices
+    // ================================================================
+    {
+        const _osName = _p("os_name", "Linux");
+        const _voicesByOS = {
+            "Windows": [
+                {name:"Microsoft David",lang:"en-US",localService:true,default:true,voiceURI:"Microsoft David"},
+                {name:"Microsoft Zira",lang:"en-US",localService:true,default:false,voiceURI:"Microsoft Zira"},
+                {name:"Microsoft Mark",lang:"en-US",localService:true,default:false,voiceURI:"Microsoft Mark"},
+                {name:"Google US English",lang:"en-US",localService:false,default:false,voiceURI:"Google US English"},
+                {name:"Google UK English Female",lang:"en-GB",localService:false,default:false,voiceURI:"Google UK English Female"},
+            ],
+            "macOS": [
+                {name:"Alex",lang:"en-US",localService:true,default:true,voiceURI:"com.apple.voice.compact.en-US.Samantha"},
+                {name:"Samantha",lang:"en-US",localService:true,default:false,voiceURI:"com.apple.voice.compact.en-US.Samantha"},
+                {name:"Victoria",lang:"en-US",localService:true,default:false,voiceURI:"com.apple.speech.synthesis.voice.Victoria"},
+                {name:"Google US English",lang:"en-US",localService:false,default:false,voiceURI:"Google US English"},
+            ],
+            "Linux": [
+                {name:"Google US English",lang:"en-US",localService:false,default:true,voiceURI:"Google US English"},
+                {name:"Google UK English Female",lang:"en-GB",localService:false,default:false,voiceURI:"Google UK English Female"},
+                {name:"Google UK English Male",lang:"en-GB",localService:false,default:false,voiceURI:"Google UK English Male"},
+            ],
+        };
+        const _voices = _voicesByOS[_osName] || _voicesByOS["Linux"];
+        // Override the existing speechSynthesis with OS-aware voices
+        globalThis.speechSynthesis.getVoices = function() { return _voices; };
+    }
+
+    // ================================================================
+    // Media codecs — Chrome-correct isTypeSupported / canPlayType
+    // ================================================================
+    {
+        const _supportedTypes = new Set([
+            "video/mp4", 'video/mp4; codecs="avc1.42E01E"', 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
+            'video/mp4; codecs="avc1.4D401E"', 'video/mp4; codecs="avc1.64001E"',
+            "video/webm", 'video/webm; codecs="vp8"', 'video/webm; codecs="vp8, vorbis"',
+            'video/webm; codecs="vp9"', 'video/webm; codecs="vp09.00.10.08"',
+            "audio/mp4", 'audio/mp4; codecs="mp4a.40.2"',
+            "audio/webm", 'audio/webm; codecs="opus"', 'audio/webm; codecs="vorbis"',
+            "audio/mpeg", "audio/ogg", 'audio/ogg; codecs="vorbis"', 'audio/ogg; codecs="opus"',
+            "audio/wav", 'audio/wav; codecs="1"', "audio/flac",
+        ]);
+
+        globalThis.MediaSource = class MediaSource {
+            static isTypeSupported(type) {
+                if (_supportedTypes.has(type)) return true;
+                // Partial match on base type
+                const base = type.split(';')[0].trim();
+                return _supportedTypes.has(base);
+            }
+            addEventListener() {}
+            removeEventListener() {}
+        };
+        globalThis.MediaSource.isTypeSupported = MediaSource.isTypeSupported;
+
+        // Patch HTMLMediaElement.canPlayType if document exists
+        if (globalThis.document) {
+            const _origCreate = globalThis.document.createElement.bind(globalThis.document);
+            const _patchedCreate = function(tag) {
+                const el = _origCreate(tag);
+                if (tag === 'video' || tag === 'audio') {
+                    el.canPlayType = function(type) {
+                        if (_supportedTypes.has(type)) return "probably";
+                        const base = type.split(';')[0].trim();
+                        if (_supportedTypes.has(base)) return "maybe";
+                        return "";
+                    };
+                }
+                return el;
+            };
+            globalThis.document.createElement = _patchedCreate;
+        }
+    }
+
+    // --- Native code masking ---
+    // Anti-bot detectors check Function.prototype.toString() for polyfilled APIs.
+    // Real Chrome returns "function X() { [native code] }" for built-in functions.
+    // Wrap our polyfills so toString() returns the native format.
+    function _maskAsNative(obj, ...names) {
+        for (const name of names) {
+            const fn = obj[name];
+            if (typeof fn === 'function') {
+                const masked = fn;
+                Object.defineProperty(masked, 'toString', {
+                    value: () => `function ${name}() { [native code] }`,
+                    configurable: true,
+                });
+            }
+        }
+    }
+
+    // Mask navigator methods
+    _maskAsNative(navigator, 'javaEnabled', 'sendBeacon', 'getBattery');
+    // Mask WebRTC
+    _maskAsNative(globalThis.RTCPeerConnection.prototype, 'createOffer', 'createAnswer',
+        'setLocalDescription', 'setRemoteDescription', 'addIceCandidate', 'close',
+        'createDataChannel', 'getStats', 'getSenders', 'getReceivers', 'getTransceivers',
+        'addTrack', 'removeTrack');
+    _maskAsNative(globalThis.RTCPeerConnection, 'generateCertificate');
+    // Mask MediaSource
+    if (globalThis.MediaSource) _maskAsNative(globalThis.MediaSource, 'isTypeSupported');
+    // Mask speechSynthesis
+    _maskAsNative(globalThis.speechSynthesis, 'getVoices', 'speak', 'cancel', 'pause', 'resume');
+    if (navigator.permissions) _maskAsNative(navigator.permissions, 'query');
+    if (navigator.mediaDevices) _maskAsNative(navigator.mediaDevices, 'enumerateDevices');
+    if (navigator.clipboard) _maskAsNative(navigator.clipboard, 'readText', 'writeText');
+    if (navigator.storage) _maskAsNative(navigator.storage, 'estimate');
+    if (navigator.serviceWorker) _maskAsNative(navigator.serviceWorker, 'register', 'getRegistrations', 'getRegistration', 'startMessages');
+
+    // Mask window methods
+    _maskAsNative(globalThis, 'fetch', 'alert', 'confirm', 'prompt', 'open', 'close',
+        'scrollTo', 'scroll', 'scrollBy', 'getComputedStyle', 'matchMedia',
+        'getSelection', 'postMessage', 'requestIdleCallback', 'atob', 'btoa');
+
+    // Mask document methods
+    if (globalThis.document) {
+        _maskAsNative(globalThis.document, 'createElement', 'createTextNode',
+            'createDocumentFragment', 'createEvent', 'createRange',
+            'getElementById', 'querySelector', 'querySelectorAll',
+            'getElementsByTagName', 'getElementsByClassName',
+            'write', 'writeln', 'execCommand', 'hasFocus',
+            'elementFromPoint', 'elementsFromPoint', 'getSelection',
+            'importNode', 'adoptNode');
+    }
+
+    // ================================================================
+    // P0 FIX: Error stack trace filtering
+    // Remove deno_core internal frames (ext:, deno:) from Error.stack
+    // CreepJS and fingerprinters read new Error().stack
+    // ================================================================
+    Error.prepareStackTrace = function(err, frames) {
+        const filtered = frames.filter(f => {
+            const file = f.getFileName() || '';
+            return !file.startsWith('ext:') && !file.startsWith('deno:')
+                && !file.includes('bootstrap') && !file.includes('core/');
+        });
+        if (filtered.length === 0) {
+            return err.toString() + '\n    at <anonymous>:1:1';
+        }
+        return err.toString() + '\n' + filtered.map(f => '    at ' + f.toString()).join('\n');
+    };
+
+    // ================================================================
+    // P0 FIX: performance.now() quantization to 100µs — on prototype.
+    // Chrome 130+ restricts precision. Full nanosecond = detectable.
+    // Installed on Performance.prototype (not the instance) so the
+    // descriptor probe returns undefined on the instance.
+    // ================================================================
+    if (typeof globalThis.Performance === 'function' && globalThis.performance) {
+        const _PProto = globalThis.Performance.prototype;
+        const _origPerfNow = _PProto.now;
+        if (typeof _origPerfNow === 'function') {
+            _defProtoMethod(_PProto, 'now', function now() {
+                return Math.round(_origPerfNow.call(globalThis.performance) * 10) / 10;
+            });
+        }
+    }
+
+    // ================================================================
+    // P2 STUBS: Emerging APIs that anti-bot scripts probe for existence
+    // ================================================================
+
+    // navigator.gpu (WebGPU) — prototype getter so own-descriptor probe
+    // returns undefined on the instance (kNoScriptId-safe).
+    if (!_NavProto.hasOwnProperty('gpu')) {
+        const _navGpu = {
+            requestAdapter() {
+                return Promise.resolve({
+                    name: _p("webgl_renderer", "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080)"),
+                    features: new Set(),
+                    limits: {},
+                    isFallbackAdapter: false,
+                    requestDevice() { return Promise.reject(new DOMException("Not supported", "NotSupportedError")); },
+                });
+            },
+            getPreferredCanvasFormat() { return "bgra8unorm"; },
+        };
+        _defNav('gpu', () => _navGpu);
+    }
+
+    // Storage Access API
+    if (globalThis.document) {
+        if (!globalThis.document.hasStorageAccess) {
+            globalThis.document.hasStorageAccess = function() { return Promise.resolve(false); };
+        }
+        if (!globalThis.document.requestStorageAccess) {
+            globalThis.document.requestStorageAccess = function() { return Promise.reject(new DOMException("Not allowed", "NotAllowedError")); };
+        }
+    }
+
+    // CSS.supports()
+    if (!globalThis.CSS) globalThis.CSS = {};
+    if (!globalThis.CSS.supports) {
+        const _cssSupported = new Set([
+            "display:grid", "display:flex", "display:block", "display:inline",
+            "position:sticky", "position:fixed", "position:absolute",
+            "gap:1px", "aspect-ratio:1", "container-type:inline-size",
+            "color:oklch(0 0 0)", "color:color-mix(in srgb,red,blue)",
+            "backdrop-filter:blur(1px)", "overflow:clip",
+            "translate:none", "rotate:none", "scale:none",
+            "accent-color:auto", "overscroll-behavior:contain",
+        ]);
+        globalThis.CSS.supports = function(prop, val) {
+            if (val === undefined) {
+                // Single argument: CSS.supports("display: grid")
+                return _cssSupported.has(prop.replace(/\s+/g, '').toLowerCase()) || true;
+            }
+            return _cssSupported.has(`${prop.toLowerCase()}:${val.toLowerCase()}`) || true;
+        };
+    }
+
+    // navigator.scheduling is already defined on Navigator.prototype above
+    // with isInputPending() — no need to re-install on the instance.
+
+    // crossOriginIsolated
+    if (globalThis.crossOriginIsolated === undefined) {
+        globalThis.crossOriginIsolated = false;
+    }
+
+    // fetch(), Headers, Request, Response are now provided by fetch_bootstrap.js
+    // (wired to real net::HttpClient via op_fetch)
+})(globalThis);

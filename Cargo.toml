@@ -1,0 +1,91 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/css_parser",
+    "crates/css_selectors",
+    "crates/css_values",
+    "crates/css_cascade",
+    "crates/dom",
+    "crates/html_parser",
+    "crates/js_runtime",
+    "crates/event_loop",
+    "crates/browser",
+    "crates/canvas",
+    "crates/layout",
+    "crates/net",
+    # "crates/event_loop",
+    "crates/workers",
+    "crates/stealth",
+    "crates/protocol",
+    # "crates/browser",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Yury Fedoseev"]
+repository = "https://github.com/nicepkg/browser_oxide"
+
+[workspace.dependencies]
+# Internal crates
+css_parser = { path = "crates/css_parser" }
+css_selectors = { path = "crates/css_selectors" }
+css_values = { path = "crates/css_values" }
+css_cascade = { path = "crates/css_cascade" }
+dom = { path = "crates/dom" }
+html_parser = { path = "crates/html_parser" }
+js_runtime = { path = "crates/js_runtime" }
+canvas = { path = "crates/canvas" }
+layout = { path = "crates/layout" }
+net = { path = "crates/net" }
+event_loop = { path = "crates/event_loop" }
+workers = { path = "crates/workers" }
+stealth = { path = "crates/stealth" }
+protocol = { path = "crates/protocol" }
+browser = { path = "crates/browser" }
+
+# JS Engine (V8)
+# rusty_v8 = "129"
+# deno_core = "0.311"
+
+# Rendering
+# tiny-skia = "0.11"
+# cosmic-text = "0.12"
+# ab_glyph = "0.2"
+# fontdb = "0.22"
+# rustybuzz = "0.18"
+
+# Networking
+# rquest = { version = "5.1", features = ["cookies", "gzip", "brotli", "deflate", "json"] }
+# quinn = "0.11"
+# h3 = "0.0.6"
+# h3-quinn = "0.0.7"
+
+# HTML Parsing
+# html5ever = "0.29"
+
+# Layout
+# taffy = "0.6"
+
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+
+# WebSocket
+# tokio-tungstenite = "0.24"
+
+# Cookies
+# cookie_store = "0.21"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+# cargo test --release uses this profile
+[profile.release.package."*"]
+opt-level = 3

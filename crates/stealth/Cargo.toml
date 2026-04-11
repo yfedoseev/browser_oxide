@@ -1,0 +1,12 @@
+[package]
+name = "stealth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Stealth fingerprint profiles for browser_oxide — consistent browser identities"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
