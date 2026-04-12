@@ -108,16 +108,30 @@ Final bit-accuracy polish to ensure standard library compatibility and stealth.
 
 | # | Task | Status |
 |---|---|---|
-| — | **Synchronous script execution** (`document.write` + initial parse) | ☑ |
-| — | **Bit-accurate prototypes** (Navigator, Location, Plugin) | ☑ |
-| — | **Stealth: Proxy removal + Native masking** | ☑ |
-| — | **PluginArray/MimeTypeArray branding** | ☑ |
+| — | **Synchronous script execution** (`document.write` + initial parse) | ☑ DONE |
+| — | **Bit-accurate prototypes** (Navigator, Location, Plugin) | ☑ DONE |
+| — | **Stealth: Proxy removal + Native masking** | ☑ DONE |
+| — | **PluginArray/MimeTypeArray branding** | ☑ DONE |
+| — | **Iframe stabilization** (`createElementNS`, `createRange`) | ☑ DONE |
+| — | **Script type filtering** (skip non-JS `type`) | ☑ DONE |
 
 **Akamai BMP v3 result (stable across 2 runs):**
 - adidas: baseline=PASS 1,242,865 bytes (real homepage)
 - homedepot: baseline=PASS 958,440 bytes + solver=PASS 974,591 bytes
 
 ---
+
+## Phase A — Leak Audit (Sprint 4 Initial) — ☑ DONE
+
+Generic "automation tell" elimination guided by public detection batteries.
+
+| # | Task | Status |
+|---|---|---|
+| 1 | **`Function.prototype.toString` faking** (`[native code]`) | ☑ DONE |
+| 2 | **Hide internal globals** (`Deno`, `ops`, `_mask*`) | ☑ DONE |
+| 3 | **`stealth_bootstrap.js` early infrastructure** | ☑ DONE |
+| 4 | **`cleanup_bootstrap.js` aggressive aggressive removal** | ☑ DONE |
+| 5 | **Refactor instrumentation to non-enumerable** | ☑ DONE |
 
 ## Sprint 4 — Engine-specific gaps (post-wire-fix)
 
