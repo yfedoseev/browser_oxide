@@ -264,6 +264,11 @@
 
         try {
             const result = await ops.op_fetch(url, method, headers, body);
+            
+            // Log for audit
+            globalThis.__fetchLog = globalThis.__fetchLog || [];
+            globalThis.__fetchLog.push({ method, url, status: result.status });
+
             // Sync cookies from the net jar into document.cookie so subsequent JS
             // reads (including the WBAAS challenge polling loop) see Set-Cookie
             // values that arrived via this response.
@@ -275,6 +280,9 @@
                 url: result.url,
             });
         } catch (e) {
+            // Log error for audit
+            globalThis.__fetchLog = globalThis.__fetchLog || [];
+            globalThis.__fetchLog.push({ method, url, status: 0, error: e.message });
             throw new TypeError("Failed to fetch: " + e.message);
         }
     };

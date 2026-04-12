@@ -1,6 +1,45 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
 
+    // --- Native code masking ---
+    const _maskFunction = (fn, name) => {
+        if (!fn) return;
+        try {
+            Object.defineProperty(fn, 'name', { value: name, configurable: true });
+            Object.defineProperty(fn, 'toString', {
+                value: function toString() { return `function ${name}() { [native code] }`; },
+                configurable: true,
+            });
+            // Recursively mask the toString itself to pass deep probes
+            Object.defineProperty(fn.toString, 'name', { value: 'toString', configurable: true });
+            Object.defineProperty(fn.toString, 'toString', {
+                value: function toString() { return 'function toString() { [native code] }'; },
+                configurable: true,
+            });
+        } catch {}
+    };
+
+    const _maskAsNative = (obj, ...names) => {
+        for (const name of names) {
+            try {
+                const desc = Object.getOwnPropertyDescriptor(obj, name) ||
+                             Object.getOwnPropertyDescriptor(Object.getPrototypeOf(obj), name);
+                if (desc) {
+                    if (desc.get) _maskFunction(desc.get, `get ${name}`);
+                    if (desc.set) _maskFunction(desc.set, `set ${name}`);
+                    if (typeof desc.value === 'function') _maskFunction(desc.value, name);
+                } else if (typeof obj[name] === 'function') {
+                    _maskFunction(obj[name], name);
+                }
+            } catch {}
+        }
+    };
+
+    // Expose temporarily for other bootstraps (will be deleted in cleanup_bootstrap.js)
+    Object.defineProperty(globalThis, '_maskAsNative', {
+        value: _maskAsNative, enumerable: false, configurable: true
+    });
+
     // Helper: read from stealth profile or use default
     const _p = (key, fallback) => {
         if (ops.op_has_stealth_profile()) {
@@ -26,70 +65,34 @@
     // ================================================================
     // Prototype-install helpers — kNoScriptId-safe layout
     // ================================================================
-    // Real Chrome: DOM-wrapped objects (navigator, screen, history, etc.)
-    // have ZERO own properties; every data/accessor lives on the class's
-    // prototype. Kasada/Castle probes call
-    // Object.getOwnPropertyDescriptor(obj, 'x') — if the result is
-    // defined, they take a path that flags the accessor as "fake native"
-    // (V8 kNoScriptId guard, May 2025 patch). Installing on the prototype
-    // makes the own-descriptor probe return undefined, matching Chrome.
-    //
-    // _defProtoGetter(proto, name, getter)  → accessor on proto, masked toString
-    // _defProtoMethod(proto, name, fn)      → method on proto, masked toString
-    // _makeProtoInstance(Cls)               → Object.create(Cls.prototype)
-
     const _defProtoGetter = (proto, name, getter) => {
+        console.log(`[BOOTSTRAP] installing getter ${name} on ${proto[Symbol.toStringTag] || 'unknown prototype'}`);
         Object.defineProperty(proto, name, {
             get: getter,
             set: undefined,
             enumerable: true,
             configurable: true,
         });
-        try {
-            const d = Object.getOwnPropertyDescriptor(proto, name);
-            Object.defineProperty(d.get, 'name', { value: `get ${name}`, configurable: true });
-            Object.defineProperty(d.get, 'toString', {
-                value: function toString() { return `function get ${name}() { [native code] }`; },
-                configurable: true,
-            });
-        } catch {}
+        _maskFunction(getter, `get ${name}`);
     };
     const _defProtoMethod = (proto, name, fn) => {
+        console.log(`[BOOTSTRAP] installing method ${name} on ${proto[Symbol.toStringTag] || 'unknown prototype'}`);
         Object.defineProperty(proto, name, {
             value: fn, writable: true, enumerable: true, configurable: true,
         });
-        try {
-            Object.defineProperty(fn, 'name', { value: name, configurable: true });
-            Object.defineProperty(fn, 'toString', {
-                value: function toString() { return `function ${name}() { [native code] }`; },
-                configurable: true,
-            });
-        } catch {}
+        _maskFunction(fn, name);
     };
 
     // ================================================================
     // Navigator class + prototype — kNoScriptId-safe layout
     // ================================================================
-    class Navigator {}
-    globalThis.Navigator = Navigator;
-    const _NavProto = Navigator.prototype;
+    const _NavProto = globalThis.Navigator.prototype;
     const _defNav = (name, getter) => _defProtoGetter(_NavProto, name, getter);
     const _defNavMethod = (name, fn) => _defProtoMethod(_NavProto, name, fn);
 
     // Stable-object references — object getters return the same reference
     // on every call, matching the behavior of real DOM-wrapped properties.
-    //
-    // Each of these navigator sub-objects is an instance of a properly-named
-    // class (NetworkInformation, MediaDevices, StorageManager, Bluetooth, …)
-    // so that `Object.getPrototypeOf(nav.X).constructor.name` and
-    // `Object.prototype.toString.call(nav.X)` return Chrome-shaped values.
-    // Sensor VMs (e.g., Akamai BMP v3) inspect these brands and refuse to
-    // upgrade trust if they see "[object Object]".
-    class NetworkInformation {}
-    Object.defineProperty(NetworkInformation.prototype, Symbol.toStringTag, {
-        value: "NetworkInformation", configurable: true,
-    });
-    globalThis.NetworkInformation = NetworkInformation;
+    let NetworkInformation = globalThis.NetworkInformation || class NetworkInformation {};
     const _navConnection = Object.create(NetworkInformation.prototype);
     Object.defineProperty(_navConnection, 'effectiveType', { get: () => _p("connection_effective_type", "4g"), enumerable: true });
     Object.defineProperty(_navConnection, 'rtt', { get: () => _pInt("connection_rtt", 50), enumerable: true });
@@ -98,24 +101,86 @@
     Object.defineProperty(_navConnection, 'type', { get: () => 'wifi', enumerable: true });
     Object.defineProperty(_navConnection, 'downlinkMax', { get: () => Infinity, enumerable: true });
 
-    const _navPlugins = { length: _pInt("plugins_count", 5), item() { return null; }, namedItem() { return null; }, refresh() {} };
-    const _navMimeTypes = { length: 2, item() { return null; }, namedItem() { return null; } };
+    let PluginArray = globalThis.PluginArray || class PluginArray {};
+    let MimeTypeArray = globalThis.MimeTypeArray || class MimeTypeArray {};
+    let Plugin = globalThis.Plugin || class Plugin {};
+    let MimeType = globalThis.MimeType || class MimeType {};
 
-    class MediaDevices {}
-    Object.defineProperty(MediaDevices.prototype, Symbol.toStringTag, {
-        value: "MediaDevices", configurable: true,
+    // 1. Setup Plugin.prototype
+    const _PluginProto = Plugin.prototype;
+    Object.defineProperty(_PluginProto, Symbol.toStringTag, { value: "Plugin", enumerable: false, configurable: true });
+    _defProtoGetter(_PluginProto, 'name', function() { return this._name || ""; });
+    _defProtoGetter(_PluginProto, 'description', function() { return this._desc || ""; });
+    _defProtoGetter(_PluginProto, 'filename', function() { return this._file || ""; });
+    _defProtoGetter(_PluginProto, 'length', function() { return 0; });
+    _defProtoMethod(_PluginProto, 'item', function item() { return null; });
+    _defProtoMethod(_PluginProto, 'namedItem', function namedItem() { return null; });
+
+    // Setup MimeType.prototype
+    const _MimeTypeProto = MimeType.prototype;
+    Object.defineProperty(_MimeTypeProto, Symbol.toStringTag, { value: "MimeType", enumerable: false, configurable: true });
+    _defProtoGetter(_MimeTypeProto, 'type', function() { return this._type || ""; });
+    _defProtoGetter(_MimeTypeProto, 'description', function() { return this._desc || ""; });
+    _defProtoGetter(_MimeTypeProto, 'suffixes', function() { return this._suffixes || ""; });
+    _defProtoGetter(_MimeTypeProto, 'enabledPlugin', function() { return this._plugin || null; });
+
+    const _makePlugin = (name, desc, file) => {
+        const p = Object.create(_PluginProto);
+        Object.defineProperty(p, '_name', { value: name });
+        Object.defineProperty(p, '_desc', { value: desc });
+        Object.defineProperty(p, '_file', { value: file });
+        return p;
+    };
+
+    const _plugins = [
+        _makePlugin("PDF Viewer", "Portable Document Format", "internal-pdf-viewer"),
+        _makePlugin("Chrome PDF Viewer", "Portable Document Format", "internal-pdf-viewer"),
+        _makePlugin("Chromium PDF Viewer", "Portable Document Format", "internal-pdf-viewer"),
+        _makePlugin("Microsoft Edge PDF Viewer", "Portable Document Format", "internal-pdf-viewer"),
+        _makePlugin("WebKit built-in PDF", "Portable Document Format", "internal-pdf-viewer"),
+    ];
+
+    // 2. Setup PluginArray.prototype
+    const _PluginArrayProto = PluginArray.prototype;
+    Object.defineProperty(_PluginArrayProto, Symbol.toStringTag, { value: "PluginArray", enumerable: false, configurable: true });
+    Object.defineProperty(_PluginArrayProto, 'length', { get: () => _plugins.length, enumerable: true, configurable: true });
+    _defProtoMethod(_PluginArrayProto, 'item', (i) => _plugins[i] || null);
+    _defProtoMethod(_PluginArrayProto, 'namedItem', (n) => _plugins.find(p => p.name === n) || null);
+    _defProtoMethod(_PluginArrayProto, 'refresh', () => {});
+
+    // Setup MimeTypeArray.prototype
+    const _MimeTypeArrayProto = MimeTypeArray.prototype;
+    Object.defineProperty(_MimeTypeArrayProto, Symbol.toStringTag, { value: "MimeTypeArray", enumerable: false, configurable: true });
+    Object.defineProperty(_MimeTypeArrayProto, 'length', { get: () => 0, enumerable: true, configurable: true });
+    _defProtoMethod(_MimeTypeArrayProto, 'item', (i) => null);
+    _defProtoMethod(_MimeTypeArrayProto, 'namedItem', (n) => null);
+    _defProtoMethod(_PluginArrayProto, 'refresh', () => {});
+    
+    // Support numeric indices on the instance (Chrome behavior)
+    const _navPlugins = Object.create(_PluginArrayProto);
+    _plugins.forEach((p, i) => {
+        Object.defineProperty(_navPlugins, i, { value: p, enumerable: true, configurable: true });
     });
-    MediaDevices.prototype.enumerateDevices = function () { return Promise.resolve(_pJson("media_devices", [])); };
-    MediaDevices.prototype.getUserMedia = function () { return Promise.reject(new Error("Permission denied")); };
-    MediaDevices.prototype.getDisplayMedia = function () { return Promise.reject(new Error("Permission denied")); };
-    MediaDevices.prototype.getSupportedConstraints = function () {
+
+    // 3. Setup MimeTypeArray
+    const _MimeTypeArrayProto = MimeTypeArray.prototype;
+    Object.defineProperty(_MimeTypeArrayProto, Symbol.toStringTag, { value: "MimeTypeArray", configurable: true });
+    Object.defineProperty(_MimeTypeArrayProto, 'length', { get: () => 0, enumerable: true, configurable: true });
+    _defProtoMethod(_MimeTypeArrayProto, 'item', () => null);
+    _defProtoMethod(_MimeTypeArrayProto, 'namedItem', () => null);
+    const _navMimeTypes = Object.create(_MimeTypeArrayProto);
+
+    let MediaDevices = globalThis.MediaDevices || class MediaDevices {};
+    const _navMediaDevices = Object.create(MediaDevices.prototype);
+    _navMediaDevices.enumerateDevices = function () { return Promise.resolve(_pJson("media_devices", [])); };
+    _navMediaDevices.getUserMedia = function () { return Promise.reject(new Error("Permission denied")); };
+    _navMediaDevices.getDisplayMedia = function () { return Promise.reject(new Error("Permission denied")); };
+    _navMediaDevices.getSupportedConstraints = function () {
         return { aspectRatio: true, autoGainControl: true, brightness: true, channelCount: true, colorTemperature: true, contrast: true, deviceId: true, displaySurface: true, echoCancellation: true, exposureCompensation: true, exposureMode: true, exposureTime: true, facingMode: true, focusDistance: true, focusMode: true, frameRate: true, groupId: true, height: true, iso: true, latency: true, noiseSuppression: true, pan: true, pointsOfInterest: true, resizeMode: true, sampleRate: true, sampleSize: true, saturation: true, sharpness: true, suppressLocalAudioPlayback: true, tilt: true, torch: true, whiteBalanceMode: true, width: true, zoom: true };
     };
-    MediaDevices.prototype.addEventListener = function () {};
-    MediaDevices.prototype.removeEventListener = function () {};
-    MediaDevices.prototype.dispatchEvent = function () { return true; };
-    globalThis.MediaDevices = MediaDevices;
-    const _navMediaDevices = Object.create(MediaDevices.prototype);
+    _navMediaDevices.addEventListener = function () {};
+    _navMediaDevices.removeEventListener = function () {};
+    _navMediaDevices.dispatchEvent = function () { return true; };
 
     class PermissionStatus {
         constructor(name) { this._name = name; }
@@ -217,43 +282,56 @@
     const _navLanguagesCache = Object.freeze(_pJson("languages", ["en-US", "en"]));
 
     // Scalar getters — read from stealth profile each call (idempotent).
-    _defNav('userAgent', () => _p("user_agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
-    _defNav('platform', () => _p("platform", "Linux x86_64"));
-    _defNav('vendor', () => _p("vendor", "Google Inc."));
-    _defNav('vendorSub', () => _p("vendor_sub", ""));
-    _defNav('productSub', () => _p("product_sub", "20030107"));
-    _defNav('appVersion', () => _p("app_version", "5.0 (X11; Linux x86_64) AppleWebKit/537.36"));
+    _defNav('userAgent', () => _p("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
+    _defNav('platform', () => _p("platform", "Win32"));
+    _defNav('vendor', () => "Google Inc.");
+    _defNav('vendorSub', () => "");
+    _defNav('productSub', () => "20030107");
+    _defNav('appVersion', () => _p("user_agent", "").replace("Mozilla/", ""));
     _defNav('appCodeName', () => "Mozilla");
     _defNav('appName', () => "Netscape");
     _defNav('product', () => "Gecko");
-    _defNav('language', () => _p("language", "en-US"));
+    _defNav('language', () => _p("language", "ru-RU"));
     _defNav('languages', () => _navLanguagesCache);
     _defNav('onLine', () => true);
     _defNav('cookieEnabled', () => true);
     _defNav('hardwareConcurrency', () => _pInt("hardware_concurrency", 8));
     _defNav('deviceMemory', () => _pInt("device_memory", 8));
     _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
-    _defNav('pdfViewerEnabled', () => _p("pdf_viewer_enabled", "true") === "true");
-    _defNav('webdriver', () => undefined);
+    _defNav('pdfViewerEnabled', () => true);
+    _defNav('webdriver', () => false);
+    _defNav('doNotTrack', () => null);
+    _defNav('msDoNotTrack', () => undefined);
+    _defNav('loadPurpose', () => undefined);
+    _defNav('sayswho', () => undefined);
 
     // Object getters — stable references.
-    _defNav('connection', () => _navConnection);
-    _defNav('plugins', () => _navPlugins);
-    _defNav('mimeTypes', () => _navMimeTypes);
-    _defNav('mediaDevices', () => _navMediaDevices);
-    _defNav('permissions', () => _navPermissions);
-    _defNav('credentials', () => _navCredentials);
-    _defNav('bluetooth', () => _navBluetooth);
-    _defNav('usb', () => _navUsb);
-    _defNav('serial', () => _navSerial);
-    _defNav('hid', () => _navHid);
-    _defNav('keyboard', () => _navKeyboard);
-    _defNav('locks', () => _navLocks);
-    _defNav('storage', () => _navStorage);
-    _defNav('serviceWorker', () => _navServiceWorker);
-    _defNav('clipboard', () => _navClipboard);
-    _defNav('geolocation', () => _navGeolocation);
-    _defNav('wakeLock', () => _navWakeLock);
+    Object.defineProperty(_NavProto, 'connection', { get: () => _navConnection, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'plugins', { get: () => _navPlugins, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'mimeTypes', { get: () => _navMimeTypes, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'mediaDevices', { get: () => _navMediaDevices, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'permissions', { get: () => _navPermissions, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'credentials', { get: () => _navCredentials, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'bluetooth', { get: () => _navBluetooth, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'usb', { get: () => _navUsb, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'serial', { get: () => _navSerial, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'hid', { get: () => _navHid, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'keyboard', { get: () => _navKeyboard, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'locks', { get: () => _navLocks, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'storage', { get: () => _navStorage, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'serviceWorker', { get: () => _navServiceWorker, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'clipboard', { get: () => _navClipboard, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'geolocation', { get: () => _navGeolocation, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'wakeLock', { get: () => _navWakeLock, enumerable: true, configurable: true });
+
+    // Apply native masking to all getters
+    _maskAsNative(_NavProto, 'userAgent', 'platform', 'vendor', 'vendorSub', 'productSub', 
+        'appVersion', 'appCodeName', 'appName', 'product', 'language', 'languages', 
+        'onLine', 'cookieEnabled', 'hardwareConcurrency', 'deviceMemory', 'maxTouchPoints', 
+        'pdfViewerEnabled', 'webdriver', 'connection', 'plugins', 'mimeTypes', 
+        'mediaDevices', 'permissions', 'credentials', 'bluetooth', 'usb', 'serial', 
+        'hid', 'keyboard', 'locks', 'storage', 'serviceWorker', 'clipboard', 
+        'geolocation', 'wakeLock');
     _defNav('mediaSession', () => _navMediaSession);
     _defNav('scheduling', () => _navScheduling);
     _defNav('userActivation', () => _navUserActivation);
@@ -299,7 +377,9 @@
     });
 
     // Instantiate — zero own properties.
-    globalThis.navigator = Object.create(_NavProto);
+    const _navigator = globalThis.navigator || Object.create(_NavProto);
+    Object.setPrototypeOf(_navigator, _NavProto);
+    globalThis.navigator = _navigator;
 
     // location — Proxy-based, tracks URL components and navigation requests
     const _locationData = {
@@ -336,59 +416,66 @@
     // location.href = ... sets this; <meta http-equiv="refresh"> does too.
     // Matches the behavior of a real browser's navigation algorithm without
     // any per-engine awareness.
-    globalThis.__pendingNavigation = null;
-
-    globalThis.location = new Proxy(_locationData, {
-        get(target, prop) {
-            if (prop === "assign") {
-                return (url) => {
-                    _parseLocationUrl(url);
-                    globalThis.__pendingNavigation = {
-                        url: _locationData.href,
-                        kind: "assign",
-                    };
-                };
-            }
-            if (prop === "replace") {
-                return (url) => {
-                    _parseLocationUrl(url);
-                    globalThis.__pendingNavigation = {
-                        url: _locationData.href,
-                        kind: "replace",
-                    };
-                };
-            }
-            if (prop === "reload") {
-                return () => {
-                    globalThis.__pendingNavigation = {
-                        url: _locationData.href,
-                        kind: "reload",
-                    };
-                };
-            }
-            if (prop === "toString") return () => target.href;
-            if (prop === Symbol.toPrimitive) return () => target.href;
-            if (prop === "ancestorOrigins") return { length: 0, item: () => null, contains: () => false };
-            return target[prop];
-        },
-        set(target, prop, value) {
-            if (prop === "href") {
-                _parseLocationUrl(value);
-                globalThis.__pendingNavigation = {
-                    url: _locationData.href,
-                    kind: "assign",
-                };
-                return true;
-            }
-            if (prop === "hash") {
-                target.hash = String(value).startsWith('#') ? value : '#' + value;
-                target.href = target.origin + target.pathname + target.search + target.hash;
-                return true;
-            }
-            target[prop] = value;
-            return true;
-        },
+    Object.defineProperty(globalThis, '__pendingNavigation', {
+        value: null,
+        writable: true,
+        enumerable: false,
+        configurable: true
     });
+
+    // Location class and instance
+    const _LocProto = globalThis.Location.prototype;
+    Object.defineProperty(_LocProto, Symbol.toStringTag, { value: "Location", enumerable: false, configurable: true });
+
+    function _defLoc(prop, getter, setter) {
+        _defProtoGetter(_LocProto, prop, getter, setter);
+    }
+
+    _defLoc('href', () => _locationData.href, (v) => {
+        _parseLocationUrl(v);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defLoc('origin', () => _locationData.origin);
+    _defLoc('protocol', () => _locationData.protocol, (v) => {
+        _parseLocationUrl(v + "//" + _locationData.host + _locationData.pathname);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defLoc('host', () => _locationData.host, (v) => {
+        _parseLocationUrl(_locationData.protocol + "//" + v + _locationData.pathname);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defLoc('hostname', () => _locationData.hostname, (v) => {
+        _parseLocationUrl(_locationData.protocol + "//" + v + (_locationData.port ? ":" + _locationData.port : "") + _locationData.pathname);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defLoc('port', () => _locationData.port);
+    _defLoc('pathname', () => _locationData.pathname);
+    _defLoc('search', () => _locationData.search);
+    _defLoc('hash', () => _locationData.hash, (v) => {
+        _locationData.hash = String(v).startsWith('#') ? v : '#' + v;
+        _locationData.href = _locationData.origin + _locationData.pathname + _locationData.search + _locationData.hash;
+    });
+    _defLoc('ancestorOrigins', () => ({ length: 0, item: () => null, contains: () => false }));
+
+    _defProtoMethod(_LocProto, 'assign', (url) => {
+        _parseLocationUrl(url);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defProtoMethod(_LocProto, 'replace', (url) => {
+        _parseLocationUrl(url);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "replace" };
+    });
+    _defProtoMethod(_LocProto, 'reload', () => {
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "reload" };
+    });
+    _defProtoMethod(_LocProto, 'toString', function() { return this.href; });
+    _LocProto[Symbol.toPrimitive] = function() { return this.href; };
+
+    _maskAsNative(_LocProto, 'assign', 'replace', 'reload', 'toString');
+
+    const _locationInstance = globalThis.location || Object.create(_LocProto);
+    Object.setPrototypeOf(_locationInstance, _LocProto);
+    globalThis.location = _locationInstance;
 
     // Frame-tree globals: top/parent/frames/self all point to this window
     // (we only emulate a single browsing context). Real browsers: when a page
@@ -399,14 +486,11 @@
     globalThis.opener = null;
 
     // screen — prototype-backed so own-descriptor probe returns undefined.
-    class Screen {}
-    globalThis.Screen = Screen;
     const _ScreenProto = Screen.prototype;
     const _screenOrientation = { type: "landscape-primary", angle: 0, onchange: null };
     // ScreenOrientation is its own interface in Chrome, so expose it too.
-    class ScreenOrientation {}
-    globalThis.ScreenOrientation = ScreenOrientation;
-    Object.setPrototypeOf(_screenOrientation, ScreenOrientation.prototype);
+    const _ScreenOrientationProto = ScreenOrientation.prototype;
+
     _defProtoGetter(_ScreenProto, 'width', () => _pInt("screen_width", 1920));
     _defProtoGetter(_ScreenProto, 'height', () => _pInt("screen_height", 1080));
     _defProtoGetter(_ScreenProto, 'availWidth', () => _pInt("screen_avail_width", 1920));
@@ -609,40 +693,6 @@
 
     // Notification
     globalThis.Notification = class Notification { static permission = "default"; };
-
-    // PluginArray / MimeTypeArray — navigator.plugins and navigator.mimeTypes
-    // return instances, but some bot tests (fpCollect, bot.sannysoft) check
-    // that the GLOBAL classes exist via `typeof PluginArray !== 'undefined'`
-    // or use them with `instanceof`.
-    if (!globalThis.PluginArray) {
-        globalThis.PluginArray = class PluginArray {
-            constructor() { this.length = 0; }
-            item() { return null; }
-            namedItem() { return null; }
-            refresh() {}
-            [Symbol.iterator]() { let i = 0; return { next: () => ({ done: i++ >= this.length, value: null }) }; }
-        };
-    }
-    if (!globalThis.MimeTypeArray) {
-        globalThis.MimeTypeArray = class MimeTypeArray {
-            constructor() { this.length = 0; }
-            item() { return null; }
-            namedItem() { return null; }
-            [Symbol.iterator]() { let i = 0; return { next: () => ({ done: i++ >= this.length, value: null }) }; }
-        };
-    }
-    if (!globalThis.Plugin) {
-        globalThis.Plugin = class Plugin {
-            constructor() { this.name = ""; this.description = ""; this.filename = ""; this.length = 0; }
-            item() { return null; }
-            namedItem() { return null; }
-        };
-    }
-    if (!globalThis.MimeType) {
-        globalThis.MimeType = class MimeType {
-            constructor() { this.type = ""; this.description = ""; this.suffixes = ""; this.enabledPlugin = null; }
-        };
-    }
 
     // Worker / SharedWorker / ServiceWorker classes. Our runtime has a
     // crates/workers module but doesn't auto-expose the constructor to JS.
@@ -1330,13 +1380,6 @@
         // a Performance class, install every accessor/method on the
         // prototype, reparent the existing performance instance to it,
         // and strip the legacy own properties.
-        let Performance;
-        if (typeof globalThis.Performance === 'function') {
-            Performance = globalThis.Performance;
-        } else {
-            Performance = class Performance {};
-            globalThis.Performance = Performance;
-        }
         const _PerfProto = Performance.prototype;
         Object.defineProperty(_PerfProto, Symbol.toStringTag, { value: "Performance", configurable: true });
 
@@ -2009,8 +2052,6 @@
     // --- history — prototype-backed ---
     const _historyStack = [{ state: null, title: "", url: globalThis.location?.href || "about:blank" }];
     let _historyIndex = 0;
-    class History {}
-    globalThis.History = History;
     const _HistoryProto = History.prototype;
     _defProtoGetter(_HistoryProto, 'length', () => _historyStack.length);
     _defProtoGetter(_HistoryProto, 'state', () => _historyStack[_historyIndex]?.state || null);
@@ -3175,27 +3216,23 @@
     // Anti-bot detectors check Function.prototype.toString() for polyfilled APIs.
     // Real Chrome returns "function X() { [native code] }" for built-in functions.
     // Wrap our polyfills so toString() returns the native format.
-    function _maskAsNative(obj, ...names) {
-        for (const name of names) {
-            const fn = obj[name];
-            if (typeof fn === 'function') {
-                const masked = fn;
-                Object.defineProperty(masked, 'toString', {
-                    value: () => `function ${name}() { [native code] }`,
-                    configurable: true,
-                });
-            }
-        }
-    }
 
     // Mask navigator methods
     _maskAsNative(navigator, 'javaEnabled', 'sendBeacon', 'getBattery');
+    _maskAsNative(PluginArray.prototype, 'item', 'namedItem', 'refresh');
+    _maskAsNative(MimeTypeArray.prototype, 'item', 'namedItem');
+    _maskAsNative(Plugin.prototype, 'item', 'namedItem');
     // Mask WebRTC
     _maskAsNative(globalThis.RTCPeerConnection.prototype, 'createOffer', 'createAnswer',
         'setLocalDescription', 'setRemoteDescription', 'addIceCandidate', 'close',
         'createDataChannel', 'getStats', 'getSenders', 'getReceivers', 'getTransceivers',
         'addTrack', 'removeTrack');
     _maskAsNative(globalThis.RTCPeerConnection, 'generateCertificate');
+    
+    // Mask document.write
+    if (globalThis.document) {
+        _maskAsNative(Object.getPrototypeOf(globalThis.document), 'write', 'writeln');
+    }
     // Mask MediaSource
     if (globalThis.MediaSource) _maskAsNative(globalThis.MediaSource, 'isTypeSupported');
     // Mask speechSynthesis

@@ -1,14 +1,17 @@
 //! HTTP/3 request execution using the h3 crate over quinn.
 
 use crate::error::NetError;
+use crate::headers;
 use crate::Response;
 use bytes::Buf;
+use stealth::profile::StealthProfile;
 use std::collections::HashMap;
 
 /// Send an HTTP/3 GET request over an established QUIC connection.
 pub async fn h3_get(
     connection: quinn::Connection,
     url: &url::Url,
+    profile: &StealthProfile,
     extra_headers: &[(String, String)],
 ) -> Result<(Response, Option<String>), NetError> {
     let h3_conn = h3_quinn::Connection::new(connection);
@@ -29,24 +32,21 @@ pub async fn h3_get(
         url.path().to_string()
     };
 
-    let mut req = http::Request::builder()
+    let mut req_builder = http::Request::builder()
         .method("GET")
-        .uri(format!("https://{}{}", authority, path))
-        .header("host", authority)
-        .header(":authority", authority)
-        .header(
-            "accept",
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        )
-        .header("accept-encoding", "gzip, deflate, br")
-        .header("accept-language", "en-US,en;q=0.9")
-        .header("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36");
+        .uri(format!("https://{}{}", authority, path));
 
-    for (k, v) in extra_headers {
-        req = req.header(k.as_str(), v.as_str());
+    // Use Chrome-exact headers from profile
+    let mut hdrs = headers::chrome_headers(profile);
+    crate::merge_headers(&mut hdrs, extra_headers);
+
+    for (k, v) in hdrs {
+        req_builder = req_builder.header(k, v);
     }
 
-    let req = req.body(()).map_err(|e| NetError::H3(e.to_string()))?;
+    let req = req_builder
+        .body(())
+        .map_err(|e| NetError::H3(e.to_string()))?;
 
     let mut stream = send_request
         .send_request(req)

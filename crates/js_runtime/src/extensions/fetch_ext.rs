@@ -155,7 +155,51 @@ pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
     client.set_cookie_str(&parsed, &cookie).await;
 }
 
+/// Synchronous fetch op. Blocks the V8 thread until the request completes.
+/// Used by document.write and appendChild(script) when synchronous execution
+/// is required.
+#[op2]
+#[string]
+pub fn op_net_fetch_sync(#[string] url: String) -> String {
+    eprintln!("[op_net_fetch_sync] fetching {}", url);
+    
+    // 1. Get a client instance
+    let client = if let Some(c) = FETCH_CLIENT.get() {
+        c.clone()
+    } else {
+        // Fallback: create a temporary client with default profile
+        let profile = stealth::presets::chrome_130_ru();
+        match net::HttpClient::new(&profile) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[op_net_fetch_sync] FAILED to create client: {}", e);
+                return String::new();
+            }
+        }
+    };
+
+    // Use a temporary thread and runtime to perform the blocking fetch.
+    // This is safe because it's only used for synchronous script fetching
+    // which MUST block the V8 thread anyway.
+    let url_clone = url.clone();
+    let result = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            client.get(&url_clone).await.map(|r| r.text()).unwrap_or_else(|e| {
+                eprintln!("[op_net_fetch_sync] FAILED fetch {}: {}", url_clone, e);
+                String::new()
+            })
+        })
+    }).join().unwrap_or_default();
+
+    eprintln!("[op_net_fetch_sync] fetched {} bytes from {}", result.len(), url);
+    result
+}
+
 deno_core::extension!(
     fetch_extension,
-    ops = [op_fetch, op_cookie_get, op_cookie_set],
+    ops = [op_fetch, op_cookie_get, op_cookie_set, op_net_fetch_sync],
 );

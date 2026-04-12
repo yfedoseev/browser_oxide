@@ -99,37 +99,37 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
         .expect("console bootstrap failed");
 
     runtime
-        .execute_script("<dom_bootstrap>", include_str!("js/dom_bootstrap.js"))
-        .expect("dom bootstrap failed");
+        .execute_script("<interfaces_bootstrap>", include_str!("js/interfaces_bootstrap.js"))
+        .expect("interfaces bootstrap failed");
+
+    runtime
+        .execute_script("<instances_bootstrap>", include_str!("js/instances_bootstrap.js"))
+        .expect("instances bootstrap failed");
+
+    runtime
+        .execute_script("<fetch_bootstrap>", include_str!("js/fetch_bootstrap.js"))
+        .expect("fetch bootstrap failed");
 
     runtime
         .execute_script("<timer_bootstrap>", include_str!("js/timer_bootstrap.js"))
         .expect("timer bootstrap failed");
 
     runtime
+        .execute_script("<dom_bootstrap>", include_str!("js/dom_bootstrap.js"))
+        .expect("dom bootstrap failed");
+
+    runtime
         .execute_script("<event_bootstrap>", include_str!("js/event_bootstrap.js"))
         .expect("event bootstrap failed");
-
-    // fetch bootstrap must come before window bootstrap (which may reference fetch)
-    runtime
-        .execute_script("<fetch_bootstrap>", include_str!("js/fetch_bootstrap.js"))
-        .expect("fetch bootstrap failed");
-
-    runtime
-        .execute_script("<window_bootstrap>", include_str!("js/window_bootstrap.js"))
-        .expect("window bootstrap failed");
 
     runtime
         .execute_script("<canvas_bootstrap>", include_str!("js/canvas_bootstrap.js"))
         .expect("canvas bootstrap failed");
 
     runtime
-        .execute_script("<sse_bootstrap>", include_str!("js/sse_bootstrap.js"))
-        .expect("sse bootstrap failed");
+        .execute_script("<window_bootstrap>", include_str!("js/window_bootstrap.js"))
+        .expect("window bootstrap failed");
 
-    runtime
-        .execute_script("<input_bootstrap>", include_str!("js/input_bootstrap.js"))
-        .expect("input bootstrap failed");
 
     // Streams (ReadableStream/WritableStream/TransformStream) —
     // installs real implementations over the minimal stubs from
@@ -161,6 +161,12 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
             eprintln!("init script {i} failed: {e}");
         }
     }
+
+    // Final cleanup — hides Deno and internal globals from user JS.
+    // Must run LAST, after all built-in bootstraps and init_scripts.
+    runtime
+        .execute_script("<cleanup_bootstrap>", include_str!("js/cleanup_bootstrap.js"))
+        .expect("cleanup bootstrap failed");
 
     runtime
 }
@@ -235,6 +241,11 @@ pub fn create_worker_runtime() -> JsRuntime {
             include_str!("js/canvas_bootstrap.js"),
         )
         .expect("worker: canvas bootstrap failed");
+
+    // Final cleanup in worker
+    runtime
+        .execute_script("<cleanup_bootstrap>", include_str!("js/cleanup_bootstrap.js"))
+        .expect("worker: cleanup bootstrap failed");
 
     runtime
 }

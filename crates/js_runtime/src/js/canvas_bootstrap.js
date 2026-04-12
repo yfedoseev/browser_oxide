@@ -844,4 +844,37 @@
     });
     // Install as the canonical global — overwrites the window_bootstrap stub.
     globalThis.OffscreenCanvas = RealOffscreenCanvas;
+
+    // Mask methods as native
+    if (typeof _maskAsNative === 'function') {
+        _maskAsNative(CanvasRenderingContext2D.prototype, 
+            'fillRect', 'strokeRect', 'clearRect', 'beginPath', 'moveTo', 'lineTo',
+            'fill', 'stroke', 'closePath', 'arc', 'arcTo', 'bezierCurveTo',
+            'quadraticCurveTo', 'rect', 'fillText', 'strokeText', 'measureText',
+            'save', 'restore', 'translate', 'rotate', 'scale', 'setTransform',
+            'resetTransform', 'getTransform', 'createLinearGradient', 
+            'createRadialGradient', 'createPattern', 'getImageData', 'putImageData',
+            'drawImage', 'isPointInPath', 'isPointInStroke');
+        
+        _maskAsNative(RealOffscreenCanvas.prototype, 'getContext', 'transferToImageBitmap', 'convertToBlob');
+        
+        if (_HTMLCanvasProto) {
+            _maskAsNative(_HTMLCanvasProto, 'getContext', 'toDataURL', 'toBlob');
+        }
+
+        if (globalThis.AudioContext) {
+            _maskAsNative(AudioContext.prototype, 'createOscillator', 'createDynamicsCompressor', 'close', 'suspend', 'resume');
+        }
+        if (globalThis.OfflineAudioContext) {
+            _maskAsNative(OfflineAudioContext.prototype, 'startRendering');
+        }
+        
+        // Also mask WebGL if available
+        if (globalThis.WebGLRenderingContext) {
+            _maskAsNative(globalThis.WebGLRenderingContext.prototype, 'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter');
+        }
+        if (globalThis.WebGL2RenderingContext) {
+            _maskAsNative(globalThis.WebGL2RenderingContext.prototype, 'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter');
+        }
+    }
 })(globalThis);

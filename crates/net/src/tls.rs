@@ -145,14 +145,13 @@ pub fn configure_connection(
         .configure()
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
-    // ALPS (Application-Layer Protocol Settings) for HTTP/2
-    config
-        .add_application_settings(b"h2")
-        .map_err(|e| NetError::Tls(e.to_string()))?;
-    config.set_alps_use_new_codepoint(true);
+    // config
+    //     .add_application_settings(b"h2")
+    //     .map_err(|e| NetError::Tls(e.to_string()))?;
+    // config.set_alps_use_new_codepoint(true);
 
     // ECH GREASE (Encrypted Client Hello)
-    config.set_enable_ech_grease(true);
+    config.set_enable_ech_grease(false);
 
     // SNI: strip brackets from IPv6 addresses
     let sni_domain = domain.trim_start_matches('[').trim_end_matches(']');

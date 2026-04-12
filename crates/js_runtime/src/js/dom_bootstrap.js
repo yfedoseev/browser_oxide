@@ -1,4 +1,5 @@
 ((globalThis) => {
+    console.log("[DOM] bootstrap start");
     const core = Deno.core;
     const ops = core.ops;
     const _nodeIds = new WeakMap();
@@ -33,6 +34,102 @@
         _nodeCache.set(nodeId, new WeakRef(node));
         return node;
     }
+
+    function _onNodeInserted(child, sync = true) {
+        if (!child) return;
+
+        // 1. Dynamic script loading
+        const childTag = (child.tagName || child.nodeName || "").toLowerCase();
+        const childSrc = (childTag === 'script') ? (child.src || child.getAttribute?.('src')) : null;
+
+        if (childTag === 'script' && !childSrc) {
+            const code = child.textContent || child.innerText || '';
+            if (code && code.trim()) {
+                console.log(`[DOM] executing inline script (${code.length} bytes)`);
+                try { (0, eval)(code); } catch (e) {
+                    console.log(`[DOM] inline eval error: ${e.message}`);
+                }
+            }
+        }
+
+        if (childTag === 'script' && childSrc) {
+            const src = childSrc;
+            const scriptEl = child;
+            let fullUrl = src;
+            if (!src.startsWith('http') && !src.startsWith('data:')) {
+                try {
+                    const base = globalThis.location ? globalThis.location.href : 'about:blank';
+                    fullUrl = new URL(src, base).href;
+                } catch(e) {}
+            }
+
+            if (sync) {
+                console.log(`[DOM] sync fetching script: ${fullUrl}`);
+                try {
+                    const code = ops.op_net_fetch_sync(fullUrl);
+                    if (code) {
+                        console.log(`[DOM] sync executing script (${code.length} bytes): ${fullUrl}`);
+                        try {
+                            (0, eval)(code);
+                            console.log(`[DOM] sync execution SUCCESS: ${fullUrl}`);
+                        } catch(e) {
+                            console.log(`[DOM] sync eval ERROR for ${fullUrl}: ${e.message}\n${e.stack}`);
+                            if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                        }
+                    } else {
+                        console.log(`[DOM] sync fetch FAILED (empty) for ${fullUrl}`);
+                        if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                        scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                    }
+                    if (scriptEl.onload) scriptEl.onload(new Event('load'));
+                    scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
+                } catch(e) {
+                    console.log(`[DOM] sync fetch OP error for ${fullUrl}: ${e.message}`);
+                    if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                    scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                }
+            } else {
+                console.log(`[DOM] async fetching script: ${fullUrl}`);
+                (async () => {
+                    try {
+                        const resp = await globalThis.fetch(fullUrl);
+                        if (resp.ok) {
+                            const code = await resp.text();
+                            console.log(`[DOM] async executing script (${code.length} bytes): ${fullUrl}`);
+                            try {
+                                (0, eval)(code);
+                                console.log(`[DOM] async execution SUCCESS: ${fullUrl}`);
+                                if (scriptEl.onload) scriptEl.onload(new Event('load'));
+                                scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
+                            } catch(e) {
+                                console.log(`[DOM] async eval ERROR for ${fullUrl}: ${e.message}\n${e.stack}`);
+                                if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                                scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                            }
+                        } else {
+                            console.log(`[DOM] async fetch FAILED (status ${resp.status}) for ${fullUrl}`);
+                            if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                        }
+                    } catch(e) {
+                        console.log(`[DOM] async fetch ERROR for ${fullUrl}: ${e.message}`);
+                        if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                        scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                    }
+                })();
+            }
+        }
+
+        // 2. Recursive check for children (handles <div><script>...</script></div>)
+        if (child.childNodes && child.childNodes.length > 0) {
+            for (let i = 0; i < child.childNodes.length; i++) {
+                _onNodeInserted(child.childNodes[i], sync);
+            }
+        }
+    }
+
+    globalThis.__onNodeInserted = _onNodeInserted;
 
     class NodeList {
         constructor(ids) {
@@ -169,59 +266,11 @@
         set textContent(val) { ops.op_dom_set_text_content(_getNodeId(this), String(val)); }
         appendChild(child) {
             ops.op_dom_append_child(_getNodeId(this), _getNodeId(child));
-            // Dynamic script loading: when a <script src="..."> is appended to the DOM,
-            // fetch and execute the script, then fire "load" event (like a real browser).
-            // This is how challenge scripts (Wildberries, Cloudflare, DataDome) load their solvers.
-            const childTag = child.tagName?.toLowerCase?.() || child.nodeName?.toLowerCase?.() || '';
-            // Check both JS property (.src) and DOM attribute (getAttribute('src'))
-            // Scripts set src via property: script.src = url (not setAttribute)
-            const childSrc = (childTag === 'script') ? (child.src || child.getAttribute?.('src')) : null;
-            // Inline script: <script>...code...</script> inserted via createElement + textContent.
-            // Real Chrome executes these synchronously on insertion. Rare in WB's WBAAS flow but
-            // common for other antibot solvers and for site-level bootstrap code.
-            if (childTag === 'script' && !childSrc) {
-                const code = child.textContent || child.innerText || '';
-                if (code && code.trim()) {
-                    try { (0, eval)(code); } catch (e) { /* execution error — real browsers swallow these */ }
-                }
-            }
-            if (childTag === 'script' && childSrc) {
-                // Dynamic script detected
-                const src = childSrc;
-                const scriptEl = child;
-                // Resolve relative URLs
-                let fullUrl = src;
-                if (!src.startsWith('http') && !src.startsWith('data:')) {
-                    try { fullUrl = new URL(src, globalThis.location?.href || 'about:blank').href; } catch(e) {}
-                }
-                // Async fetch + execute
-                (async () => {
-                    try {
-                        const resp = await globalThis.fetch(fullUrl);
-                        if (resp.ok) {
-                            const code = await resp.text();
-                            try {
-                                (0, eval)(code); // indirect eval = global scope
-                            } catch(e) {
-                                if (scriptEl.onerror) scriptEl.onerror(e);
-                                scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
-                                return;
-                            }
-                            if (scriptEl.onload) scriptEl.onload(new Event('load'));
-                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
-                        } else {
-                            if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
-                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
-                        }
-                    } catch(e) {
-                        if (scriptEl.onerror) scriptEl.onerror(e);
-                        scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
-                    }
-                })();
-            }
+            _onNodeInserted(child);
             return child;
         }
         removeChild(child) {
+            _ceDisconnected(child);
             ops.op_dom_remove_child(_getNodeId(this), _getNodeId(child));
             return child;
         }
@@ -229,13 +278,16 @@
             const parent = _getNodeId(this);
             const oldId = _getNodeId(oldChild);
             const newId = _getNodeId(newChild);
+            _ceDisconnected(oldChild);
             ops.op_dom_insert_before(parent, newId, oldId);
             ops.op_dom_remove_child(parent, oldId);
+            _onNodeInserted(newChild);
             return oldChild;
         }
         insertBefore(newChild, refChild) {
             if (refChild === null || refChild === undefined) return this.appendChild(newChild);
             ops.op_dom_insert_before(_getNodeId(this), _getNodeId(newChild), _getNodeId(refChild));
+            _onNodeInserted(newChild);
             return newChild;
         }
         cloneNode(deep = false) {
@@ -633,12 +685,61 @@
     class HTMLHeadingElement extends HTMLElement {}
     class HTMLAnchorElement extends HTMLElement {}
     class HTMLImageElement extends HTMLElement {}
+    Object.defineProperty(HTMLImageElement.prototype, "width", {
+        get() {
+            const attr = this.getAttribute("width");
+            return attr ? parseInt(attr, 10) : 0;
+        },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "height", {
+        get() {
+            const attr = this.getAttribute("height");
+            return attr ? parseInt(attr, 10) : 0;
+        },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "naturalWidth", {
+        get() { return this.width; },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "naturalHeight", {
+        get() { return this.height; },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "complete", {
+        get() { return true; }, 
+        enumerable: true, configurable: true
+    });
+    HTMLImageElement.prototype.decode = function() { return Promise.resolve(); };
     class HTMLInputElement extends HTMLElement {}
     class HTMLFormElement extends HTMLElement {}
     class HTMLButtonElement extends HTMLElement {}
     class HTMLSelectElement extends HTMLElement {}
     class HTMLTextAreaElement extends HTMLElement {}
     class HTMLCanvasElement extends HTMLElement {}
+    Object.defineProperty(HTMLCanvasElement.prototype, "width", {
+        get() {
+            const attr = this.getAttribute("width");
+            return attr ? parseInt(attr, 10) : 300;
+        },
+        set(v) { this.setAttribute("width", v); },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLCanvasElement.prototype, "height", {
+        get() {
+            const attr = this.getAttribute("height");
+            return attr ? parseInt(attr, 10) : 150;
+        },
+        set(v) { this.setAttribute("height", v); },
+        enumerable: true, configurable: true
+    });
+    HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
+        if (!this._canvasId) {
+            this._canvasId = ops.op_canvas_create(this.width, this.height);
+        }
+        return ops.op_canvas_to_data_url(this._canvasId);
+    };
     class HTMLScriptElement extends HTMLElement {}
     class HTMLStyleElement extends HTMLElement {}
     class HTMLLinkElement extends HTMLElement {}
@@ -805,8 +906,21 @@
         // document.open/close — reset and finalize document stream
         open() { return this; }
         close() {}
-        write(html) { ops.op_dom_document_write(String(html)); }
-        writeln(html) { ops.op_dom_document_write(String(html) + "\n"); }
+        write(html) {
+            // Document.write in Chrome synchronously executes any <script> tags
+            // it inserts. Since op_dom_document_write returns the IDs of the
+            // newly created nodes, we wrap them and trigger our insertion logic.
+            const newIds = ops.op_dom_document_write(String(html));
+            if (Array.isArray(newIds)) {
+                for (const id of newIds) {
+                    const node = _wrapNode(id);
+                    if (node) _onNodeInserted(node, true); // Always sync for document.write
+                }
+            }
+        }
+        writeln(html) {
+            this.write(html + "\n");
+        }
         // Selection and editing
         execCommand(command, showUI, value) { return false; }
         queryCommandSupported(command) { return false; }
@@ -817,7 +931,7 @@
         elementsFromPoint(x, y) { return this.body ? [this.body] : []; }
         caretPositionFromPoint(x, y) { return null; }
         hasFocus() { return true; }  // Anti-bot: must return true
-        get readyState() { return "complete"; }
+        get readyState() { return globalThis.__documentReadyState || "complete"; }
         get URL() { return globalThis.location?.href || "about:blank"; }
         get documentURI() { return this.URL; }
         get domain() { return globalThis.location?.hostname || ""; }
@@ -1261,20 +1375,18 @@
         }
     }
 
-    // Wrap DOM mutation methods to fire MO notifications + CE lifecycle
+    // Wrap DOM mutation methods to fire MO notifications
     const _origAppendChild = Node.prototype.appendChild;
     Node.prototype.appendChild = function(child) {
         const result = _origAppendChild.call(this, child);
         if (_moObservers.length > 0) {
             _notifyMO("childList", _getNodeId(this), { target: this, addedNodes: [child] });
         }
-        _ceConnected(child);
         return result;
     };
 
     const _origRemoveChild = Node.prototype.removeChild;
     Node.prototype.removeChild = function(child) {
-        _ceDisconnected(child);
         const result = _origRemoveChild.call(this, child);
         if (_moObservers.length > 0) {
             _notifyMO("childList", _getNodeId(this), { target: this, removedNodes: [child] });
@@ -1288,7 +1400,6 @@
         if (_moObservers.length > 0) {
             _notifyMO("childList", _getNodeId(this), { target: this, addedNodes: [newChild] });
         }
-        _ceConnected(newChild);
         return result;
     };
 
@@ -1372,10 +1483,10 @@
             getElementsByTagName() { return new NodeList([]); },
             createElement(tag) { return _document.createElement(tag); },
             createTextNode(text) { return _document.createTextNode(text); },
-            write() {},
-            writeln() {},
-            open() { return this; },
-            close() {},
+            write(html) { return _document.write(html); },
+            writeln(html) { return _document.writeln(html); },
+            open() { return _document.open(); },
+            close() { return _document.close(); },
         };
         const iframeLocals = {
             document: iframeDoc,
@@ -1446,4 +1557,5 @@
     // Minimal window stub
     globalThis.window = globalThis;
     globalThis.self = globalThis;
+    console.log("[DOM] bootstrap end");
 })(globalThis);

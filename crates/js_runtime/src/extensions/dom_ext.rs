@@ -581,8 +581,9 @@ pub fn op_dom_insert_adjacent_html(
     state.layout_engine.mark_dirty();
 }
 
-#[op2(fast)]
-pub fn op_dom_document_write(#[state] state: &mut DomState, #[string] html: &str) {
+#[op2]
+#[serde]
+pub fn op_dom_document_write(#[state] state: &mut DomState, #[string] html: &str) -> Vec<i32> {
     let body_id = state
         .dom
         .get_elements_by_tag_name(NodeId::DOCUMENT, "body")
@@ -590,20 +591,23 @@ pub fn op_dom_document_write(#[state] state: &mut DomState, #[string] html: &str
         .next();
     let body_id = match body_id {
         Some(id) => id,
-        None => return,
+        None => return vec![],
     };
     let fragment_dom = html_parser::parse_html(&format!("<body>{}</body>", html));
     let frag_body = fragment_dom
         .get_elements_by_tag_name(NodeId::DOCUMENT, "body")
         .into_iter()
         .next();
+    let mut new_ids = Vec::new();
     if let Some(frag_body_id) = frag_body {
         for child_id in fragment_dom.children(frag_body_id) {
             let new_child = state.dom.merge_subtree(&fragment_dom, child_id);
             state.dom.append_child(body_id, new_child);
+            new_ids.push(new_child.to_raw() as i32);
         }
     }
     state.layout_engine.mark_dirty();
+    new_ids
 }
 
 #[op2(fast)]

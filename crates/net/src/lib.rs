@@ -147,7 +147,7 @@ impl HttpClient {
             conn
         };
 
-        let (resp, alt_svc) = h3_request::h3_get(conn, &parsed, &[]).await?;
+        let (resp, alt_svc) = h3_request::h3_get(conn, &parsed, &self.profile, &[]).await?;
 
         // Update cache from response
         if let Some(alt_svc_header) = &alt_svc {
@@ -336,10 +336,37 @@ impl HttpClient {
     }
 
     /// GET with explicit redirect following.
+    /// Perform a GET request, following redirects up to `max_redirects`.
     pub async fn get_follow(&self, url: &str, max_redirects: u8) -> Result<Response, NetError> {
         let mut current_url = url.to_string();
         for _ in 0..max_redirects {
             let resp = self.get(&current_url).await?;
+
+            if matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
+                if let Some(loc) = resp.headers.get("location") {
+                    let next_url = resolve_redirect(&current_url, loc)?;
+                    // For 301, 302, 303 redirects from a GET, we just continue with another GET.
+                    // For 307, 308, we MUST preserve the method (GET), which self.get() does.
+                    current_url = next_url;
+                    continue;
+                }
+            }
+            return Ok(resp);
+        }
+        self.get(&current_url).await
+    }
+
+    /// Perform a GET request, following redirects, with extra headers.
+    pub async fn get_follow_with_headers(
+        &self,
+        url: &str,
+        extra_headers: &[(String, String)],
+        max_redirects: u8,
+    ) -> Result<Response, NetError> {
+        let mut current_url = url.to_string();
+        for _ in 0..max_redirects {
+            // Re-apply headers to each hop
+            let resp = self.get_with_headers(&current_url, extra_headers).await?;
 
             if matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
                 if let Some(loc) = resp.headers.get("location") {
@@ -349,8 +376,53 @@ impl HttpClient {
             }
             return Ok(resp);
         }
-        // Final request after max redirects
-        self.get(&current_url).await
+        self.get_with_headers(&current_url, extra_headers).await
+    }
+
+    /// Perform a POST request, following redirects.
+    /// DDoS-Guard (ozon.ru) returns 307 on POST /abt/result, which requires
+    /// re-POSTing the body to the new location.
+    pub async fn post_follow(
+        &self,
+        url: &str,
+        body: &str,
+        max_redirects: u8,
+    ) -> Result<Response, NetError> {
+        self.post_bytes_follow(url, body.as_bytes(), &[], max_redirects)
+            .await
+    }
+
+    /// POST with raw bytes and redirects.
+    pub async fn post_bytes_follow(
+        &self,
+        url: &str,
+        body: &[u8],
+        extra_headers: &[(String, String)],
+        max_redirects: u8,
+    ) -> Result<Response, NetError> {
+        let mut current_url = url.to_string();
+        for _ in 0..max_redirects {
+            let resp = self
+                .post_bytes_with_headers(&current_url, body, extra_headers)
+                .await?;
+
+            if matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
+                if let Some(loc) = resp.headers.get("location") {
+                    let next_url = resolve_redirect(&current_url, loc)?;
+                    if matches!(resp.status, 307 | 308) {
+                        // 307/308: MUST re-POST the same body to the new location.
+                        current_url = next_url;
+                        continue;
+                    } else {
+                        // 301/302/303: Standard behavior is to switch to GET.
+                        return self.get_follow(&next_url, max_redirects - 1).await;
+                    }
+                }
+            }
+            return Ok(resp);
+        }
+        self.post_bytes_with_headers(&current_url, body, extra_headers)
+            .await
     }
 
     /// Perform a POST request.
