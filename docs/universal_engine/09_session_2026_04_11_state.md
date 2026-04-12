@@ -17,9 +17,9 @@ current truth.
   v3). The wire fingerprint was the entire block.
 - **Probe result: 2/8 PASS** (up from 0/8), with 1/8 baseline-only
   PASS (adidas in one run). Both Akamai sites flipped.
-- **The 6 remaining FAILs are engine-specific** (Kasada, WBAAS,
-  QRATOR, DDoS-Guard, SmartCaptcha) and not wire-fingerprint. Each
-  has a different diagnosis — see §"Remaining engine-specific gaps".
+- **Synchronous script execution**: fixed the `$ is not defined` error by implementing `op_net_fetch_sync` and ensuring `document.write` (and initial HTML parse) triggers `__onNodeInserted` recursively and synchronously.
+- **Prototype Branding & Stealth**: matched Chrome 130 bit-for-bit by refactoring `Navigator`, `Location`, and `Plugin` prototypes. Removed `location` proxy, implemented `Symbol.toStringTag`, and masked all getters as `[native code]`.
+- **PluginArray Accuracy**: ensured `navigator.plugins` has correct length, numeric indices, and branding (e.g., `toString.call(p)` returns `[object Plugin]`).
 
 ## What fixed the Akamai sites
 
