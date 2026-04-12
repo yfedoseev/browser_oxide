@@ -802,6 +802,7 @@ impl Page {
                             }
                             urlStr = new URL(urlStr, base).href;
                             if (isRequest) {
+                                // Recreate Request with absolute URL. Preserve all properties from the original.
                                 args[0] = new Request(urlStr, args[0]);
                             } else {
                                 args[0] = urlStr;

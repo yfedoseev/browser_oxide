@@ -40,6 +40,13 @@
 
         // 1. Dynamic script loading
         const childTag = (child.tagName || child.nodeName || "").toLowerCase();
+        const type = (child.getAttribute?.('type') || '').toLowerCase();
+        const isJs = !type || type === 'text/javascript' || type === 'application/javascript' || type === 'module';
+        
+        if (childTag === 'script' && !isJs) {
+            return; // Skip non-JS scripts like application/ld+json
+        }
+
         const childSrc = (childTag === 'script') ? (child.src || child.getAttribute?.('src')) : null;
 
         if (childTag === 'script' && !childSrc) {
@@ -911,6 +918,10 @@
         createElement(tag) {
             return _wrapNode(ops.op_dom_create_element(tag));
         }
+        createElementNS(ns, tag) {
+            // For now, treat namespaced elements same as regular ones.
+            return this.createElement(tag);
+        }
         createTextNode(text) {
             return _wrapNode(ops.op_dom_create_text_node(text));
         }
@@ -1009,8 +1020,8 @@
             // fetch()/navigation reads from the shared jar.
             try {
                 const url = globalThis.location?.href;
-                if (url && url !== "about:blank" && globalThis.Deno?.core?.ops?.op_cookie_set) {
-                    globalThis.Deno.core.ops.op_cookie_set(url, String(val));
+                if (url && url !== "about:blank" && ops.op_cookie_set) {
+                    ops.op_cookie_set(url, String(val));
                 }
             } catch (e) { /* ignore */ }
         }
@@ -1228,6 +1239,8 @@
     _tag(DOMTokenList, "DOMTokenList");
 
     globalThis.document = _document;
+    globalThis.Document = Document;
+    globalThis.HTMLDocument = Document;
     globalThis.Node = Node;
     globalThis.Element = Element;
     // Expose the real HTMLElement subclasses — the prototype chain is
@@ -1523,6 +1536,9 @@
             getElementById() { return null; },
             getElementsByTagName() { return new NodeList([]); },
             createElement(tag) { return _document.createElement(tag); },
+            createElementNS(ns, tag) { return _document.createElementNS(ns, tag); },
+            createEvent(type) { return _document.createEvent(type); },
+            createRange() { return _document.createRange(); },
             createTextNode(text) { return _document.createTextNode(text); },
             write(html) { return _document.write(html); },
             writeln(html) { return _document.writeln(html); },
