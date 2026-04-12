@@ -746,7 +746,7 @@ impl Page {
         // `document.cookie` during the page run.
         event_loop
             .execute_script(
-                r#"window.__cookieWrites = [];
+                r#"Object.defineProperty(window, '__cookieWrites', { value: [], enumerable: false, configurable: true });
             (function() {
                 const proto = Document.prototype || (document && Object.getPrototypeOf(document));
                 if (!proto) return;
@@ -775,7 +775,8 @@ impl Page {
         // Generic request log, equivalent to DevTools' Network tab.
         event_loop
             .execute_script(
-                r#"window.__scriptErrors = [];
+                r#"Object.defineProperty(window, '__scriptErrors', { value: [], enumerable: false, configurable: true });
+            Object.defineProperty(window, '__fetchLog', { value: [], enumerable: false, configurable: true });
             // Temporarily disable the stack filter so we can see the real
             // call sites when a TypeError fires inside a challenge VM.
             delete Error.prepareStackTrace;
@@ -785,7 +786,6 @@ impl Page {
             window.addEventListener('unhandledrejection', function(e) {
                 window.__scriptErrors.push('REJECT:' + String(e.reason).substring(0,200));
             });
-            window.__fetchLog = [];
             const _origFetch = globalThis.fetch;
             globalThis.fetch = async function(input, init) {
                 const entry = { method: 'GET', url: '', hasBody: false };
@@ -892,17 +892,9 @@ impl Page {
             let _ = event_loop.run_until_idle(Duration::from_millis(50)).await;
         }
 
-        // Install error tracking for challenge debugging
+        // Final cleanup — hides Deno and internal globals from user JS.
         event_loop
-            .execute_script(
-                r#"window.__errors = [];
-            window.onerror = function(msg, src, line, col, err) {
-                window.__errors.push('ERR:' + msg + ' at ' + (src||'?') + ':' + line);
-            };
-            window.addEventListener('unhandledrejection', function(e) {
-                window.__errors.push('REJECT:' + (e.reason||'').toString().substring(0,100));
-            });"#,
-            )
+            .execute_script(include_str!("../../js_runtime/src/js/cleanup_bootstrap.js"))
             .ok();
 
         // Fire DOMContentLoaded and load events via setTimeout so they execute

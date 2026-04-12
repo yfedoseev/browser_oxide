@@ -98,6 +98,11 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
         )
         .expect("console bootstrap failed");
 
+    // Early stealth — defines masking helpers used by other bootstraps
+    runtime
+        .execute_script("<stealth_bootstrap>", include_str!("js/stealth_bootstrap.js"))
+        .expect("stealth bootstrap failed");
+
     runtime
         .execute_script("<interfaces_bootstrap>", include_str!("js/interfaces_bootstrap.js"))
         .expect("interfaces bootstrap failed");
@@ -151,22 +156,20 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
         )
         .expect("structured_clone bootstrap failed");
 
-    // Run caller-provided init scripts after all built-in bootstraps.
+    // Final cleanup — hides Deno and internal globals from user JS.
+    // Must run BEFORE init_scripts so they don't see internals.
+    runtime
+        .execute_script("<cleanup_bootstrap>", include_str!("js/cleanup_bootstrap.js"))
+        .expect("cleanup bootstrap failed");
+
+    // Run caller-provided init scripts after built-in cleanup.
     // These run in order before any <script> tags parsed from HTML.
-    // Errors are logged but do not abort runtime construction so a bad
-    // init script cannot brick the page.
     for (i, code) in options.init_scripts.iter().enumerate() {
         let name: &'static str = Box::leak(format!("<init_script_{i}>").into_boxed_str());
         if let Err(e) = runtime.execute_script(name, code.clone()) {
             eprintln!("init script {i} failed: {e}");
         }
     }
-
-    // Final cleanup — hides Deno and internal globals from user JS.
-    // Must run LAST, after all built-in bootstraps and init_scripts.
-    runtime
-        .execute_script("<cleanup_bootstrap>", include_str!("js/cleanup_bootstrap.js"))
-        .expect("cleanup bootstrap failed");
 
     runtime
 }

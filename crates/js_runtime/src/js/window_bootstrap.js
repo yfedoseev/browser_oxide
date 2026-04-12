@@ -1,43 +1,9 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
-
-    // --- Native code masking ---
-    const _maskFunction = (fn, name) => {
-        if (!fn) return;
-        try {
-            Object.defineProperty(fn, 'name', { value: name, configurable: true });
-            const ts = function toString() { return `function ${name}() { [native code] }`; };
-            Object.defineProperty(fn, 'toString', { value: ts, configurable: true });
-            
-            // Recursively mask the toString itself
-            Object.defineProperty(ts, 'name', { value: 'toString', configurable: true });
-            Object.defineProperty(ts, 'toString', {
-                value: function toString() { return 'function toString() { [native code] }'; },
-                configurable: true,
-            });
-        } catch {}
-    };
-
-    const _maskAsNative = (obj, ...names) => {
-        for (const name of names) {
-            try {
-                const desc = Object.getOwnPropertyDescriptor(obj, name) ||
-                             Object.getOwnPropertyDescriptor(Object.getPrototypeOf(obj), name);
-                if (desc) {
-                    if (desc.get) _maskFunction(desc.get, `get ${name}`);
-                    if (desc.set) _maskFunction(desc.set, `set ${name}`);
-                    if (typeof desc.value === 'function') _maskFunction(desc.value, name);
-                } else if (typeof obj[name] === 'function') {
-                    _maskFunction(obj[name], name);
-                }
-            } catch {}
-        }
-    };
-
-    // Expose temporarily for other bootstraps (will be deleted in cleanup_bootstrap.js)
-    Object.defineProperty(globalThis, '_maskAsNative', {
-        value: _maskAsNative, enumerable: false, configurable: true
-    });
+    
+    // Masking helpers are provided by stealth_bootstrap.js
+    const _maskFunction = globalThis._maskFunction;
+    const _maskAsNative = globalThis._maskAsNative;
 
     // Helper: read from stealth profile or use default
     const _p = (key, fallback) => {
@@ -65,7 +31,6 @@
     // Prototype-install helpers — kNoScriptId-safe layout
     // ================================================================
     const _defProtoGetter = (proto, name, getter) => {
-        console.log(`[BOOTSTRAP] installing getter ${name} on ${proto[Symbol.toStringTag] || 'unknown prototype'}`);
         Object.defineProperty(proto, name, {
             get: getter,
             set: undefined,
@@ -75,7 +40,6 @@
         _maskFunction(getter, `get ${name}`);
     };
     const _defProtoMethod = (proto, name, fn) => {
-        console.log(`[BOOTSTRAP] installing method ${name} on ${proto[Symbol.toStringTag] || 'unknown prototype'}`);
         Object.defineProperty(proto, name, {
             value: fn, writable: true, enumerable: true, configurable: true,
         });
