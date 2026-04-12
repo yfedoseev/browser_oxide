@@ -468,27 +468,26 @@ impl Page {
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
 
         let mut current_url = url.to_string();
+        let mut current_method = "GET".to_string();
+        let mut current_body: Option<String> = None;
         let iterations = max_iterations.max(1);
         let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
 
         for iter in 0..iterations {
-            eprintln!("[navigate] iter={iter} url={current_url}");
+            eprintln!("[navigate] iter={iter} url={current_url} method={current_method}");
 
-            if debug_nav {
-                if let Ok(parsed) = url::Url::parse(&current_url) {
-                    let jar_cookies = client.cookies_for_url(&parsed).await.unwrap_or_default();
-                    if !jar_cookies.is_empty() {
-                        eprintln!("[navigate] pre-GET jar cookies: {jar_cookies}");
-                    }
-                }
-            }
-
-            // get_follow handles 302/307 redirect loops generically —
-            // this is what flips ozon.ru from INTR to PASS.
-            let resp = client
-                .get_follow(&current_url, 10)
-                .await
-                .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+            let resp = if current_method == "POST" {
+                client
+                    .post_bytes_follow(&current_url, current_body.as_deref().unwrap_or("").as_bytes(), &[], 10)
+                    .await
+                    .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+            } else {
+                client
+                    .get_follow(&current_url, 10)
+                    .await
+                    .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+            };
+            
             let html = resp.text();
             let resp_url = resp.url.clone();
 
@@ -501,12 +500,10 @@ impl Page {
             )
             .await?;
 
-            // Clear any synchronous pending navigation from script execution
-            // during build_page before we start the idle run.
+            // Clear any synchronous pending navigation
             page.event_loop().execute_script("globalThis.__pendingNavigation = null;").ok();
 
-            // Drain the event loop so setTimeout/Promise-based scripts can
-            // set __pendingNavigation if they want to re-navigate.
+            // Drain the event loop
             if let Err(e) = page
                 .event_loop()
                 .run_until_idle(Duration::from_secs(30))
@@ -515,29 +512,13 @@ impl Page {
                 eprintln!("[navigate] event loop error: {e}");
             }
 
-            if debug_nav {
-                let js_cookies = page
-                    .event_loop()
-                    .execute_script("String(document.cookie || '')")
-                    .unwrap_or_default();
-                if !js_cookies.is_empty() && js_cookies != "undefined" {
-                    eprintln!("[navigate] post-drain JS cookies: {js_cookies}");
-                }
-                if let Ok(parsed) = url::Url::parse(&resp_url) {
-                    let jar_cookies = client.cookies_for_url(&parsed).await.unwrap_or_default();
-                    if !jar_cookies.is_empty() {
-                        eprintln!("[navigate] post-drain jar cookies: {jar_cookies}");
-                    }
-                }
-            }
-
             // Did a script request a re-navigation?
             let pending_info = page
                 .event_loop()
                 .execute_script(
                     "(function(){\
                         const p = globalThis.__pendingNavigation;\
-                        return p ? JSON.stringify({url: p.url, kind: p.kind}) : '';\
+                        return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
                     })()",
                 )
                 .unwrap_or_default();
@@ -548,38 +529,28 @@ impl Page {
 
             let p: deno_core::serde_json::Value = deno_core::serde_json::from_str(&pending_info).unwrap_or_default();
             let pending_url = p["url"].as_str().unwrap_or_default();
+            let pending_method_val = p["method"].as_str().unwrap_or("GET").to_string();
+            let pending_body_val = p["body"].as_str().map(|s| s.to_string());
             let kind = p["kind"].as_str().unwrap_or("unknown");
 
             if pending_url.is_empty() {
                 return Ok(page);
             }
 
-            // Resolve relative pending URLs against the FINAL redirected URL of this iteration
+            // Resolve relative pending URLs
             let next_url = Self::resolve_url(&resp_url, &pending_url)
                 .ok_or_else(|| deno_core::error::AnyError::msg("Failed to resolve pending URL"))?;
-            eprintln!("[navigate] pending navigation (kind: {kind}) -> {next_url}");
+            eprintln!("[navigate] pending navigation (kind: {kind}) -> {next_url} [{pending_method_val}]");
 
-            // Check if this is the LAST iteration: if so, return this
-            // page instead of dropping it and re-fetching. We return
-            // the pre-navigation page because the alternative (re-
-            // fetching via `get_follow` without JS execution) is a
-            // strict regression.
             if iter + 1 == iterations {
-                eprintln!(
-                    "[navigate] hit max_iterations={iterations}, returning current page"
-                );
+                eprintln!("[navigate] hit max_iterations={iterations}, returning current page");
                 return Ok(page);
             }
 
-            // Not the last iteration: drop the current page's isolate
-            // BEFORE starting the next iter's build. V8 requires
-            // isolates to be dropped in reverse creation order, so we
-            // must release this one before the next `JsRuntime::new`
-            // creates a newer one — otherwise the next `Page` drop
-            // would panic with "OwnedIsolate instances must be dropped
-            // in the reverse order of creation".
             drop(page);
             current_url = next_url;
+            current_method = pending_method_val;
+            current_body = pending_body_val;
         }
 
         // Shouldn't be reachable (iterations >= 1 guaranteed), but fall
@@ -685,6 +656,10 @@ impl Page {
                     match client.get_follow_with_headers(&full_url, &hdrs, 5).await {
                         Ok(resp) if resp.ok() => {
                             let text = resp.text();
+                            if full_url.contains("qauth") || full_url.contains("ips.js") || full_url.contains("antibot") {
+                                let safe_name = full_url.replace("/", "_").replace(":", "_").replace("?", "_");
+                                let _ = std::fs::write(format!("oxide_dump/{}", safe_name), &text);
+                            }
                             if text.trim_start().starts_with("<!")
                                 || text.trim_start().starts_with("<html")
                             {
@@ -737,9 +712,11 @@ impl Page {
 
         // Set location
         let url_js = url.replace('\\', "\\\\").replace('\'', "\\'");
-        event_loop
-            .execute_script(&format!("location.href = '{}';", url_js))
-            .ok();
+        if let Err(e) = event_loop.execute_script(&format!("location.href = '{}';", url_js)) {
+            eprintln!("ERROR SETTING LOCATION: {}", e);
+        }
+        let loc = event_loop.execute_script("globalThis.location.href").unwrap_or_default();
+        eprintln!("LOCATION SET TO: {}", loc);
 
         // Install cookie-write instrumentation. Generic DevTools-style
         // debugging — lets us see what values scripts assign to
@@ -788,11 +765,42 @@ impl Page {
             });
             const _origFetch = globalThis.fetch;
             globalThis.fetch = async function(input, init) {
+                if (!window.__fetchLog) window.__fetchLog = [];
                 const entry = { method: 'GET', url: '', hasBody: false };
+                let args = Array.from(arguments);
                 try {
-                    entry.url = String(typeof input === 'string' ? input : (input && input.url) || '').substring(0, 200);
-                    entry.method = (init && init.method) || 'GET';
-                    entry.hasBody = !!(init && init.body);
+                    let urlStr = '';
+                    let isRequest = false;
+                    if (typeof args[0] === 'string') {
+                        urlStr = args[0];
+                    } else if (args[0] && typeof args[0].url === 'string') {
+                        urlStr = args[0].url;
+                        isRequest = true;
+                    } else if (args[0] instanceof URL) {
+                        urlStr = args[0].href;
+                    }
+                    
+                    if (urlStr && !urlStr.startsWith('http') && !urlStr.startsWith('data:') && !urlStr.startsWith('blob:')) {
+                        try {
+                            let base = globalThis.location ? globalThis.location.href : 'about:blank';
+                            if (base === 'about:blank' || base === 'javascript:;' || base === '') {
+                                try { base = globalThis.parent.location.href; } catch(e) {}
+                            }
+                            const old = urlStr;
+                            urlStr = new URL(urlStr, base).href;
+                            window.__scriptErrors.push('RESOLVED ' + old + ' with base ' + base + ' to ' + urlStr);
+                            if (isRequest) {
+                                args[0] = new Request(urlStr, args[0]);
+                            } else {
+                                args[0] = urlStr;
+                            }
+                        } catch(e) {
+                            window.__scriptErrors.push('fetch url resolve error: ' + e.message);
+                        }
+                    }
+                    entry.url = String(urlStr || '').substring(0, 200);
+                    entry.method = (init && init.method) || (isRequest && args[0].method) || 'GET';
+                    entry.hasBody = !!((init && init.body) || (isRequest && args[0].body));
                     // Capture request body for error reporter diagnosis.
                     if (init && init.body != null) {
                         try {
@@ -821,7 +829,7 @@ impl Page {
                 } catch {}
                 window.__fetchLog.push(entry);
                 try {
-                    const resp = await _origFetch.apply(this, arguments);
+                    const resp = await _origFetch.apply(this, args);
                     entry.status = resp.status;
                     try {
                         const respHdrs = {};
@@ -1024,22 +1032,19 @@ impl Page {
                     Err(e) => eprintln!("iframe srcdoc error: {e}"),
                 }
             } else if let Some(src) = &info.src {
-                if src.starts_with("http") || src.starts_with("//") {
-                    let full_src = if src.starts_with("//") {
-                        format!("https:{}", src)
-                    } else {
-                        src.clone()
-                    };
-                    match iframe::ChildIframe::from_url(
-                        info.node_id,
-                        &full_src,
-                        client,
-                        Some(profile),
-                    )
-                    .await
-                    {
-                        Ok(child) => children.push(child),
-                        Err(e) => eprintln!("iframe src error for {}: {e}", full_src),
+                if !src.is_empty() {
+                    if let Some(full_src) = Self::resolve_url(url, src) {
+                        match iframe::ChildIframe::from_url(
+                            info.node_id,
+                            &full_src,
+                            client,
+                            Some(profile),
+                        )
+                        .await
+                        {
+                            Ok(child) => children.push(child),
+                            Err(e) => eprintln!("iframe src error for {}: {e}", full_src),
+                        }
                     }
                 }
             }

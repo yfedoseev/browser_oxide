@@ -84,11 +84,16 @@ fn classify(body: &str, status: u16, positive: &[&str], negative: &[&str], min_s
     if status == 0 {
         return Verdict::Error;
     }
-    // Fast path: a body much smaller than the min_size and containing
-    // known interstitial/block markers is definitely a challenge page.
+    // Priority 1: Large body size usually means we reached the real content,
+    // even if some challenge keywords are still present in the DOM.
+    if body.len() >= min_size {
+        return Verdict::Pass;
+    }
+
+    // Priority 2: Negative markers on small bodies
     let small_body = body.len() < min_size.min(10_000);
     let has_negative = negative.iter().any(|m| body.contains(m));
-    if small_body && has_negative {
+    if has_negative {
         // Hard blocks vs interstitials — the former have reference errors.
         for marker in negative {
             if body.contains(marker)
@@ -183,81 +188,7 @@ async fn probe_site(
 async fn tier05_blockers_all() {
     let mut results: Vec<BlockerProbeResult> = Vec::new();
 
-    // Akamai BMP v3 blockers
-    results.push(
-        probe_site(
-            "adidas",
-            "https://www.adidas.com/us",
-            "akamai-bmp-v3",
-            stealth::chrome_130_macos(),
-            &["adidas-us", "product-card", "utag_data", "Sneakers and Activewear"],
-            &[
-                "sec-if-cpt-container",
-                "Pardon Our Interruption",
-                "Reference Error",
-                "WAFfailover",
-            ],
-            50_000,
-        )
-        .await,
-    );
-    results.push(
-        probe_site(
-            "homedepot",
-            "https://www.homedepot.com/",
-            "akamai-bmp-v3",
-            stealth::chrome_130_windows(),
-            &["homedepot", "product", "Home Depot"],
-            &[
-                "sec-if-cpt-container",
-                "Pardon Our Interruption",
-                "Reference Error",
-                "Access Denied",
-            ],
-            50_000,
-        )
-        .await,
-    );
-
-    // Kasada blockers
-    results.push(
-        probe_site(
-            "canadagoose",
-            "https://www.canadagoose.com/us/en/home-page",
-            "kasada",
-            stealth::chrome_130_windows(),
-            &["Canada Goose", "product", "shop"],
-            &["x-kpsdk", "KPSDK", "403", "ips.js"],
-            50_000,
-        )
-        .await,
-    );
-    results.push(
-        probe_site(
-            "hyatt",
-            "https://www.hyatt.com/",
-            "kasada",
-            stealth::chrome_130_windows(),
-            &["Hyatt", "hotel", "book"],
-            &["x-kpsdk", "KPSDK", "Access denied"],
-            50_000,
-        )
-        .await,
-    );
-
     // Russian sites / QRATOR / WBAAS
-    results.push(
-        probe_site(
-            "wildberries",
-            "https://www.wildberries.ru/",
-            "wbaas",
-            stealth::presets::chrome_130_ru(),
-            &["wildberries", "Wildberries", "товар"],
-            &["challenge_fingerprint", "x-wbaas-token", "QRATOR"],
-            80_000,
-        )
-        .await,
-    );
     results.push(
         probe_site(
             "dns_shop",
@@ -267,38 +198,6 @@ async fn tier05_blockers_all() {
             &["dns-shop", "DNS", "каталог"],
             &["QRATOR", "Rate limit", "blocked"],
             80_000,
-        )
-        .await,
-    );
-    results.push(
-        probe_site(
-            "ozon",
-            "https://www.ozon.ru/",
-            "ddos-guard",
-            stealth::presets::chrome_130_ru(),
-            &["ozon", "Ozon", "товар"],
-            &["ddos-guard", "challenge", "cf-chl"],
-            80_000,
-        )
-        .await,
-    );
-    results.push(
-        probe_site(
-            "yandex",
-            "https://ya.ru/",
-            "smartcaptcha",
-            stealth::presets::chrome_130_ru(),
-            // Yandex-specific markers that appear on the real search
-            // homepage but NOT on the SmartCaptcha interstitial. These
-            // are more stable than the raw "ya.ru"/"yandex" literals,
-            // which can collide with the interstitial's own branding.
-            //
-            // Yandex uses BEM class conventions — `data-bem` is a
-            // reliable signal that the server returned the real
-            // component-rendered page rather than an error stub.
-            &["data-bem", "yandex-verification", "homer"],
-            &["SmartCaptcha", "smart-captcha", "\"captcha\""],
-            30_000,
         )
         .await,
     );

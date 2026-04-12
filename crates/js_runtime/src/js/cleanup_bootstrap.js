@@ -7,11 +7,6 @@
         '_customElementsRegistry',
         '__bootstrap',
         '__boxide',
-        '__cookieWrites',
-        '__errors',
-        '__fetchLog',
-        '__onNodeInserted',
-        '__scriptErrors',
         '__syncCookiesFromNet',
         '__documentReadyState',
         '__pendingNavigation'

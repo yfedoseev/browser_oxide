@@ -30,20 +30,29 @@
     // ================================================================
     // Prototype-install helpers — kNoScriptId-safe layout
     // ================================================================
-    const _defProtoGetter = (proto, name, getter) => {
+    const _defProtoGetter = (proto, name, getter, setter) => {
+        const instrumentedGetter = function() {
+            try { Deno.core.print(`[INSTRUMENT] get ${proto[Symbol.toStringTag]}.${name}\n`); } catch(e) {}
+            return getter.call(this);
+        };
         Object.defineProperty(proto, name, {
-            get: getter,
-            set: undefined,
+            get: instrumentedGetter,
+            set: setter,
             enumerable: true,
             configurable: true,
         });
-        _maskFunction(getter, `get ${name}`);
+        _maskFunction(instrumentedGetter, `get ${name}`);
+        if (setter) _maskFunction(setter, `set ${name}`);
     };
     const _defProtoMethod = (proto, name, fn) => {
+        const instrumentedFn = function(...args) {
+            try { Deno.core.print(`[INSTRUMENT] call ${proto[Symbol.toStringTag]}.${name}\n`); } catch(e) {}
+            return fn.apply(this, args);
+        };
         Object.defineProperty(proto, name, {
-            value: fn, writable: true, enumerable: true, configurable: true,
+            value: instrumentedFn, writable: true, enumerable: true, configurable: true,
         });
-        _maskFunction(fn, name);
+        _maskFunction(instrumentedFn, name);
     };
 
     // ================================================================
@@ -388,6 +397,7 @@
     }
 
     _defLoc('href', () => _locationData.href, (v) => {
+        try { Deno.core.print('[BOOTSTRAP] SETTING LOCATION HREF TO ' + v + '\n'); } catch(e) {}
         _parseLocationUrl(v);
         globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
     });
@@ -429,9 +439,21 @@
 
     _maskAsNative(_LocProto, 'assign', 'replace', 'reload', 'toString');
 
-    const _locationInstance = globalThis.location || Object.create(_LocProto);
-    Object.setPrototypeOf(_locationInstance, _LocProto);
-    globalThis.location = _locationInstance;
+    const _locationInstance = Object.create(_LocProto);
+    try {
+        // Delete Deno's location getter if it exists
+        delete globalThis.location;
+    } catch(e) {}
+    try {
+        Object.defineProperty(globalThis, 'location', {
+            value: _locationInstance,
+            writable: true,
+            enumerable: true,
+            configurable: true
+        });
+    } catch(e) {
+        globalThis.location = _locationInstance;
+    }
 
     // Frame-tree globals: top/parent/frames/self all point to this window
     // (we only emulate a single browsing context). Real browsers: when a page
@@ -1833,7 +1855,25 @@
         static DONE = 4;
         open(method, url, async = true, user, password) {
             this._method = String(method || "GET").toUpperCase();
-            this._url = String(url || "");
+            let urlStr = String(url || "");
+            if (urlStr && !urlStr.startsWith('http') && !urlStr.startsWith('data:') && !urlStr.startsWith('blob:')) {
+                try {
+                    let base = globalThis.location ? globalThis.location.href : 'about:blank';
+                    if (base === 'about:blank' || base === 'javascript:;' || base === '') {
+                        try { base = globalThis.parent.location.href; } catch(e) {}
+                    }
+                    const old = urlStr;
+                    urlStr = new URL(urlStr, base).href;
+                    if (globalThis.__scriptErrors) {
+                        globalThis.__scriptErrors.push('XHR RESOLVED ' + old + ' with base ' + base + ' to ' + urlStr);
+                    }
+                } catch(e) {
+                    if (globalThis.__scriptErrors) {
+                        globalThis.__scriptErrors.push('XHR RESOLVE ERROR ' + e.message);
+                    }
+                }
+            }
+            this._url = urlStr;
             this._async = async !== false;
             this._headers = {};
             this._respHeaders = {};

@@ -69,6 +69,16 @@
                     const code = ops.op_net_fetch_sync(fullUrl);
                     if (code) {
                         console.log(`[DOM] sync executing script (${code.length} bytes): ${fullUrl}`);
+                        if (fullUrl.includes('qauth')) {
+                            console.log(`[INSTRUMENT] QRATOR active - monitoring Web APIs...`);
+                            // Minimal temporary instrumentation
+                            const _origGetComputedStyle = globalThis.getComputedStyle;
+                            globalThis.getComputedStyle = function(el) {
+                                const style = _origGetComputedStyle.apply(this, arguments);
+                                console.log(`[INSTRUMENT] QRATOR getComputedStyle on ${el?.tagName || 'unknown'}`);
+                                return style;
+                            };
+                        }
                         try {
                             (0, eval)(code);
                             console.log(`[DOM] sync execution SUCCESS: ${fullUrl}`);
@@ -713,7 +723,48 @@
     });
     HTMLImageElement.prototype.decode = function() { return Promise.resolve(); };
     class HTMLInputElement extends HTMLElement {}
-    class HTMLFormElement extends HTMLElement {}
+    class HTMLFormElement extends HTMLElement {
+        submit() {
+            const action = this.getAttribute('action') || (globalThis.location ? globalThis.location.href : '');
+            const method = (this.getAttribute('method') || 'GET').toUpperCase();
+            
+            // Serialize form data
+            const params = new URLSearchParams();
+            const inputs = this.querySelectorAll('input, textarea, select');
+            for (let i = 0; i < inputs.length; i++) {
+                const el = inputs[i];
+                const name = el.getAttribute('name');
+                if (!name || el.disabled) continue;
+                
+                const type = (el.getAttribute('type') || '').toLowerCase();
+                if (type === 'submit' || type === 'button' || type === 'image') continue;
+                if ((type === 'checkbox' || type === 'radio') && !el.checked) continue;
+                
+                params.append(name, el.value || '');
+            }
+
+            let finalUrl = action;
+            let finalBody = null;
+            
+            if (method === 'GET') {
+                const url = new URL(action, globalThis.location ? globalThis.location.href : 'about:blank');
+                params.forEach((v, k) => url.searchParams.append(k, v));
+                finalUrl = url.href;
+            } else {
+                finalBody = params.toString();
+            }
+
+            globalThis.__pendingNavigation = {
+                url: finalUrl,
+                method: method,
+                body: finalBody,
+                kind: 'assign'
+            };
+        }
+        requestSubmit(submitter) {
+            this.submit();
+        }
+    }
     class HTMLButtonElement extends HTMLElement {}
     class HTMLSelectElement extends HTMLElement {}
     class HTMLTextAreaElement extends HTMLElement {}

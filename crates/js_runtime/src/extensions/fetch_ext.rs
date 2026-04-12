@@ -196,6 +196,9 @@ pub fn op_net_fetch_sync(#[string] url: String) -> String {
     }).join().unwrap_or_default();
 
     eprintln!("[op_net_fetch_sync] fetched {} bytes from {}", result.len(), url);
+    if url.contains("qauth") {
+        let _ = std::fs::write("oxide_dump/qauth.js", &result);
+    }
     result
 }
 

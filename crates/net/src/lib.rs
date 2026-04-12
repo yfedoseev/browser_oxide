@@ -29,6 +29,12 @@ use stealth::StealthProfile;
 use tokio::sync::Mutex;
 use url::Url;
 
+#[derive(Debug, Clone)]
+pub enum Method {
+    Get,
+    Post(Vec<u8>),
+}
+
 /// HTTP response.
 #[derive(Debug, Clone)]
 pub struct Response {

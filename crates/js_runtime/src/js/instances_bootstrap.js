@@ -6,9 +6,6 @@
     if (!globalThis.navigator) {
         globalThis.navigator = Object.create(globalThis.Navigator.prototype);
     }
-    if (!globalThis.location) {
-        globalThis.location = Object.create(globalThis.Location.prototype);
-    }
     if (!globalThis.history) {
         globalThis.history = Object.create(globalThis.History.prototype);
     }
