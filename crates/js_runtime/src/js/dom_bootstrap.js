@@ -69,16 +69,6 @@
                     const code = ops.op_net_fetch_sync(fullUrl);
                     if (code) {
                         console.log(`[DOM] sync executing script (${code.length} bytes): ${fullUrl}`);
-                        if (fullUrl.includes('qauth')) {
-                            console.log(`[INSTRUMENT] QRATOR active - monitoring Web APIs...`);
-                            // Minimal temporary instrumentation
-                            const _origGetComputedStyle = globalThis.getComputedStyle;
-                            globalThis.getComputedStyle = function(el) {
-                                const style = _origGetComputedStyle.apply(this, arguments);
-                                console.log(`[INSTRUMENT] QRATOR getComputedStyle on ${el?.tagName || 'unknown'}`);
-                                return style;
-                            };
-                        }
                         try {
                             (0, eval)(code);
                             console.log(`[DOM] sync execution SUCCESS: ${fullUrl}`);

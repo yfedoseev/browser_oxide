@@ -412,6 +412,7 @@ impl Page {
             .await
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         let html = resp.text();
+        let _ = std::fs::write("oxide_dump/page_html.html", &html);
         let resp_url = resp.url.clone();
         Self::with_profile(&html, &resp_url, profile).await
     }
@@ -490,7 +491,12 @@ impl Page {
             
             let html = resp.text();
             let resp_url = resp.url.clone();
-
+            if let Ok(parsed) = url::Url::parse(&resp_url) {
+                let jar_cookies = client.cookies_for_url(&parsed).await.unwrap_or_default();
+                if debug_nav {
+                    eprintln!("[navigate] jar cookies: {}", jar_cookies);
+                }
+            }
             let mut page = Self::build_page_with_scripts_and_init(
                 &html,
                 &resp_url,
@@ -717,6 +723,9 @@ impl Page {
         }
         let loc = event_loop.execute_script("globalThis.location.href").unwrap_or_default();
         eprintln!("LOCATION SET TO: {}", loc);
+        
+        // Synchronize cookies from the net client so document.cookie is accurate
+        let _ = event_loop.execute_and_run("globalThis.__syncCookiesFromNet && globalThis.__syncCookiesFromNet();", Duration::from_secs(1)).await;
 
         // Install cookie-write instrumentation. Generic DevTools-style
         // debugging — lets us see what values scripts assign to
@@ -734,7 +743,12 @@ impl Page {
                 Object.defineProperty(proto, 'cookie', {
                     configurable: true,
                     enumerable: desc.enumerable,
-                    get: function() { return origGet ? origGet.call(this) : ''; },
+                    get: function() { 
+                        if (globalThis.__scriptErrors) {
+                            globalThis.__scriptErrors.push('[INSTRUMENT] GET document.cookie');
+                        }
+                        return origGet ? origGet.call(this) : ''; 
+                    },
                     set: function(v) {
                         try {
                             if (window.__cookieWrites.length < 100) {
@@ -786,16 +800,16 @@ impl Page {
                             if (base === 'about:blank' || base === 'javascript:;' || base === '') {
                                 try { base = globalThis.parent.location.href; } catch(e) {}
                             }
-                            const old = urlStr;
                             urlStr = new URL(urlStr, base).href;
-                            window.__scriptErrors.push('RESOLVED ' + old + ' with base ' + base + ' to ' + urlStr);
                             if (isRequest) {
                                 args[0] = new Request(urlStr, args[0]);
                             } else {
                                 args[0] = urlStr;
                             }
                         } catch(e) {
-                            window.__scriptErrors.push('fetch url resolve error: ' + e.message);
+                            if (globalThis.__scriptErrors) {
+                                globalThis.__scriptErrors.push('fetch url resolve error: ' + e.message);
+                            }
                         }
                     }
                     entry.url = String(urlStr || '').substring(0, 200);

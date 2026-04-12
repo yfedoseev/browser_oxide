@@ -31,28 +31,20 @@
     // Prototype-install helpers — kNoScriptId-safe layout
     // ================================================================
     const _defProtoGetter = (proto, name, getter, setter) => {
-        const instrumentedGetter = function() {
-            try { Deno.core.print(`[INSTRUMENT] get ${proto[Symbol.toStringTag]}.${name}\n`); } catch(e) {}
-            return getter.call(this);
-        };
         Object.defineProperty(proto, name, {
-            get: instrumentedGetter,
+            get: getter,
             set: setter,
             enumerable: true,
             configurable: true,
         });
-        _maskFunction(instrumentedGetter, `get ${name}`);
+        _maskFunction(getter, `get ${name}`);
         if (setter) _maskFunction(setter, `set ${name}`);
     };
     const _defProtoMethod = (proto, name, fn) => {
-        const instrumentedFn = function(...args) {
-            try { Deno.core.print(`[INSTRUMENT] call ${proto[Symbol.toStringTag]}.${name}\n`); } catch(e) {}
-            return fn.apply(this, args);
-        };
         Object.defineProperty(proto, name, {
-            value: instrumentedFn, writable: true, enumerable: true, configurable: true,
+            value: fn, writable: true, enumerable: true, configurable: true,
         });
-        _maskFunction(instrumentedFn, name);
+        _maskFunction(fn, name);
     };
 
     // ================================================================
