@@ -6,13 +6,12 @@
         if (!fn) return;
         try {
             Object.defineProperty(fn, 'name', { value: name, configurable: true });
-            Object.defineProperty(fn, 'toString', {
-                value: function toString() { return `function ${name}() { [native code] }`; },
-                configurable: true,
-            });
-            // Recursively mask the toString itself to pass deep probes
-            Object.defineProperty(fn.toString, 'name', { value: 'toString', configurable: true });
-            Object.defineProperty(fn.toString, 'toString', {
+            const ts = function toString() { return `function ${name}() { [native code] }`; };
+            Object.defineProperty(fn, 'toString', { value: ts, configurable: true });
+            
+            // Recursively mask the toString itself
+            Object.defineProperty(ts, 'name', { value: 'toString', configurable: true });
+            Object.defineProperty(ts, 'toString', {
                 value: function toString() { return 'function toString() { [native code] }'; },
                 configurable: true,
             });
@@ -154,7 +153,6 @@
     Object.defineProperty(_MimeTypeArrayProto, 'length', { get: () => 0, enumerable: true, configurable: true });
     _defProtoMethod(_MimeTypeArrayProto, 'item', (i) => null);
     _defProtoMethod(_MimeTypeArrayProto, 'namedItem', (n) => null);
-    _defProtoMethod(_PluginArrayProto, 'refresh', () => {});
     
     // Support numeric indices on the instance (Chrome behavior)
     const _navPlugins = Object.create(_PluginArrayProto);
@@ -162,12 +160,6 @@
         Object.defineProperty(_navPlugins, i, { value: p, enumerable: true, configurable: true });
     });
 
-    // 3. Setup MimeTypeArray
-    const _MimeTypeArrayProto = MimeTypeArray.prototype;
-    Object.defineProperty(_MimeTypeArrayProto, Symbol.toStringTag, { value: "MimeTypeArray", configurable: true });
-    Object.defineProperty(_MimeTypeArrayProto, 'length', { get: () => 0, enumerable: true, configurable: true });
-    _defProtoMethod(_MimeTypeArrayProto, 'item', () => null);
-    _defProtoMethod(_MimeTypeArrayProto, 'namedItem', () => null);
     const _navMimeTypes = Object.create(_MimeTypeArrayProto);
 
     let MediaDevices = globalThis.MediaDevices || class MediaDevices {};
