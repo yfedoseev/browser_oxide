@@ -100,6 +100,19 @@ See `09_session_2026_04_11_state.md` for the breakthrough details.
 | 55 | **Fix header order: `upgrade-insecure-requests` first** | ☑ matches Chrome 146 capture |
 | 56 | **Fix `sec-ch-ua`: Not-A.Brand in middle, v=24** | ☑ matches Chrome 146 capture |
 
+---
+
+## Sprint 3.6 — Universal Engine Stability (jQuery + Prototypes) — ☑ DONE
+
+Final bit-accuracy polish to ensure standard library compatibility and stealth.
+
+| # | Task | Status |
+|---|---|---|
+| — | **Synchronous script execution** (`document.write` + initial parse) | ☑ |
+| — | **Bit-accurate prototypes** (Navigator, Location, Plugin) | ☑ |
+| — | **Stealth: Proxy removal + Native masking** | ☑ |
+| — | **PluginArray/MimeTypeArray branding** | ☑ |
+
 **Akamai BMP v3 result (stable across 2 runs):**
 - adidas: baseline=PASS 1,242,865 bytes (real homepage)
 - homedepot: baseline=PASS 958,440 bytes + solver=PASS 974,591 bytes
