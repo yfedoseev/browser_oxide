@@ -141,9 +141,9 @@ are each different engine-specific challenges. None are wire-level.
 | # | Task | Target site | Est. | Status |
 |---|---|---|---|---|
 | 78 | POST 307/308 redirect follow for ozon `/abt/result` | ozon | 1h | ☑ DONE |
-| 79 | h3_request.rs hardcoded headers — plumb StealthProfile | alt-svc sites | 1-2h | ☐ |
-| 83 | Kasada: init-script injection of ips.js-compatible fetch patches so tokens carry across iterations | canadagoose, hyatt | 4-8h | ☐ |
-| 84 | WBAAS: diagnose `x_wbaas_token` cookie propagation from JS to HttpClient jar | wildberries | 2-4h | ☐ |
+| 79 | h3_request.rs hardcoded headers — plumb StealthProfile | alt-svc sites | 1-2h | ☑ DONE (Plumbed via chrome_headers(profile)) |
+| 83 | Kasada: init-script injection of ips.js-compatible fetch patches so tokens carry across iterations | canadagoose, hyatt | 4-8h | ☑ DONE (Solved via Generic Storage Persistence) |
+| 84 | WBAAS: diagnose `x_wbaas_token` cookie propagation from JS to HttpClient jar | wildberries | 2-4h | ☑ DONE (Fixed op_cookie_set URL resolution bug) |
 | 85 | QRATOR: instrument inline script to find missing capability branch | dns_shop | 4-8h | ☑ DONE (Captured payloads, fixed btoa/atob spec tells) |
 | 86 | Yandex: diagnose 0-byte baseline (Host case? SNI quirk? TCP options?) | ya.ru | 2-4h | ☑ DONE (Generic navigation loop fixed this) |
 | 87 | DDoS-Guard: find the sensor script ozon wants + classifier fix | ozon | 4-8h | ☑ DONE (Classifier fixed via size heuristic) |
