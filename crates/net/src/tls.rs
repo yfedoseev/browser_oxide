@@ -151,7 +151,14 @@ pub fn configure_connection(
     // config.set_alps_use_new_codepoint(true);
 
     // ECH GREASE (Encrypted Client Hello)
-    config.set_enable_ech_grease(false);
+    config.set_enable_ech_grease(true);
+
+    // ALPS (Application-Layer Protocol Settings) for HTTP/2
+    // This is a strong modern Chrome signal.
+    config
+        .add_application_settings(b"h2")
+        .map_err(|e| NetError::Tls(e.to_string()))?;
+    config.set_alps_use_new_codepoint(true);
 
     // SNI: strip brackets from IPv6 addresses
     let sni_domain = domain.trim_start_matches('[').trim_end_matches(']');
