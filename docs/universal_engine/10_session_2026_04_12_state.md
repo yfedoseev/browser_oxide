@@ -40,7 +40,7 @@ Discovered that QRATOR reads its own configuration from the `<script>` tag attri
 | `Intl` Locale Sync | **FIXED** | Prevents "US Locale but RU Timezone" red flag. |
 | Canvas Pixel Jitter | **ENABLED** | Breaks deterministic pixel hashing in Rust. |
 | Exotic `document.all` | **ENABLED** | Pass truthy-but-hidden collection probes. |
-| **Unified Masking** | **FIXED** | Synced Window/Iframe/Worker environments (Task 83). |
+| **Unified Masking** | **FIXED** | Synced Window/Iframe/Worker environments. |
 | **HTTP/3 POST** | **FIXED** | Protocol-level consistency for solver reports. |
 
 ---
