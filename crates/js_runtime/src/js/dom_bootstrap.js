@@ -74,7 +74,7 @@
             if (sync) {
                 console.log(`[DOM] sync fetching script: ${fullUrl}`);
                 try {
-                    const code = ops.op_net_fetch_sync(fullUrl);
+                    const code = ops.op_net_fetch_sync(fullUrl, globalThis.location?.href || "");
                     if (code) {
                         console.log(`[DOM] sync executing script (${code.length} bytes): ${fullUrl}`);
                         try {

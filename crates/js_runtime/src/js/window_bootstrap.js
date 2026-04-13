@@ -2,30 +2,7 @@
     const ops = Deno.core.ops;
     const _boxide = globalThis.__boxide;
 
-    // --- Missing API Instrumentation (v2) ---
-    const _globalProxy = new Proxy(globalThis, {
-        get(target, prop) {
-            const val = target[prop];
-            if (val === undefined && typeof prop === 'string' && !prop.startsWith('__') && !prop.startsWith('Symbol')) {
-                if (!globalThis.__missingApis) globalThis.__missingApis = [];
-                if (!globalThis.__missingApis.some(e => e.p === prop)) {
-                    let stack = "no stack";
-                    try { throw new Error(); } catch(e) { stack = e.stack; }
-                    globalThis.__missingApis.push({ p: prop, s: stack.split('\n')[2] });
-                }
-            }
-            return val;
-        }
-    });
-
     if (globalThis.WebAssembly) {
-        const _origValidate = WebAssembly.validate;
-        WebAssembly.validate = function(bytes) {
-            if (globalThis.__scriptErrors) {
-                globalThis.__scriptErrors.push('WASM VALIDATE: ' + (bytes ? bytes.byteLength : 0) + ' bytes');
-            }
-            return _origValidate.call(WebAssembly, bytes);
-        };
         // Streaming stubs
         WebAssembly.instantiateStreaming = async function(source, importObject) {
             const resp = await source;
@@ -617,11 +594,6 @@
         loadTimes: _chromeLoadTimes,
     };
 
-    // --- Undefined Hunter ---
-    _defProtoMethod(Document.prototype, 'browsingTopics', function browsingTopics() {
-        return Promise.resolve([]);
-    });
-
     // --- Document visibility/hidden stubs ---
     Object.defineProperty(Document.prototype, 'visibilityState', { get() { return 'visible'; }, enumerable: true, configurable: true });
     Object.defineProperty(Document.prototype, 'hidden', { get() { return false; }, enumerable: true, configurable: true });
@@ -704,17 +676,7 @@
     Object.defineProperty(Document.prototype, 'documentMode', { value: undefined, enumerable: false, configurable: true });
 
     const _hunt = (obj, name) => {
-        return new Proxy(obj, {
-            get(target, prop) {
-                const val = target[prop];
-                if (val === undefined && typeof prop === 'string' && !prop.startsWith('__')) {
-                    if (globalThis.__scriptErrors) {
-                        globalThis.__scriptErrors.push('UNDEFINED_HUNTER: ' + name + '.' + prop);
-                    }
-                }
-                return val;
-            }
-        });
+        return obj;
     };
     globalThis.navigator = _hunt(globalThis.navigator, 'navigator');
     globalThis.document = _hunt(globalThis.document, 'document');
@@ -1921,18 +1883,6 @@
         };
     }
     const _origStringify = JSON.stringify;
-    JSON.stringify = function(val, replacer, space) {
-        if (val && typeof val === 'object' && !Array.isArray(val)) {
-            if (globalThis.__scriptErrors) {
-                const s = _origStringify(val);
-                if (s.includes('webdriver') || s.includes('userAgent') || s.length > 50) {
-                    globalThis.__scriptErrors.push('JSON_STR: ' + s.substring(0, 1000));
-                }
-            }
-        }
-        return _origStringify(val, replacer, space);
-    };
-
     if (!globalThis.btoa) {
         globalThis.btoa = function btoa(s) {
             if (arguments.length === 0) {
@@ -1942,17 +1892,6 @@
             for (let i = 0; i < str.length; i++) {
                 if (str.charCodeAt(i) > 255) {
                     throw new DOMException("Failed to execute 'btoa' on 'Window': The string to be encoded contains characters outside of the Latin1 range.", "InvalidCharacterError");
-                }
-            }
-            
-            if (globalThis.__scriptErrors) {
-                if (str === 'undefined') {
-                    let stack = "no stack";
-                    try { throw new Error(); } catch(e) { stack = e.stack; }
-                    globalThis.__scriptErrors.push('BTOA_UNDEFINED_STACK: ' + stack.split('\n').slice(0, 5).join(' | '));
-                } else {
-                    const preview = str.length > 500 ? str.substring(0, 500) + '...' : str;
-                    globalThis.__scriptErrors.push('BTOA (' + str.length + '): ' + preview);
                 }
             }
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -2177,13 +2116,7 @@
                     }
                     const old = urlStr;
                     urlStr = new URL(urlStr, base).href;
-                    if (globalThis.__scriptErrors) {
-                        globalThis.__scriptErrors.push('XHR OPEN ' + this._method + ' ' + urlStr);
-                    }
                 } catch(e) {
-                    if (globalThis.__scriptErrors) {
-                        globalThis.__scriptErrors.push('XHR RESOLVE ERROR ' + e.message);
-                    }
                 }
             }
             this._url = urlStr;
@@ -2209,10 +2142,6 @@
         overrideMimeType(mime) { this._overrideMime = String(mime); }
         send(body) {
             const xhr = this;
-            if (globalThis.__scriptErrors) {
-                const bodyPreview = body ? (typeof body === 'string' ? body : '[complex body]') : 'empty';
-                globalThis.__scriptErrors.push('XHR SEND ' + xhr._url + ' BODY: ' + bodyPreview.substring(0, 500));
-            }
             if (xhr._aborted) return;
             const fireEvent = (type) => {
                 try {

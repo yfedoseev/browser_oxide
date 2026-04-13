@@ -160,27 +160,30 @@ pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
 /// is required.
 #[op2]
 #[string]
-pub fn op_net_fetch_sync(#[string] url: String) -> String {
+pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> String {
     eprintln!("[op_net_fetch_sync] fetching {}", url);
     
     // 1. Get a client instance
     let client = if let Some(c) = FETCH_CLIENT.get() {
         c.clone()
     } else {
-        // Fallback: create a temporary client with default profile
         let profile = stealth::presets::chrome_130_ru();
-        match net::HttpClient::new(&profile) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[op_net_fetch_sync] FAILED to create client: {}", e);
-                return String::new();
-            }
-        }
+        net::HttpClient::new(&profile).expect("failed to create sync client")
     };
 
-    // Use a temporary thread and runtime to perform the blocking fetch.
-    // This is safe because it's only used for synchronous script fetching
-    // which MUST block the V8 thread anyway.
+    // 2. Build browser-native headers for a script fetch
+    let mut extra_headers = vec![
+        ("referer".to_string(), referer.clone()),
+        ("sec-fetch-dest".to_string(), "script".to_string()),
+        ("sec-fetch-mode".to_string(), "no-cors".to_string()),
+        ("sec-fetch-site".to_string(), "same-origin".to_string()),
+    ];
+    if let Ok(parsed) = Url::parse(&referer) {
+        if let Some(origin) = parsed.origin().ascii_serialization().into() {
+            extra_headers.push(("origin".to_string(), origin));
+        }
+    }
+
     let url_clone = url.clone();
     let result = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -188,7 +191,7 @@ pub fn op_net_fetch_sync(#[string] url: String) -> String {
             .build()
             .unwrap();
         rt.block_on(async move {
-            match tokio::time::timeout(std::time::Duration::from_secs(10), client.get(&url_clone)).await {
+            match tokio::time::timeout(std::time::Duration::from_secs(10), client.get_with_headers(&url_clone, &extra_headers)).await {
                 Ok(Ok(resp)) => resp.text(),
                 Ok(Err(e)) => {
                     eprintln!("[op_net_fetch_sync] FAILED fetch {}: {}", url_clone, e);
