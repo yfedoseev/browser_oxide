@@ -1,6 +1,44 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
-    
+    const _boxide = globalThis.__boxide;
+
+    // --- Missing API Instrumentation (v2) ---
+    const _globalProxy = new Proxy(globalThis, {
+        get(target, prop) {
+            const val = target[prop];
+            if (val === undefined && typeof prop === 'string' && !prop.startsWith('__') && !prop.startsWith('Symbol')) {
+                if (!globalThis.__missingApis) globalThis.__missingApis = [];
+                if (!globalThis.__missingApis.some(e => e.p === prop)) {
+                    let stack = "no stack";
+                    try { throw new Error(); } catch(e) { stack = e.stack; }
+                    globalThis.__missingApis.push({ p: prop, s: stack.split('\n')[2] });
+                }
+            }
+            return val;
+        }
+    });
+
+    if (globalThis.WebAssembly) {
+        const _origValidate = WebAssembly.validate;
+        WebAssembly.validate = function(bytes) {
+            if (globalThis.__scriptErrors) {
+                globalThis.__scriptErrors.push('WASM VALIDATE: ' + (bytes ? bytes.byteLength : 0) + ' bytes');
+            }
+            return _origValidate.call(WebAssembly, bytes);
+        };
+        // Streaming stubs
+        WebAssembly.instantiateStreaming = async function(source, importObject) {
+            const resp = await source;
+            const bytes = await resp.arrayBuffer();
+            return WebAssembly.instantiate(bytes, importObject);
+        };
+        WebAssembly.compileStreaming = async function(source) {
+            const resp = await source;
+            const bytes = await resp.arrayBuffer();
+            return WebAssembly.compile(bytes);
+        };
+    }
+
     // Masking helpers are provided by stealth_bootstrap.js
     const _maskFunction = globalThis._maskFunction;
     const _maskAsNative = globalThis._maskAsNative;
@@ -59,11 +97,14 @@
     let NetworkInformation = globalThis.NetworkInformation || class NetworkInformation {};
     const _navConnection = Object.create(NetworkInformation.prototype);
     Object.defineProperty(_navConnection, 'effectiveType', { get: () => _p("connection_effective_type", "4g"), enumerable: true });
-    Object.defineProperty(_navConnection, 'rtt', { get: () => _pInt("connection_rtt", 50), enumerable: true });
-    Object.defineProperty(_navConnection, 'downlink', { get: () => _pFloat("connection_downlink", 10), enumerable: true });
+    Object.defineProperty(_navConnection, 'rtt', { get: () => Math.round(_pInt("connection_rtt", 50) / 25) * 25, enumerable: true });
+    Object.defineProperty(_navConnection, 'downlink', { get: () => Math.round(_pFloat("connection_downlink", 10) * 40) / 40, enumerable: true });
     Object.defineProperty(_navConnection, 'saveData', { get: () => false, enumerable: true });
-    Object.defineProperty(_navConnection, 'type', { get: () => 'wifi', enumerable: true });
     Object.defineProperty(_navConnection, 'downlinkMax', { get: () => Infinity, enumerable: true });
+    _navConnection.addEventListener = function addEventListener() {};
+    _navConnection.removeEventListener = function removeEventListener() {};
+    _navConnection.dispatchEvent = function dispatchEvent() { return true; };
+    _navConnection.onchange = null;
 
     let PluginArray = globalThis.PluginArray || class PluginArray {};
     let MimeTypeArray = globalThis.MimeTypeArray || class MimeTypeArray {};
@@ -564,15 +605,121 @@
             PlatformNaclArch: {ARM:"arm",MIPS:"mips",MIPS64:"mips64",X86_32:"x86-32",X86_64:"x86-64"},
             RequestUpdateCheckStatus: {NO_UPDATE:"no_update",THROTTLED:"throttled",UPDATE_AVAILABLE:"update_available"},
             OnRestartRequiredReason: {APP_UPDATE:"app_update",OS_UPDATE:"os_update",PERIODIC:"periodic"},
-            id: undefined,
-            onConnect: null,
-            onMessage: null,
+            id: "kjmdfpjcpgidgjglkaonfhgmjjmghmfe", // Standard Chrome Web Store ID format
+            onConnect: { addListener() {}, removeListener() {}, hasListener() { return false; } },
+            onMessage: { addListener() {}, removeListener() {}, hasListener() { return false; } },
             connect() {},
             sendMessage() {},
+            getURL(s) { return "chrome-extension://kjmdfpjcpgidgjglkaonfhgmjjmghmfe/" + s; },
+            getManifest() { return { name: "Chrome", version: "1.0", manifest_version: 2 }; },
         },
         csi: _chromeCsi,
         loadTimes: _chromeLoadTimes,
     };
+
+    // --- Undefined Hunter ---
+    _defProtoMethod(Document.prototype, 'browsingTopics', function browsingTopics() {
+        return Promise.resolve([]);
+    });
+
+    // --- Document visibility/hidden stubs ---
+    Object.defineProperty(Document.prototype, 'visibilityState', { get() { return 'visible'; }, enumerable: true, configurable: true });
+    Object.defineProperty(Document.prototype, 'hidden', { get() { return false; }, enumerable: true, configurable: true });
+    Object.defineProperty(Document.prototype, 'webkitVisibilityState', { get() { return 'visible'; }, enumerable: true, configurable: true });
+    Object.defineProperty(Document.prototype, 'webkitHidden', { get() { return false; }, enumerable: true, configurable: true });
+
+    if (globalThis.navigator) {
+        // Match Chrome's exact descriptor for webdriver: false, non-enumerable
+        Object.defineProperty(_NavProto, 'webdriver', {
+            get: () => false,
+            enumerable: false,
+            configurable: true
+        });
+        _defNav('onLine', () => true);
+        _defNav('cookieEnabled', () => true);
+        _defNav('vendor', () => 'Google Inc.');
+        _defNav('productSub', () => '20030107');
+        _defNav('language', () => _p("language", "ru-RU"));
+        _defNav('languages', () => _pJson("languages", ["ru-RU", "ru", "en-US", "en"]));
+        _defNav('pdfViewerEnabled', () => true);
+        _defNav('deviceMemory', () => _pInt("device_memory", 8));
+        _defNav('hardwareConcurrency', () => _pInt("hardware_concurrency", 8));
+        _defNav('doNotTrack', () => null);
+
+        // Realistic Plugins and MimeTypes
+        const _pluginsData = [
+            { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+            { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+            { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+            { name: "Microsoft Edge PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+            { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+        ];
+        const _mimesData = [
+            { type: "application/pdf", suffixes: "pdf", description: "Portable Document Format", __pluginName: "PDF Viewer" },
+            { type: "text/pdf", suffixes: "pdf", description: "Portable Document Format", __pluginName: "PDF Viewer" }
+        ];
+        
+        const _navPlugins = _pluginsData.map(p => {
+            const obj = Object.create(globalThis.Plugin?.prototype || Object.prototype);
+            Object.defineProperty(obj, 'name', { value: p.name, enumerable: true });
+            Object.defineProperty(obj, 'filename', { value: p.filename, enumerable: true });
+            Object.defineProperty(obj, 'description', { value: p.description, enumerable: true });
+            return obj;
+        });
+        const _navMimeTypes = _mimesData.map(m => {
+            const obj = Object.create(globalThis.MimeType?.prototype || Object.prototype);
+            Object.defineProperty(obj, 'type', { value: m.type, enumerable: true });
+            Object.defineProperty(obj, 'suffixes', { value: m.suffixes, enumerable: true });
+            Object.defineProperty(obj, 'description', { value: m.description, enumerable: true });
+            const plugin = _navPlugins.find(p => p.name === m.__pluginName);
+            Object.defineProperty(obj, 'enabledPlugin', { get: () => plugin, enumerable: true });
+            return obj;
+        });
+
+        _navPlugins.item = function(i) { return this[i] || null; };
+        _navPlugins.namedItem = function(n) { return this.find(p => p.name === n) || null; };
+        _navMimeTypes.item = function(i) { return this[i] || null; };
+        _navMimeTypes.namedItem = function(n) { return this.find(m => m.type === n) || null; };
+        
+        _defNav('plugins', () => _navPlugins);
+        _defNav('mimeTypes', () => _navMimeTypes);
+    }
+
+    if (globalThis.navigator) {
+        // ... (webdriver/online/etc)
+        _defNav('devicePixelRatio', () => 2.0);
+    }
+
+    if (globalThis.Screen) {
+        const _ScreenProto = Screen.prototype;
+        _defProtoGetter(_ScreenProto, 'availLeft', () => 0);
+        _defProtoGetter(_ScreenProto, 'availTop', () => 0);
+        _defProtoGetter(_ScreenProto, 'colorDepth', () => 24);
+        _defProtoGetter(_ScreenProto, 'pixelDepth', () => 24);
+    }
+
+    globalThis.devicePixelRatio = 2.0;
+
+    // Explicitly define documentMode as undefined to pass 'prop in document' checks quietly
+    Object.defineProperty(Document.prototype, 'documentMode', { value: undefined, enumerable: false, configurable: true });
+
+    const _hunt = (obj, name) => {
+        return new Proxy(obj, {
+            get(target, prop) {
+                const val = target[prop];
+                if (val === undefined && typeof prop === 'string' && !prop.startsWith('__')) {
+                    if (globalThis.__scriptErrors) {
+                        globalThis.__scriptErrors.push('UNDEFINED_HUNTER: ' + name + '.' + prop);
+                    }
+                }
+                return val;
+            }
+        });
+    };
+    globalThis.navigator = _hunt(globalThis.navigator, 'navigator');
+    globalThis.document = _hunt(globalThis.document, 'document');
+    globalThis.chrome = _hunt(globalThis.chrome, 'chrome');
+    globalThis.performance = _hunt(globalThis.performance, 'performance');
 
     // navigator.userAgentData (Client Hints API)
     //
@@ -607,39 +754,48 @@
         const lowEntropyBrands = Object.freeze([
             Object.freeze({ brand: "Chromium", version: browserMajor }),
             Object.freeze({ brand: "Google Chrome", version: browserMajor }),
-            Object.freeze({ brand: "Not?A_Brand", version: "99" }),
+            Object.freeze({ brand: "Not-A.Brand", version: "24" }),
         ]);
         const fullVersionList = Object.freeze([
             Object.freeze({ brand: "Chromium", version: browserFullVersion }),
             Object.freeze({ brand: "Google Chrome", version: browserFullVersion }),
-            Object.freeze({ brand: "Not?A_Brand", version: "99.0.0.0" }),
+            Object.freeze({ brand: "Not-A.Brand", version: "24.0.0.0" }),
         ]);
+
+        function _shuffled(arr) {
+            const copy = [...arr];
+            for (let i = copy.length - 1; i > 0; i--) {
+                const j = ((Date.now() * 0x9e3779b9 + i) >>> 0) % (i + 1);
+                [copy[i], copy[j]] = [copy[j], copy[i]];
+            }
+            return copy;
+        }
+        const _shuffledLow = Object.freeze(_shuffled(lowEntropyBrands));
+        const _shuffledFull = Object.freeze(_shuffled(fullVersionList));
 
         // The superset object used by getHighEntropyValues()
         const allHints = {
-            architecture,
-            bitness,
-            brands: lowEntropyBrands,
-            fullVersionList,
+            architecture: "x86",
+            bitness: "64",
+            brands: _shuffledFull,
+            fullVersionList: _shuffledFull,
             mobile: false,
             model: "",
-            platform: osName,
-            platformVersion,
+            platform: "Windows",
+            platformVersion: "10.0.0",
             uaFullVersion: browserFullVersion,
             wow64: false,
         };
 
-        // NavigatorUAData — stable object served via a Navigator.prototype
-        // getter so the instance has no own 'userAgentData' property.
         const _navUaData = {
-            brands: lowEntropyBrands,
+            get brands() { return _shuffledLow; },
             mobile: false,
-            platform: osName,
+            platform: "Windows",
             getHighEntropyValues(hints) {
                 const result = {
-                    brands: lowEntropyBrands,
+                    brands: _shuffledFull,
                     mobile: false,
-                    platform: osName,
+                    platform: "Windows",
                 };
                 if (Array.isArray(hints)) {
                     for (const key of hints) {
@@ -652,9 +808,9 @@
             },
             toJSON() {
                 return {
-                    brands: lowEntropyBrands.map(b => ({ brand: b.brand, version: b.version })),
+                    brands: _shuffledLow.map(b => ({ brand: b.brand, version: b.version })),
                     mobile: false,
-                    platform: osName,
+                    platform: "Windows",
                 };
             },
         };
@@ -788,9 +944,9 @@
                 let wire;
                 try {
                     wire =
-                        (globalThis.__boxide &&
-                            globalThis.__boxide.serializeForWire &&
-                            globalThis.__boxide.serializeForWire(message)) ||
+                        (_boxide &&
+                            _boxide.serializeForWire &&
+                            _boxide.serializeForWire(message)) ||
                         message;
                 } catch (e) {
                     // DataCloneError (e.g. function inside message).
@@ -1156,24 +1312,51 @@
     // =========================================================
     if (ops.op_has_stealth_profile && ops.op_has_stealth_profile()) {
         const profileTz = ops.op_get_profile_value("timezone") || "";
-        if (profileTz && globalThis.Intl && globalThis.Intl.DateTimeFormat) {
-            const _OrigDTF = globalThis.Intl.DateTimeFormat;
-            const _OrigFmt = globalThis.Intl.DateTimeFormat.prototype;
-            // Wrap the constructor
-            const PatchedDTF = function DateTimeFormat(locales, options) {
-                const opts = Object.assign({}, options || {});
-                if (!opts.timeZone) opts.timeZone = profileTz;
-                return new _OrigDTF(locales, opts);
+        const profileLocale = ops.op_get_profile_value("language") || "ru-RU";
+        
+        if (globalThis.Intl) {
+            const _patchIntl = (klass) => {
+                if (!globalThis.Intl[klass]) return;
+                const _Orig = globalThis.Intl[klass];
+                const Patched = function(...args) {
+                    let locales = args[0];
+                    let options = args[1] || {};
+                    // If no locale provided, use profile locale
+                    if (!locales) locales = profileLocale;
+                    // For DateTimeFormat, also force timezone
+                    if (klass === 'DateTimeFormat' && !options.timeZone) {
+                        options = Object.assign({}, options, { timeZone: profileTz });
+                    }
+                    return new _Orig(locales, options);
+                };
+                Patched.prototype = _Orig.prototype;
+                if (_Orig.supportedLocalesOf) Patched.supportedLocalesOf = _Orig.supportedLocalesOf.bind(_Orig);
+                Object.defineProperty(globalThis.Intl, klass, { value: Patched, writable: true, configurable: true });
             };
-            // Preserve prototype chain so `instanceof Intl.DateTimeFormat` works
-            PatchedDTF.prototype = _OrigFmt;
-            PatchedDTF.supportedLocalesOf = _OrigDTF.supportedLocalesOf.bind(_OrigDTF);
-            Object.defineProperty(globalThis.Intl, "DateTimeFormat", {
-                value: PatchedDTF,
-                writable: true,
-                configurable: true,
-            });
 
+            _patchIntl('DateTimeFormat');
+            _patchIntl('NumberFormat');
+            _patchIntl('Collator');
+            _patchIntl('PluralRules');
+            _patchIntl('RelativeTimeFormat');
+
+            // --- Deep prototype override ---
+            const _intlClasses = ['DateTimeFormat', 'NumberFormat', 'Collator', 'PluralRules', 'RelativeTimeFormat'];
+            for (const klass of _intlClasses) {
+                if (globalThis.Intl[klass]) {
+                    const proto = globalThis.Intl[klass].prototype;
+                    const origResolved = proto.resolvedOptions;
+                    proto.resolvedOptions = function() {
+                        const res = origResolved.call(this);
+                        res.timeZone = profileTz || res.timeZone;
+                        res.locale = profileLocale || res.locale;
+                        return res;
+                    };
+                }
+            }
+        }
+
+        if (profileTz) {
             // Compute the UTC offset for the profile timezone at the current instant.
             // V8 supports IANA timezones natively via Intl, so we can use Intl to
             // derive the offset without needing a full tz database.
@@ -1357,18 +1540,74 @@
         // it as an own property on the instance with a native-code toString.
         const _origNow = globalThis.performance.now && globalThis.performance.now.bind(globalThis.performance);
 
-        _defProtoGetter(_PerfProto, 'memory', () => _perfMemory);
+        _defProtoGetter(_PerfProto, 'memory', () => {
+            const jsHeapSizeLimit = 2172649472;
+            const base = 10485760; // 10 MB
+            const jitter = ((Date.now() * 0x9e3779b9) >>> 0) % 5000000;
+            const totalJSHeapSize = base + jitter;
+            const usedJSHeapSize = Math.floor(totalJSHeapSize * 0.85);
+            return {
+                jsHeapSizeLimit,
+                totalJSHeapSize,
+                usedJSHeapSize,
+            };
+        });
         _defProtoGetter(_PerfProto, 'timing', () => _perfTiming);
         _defProtoGetter(_PerfProto, 'timeOrigin', () => _perfTimingStart);
         _defProtoGetter(_PerfProto, 'navigation', () => _perfNavigation);
         _defProtoGetter(_PerfProto, 'onresourcetimingbufferfull', () => null);
 
         _defProtoMethod(_PerfProto, 'getEntries', function getEntries() {
-            return [_navEntry(), ..._buildResourceEntries()];
+            const entries = [_navEntry(), ..._buildResourceEntries()];
+            const origin = globalThis.location ? globalThis.location.origin : "";
+            const qratorUrl = `${origin}/__qrator/qauth_utm_v2d_v9118.js`;
+            
+            if (!entries.some(e => e.name.includes('qauth'))) {
+                const start = 10 + (Math.random() * 5);
+                const dur = 40 + (Math.random() * 20);
+                entries.push({
+                    name: qratorUrl,
+                    entryType: 'resource',
+                    startTime: Number(start.toFixed(13)),
+                    duration: Number(dur.toFixed(13)),
+                    initiatorType: 'script',
+                    nextHopProtocol: 'h2',
+                    workerStart: 0,
+                    redirectStart: 0,
+                    redirectEnd: 0,
+                    fetchStart: Number(start.toFixed(13)),
+                    domainLookupStart: Number(start.toFixed(13)),
+                    domainLookupEnd: Number(start.toFixed(13)),
+                    connectStart: Number(start.toFixed(13)),
+                    connectEnd: Number(start.toFixed(13)),
+                    secureConnectionStart: Number(start.toFixed(13)),
+                    requestStart: Number((start + 1).toFixed(13)),
+                    responseStart: Number((start + 5).toFixed(13)),
+                    responseEnd: Number((start + dur).toFixed(13)),
+                    transferSize: 349878,
+                    encodedBodySize: 349800,
+                    decodedBodySize: 349800,
+                    serverTiming: []
+                });
+            }
+            return entries;
         });
         _defProtoMethod(_PerfProto, 'getEntriesByType', function getEntriesByType(type) {
             if (type === "navigation") return [_navEntry()];
-            if (type === "resource") return _buildResourceEntries();
+            if (type === "resource") {
+                const entries = _buildResourceEntries();
+                const origin = globalThis.location ? globalThis.location.origin : "";
+                entries.push({
+                    name: `${origin}/__qrator/qauth_utm_v2d_v9118.js`,
+                    entryType: 'resource',
+                    startTime: 12.5,
+                    duration: 45.2,
+                    initiatorType: 'script',
+                    transferSize: 349878,
+                    nextHopProtocol: 'h2'
+                });
+                return entries;
+            }
             if (type === "mark" || type === "measure") return [];
             if (type === "paint") {
                 return [
@@ -1662,27 +1901,64 @@
 
     // atob / btoa
     if (!globalThis.atob) {
-        globalThis.atob = function(s) {
-            // Minimal base64 decode
+        globalThis.atob = function atob(s) {
+            if (arguments.length === 0) {
+                throw new TypeError("Failed to execute 'atob' on 'Window': 1 argument required, but only 0 present.");
+            }
+            const input = String(s).replace(/[\t\n\f\r ]/g, "");
+            if (input.length === 0) return "";
+            
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
             let out = "";
-            s = s.replace(/[^A-Za-z0-9+/]/g, "");
-            for (let i = 0; i < s.length; i += 4) {
-                const a = chars.indexOf(s[i]), b = chars.indexOf(s[i+1]);
-                const c = chars.indexOf(s[i+2]), d = chars.indexOf(s[i+3]);
+            for (let i = 0; i < input.length; i += 4) {
+                const a = chars.indexOf(input[i]), b = chars.indexOf(input[i+1]);
+                const c = chars.indexOf(input[i+2]), d = chars.indexOf(input[i+3]);
                 out += String.fromCharCode((a << 2) | (b >> 4));
-                if (c !== -1) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
-                if (d !== -1) out += String.fromCharCode(((c & 3) << 6) | d);
+                if (c !== -1 && c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+                if (d !== -1 && d !== 64) out += String.fromCharCode(((c & 3) << 6) | d);
             }
             return out;
         };
     }
+    const _origStringify = JSON.stringify;
+    JSON.stringify = function(val, replacer, space) {
+        if (val && typeof val === 'object' && !Array.isArray(val)) {
+            if (globalThis.__scriptErrors) {
+                const s = _origStringify(val);
+                if (s.includes('webdriver') || s.includes('userAgent') || s.length > 50) {
+                    globalThis.__scriptErrors.push('JSON_STR: ' + s.substring(0, 1000));
+                }
+            }
+        }
+        return _origStringify(val, replacer, space);
+    };
+
     if (!globalThis.btoa) {
-        globalThis.btoa = function(s) {
+        globalThis.btoa = function btoa(s) {
+            if (arguments.length === 0) {
+                throw new TypeError("Failed to execute 'btoa' on 'Window': 1 argument required, but only 0 present.");
+            }
+            const str = String(s);
+            for (let i = 0; i < str.length; i++) {
+                if (str.charCodeAt(i) > 255) {
+                    throw new DOMException("Failed to execute 'btoa' on 'Window': The string to be encoded contains characters outside of the Latin1 range.", "InvalidCharacterError");
+                }
+            }
+            
+            if (globalThis.__scriptErrors) {
+                if (str === 'undefined') {
+                    let stack = "no stack";
+                    try { throw new Error(); } catch(e) { stack = e.stack; }
+                    globalThis.__scriptErrors.push('BTOA_UNDEFINED_STACK: ' + stack.split('\n').slice(0, 5).join(' | '));
+                } else {
+                    const preview = str.length > 500 ? str.substring(0, 500) + '...' : str;
+                    globalThis.__scriptErrors.push('BTOA (' + str.length + '): ' + preview);
+                }
+            }
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
             let out = "";
-            for (let i = 0; i < s.length; i += 3) {
-                const a = s.charCodeAt(i), b = s.charCodeAt(i+1), c = s.charCodeAt(i+2);
+            for (let i = 0; i < str.length; i += 3) {
+                const a = str.charCodeAt(i), b = str.charCodeAt(i+1), c = str.charCodeAt(i+2);
                 out += chars[a >> 2] + chars[((a & 3) << 4) | (b >> 4)];
                 out += (isNaN(b) ? "=" : chars[((b & 15) << 2) | (c >> 6)]);
                 out += (isNaN(c) ? "=" : chars[c & 63]);
@@ -1691,20 +1967,64 @@
         };
     }
 
-    // localStorage / sessionStorage stubs (in-memory)
-    const _storageData = { local: {}, session: {} };
+    // localStorage / sessionStorage persistent stubs (backed by Rust DomState)
+    const LOCAL_STORAGE_QUOTA = 5242880; // 5 MB
+    
+    function getStorageAreaSize(type) {
+        const keys = ops.op_dom_storage_keys(type);
+        let size = 0;
+        for (const k of keys) {
+            const v = ops.op_dom_storage_get(type, k);
+            size += String(k).length + (v ? String(v).length : 0);
+        }
+        return size;
+    }
+
+    function setStorageItem(type, key, value) {
+        const valStr = String(value);
+        const newSize = String(key).length + valStr.length;
+        const oldVal = ops.op_dom_storage_get(type, key);
+        const oldSize = oldVal ? String(key).length + String(oldVal).length : 0;
+        
+        const currentSize = getStorageAreaSize(type);
+        if (currentSize - oldSize + newSize > LOCAL_STORAGE_QUOTA) {
+            throw new DOMException(
+                "Failed to execute 'setItem' on 'Storage': Setting the value of '" + key + "' exceeded the quota.",
+                'QuotaExceededError'
+            );
+        }
+        
+        ops.op_dom_storage_set(type, key, valStr);
+        return true;
+    }
+
     function makeStorage(type) {
-        return new Proxy(_storageData[type], {
+        return new Proxy({}, {
             get(target, key) {
-                if (key === "getItem") return (k) => target[k] ?? null;
-                if (key === "setItem") return (k, v) => { target[k] = String(v); };
-                if (key === "removeItem") return (k) => { delete target[k]; };
-                if (key === "clear") return () => { for (const k in target) delete target[k]; };
-                if (key === "key") return (i) => Object.keys(target)[i] ?? null;
-                if (key === "length") return Object.keys(target).length;
-                return target[key];
+                if (key === "getItem") return (k) => ops.op_dom_storage_get(type, String(k));
+                if (key === "setItem") return (k, v) => { setStorageItem(type, String(k), v); };
+                if (key === "removeItem") return (k) => { ops.op_dom_storage_remove(type, String(k)); };
+                if (key === "clear") return () => { ops.op_dom_storage_clear(type); };
+                if (key === "key") return (i) => ops.op_dom_storage_keys(type)[i] ?? null;
+                if (key === "length") return ops.op_dom_storage_keys(type).length;
+                
+                // Fallback to getting the item directly if it's not a method
+                return ops.op_dom_storage_get(type, String(key)) ?? undefined;
             },
-            set(target, key, value) { target[key] = String(value); return true; },
+            set(target, key, value) { return setStorageItem(type, String(key), value); },
+            deleteProperty(target, key) {
+                ops.op_dom_storage_remove(type, String(key));
+                return true;
+            },
+            ownKeys() {
+                return ops.op_dom_storage_keys(type);
+            },
+            getOwnPropertyDescriptor(target, key) {
+                const val = ops.op_dom_storage_get(type, String(key));
+                if (val !== null) {
+                    return { value: val, enumerable: true, configurable: true, writable: true };
+                }
+            }
         });
     }
     globalThis.localStorage = makeStorage("local");
@@ -1772,7 +2092,8 @@
 
     // getComputedStyle — reads inline style from actual element, falls back to CSS defaults
     globalThis.getComputedStyle = function(element, pseudoElt) {
-        const nodeId = element && typeof element._getNodeId === "function" ? element._getNodeId() : 0;
+        const helper = globalThis.__boxide && globalThis.__boxide._getNodeId;
+        const nodeId = helper ? helper(element) : 0;
         return new Proxy({}, {
             get(target, prop) {
                 if (prop === "getPropertyValue") {
@@ -1857,7 +2178,7 @@
                     const old = urlStr;
                     urlStr = new URL(urlStr, base).href;
                     if (globalThis.__scriptErrors) {
-                        globalThis.__scriptErrors.push('XHR RESOLVED ' + old + ' with base ' + base + ' to ' + urlStr);
+                        globalThis.__scriptErrors.push('XHR OPEN ' + this._method + ' ' + urlStr);
                     }
                 } catch(e) {
                     if (globalThis.__scriptErrors) {
@@ -1888,6 +2209,10 @@
         overrideMimeType(mime) { this._overrideMime = String(mime); }
         send(body) {
             const xhr = this;
+            if (globalThis.__scriptErrors) {
+                const bodyPreview = body ? (typeof body === 'string' ? body : '[complex body]') : 'empty';
+                globalThis.__scriptErrors.push('XHR SEND ' + xhr._url + ' BODY: ' + bodyPreview.substring(0, 500));
+            }
             if (xhr._aborted) return;
             const fireEvent = (type) => {
                 try {
@@ -2257,11 +2582,11 @@
                 } else {
                     data = new Uint8Array();
                 }
-                try { Deno.core.ops.op_blob_register(u, data, contentType); } catch (e) {}
+                try { ops.op_blob_register(u, data, contentType); } catch (e) {}
                 return u;
             }
             static revokeObjectURL(url) {
-                try { Deno.core.ops.op_blob_revoke(url); } catch (e) {}
+                try { ops.op_blob_revoke(url); } catch (e) {}
             }
         };
     }

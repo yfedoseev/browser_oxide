@@ -6,8 +6,9 @@
     const _nodeCache = new Map();
 
     function _getNodeId(node) {
+        if (node === globalThis || node === globalThis.window) return -999;
         const id = _nodeIds.get(node);
-        if (id === undefined) throw new Error("Invalid node");
+        if (id === undefined) return 0; // Return 0 instead of throwing to be more resilient
         return id;
     }
 
@@ -350,9 +351,15 @@
             if (other.contains(this)) return 10; // DOCUMENT_POSITION_CONTAINS | PRECEDING
             return 4; // DOCUMENT_POSITION_FOLLOWING
         }
-        // _getNodeId bridge for event_bootstrap
-        _getNodeId() { return _getNodeId(this); }
     }
+
+    // --- Internal Bridge ---
+    if (!globalThis.__boxide) {
+        Object.defineProperty(globalThis, '__boxide', { value: {}, enumerable: false, configurable: true });
+    }
+    globalThis.__boxide._getNodeId = _getNodeId;
+    globalThis.__boxide._wrapNode = _wrapNode;
+    globalThis.__boxide._setCurrentScript = _setCurrentScript;
 
     function _createStyleProxy(nodeId) {
         const cache = {};
@@ -883,7 +890,58 @@
 
     class DocumentFragment extends Node {}
 
+    let _currentScript = null;
+    function _setCurrentScript(el) { _currentScript = el; }
+
+    class HTMLAllCollection {
+        constructor(doc) {
+            this._doc = doc;
+        }
+        get length() { return this._doc.querySelectorAll("*").length; }
+        item(i) { return this._doc.querySelectorAll("*")[i] || null; }
+        namedItem(n) {
+            return this._doc.getElementById(n) || 
+                   this._doc.querySelector(`[name="${CSS.escape(n)}"]`) || 
+                   null;
+        }
+        [Symbol.iterator]() {
+            const nodes = this._doc.querySelectorAll("*");
+            let i = 0;
+            return {
+                next() {
+                    return i < nodes.length ? { value: nodes[i++], done: false } : { done: true };
+                }
+            };
+        }
+    }
+
     class Document extends Node {
+        constructor() {
+            super();
+            if (!globalThis.__boxide) {
+                Object.defineProperty(globalThis, '__boxide', { value: {}, enumerable: false, configurable: true });
+            }
+            // Capture initial base URL from ops or a global hint
+            globalThis.__boxide._baseUrl = ops.op_dom_get_base_url && ops.op_dom_get_base_url();
+            
+            const all = new HTMLAllCollection(this);
+            // Hide 'all' from enumeration but keep it truthy
+            Object.defineProperty(this, 'all', {
+                get() { return all; },
+                enumerable: false,
+                configurable: true
+            });
+        }
+        get scripts() { return this.getElementsByTagName("script"); }
+        get currentScript() { return _currentScript; }
+        get visibilityState() { return "visible"; }
+        get hidden() { return false; }
+        get webkitVisibilityState() { return "visible"; }
+        get webkitHidden() { return false; }
+        get fullscreenEnabled() { return true; }
+        get webkitFullscreenEnabled() { return true; }
+        get webkitIsFullScreen() { return false; }
+
         get documentElement() {
             const els = ops.op_dom_get_child_elements(ops.op_dom_document_node());
             return els.length > 0 ? _wrapNode(els[0]) : null;
@@ -1016,11 +1074,13 @@
             } else {
                 globalThis.__jsCookies[key] = value;
             }
-            // Fire-and-forget propagation to the net layer. Safe because the next
-            // fetch()/navigation reads from the shared jar.
+            // Fire-and-forget propagation to the net layer.
             try {
-                const url = globalThis.location?.href;
-                if (url && url !== "about:blank" && ops.op_cookie_set) {
+                let url = globalThis.location?.href;
+                if (!url || url === "about:blank" || url === "javascript:;" || url === "") {
+                    url = globalThis.__boxide && globalThis.__boxide._baseUrl;
+                }
+                if (url && ops.op_cookie_set) {
                     ops.op_cookie_set(url, String(val));
                 }
             } catch (e) { /* ignore */ }

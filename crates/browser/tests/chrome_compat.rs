@@ -243,7 +243,7 @@ async fn nav_pdf_viewer_enabled() {
 }
 #[tokio::test]
 async fn nav_webdriver() {
-    assert_eq!(check("typeof navigator.webdriver").await, "undefined");
+    assert_eq!(check("typeof navigator.webdriver").await, "boolean");
 }
 #[tokio::test]
 async fn nav_plugins_length() {
@@ -1554,8 +1554,8 @@ async fn k_no_script_id_webdriver_not_on_instance() {
 }
 
 #[tokio::test]
-async fn k_no_script_id_webdriver_on_prototype_returns_undefined() {
-    assert_eq!(check("navigator.webdriver === undefined").await, "true");
+async fn k_no_script_id_webdriver_on_prototype_returns_false() {
+    assert_eq!(check("navigator.webdriver === false").await, "true");
 }
 
 #[tokio::test]
@@ -1868,8 +1868,8 @@ async fn to_string_tag_event_target_prototype() {
 // --- Kasada/Akamai specific Navigator shape checks ---
 
 #[tokio::test]
-async fn nav_webdriver_typeof_undefined() {
-    assert_eq!(check("typeof navigator.webdriver").await, "undefined");
+async fn nav_webdriver_typeof_boolean() {
+    assert_eq!(check("typeof navigator.webdriver").await, "boolean");
 }
 
 #[tokio::test]

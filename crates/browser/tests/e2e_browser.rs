@@ -37,7 +37,7 @@ async fn html_to_dom_to_js_roundtrip() {
             el.setAttribute('data-processed', 'true');
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -85,7 +85,7 @@ async fn dom_mutations_are_visible_to_queries() {
             document.getElementById('a').replaceWith(e);
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -152,7 +152,7 @@ async fn events_bubble_through_dom_tree() {
             document.getElementById('btn').dispatchEvent(new Event('click', { bubbles: true }));
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -177,7 +177,7 @@ async fn event_listener_removal_works() {
             el.dispatchEvent(new Event('test'));
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -199,7 +199,7 @@ async fn custom_event_with_detail() {
             );
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -228,7 +228,7 @@ async fn async_chain_mutates_dom() {
             }, 10);
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -251,7 +251,7 @@ async fn set_interval_fires_multiple_times() {
             }, 20);
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -272,7 +272,7 @@ async fn cookie_read_write() {
             document.cookie = 'theme=dark; path=/';
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -296,7 +296,7 @@ async fn localstorage_persists() {
             localStorage.setItem('count', '42');
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -338,7 +338,7 @@ async fn style_mutations_reflect_in_dom() {
             box.style.setProperty('border', '1px solid black');
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -384,7 +384,7 @@ async fn clone_and_modify_independently() {
             }
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -419,7 +419,7 @@ async fn insert_adjacent_html_builds_complex_dom() {
             el.insertAdjacentHTML('beforeend', '<span>-end</span>');
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -559,7 +559,7 @@ async fn canvas_renders_and_exports() {
             globalThis.textWidth = ctx.measureText('Hello').width;
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -590,7 +590,7 @@ async fn webgl_context_and_parameters() {
             globalThis.maxTexture = gl.getParameter(0x0D33); // GL_MAX_TEXTURE_SIZE
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -615,7 +615,7 @@ async fn webgl_context_and_parameters() {
 
 #[tokio::test]
 async fn audio_context_exists() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None).await.unwrap();
     assert_eq!(page.evaluate("typeof AudioContext").unwrap(), "function");
     assert_eq!(
         page.evaluate("typeof OfflineAudioContext").unwrap(),
@@ -633,7 +633,7 @@ async fn layout_returns_dimensions() {
         r#"
         <div id="box" style="width:200px; height:100px;"></div>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -664,7 +664,7 @@ async fn history_navigation() {
             history.back();
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -678,7 +678,7 @@ async fn history_navigation() {
 
 #[tokio::test]
 async fn url_parsing() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None).await.unwrap();
     assert_eq!(
         page.evaluate("new URL('https://example.com/path?q=1#hash').hostname")
             .unwrap(),
@@ -718,7 +718,7 @@ async fn abort_controller_lifecycle() {
             events.push('after:' + ac.signal.aborted);
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -744,7 +744,7 @@ async fn domparser_parses_html() {
             globalThis.text = doc.querySelector('#inner').textContent;
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -773,7 +773,7 @@ async fn formdata_and_urlsearchparams() {
             globalThis.uspStr = usp.toString();
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -788,7 +788,7 @@ async fn formdata_and_urlsearchparams() {
 
 #[tokio::test]
 async fn match_media_evaluates_queries() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None).await.unwrap();
     // innerWidth defaults to 1920
     assert_eq!(
         page.evaluate("matchMedia('(min-width: 768px)').matches")
@@ -819,7 +819,7 @@ async fn document_write_injects_content() {
             document.write('<div id="written">injected</div>');
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -871,7 +871,7 @@ async fn spa_like_render_cycle() {
             const firstItem = document.querySelector('.user-item');
             firstItem.dispatchEvent(new Event('click'));
         </script>
-    "#)).await.unwrap();
+    "#), None).await.unwrap();
 
     assert_eq!(
         page.evaluate("document.querySelectorAll('.user-item').length")
@@ -911,7 +911,7 @@ async fn is_connected_tracks_dom_attachment() {
             globalThis.step3 = div.isConnected; // false — removed
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -998,8 +998,7 @@ async fn e2e_style_block_to_computed_style() {
                 globalThis.fontSize = cs.fontSize;
                 globalThis.bg = cs.backgroundColor;
             </script>
-        </body></html>"#,
-    )
+        </body></html>"#, None)
     .await
     .unwrap();
 
@@ -1027,7 +1026,7 @@ async fn e2e_canvas_gradient_renders_pixels() {
             globalThis.dataUrl = document.getElementById('c').toDataURL();
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -1059,7 +1058,7 @@ async fn e2e_mutation_observer_in_pipeline() {
             document.getElementById('target').appendChild(document.createElement('span'));
             document.getElementById('target').setAttribute('data-x', '1');
         </script>
-    "#)).await.unwrap();
+    "#), None).await.unwrap();
 
     // Give microtasks time to fire
     page.evaluate_async("void 0", Duration::from_millis(50))
@@ -1092,7 +1091,7 @@ async fn e2e_websocket_constructor_stores_url() {
             globalThis.wsState = ws.readyState;
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -1117,7 +1116,7 @@ async fn e2e_iframe_content_window_exists() {
             globalThis.parentIsWindow = iframe.contentWindow.parent === window;
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -1180,8 +1179,7 @@ async fn e2e_spa_with_css_cascade() {
                 bob.dispatchEvent(new Event('click'));
                 globalThis.bobActive = bob.classList.contains('active');
             </script>
-        </body></html>"#,
-    )
+        </body></html>"#, None)
     .await
     .unwrap();
 
@@ -1234,7 +1232,7 @@ async fn e2e_websocket_tls_connects() {
             }
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -1329,7 +1327,7 @@ async fn e2e_webgl_renders_in_pipeline() {
             globalThis.hasContent = document.getElementById('c').toDataURL().length > 100;
         </script>
     "#,
-    ))
+    ), None)
     .await
     .unwrap();
 
@@ -1360,8 +1358,7 @@ async fn e2e_iframe_srcdoc_isolated() {
         r#"<!DOCTYPE html><html><body>
         <script>globalThis.scope = 'parent';</script>
         <iframe srcdoc="<script>globalThis.scope = 'child';</script>"></iframe>
-    </body></html>"#,
-    )
+    </body></html>"#, None)
     .await
     .unwrap();
 
@@ -1379,8 +1376,7 @@ async fn e2e_iframe_dom_isolated() {
         r#"<!DOCTYPE html><html><body>
         <div id="p">parent-dom</div>
         <iframe srcdoc="<div id='c'>child-dom</div>"></iframe>
-    </body></html>"#,
-    )
+    </body></html>"#, None)
     .await
     .unwrap();
 

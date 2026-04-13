@@ -17,6 +17,8 @@ use deno_core::{JsRuntime, RuntimeOptions};
 use dom::Dom;
 use stealth::StealthProfile;
 
+use std::collections::HashMap;
+
 /// Options for creating a BrowserJsRuntime.
 pub struct BrowserRuntimeOptions {
     pub base_url: Option<url::Url>,
@@ -28,6 +30,8 @@ pub struct BrowserRuntimeOptions {
     /// uses this to carry fingerprint/capability extensions across
     /// navigations within a frame without baking them into the runtime.
     pub init_scripts: Vec<String>,
+    /// Persistent storage (localStorage / sessionStorage) carried across navigations.
+    pub storage: Option<HashMap<String, HashMap<String, String>>>,
 }
 
 impl Default for BrowserRuntimeOptions {
@@ -37,6 +41,7 @@ impl Default for BrowserRuntimeOptions {
             stealth_profile: None,
             stylesheets: Vec::new(),
             init_scripts: Vec::new(),
+            storage: None,
         }
     }
 }
@@ -45,6 +50,9 @@ impl Default for BrowserRuntimeOptions {
 pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
     let mut state = DomState::new(dom);
     state.stylesheets = options.stylesheets;
+    if let Some(storage) = options.storage {
+        state.storage = storage;
+    }
     if let Some(url) = options.base_url {
         state = state.with_base_url(url);
     }
@@ -180,7 +188,7 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
 /// DO get canvas (for `OffscreenCanvas`, which sites probe inside
 /// workers per the WHATWG spec), console, crypto, timers, fetch,
 /// and the worker-side ops.
-pub fn create_worker_runtime() -> JsRuntime {
+pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![
             console_extension::init_ops(),
@@ -200,6 +208,12 @@ pub fn create_worker_runtime() -> JsRuntime {
         .borrow_mut()
         .put(FetchState::new(None));
     runtime.op_state().borrow_mut().put(CanvasState::new());
+    
+    // Inject DomState even in workers (stubbed) to hold the stealth profile
+    // so op_has_stealth_profile() works in the worker isolate.
+    let mut dom_state = DomState::new(dom::Dom::new());
+    dom_state.stealth_profile = profile;
+    runtime.op_state().borrow_mut().put(dom_state);
 
     runtime
         .execute_script(
@@ -216,13 +230,6 @@ pub fn create_worker_runtime() -> JsRuntime {
         .execute_script("<fetch_bootstrap>", include_str!("js/fetch_bootstrap.js"))
         .expect("worker: fetch bootstrap failed");
 
-    runtime
-        .execute_script(
-            "<worker_bootstrap>",
-            include_str!("js/worker_bootstrap.js"),
-        )
-        .expect("worker: worker bootstrap failed");
-
     // structuredClone is useful inside workers too — worker code that
     // uses `postMessage` with complex values relies on it, and the
     // impl is self-contained (it gracefully handles the absence of
@@ -233,6 +240,13 @@ pub fn create_worker_runtime() -> JsRuntime {
             include_str!("js/structured_clone.js"),
         )
         .expect("worker: structured_clone bootstrap failed");
+
+    runtime
+        .execute_script(
+            "<worker_bootstrap>",
+            include_str!("js/worker_bootstrap.js"),
+        )
+        .expect("worker: worker bootstrap failed");
 
     // canvas_bootstrap installs CanvasRenderingContext2D and the real
     // OffscreenCanvas backed by canvas_ext ops. Safe in workers

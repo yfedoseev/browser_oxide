@@ -13,6 +13,7 @@ pub struct DomState {
     pub storage: HashMap<String, HashMap<String, String>>,
     /// CSS from `<style>` blocks, used by getComputedStyle
     pub stylesheets: Vec<String>,
+    pub stealth_profile: Option<stealth::StealthProfile>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,7 @@ impl DomState {
             console_output: Vec::new(),
             storage,
             stylesheets: Vec::new(),
+            stealth_profile: None,
         }
     }
 

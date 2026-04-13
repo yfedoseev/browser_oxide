@@ -28,6 +28,7 @@ impl ChildIframe {
     pub async fn from_srcdoc(
         node_id: NodeId,
         html: &str,
+        profile: &stealth::StealthProfile,
     ) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
         let scripts = crate::script_runner::find_scripts(&dom);
@@ -37,6 +38,7 @@ impl ChildIframe {
         let runtime = BrowserJsRuntime::with_options(
             dom,
             BrowserRuntimeOptions {
+                stealth_profile: Some(profile.clone()),
                 stylesheets,
                 ..Default::default()
             },
@@ -87,7 +89,7 @@ impl ChildIframe {
         let html = resp.text();
         // Skip if response looks like non-HTML (binary, error page)
         if html.trim().is_empty() {
-            return Self::from_srcdoc(node_id, "<html><body></body></html>").await;
+            return Self::from_srcdoc(node_id, "<html><body></body></html>", stealth_profile.unwrap()).await;
         }
 
         let dom = html_parser::parse_html(&html);

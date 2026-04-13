@@ -117,4 +117,9 @@ impl BrowserJsRuntime {
     pub fn inner(&mut self) -> &mut JsRuntime {
         &mut self.inner
     }
+
+    /// Get the OpState (shared state).
+    pub fn op_state(&mut self) -> std::rc::Rc<std::cell::RefCell<deno_core::OpState>> {
+        self.inner.op_state()
+    }
 }

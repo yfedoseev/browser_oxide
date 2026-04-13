@@ -155,15 +155,11 @@ async fn navigator_ua_matches_chrome_pattern() {
     assert!(ua.contains("Chrome/"), "UA should contain Chrome/: {}", ua);
     assert!(ua.contains("Safari/"), "UA should contain Safari/: {}", ua);
 }
-
 #[tokio::test]
-async fn navigator_webdriver_undefined_not_false() {
-    // Chrome sets navigator.webdriver = undefined (not false)
-    // Anti-bot checks: typeof navigator.webdriver === 'undefined'
-    assert_eq!(check("typeof navigator.webdriver").await, "undefined");
-    assert_eq!(check("navigator.webdriver === undefined").await, "true");
-    // NOT false — this is a common detection vector
-    assert_eq!(check("navigator.webdriver === false").await, "false");
+async fn navigator_webdriver_boolean() {
+    // Chrome 130+ sets navigator.webdriver = false (boolean) when automation is off
+    assert_eq!(check("typeof navigator.webdriver").await, "boolean");
+    assert_eq!(check("navigator.webdriver === false").await, "true");
 }
 
 #[tokio::test]

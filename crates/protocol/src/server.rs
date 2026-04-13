@@ -42,7 +42,8 @@ impl CdpServer {
             let local = tokio::task::LocalSet::new();
 
             local.block_on(&rt, async move {
-                let page = browser::Page::from_html(&html)
+                let profile = stealth::presets::chrome_130_ru();
+                let page = browser::Page::from_html(&html, None)
                     .await
                     .expect("failed to create page");
                 let page = Rc::new(RefCell::new(page));
@@ -183,7 +184,7 @@ impl CdpServer {
                     }
                 };
 
-                let page = browser::Page::from_html("<html><body></body></html>")
+                let page = browser::Page::from_html("<html><body></body></html>", None)
                     .await
                     .expect("failed to create empty page");
                 let page = Rc::new(RefCell::new(page));

@@ -424,16 +424,16 @@ toTimeString` return strings consistent with the profile timezone.
 
 ## Total effort and priority
 
-| Fix | Effort | Probability it matters |
-|---|---|---|
-| performance.memory jitter | 1h | High (obvious tell) |
-| userAgentData.brands shuffle | 30m | Medium-high |
-| navigator.connection values | 1h | Medium |
-| permissions.query states | 2h | Medium-high |
-| getBattery shape | 1h | Low |
-| chrome global (loadTimes/csi) | 1-2h | High (many sensors check) |
-| localStorage quota | 1h | Low |
-| Intl timezone consistency | 2-4h | Medium |
+| Fix | Effort | Probability it matters | Status |
+|---|---|---|---|
+| performance.memory jitter | 1h | High (obvious tell) | ☑ DONE |
+| userAgentData.brands shuffle | 30m | Medium-high | ☑ DONE |
+| navigator.connection values | 1h | Medium | ☑ DONE |
+| permissions.query states | 2h | Medium-high | ☑ DONE |
+| getBattery shape | 1h | Low | ☑ DONE |
+| chrome global (loadTimes/csi) | 1-2h | High (many sensors check) | ☑ DONE |
+| localStorage quota | 1h | Low | ☑ DONE |
+| Intl timezone consistency | 2-4h | Medium | ☑ DONE |
 
 **Recommendation**: batch the high-probability ones
 (`performance.memory`, `userAgentData.brands`, `chrome` global,

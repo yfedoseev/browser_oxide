@@ -123,7 +123,12 @@ impl HttpClient {
     }
 
     /// Try HTTP/3 for an HTTPS URL. Returns Ok if successful, Err to fall back.
-    async fn try_h3(&self, url: &str) -> Result<Response, NetError> {
+    async fn try_h3_request(
+        &self,
+        url: &str,
+        method: Method,
+        extra_headers: &[(String, String)],
+    ) -> Result<Response, NetError> {
         let parsed = Url::parse(url).map_err(|e| NetError::Quic(e.to_string()))?;
         if parsed.scheme() != "https" {
             return Err(NetError::Quic("not HTTPS".into()));
@@ -153,7 +158,8 @@ impl HttpClient {
             conn
         };
 
-        let (resp, alt_svc) = h3_request::h3_get(conn, &parsed, &self.profile, &[]).await?;
+        let (resp, alt_svc) =
+            h3_request::h3_request(conn, &parsed, method, &self.profile, extra_headers).await?;
 
         // Update cache from response
         if let Some(alt_svc_header) = &alt_svc {
@@ -253,11 +259,9 @@ impl HttpClient {
         url: &str,
         extra_headers: &[(String, String)],
     ) -> Result<Response, NetError> {
-        // Try HTTP/3 first if we know the host supports it (skip when custom headers — h3 path doesn't forward them)
-        if extra_headers.is_empty() {
-            if let Ok(resp) = self.try_h3(url).await {
-                return Ok(resp);
-            }
+        // Try HTTP/3 first
+        if let Ok(resp) = self.try_h3_request(url, Method::Get, extra_headers).await {
+            return Ok(resp);
         }
 
         let parsed = Url::parse(url)?;
@@ -457,6 +461,11 @@ impl HttpClient {
         body: &[u8],
         extra_headers: &[(String, String)],
     ) -> Result<Response, NetError> {
+        // Try HTTP/3 first
+        if let Ok(resp) = self.try_h3_request(url, Method::Post(body.to_vec()), extra_headers).await {
+            return Ok(resp);
+        }
+
         let parsed = Url::parse(url)?;
         let host = parsed
             .host_str()

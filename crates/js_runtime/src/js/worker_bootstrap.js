@@ -6,131 +6,125 @@
 
 ((globalThis) => {
     const ops = Deno.core.ops;
+    const _boxide = globalThis.__boxide;
+
+    // Helper: read from stealth profile or use default
+    const _p = (key, fallback) => {
+        if (ops.op_has_stealth_profile && ops.op_has_stealth_profile()) {
+            const v = ops.op_get_profile_value(key);
+            return v !== "" ? v : fallback;
+        }
+        return fallback;
+    };
+    const _pInt = (key, fallback) => {
+        const v = _p(key, "");
+        return v !== "" ? parseInt(v, 10) : fallback;
+    };
+    const _pJson = (key, fallback) => {
+        const v = _p(key, "");
+        if (v !== "") try { return JSON.parse(v); } catch {}
+        return fallback;
+    };
 
     // The global object doubles as WorkerGlobalScope / DedicatedWorkerGlobalScope / self.
     const self = globalThis;
     self.self = self;
 
-    // --- Brand classes (for instanceof and Symbol.toStringTag) ---
-    class WorkerGlobalScope {}
-    class DedicatedWorkerGlobalScope extends WorkerGlobalScope {}
-    Object.defineProperty(WorkerGlobalScope.prototype, Symbol.toStringTag, {
-        value: "WorkerGlobalScope",
-        configurable: true,
-    });
-    Object.defineProperty(DedicatedWorkerGlobalScope.prototype, Symbol.toStringTag, {
-        value: "DedicatedWorkerGlobalScope",
-        configurable: true,
-    });
-    globalThis.WorkerGlobalScope = WorkerGlobalScope;
-    globalThis.DedicatedWorkerGlobalScope = DedicatedWorkerGlobalScope;
-    Object.setPrototypeOf(self, DedicatedWorkerGlobalScope.prototype);
+    // --- Intl Sync (matches window_bootstrap) ---
+    if (ops.op_has_stealth_profile && ops.op_has_stealth_profile()) {
+        const profileTz = ops.op_get_profile_value("timezone") || "Europe/Moscow";
+        const profileLocale = ops.op_get_profile_value("language") || "ru-RU";
+        if (globalThis.Intl) {
+            const _intlClasses = ['DateTimeFormat', 'NumberFormat', 'Collator', 'PluralRules', 'RelativeTimeFormat'];
+            for (const klass of _intlClasses) {
+                if (globalThis.Intl[klass]) {
+                    const proto = globalThis.Intl[klass].prototype;
+                    const origResolved = proto.resolvedOptions;
+                    proto.resolvedOptions = function() {
+                        const res = origResolved.call(this);
+                        res.timeZone = profileTz || res.timeZone;
+                        res.locale = profileLocale || res.locale;
+                        return res;
+                    };
+                }
+            }
+        }
+    }
 
-    // --- Minimal navigator for workers (WorkerNavigator) ---
+    // --- WorkerNavigator (matches StealthProfile) ---
     if (!self.navigator) {
+        const osName = _p("os", "Linux");
+        const browserMajor = _p("browser_major", "130");
+        const browserFullVersion = _p("browser_version", "130.0.6723.91");
+        
         const workerNavigator = {
-            userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-            language: "en-US",
-            languages: ["en-US", "en"],
-            platform: "MacIntel",
+            userAgent: _p("user_agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36"),
+            language: _p("language", "ru-RU"),
+            languages: _pJson("languages", ["ru-RU", "ru", "en-US", "en"]),
+            platform: _p("platform", "Linux x86_64"),
             onLine: true,
-            hardwareConcurrency: 8,
-            deviceMemory: 8,
+            cookieEnabled: true,
+            hardwareConcurrency: _pInt("hardware_concurrency", 8),
+            deviceMemory: _pInt("device_memory", 8),
             appName: "Netscape",
-            appVersion: "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            appVersion: "5.0 (" + osName + ") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + browserFullVersion,
             product: "Gecko",
             productSub: "20030107",
             vendor: "Google Inc.",
             vendorSub: "",
         };
-        Object.defineProperty(workerNavigator, Symbol.toStringTag, {
-            value: "WorkerNavigator",
-            configurable: true,
-        });
+        Object.defineProperty(workerNavigator, Symbol.toStringTag, { value: "WorkerNavigator", configurable: true });
         self.navigator = workerNavigator;
     }
 
-    // --- self.location (stubbed; worker typically gets parent's origin) ---
-    if (!self.location) {
-        self.location = {
-            href: "about:blank",
-            origin: "null",
-            protocol: "about:",
-            host: "",
-            hostname: "",
-            port: "",
-            pathname: "blank",
-            search: "",
-            hash: "",
-        };
+    // --- performance.memory jitter (matches window_bootstrap) ---
+    if (globalThis.performance) {
+        Object.defineProperty(globalThis.performance, 'memory', {
+            get() {
+                const jsHeapSizeLimit = 2172649472;
+                const base = 10485760; // 10 MB
+                const jitter = ((Date.now() * 0x9e3779b9) >>> 0) % 5000000;
+                const totalJSHeapSize = base + jitter;
+                const usedJSHeapSize = Math.floor(totalJSHeapSize * 0.85);
+                return { jsHeapSizeLimit, totalJSHeapSize, usedJSHeapSize };
+            },
+            configurable: true,
+            enumerable: true
+        });
     }
 
-    // --- EventTarget-like listener registry for message/error events ---
-    const _listeners = {
-        message: [],
-        messageerror: [],
-        error: [],
-    };
-    self.addEventListener = function (type, listener, _options) {
-        if (!_listeners[type]) _listeners[type] = [];
-        _listeners[type].push(listener);
-    };
-    self.removeEventListener = function (type, listener) {
-        const arr = _listeners[type];
-        if (!arr) return;
-        const i = arr.indexOf(listener);
-        if (i >= 0) arr.splice(i, 1);
-    };
-    self.dispatchEvent = function (event) {
-        const arr = _listeners[event && event.type];
-        if (arr) {
-            for (const fn of arr.slice()) {
-                try { fn.call(self, event); } catch (e) { /* swallow */ }
-            }
-        }
-        // Also call the `on<type>` property handler.
-        const on = self["on" + (event && event.type)];
-        if (typeof on === "function") {
-            try { on.call(self, event); } catch (e) { /* swallow */ }
-        }
-        return true;
-    };
-    self.onmessage = null;
-    self.onmessageerror = null;
-    self.onerror = null;
-
-    // --- atob / btoa (shared with window_bootstrap's implementation) ---
-    // Workers have these globals per WHATWG spec; some classic-worker
-    // scripts (including our own `importScripts` data-URL loader) rely
-    // on them, so we install the same minimal base64 helpers the main
-    // thread uses rather than deferring to a dedicated bootstrap.
+    // --- atob / btoa spec-compliant fixes ---
     if (!self.atob) {
-        self.atob = function (s) {
+        self.atob = function atob(s) {
+            if (arguments.length === 0) throw new TypeError("1 argument required");
+            const input = String(s).replace(/[\t\n\f\r ]/g, "");
+            if (input.length === 0) return "";
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
             let out = "";
-            s = String(s).replace(/[^A-Za-z0-9+/]/g, "");
-            for (let i = 0; i < s.length; i += 4) {
-                const a = chars.indexOf(s[i]), b = chars.indexOf(s[i + 1]);
-                const c = chars.indexOf(s[i + 2]), d = chars.indexOf(s[i + 3]);
+            for (let i = 0; i < input.length; i += 4) {
+                const a = chars.indexOf(input[i]), b = chars.indexOf(input[i+1]);
+                const c = chars.indexOf(input[i+2]), d = chars.indexOf(input[i+3]);
                 out += String.fromCharCode((a << 2) | (b >> 4));
-                if (c !== -1) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
-                if (d !== -1) out += String.fromCharCode(((c & 3) << 6) | d);
+                if (c !== -1 && c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+                if (d !== -1 && d !== 64) out += String.fromCharCode(((c & 3) << 6) | d);
             }
             return out;
         };
     }
     if (!self.btoa) {
-        self.btoa = function (s) {
+        self.btoa = function btoa(s) {
+            if (arguments.length === 0) throw new TypeError("1 argument required");
+            const str = String(s);
+            for (let i = 0; i < str.length; i++) {
+                if (str.charCodeAt(i) > 255) throw new DOMException("InvalidCharacterError");
+            }
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
             let out = "";
-            const str = String(s);
             for (let i = 0; i < str.length; i += 3) {
-                const a = str.charCodeAt(i),
-                    b = str.charCodeAt(i + 1),
-                    c = str.charCodeAt(i + 2);
+                const a = str.charCodeAt(i), b = str.charCodeAt(i+1), c = str.charCodeAt(i+2);
                 out += chars[a >> 2] + chars[((a & 3) << 4) | (b >> 4)];
-                out += isNaN(b) ? "=" : chars[((b & 15) << 2) | (c >> 6)];
-                out += isNaN(c) ? "=" : chars[c & 63];
+                out += (isNaN(b) ? "=" : chars[((b & 15) << 2) | (c >> 6)]);
+                out += (isNaN(c) ? "=" : chars[c & 63]);
             }
             return out;
         };
@@ -189,7 +183,7 @@
                 continue;
             }
             const deserializer =
-                globalThis.__boxide && globalThis.__boxide.deserializeFromWire;
+                _boxide && _boxide.deserializeFromWire;
             const data = deserializer
                 ? deserializer(payload && payload.data)
                 : payload && payload.data;

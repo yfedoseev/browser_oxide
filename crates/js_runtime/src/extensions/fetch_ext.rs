@@ -188,10 +188,17 @@ pub fn op_net_fetch_sync(#[string] url: String) -> String {
             .build()
             .unwrap();
         rt.block_on(async move {
-            client.get(&url_clone).await.map(|r| r.text()).unwrap_or_else(|e| {
-                eprintln!("[op_net_fetch_sync] FAILED fetch {}: {}", url_clone, e);
-                String::new()
-            })
+            match tokio::time::timeout(std::time::Duration::from_secs(10), client.get(&url_clone)).await {
+                Ok(Ok(resp)) => resp.text(),
+                Ok(Err(e)) => {
+                    eprintln!("[op_net_fetch_sync] FAILED fetch {}: {}", url_clone, e);
+                    String::new()
+                }
+                Err(_) => {
+                    eprintln!("[op_net_fetch_sync] TIMEOUT fetching {}", url_clone);
+                    String::new()
+                }
+            }
         })
     }).join().unwrap_or_default();
 

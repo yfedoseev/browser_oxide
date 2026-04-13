@@ -31,14 +31,15 @@ impl Drop for Page {
 impl Page {
     /// Create a page from an HTML string. Parses HTML, executes inline scripts,
     /// and runs the event loop until idle (or 30s timeout).
-    pub async fn from_html(html: &str) -> Result<Self, deno_core::error::AnyError> {
-        Self::from_html_with_url(html, "about:blank").await
+    pub async fn from_html(html: &str, profile: Option<stealth::StealthProfile>) -> Result<Self, deno_core::error::AnyError> {
+        let p = profile.unwrap_or_else(stealth::presets::chrome_130_ru);
+        Self::from_html_with_url(html, "about:blank", p).await
     }
 
     /// Create a page quickly — parses HTML, sets up DOM + JS runtime, executes
     /// inline scripts, but does NOT drain the event loop. Useful for CDP
     /// navigation where the caller controls script execution via Runtime.evaluate.
-    pub async fn from_html_fast(html: &str, url: &str) -> Result<Self, deno_core::error::AnyError> {
+    pub async fn from_html_fast(html: &str, url: &str, profile: stealth::StealthProfile) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
         let scripts = script_runner::find_scripts(&dom);
         let stylesheet_entries = stylesheet_collector::find_stylesheets(&dom);
@@ -47,6 +48,7 @@ impl Page {
         let runtime = BrowserJsRuntime::with_options(
             dom,
             BrowserRuntimeOptions {
+                stealth_profile: Some(profile),
                 stylesheets,
                 ..Default::default()
             },
@@ -116,6 +118,7 @@ impl Page {
     pub async fn from_html_with_url(
         html: &str,
         url: &str,
+        profile: stealth::StealthProfile,
     ) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
 
@@ -127,6 +130,7 @@ impl Page {
         let runtime = BrowserJsRuntime::with_options(
             dom,
             BrowserRuntimeOptions {
+                stealth_profile: Some(profile.clone()),
                 stylesheets,
                 ..Default::default()
             },
@@ -209,7 +213,7 @@ impl Page {
         };
         for info in &iframes {
             if let Some(srcdoc) = &info.srcdoc {
-                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc).await {
+                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &profile).await {
                     Ok(child) => children.push(child),
                     Err(e) => eprintln!("iframe srcdoc error: {e}"),
                 }
@@ -391,13 +395,14 @@ impl Page {
     pub async fn navigate_simple(
         url: &str,
         client: &net::HttpClient,
+        profile: stealth::StealthProfile,
     ) -> Result<Self, deno_core::error::AnyError> {
         let resp = client
             .get(url)
             .await
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         let html = resp.text();
-        Self::from_html_with_url(&html, url).await
+        Self::from_html_with_url(&html, url, profile).await
     }
 
     /// Navigate with a stealth profile.
@@ -1042,7 +1047,7 @@ impl Page {
         };
         for info in &iframes {
             if let Some(srcdoc) = &info.srcdoc {
-                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc).await {
+                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &profile).await {
                     Ok(child) => children.push(child),
                     Err(e) => eprintln!("iframe srcdoc error: {e}"),
                 }

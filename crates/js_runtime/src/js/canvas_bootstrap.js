@@ -544,10 +544,10 @@
         #canvasId;
         #attrs;
         constructor(width = 300, height = 150) {
-            this.width = width;
-            this.height = height;
             this.#canvasId = ops.op_canvas_create(width, height);
             this.#attrs = { width: String(width), height: String(height) };
+            Object.defineProperty(this, 'width', { value: width, writable: true, enumerable: true, configurable: true });
+            Object.defineProperty(this, 'height', { value: height, writable: true, enumerable: true, configurable: true });
             // Element base properties — fpCollect and bot.sannysoft expect these.
             // Use defineProperty because Element.prototype (which we chain into
             // at the bottom of this file) has tagName/nodeName/etc. as getters
@@ -568,8 +568,12 @@
         // `canvas.setAttribute('width', 200)` before drawing.
         setAttribute(name, value) {
             this.#attrs[name] = String(value);
-            if (name === "width") { this.width = parseInt(value, 10) || this.width; }
-            if (name === "height") { this.height = parseInt(value, 10) || this.height; }
+            if (name === "width") {
+                Object.defineProperty(this, 'width', { value: parseInt(value, 10) || this.width, writable: true, enumerable: true, configurable: true });
+            }
+            if (name === "height") {
+                Object.defineProperty(this, 'height', { value: parseInt(value, 10) || this.height, writable: true, enumerable: true, configurable: true });
+            }
         }
         getAttribute(name) { return this.#attrs[name] !== undefined ? this.#attrs[name] : null; }
         removeAttribute(name) { delete this.#attrs[name]; }

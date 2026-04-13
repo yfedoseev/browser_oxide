@@ -17,8 +17,11 @@ async fn eval(js: &str) -> String {
 // === navigator checks ===
 
 #[tokio::test]
-async fn webdriver_is_undefined() {
-    assert_eq!(eval("typeof navigator.webdriver").await, "undefined");
+async fn webdriver_is_boolean() {
+    assert_eq!(
+        eval("typeof navigator.webdriver").await,
+        "boolean"
+    );
 }
 
 #[tokio::test]

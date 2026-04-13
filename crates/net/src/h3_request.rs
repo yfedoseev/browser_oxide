@@ -7,10 +7,13 @@ use bytes::Buf;
 use stealth::profile::StealthProfile;
 use std::collections::HashMap;
 
-/// Send an HTTP/3 GET request over an established QUIC connection.
-pub async fn h3_get(
+use crate::Method;
+
+/// Send an HTTP/3 request over an established QUIC connection.
+pub async fn h3_request(
     connection: quinn::Connection,
     url: &url::Url,
+    method: Method,
     profile: &StealthProfile,
     extra_headers: &[(String, String)],
 ) -> Result<(Response, Option<String>), NetError> {
@@ -32,8 +35,13 @@ pub async fn h3_get(
         url.path().to_string()
     };
 
+    let method_str = match &method {
+        Method::Get => "GET",
+        Method::Post(_) => "POST",
+    };
+
     let mut req_builder = http::Request::builder()
-        .method("GET")
+        .method(method_str)
         .uri(format!("https://{}{}", authority, path));
 
     // Use Chrome-exact headers from profile
@@ -44,6 +52,15 @@ pub async fn h3_get(
         req_builder = req_builder.header(k, v);
     }
 
+    let body_bytes = match method {
+        Method::Get => Vec::new(),
+        Method::Post(b) => b,
+    };
+
+    if !body_bytes.is_empty() {
+        req_builder = req_builder.header("content-length", body_bytes.len().to_string());
+    }
+
     let req = req_builder
         .body(())
         .map_err(|e| NetError::H3(e.to_string()))?;
@@ -52,6 +69,13 @@ pub async fn h3_get(
         .send_request(req)
         .await
         .map_err(|e| NetError::H3(e.to_string()))?;
+
+    if !body_bytes.is_empty() {
+        stream
+            .send_data(bytes::Bytes::from(body_bytes))
+            .await
+            .map_err(|e| NetError::H3(e.to_string()))?;
+    }
 
     stream
         .finish()

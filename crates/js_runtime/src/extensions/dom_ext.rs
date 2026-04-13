@@ -974,6 +974,66 @@ pub fn op_dom_get_stylesheet_rules(
     rules
 }
 
+#[op2]
+#[string]
+pub fn op_dom_get_base_url(#[state] state: &DomState) -> String {
+    state.base_url.as_ref().map(|u| u.to_string()).unwrap_or_else(|| "about:blank".to_string())
+}
+
+#[op2]
+#[string]
+pub fn op_dom_storage_get(
+    #[state] state: &DomState,
+    #[string] area: String,
+    #[string] key: String,
+) -> Option<String> {
+    state
+        .storage
+        .get(&area)
+        .and_then(|m| m.get(&key))
+        .cloned()
+}
+
+#[op2(fast)]
+pub fn op_dom_storage_set(
+    #[state] state: &mut DomState,
+    #[string] area: String,
+    #[string] key: String,
+    #[string] value: String,
+) {
+    if let Some(m) = state.storage.get_mut(&area) {
+        m.insert(key, value);
+    }
+}
+
+#[op2(fast)]
+pub fn op_dom_storage_remove(
+    #[state] state: &mut DomState,
+    #[string] area: String,
+    #[string] key: String,
+) {
+    if let Some(m) = state.storage.get_mut(&area) {
+        m.remove(&key);
+    }
+}
+
+#[op2(fast)]
+pub fn op_dom_storage_clear(#[state] state: &mut DomState, #[string] area: String) {
+    if let Some(m) = state.storage.get_mut(&area) {
+        m.clear();
+    }
+}
+
+#[op2]
+#[serde]
+pub fn op_dom_storage_keys(#[state] state: &DomState, #[string] area: String) -> Vec<String> {
+    state
+        .storage
+        .get(&area)
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
 deno_core::extension!(
     dom_extension,
     ops = [
@@ -1017,5 +1077,11 @@ deno_core::extension!(
         op_dom_get_stylesheet_rules,
         op_dom_attach_shadow,
         op_dom_get_shadow_root,
+        op_dom_get_base_url,
+        op_dom_storage_get,
+        op_dom_storage_set,
+        op_dom_storage_remove,
+        op_dom_storage_clear,
+        op_dom_storage_keys,
     ],
 );

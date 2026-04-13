@@ -200,10 +200,12 @@ thread_local! {
 #[op2(fast)]
 #[smi]
 pub fn op_worker_spawn(
+    #[state] state: &mut deno_core::OpState,
     #[string] script: String,
     #[string] _name: String,
     is_module: bool,
 ) -> i32 {
+    let profile = state.borrow::<crate::state::DomState>().stealth_profile.clone();
     let (to_worker_tx, to_worker_rx) = std::sync::mpsc::channel::<String>();
     let (to_parent_tx, to_parent_rx) = std::sync::mpsc::channel::<String>();
     let terminate = Arc::new(AtomicBool::new(false));
@@ -245,7 +247,7 @@ pub fn op_worker_spawn(
 
             let local = tokio::task::LocalSet::new();
             local.block_on(&rt, async move {
-                let mut runtime = crate::runtime::create_worker_runtime();
+                let mut runtime = crate::runtime::create_worker_runtime(profile);
 
                 // Execute the worker script inside the worker's isolate.
                 // Module workers go through `load_main_es_module_from_code`
