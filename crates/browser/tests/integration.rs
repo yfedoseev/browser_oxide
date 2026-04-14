@@ -1,19 +1,18 @@
 //! End-to-end integration tests crossing crate boundaries.
 
 use browser::Page;
+use stealth;
 
 #[tokio::test]
 async fn html_parse_js_execute_extract() {
-    let mut page = Page::from_html(
-        r#"
+    let mut page = Page::from_html(r#"
         <html><head><title>Integration</title></head><body>
             <div id="app"></div>
             <script>
                 document.getElementById('app').innerHTML = '<h1>Dynamic Content</h1>';
             </script>
         </body></html>
-    "#,
-    )
+    "#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
 
@@ -23,16 +22,14 @@ async fn html_parse_js_execute_extract() {
 
 #[tokio::test]
 async fn multiple_scripts_execute_in_order() {
-    let mut page = Page::from_html(
-        r#"
+    let mut page = Page::from_html(r#"
         <html><head></head><body>
             <div id="log"></div>
             <script>document.getElementById('log').textContent = 'A';</script>
             <script>document.getElementById('log').textContent += 'B';</script>
             <script>document.getElementById('log').textContent += 'C';</script>
         </body></html>
-    "#,
-    )
+    "#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
 
@@ -41,8 +38,7 @@ async fn multiple_scripts_execute_in_order() {
 
 #[tokio::test]
 async fn create_element_and_query() {
-    let mut page = Page::from_html(
-        r#"
+    let mut page = Page::from_html(r#"
         <html><head></head><body>
             <script>
                 for (let i = 0; i < 5; i++) {
@@ -53,8 +49,7 @@ async fn create_element_and_query() {
                 }
             </script>
         </body></html>
-    "#,
-    )
+    "#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
 
@@ -66,8 +61,7 @@ async fn create_element_and_query() {
 
 #[tokio::test]
 async fn inner_html_set_and_query() {
-    let mut page = Page::from_html(
-        r#"
+    let mut page = Page::from_html(r#"
         <html><head></head><body>
             <div id="container"></div>
             <script>
@@ -75,8 +69,7 @@ async fn inner_html_set_and_query() {
                     '<ul><li>One</li><li>Two</li><li>Three</li></ul>';
             </script>
         </body></html>
-    "#,
-    )
+    "#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
 
@@ -88,8 +81,7 @@ async fn inner_html_set_and_query() {
 
 #[tokio::test]
 async fn set_timeout_fires_and_mutates_dom() {
-    let mut page = Page::from_html(
-        r#"
+    let mut page = Page::from_html(r#"
         <html><head></head><body>
             <div id="result">waiting</div>
             <script>
@@ -98,8 +90,7 @@ async fn set_timeout_fires_and_mutates_dom() {
                 }, 50);
             </script>
         </body></html>
-    "#,
-    )
+    "#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
 
@@ -108,8 +99,7 @@ async fn set_timeout_fires_and_mutates_dom() {
 
 #[tokio::test]
 async fn promise_chain() {
-    let mut page = Page::from_html(
-        r#"
+    let mut page = Page::from_html(r#"
         <html><head></head><body>
             <div id="out"></div>
             <script>
@@ -118,8 +108,7 @@ async fn promise_chain() {
                     .then(v => { document.getElementById('out').textContent = v; });
             </script>
         </body></html>
-    "#,
-    )
+    "#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
 
@@ -128,8 +117,7 @@ async fn promise_chain() {
 
 #[tokio::test]
 async fn class_list_manipulation() {
-    let mut page = Page::from_html(
-        r#"
+    let mut page = Page::from_html(r#"
         <html><head></head><body>
             <div id="el" class="initial"></div>
             <script>
@@ -138,8 +126,7 @@ async fn class_list_manipulation() {
                 el.classList.remove('initial');
             </script>
         </body></html>
-    "#,
-    )
+    "#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
 
@@ -152,16 +139,14 @@ async fn class_list_manipulation() {
 
 #[tokio::test]
 async fn attribute_set_and_get() {
-    let mut page = Page::from_html(
-        r#"
+    let mut page = Page::from_html(r#"
         <html><head></head><body>
             <div id="el"></div>
             <script>
                 document.getElementById('el').setAttribute('data-value', '42');
             </script>
         </body></html>
-    "#,
-    )
+    "#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
 
@@ -176,7 +161,7 @@ async fn cdp_session_runtime_evaluate() {
     use protocol::{CdpRequest, CdpSession};
 
     let mut session = CdpSession::new();
-    let mut page = Page::from_html("<html><head></head><body></body></html>")
+    let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
 
@@ -195,7 +180,7 @@ async fn cdp_session_page_navigate_events() {
 
     let mut session = CdpSession::new();
     session.enable_domain("Page");
-    let mut page = Page::from_html("<html><head></head><body></body></html>")
+    let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
 
@@ -217,7 +202,7 @@ async fn cdp_session_dom_get_document() {
     use protocol::{CdpRequest, CdpSession};
 
     let mut session = CdpSession::new();
-    let mut page = Page::from_html("<html><head></head><body><p>Test</p></body></html>")
+    let mut page = Page::from_html("<html><head></head><body><p>Test</p></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
 
@@ -232,7 +217,7 @@ async fn cdp_session_dom_get_document() {
 
 #[tokio::test]
 async fn page_evaluate_returns_result() {
-    let mut page = Page::from_html("<html><head></head><body></body></html>")
+    let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     assert_eq!(page.evaluate("2 + 2").unwrap(), "4");
@@ -246,7 +231,7 @@ async fn page_evaluate_returns_result() {
 #[tokio::test]
 async fn take_dom_preserves_content() {
     let page =
-        Page::from_html("<html><head></head><body><p id=\"keep\">Preserved</p></body></html>")
+        Page::from_html("<html><head></head><body><p id=\"keep\">Preserved</p></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
 

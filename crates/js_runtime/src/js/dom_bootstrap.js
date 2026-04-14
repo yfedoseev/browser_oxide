@@ -20,6 +20,16 @@
             if (obj) return obj;
         }
         const nodeType = ops.op_dom_get_node_type(nodeId);
+        return _wrapNodeWithType(nodeId, nodeType);
+    }
+
+    function _wrapNodeWithType(nodeId, nodeType) {
+        if (nodeId === null || nodeId === undefined || nodeId === -1) return null;
+        const cached = _nodeCache.get(nodeId);
+        if (cached) {
+            const obj = cached.deref();
+            if (obj) return obj;
+        }
         let node;
         switch (nodeType) {
             case 1:
@@ -140,11 +150,20 @@
     globalThis.__onNodeInserted = _onNodeInserted;
 
     class NodeList {
-        constructor(ids) {
-            this._ids = ids;
-            // Populate numeric indices for bracket access (Chrome behavior)
-            for (let i = 0; i < ids.length; i++) {
-                this[i] = _wrapNode(ids[i]);
+        constructor(data, isTyped = false) {
+            if (isTyped) {
+                this._ids = [];
+                for (let i = 0; i < data.length; i += 2) {
+                    const id = data[i];
+                    const type = data[i+1];
+                    this._ids.push(id);
+                    this[i/2] = _wrapNodeWithType(id, type);
+                }
+            } else {
+                this._ids = data;
+                for (let i = 0; i < data.length; i++) {
+                    this[i] = _wrapNode(data[i]);
+                }
             }
         }
         get length() { return this._ids.length; }
@@ -265,7 +284,7 @@
             const p = this.parentNode;
             return p && p.nodeType === 1 ? p : null;
         }
-        get childNodes() { return new NodeList(ops.op_dom_get_children(_getNodeId(this))); }
+        get childNodes() { return new NodeList(ops.op_dom_get_children_with_types(_getNodeId(this)), true); }
         get firstChild() { return _wrapNode(ops.op_dom_get_first_child(_getNodeId(this))); }
         get lastChild() { return _wrapNode(ops.op_dom_get_last_child(_getNodeId(this))); }
         get nextSibling() { return _wrapNode(ops.op_dom_get_next_sibling(_getNodeId(this))); }
@@ -442,7 +461,7 @@
         set innerHTML(val) { ops.op_dom_set_inner_html(_getNodeId(this), String(val)); }
         get outerHTML() { return ops.op_dom_get_outer_html(_getNodeId(this)); }
         get children() {
-            return new NodeList(ops.op_dom_get_child_elements(_getNodeId(this)));
+            return new NodeList(ops.op_dom_get_child_elements_with_types(_getNodeId(this)), true);
         }
         get firstElementChild() {
             const els = ops.op_dom_get_child_elements(_getNodeId(this));

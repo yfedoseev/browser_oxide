@@ -57,7 +57,7 @@ pub fn op_dom_get_outer_html(#[state] state: &DomState, #[smi] node_id: i32) -> 
 pub fn op_dom_get_attribute(
     #[state] state: &DomState,
     #[smi] node_id: i32,
-    #[string] name: String,
+    #[string] name: &str,
 ) -> String {
     let id = NodeId::from_raw(node_id as u32);
     state
@@ -67,7 +67,7 @@ pub fn op_dom_get_attribute(
         .and_then(|e| {
             e.attrs
                 .iter()
-                .find(|a| a.name.local.eq_ignore_ascii_case(&name))
+                .find(|a| a.name.local.eq_ignore_ascii_case(name))
                 .map(|a| a.value.clone())
         })
         .unwrap_or_default()
@@ -117,6 +117,19 @@ pub fn op_dom_get_children(#[state] state: &DomState, #[smi] node_id: i32) -> Ve
 
 #[op2]
 #[serde]
+pub fn op_dom_get_children_with_types(#[state] state: &DomState, #[smi] node_id: i32) -> Vec<i32> {
+    let id = NodeId::from_raw(node_id as u32);
+    let children = state.dom.children(id);
+    let mut res = Vec::with_capacity(children.len() * 2);
+    for cid in children {
+        res.push(cid.to_raw() as i32);
+        res.push(state.dom.node_type(cid) as i32);
+    }
+    res
+}
+
+#[op2]
+#[serde]
 pub fn op_dom_get_child_elements(#[state] state: &DomState, #[smi] node_id: i32) -> Vec<i32> {
     state
         .dom
@@ -124,6 +137,19 @@ pub fn op_dom_get_child_elements(#[state] state: &DomState, #[smi] node_id: i32)
         .iter()
         .map(|id| id.to_raw() as i32)
         .collect()
+}
+
+#[op2]
+#[serde]
+pub fn op_dom_get_child_elements_with_types(#[state] state: &DomState, #[smi] node_id: i32) -> Vec<i32> {
+    let id = NodeId::from_raw(node_id as u32);
+    let children = state.dom.child_elements(id);
+    let mut res = Vec::with_capacity(children.len() * 2);
+    for cid in children {
+        res.push(cid.to_raw() as i32);
+        res.push(state.dom.node_type(cid) as i32);
+    }
+    res
 }
 
 #[op2(fast)]
@@ -1047,7 +1073,9 @@ deno_core::extension!(
         op_dom_has_attribute,
         op_dom_get_parent,
         op_dom_get_children,
+        op_dom_get_children_with_types,
         op_dom_get_child_elements,
+        op_dom_get_child_elements_with_types,
         op_dom_get_first_child,
         op_dom_get_last_child,
         op_dom_get_next_sibling,

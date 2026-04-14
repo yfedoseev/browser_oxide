@@ -5,18 +5,19 @@
 
 use browser::Page;
 use std::time::Duration;
+use stealth;
 
 fn html(body: &str) -> String {
     format!("<html><head></head><body>{}</body></html>", body)
 }
 
 async fn eval(js: &str) -> String {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate(js).unwrap()
 }
 
 async fn page_with(body: &str) -> Page {
-    Page::from_html(&html(body)).await.unwrap()
+    Page::from_html(&html(body), None::<stealth::StealthProfile>).await.unwrap()
 }
 
 // ================================================================

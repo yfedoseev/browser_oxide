@@ -11,6 +11,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
+use stealth;
 
 /// A running CDP server. Stops when dropped.
 pub struct CdpServer {
@@ -43,7 +44,7 @@ impl CdpServer {
 
             local.block_on(&rt, async move {
                 let profile = stealth::presets::chrome_130_ru();
-                let page = browser::Page::from_html(&html, None)
+                let page = browser::Page::from_html(&html, None::<stealth::StealthProfile>)
                     .await
                     .expect("failed to create page");
                 let page = Rc::new(RefCell::new(page));
@@ -184,7 +185,7 @@ impl CdpServer {
                     }
                 };
 
-                let page = browser::Page::from_html("<html><body></body></html>", None)
+                let page = browser::Page::from_html("<html><body></body></html>", None::<stealth::StealthProfile>)
                     .await
                     .expect("failed to create empty page");
                 let page = Rc::new(RefCell::new(page));
@@ -541,14 +542,14 @@ mod tests {
 
         // Warm up
         rt.block_on(async {
-            let _ = browser::Page::from_html(html).await;
+            let _ = browser::Page::from_html(html, None::<stealth::StealthProfile>).await;
         });
 
         let mut times = Vec::new();
         for _ in 0..10 {
             rt.block_on(async {
                 let start = std::time::Instant::now();
-                let page = browser::Page::from_html_fast(html, "https://example.com").await.unwrap();
+                let page = browser::Page::from_html_fast(html, "https://example.com", stealth::presets::chrome_130_ru()).await.unwrap();
                 times.push(start.elapsed());
                 drop(page);
             });

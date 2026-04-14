@@ -5,12 +5,13 @@ use dom::Dom;
 use event_loop::{BrowserEventLoop, IdleReason};
 use js_runtime::{runtime::BrowserRuntimeOptions, BrowserJsRuntime};
 use std::time::Duration;
+use stealth;
 
 /// A browser page. Owns a DOM, JS runtime, and event loop.
 ///
 /// # Example
 /// ```rust,ignore
-/// let page = Page::from_html("<html><body><script>document.title = 'Hello'</script></body></html>").await?;
+/// let page = Page::from_html("<html><body><script>document.title = 'Hello'</script></body></html>", None::<stealth::StealthProfile>).await?;
 /// assert_eq!(page.title(), "Hello");
 /// ```
 pub struct Page {
@@ -31,9 +32,11 @@ impl Drop for Page {
 impl Page {
     /// Create a page from an HTML string. Parses HTML, executes inline scripts,
     /// and runs the event loop until idle (or 30s timeout).
-    pub async fn from_html(html: &str, profile: Option<stealth::StealthProfile>) -> Result<Self, deno_core::error::AnyError> {
-        let p = profile.unwrap_or_else(stealth::presets::chrome_130_ru);
-        Self::from_html_with_url(html, "about:blank", p).await
+    pub async fn from_html(
+        html: &str,
+        profile: Option<stealth::StealthProfile>,
+    ) -> Result<Self, deno_core::error::AnyError> {
+        Self::from_html_with_url(html, "about:blank", profile).await
     }
 
     /// Create a page quickly — parses HTML, sets up DOM + JS runtime, executes
@@ -48,7 +51,7 @@ impl Page {
         let runtime = BrowserJsRuntime::with_options(
             dom,
             BrowserRuntimeOptions {
-                stealth_profile: Some(profile),
+                stealth_profile: Some(profile.clone()),
                 stylesheets,
                 ..Default::default()
             },
@@ -61,15 +64,20 @@ impl Page {
             .execute_script(&format!("location.href = '{}';", url_js))
             .ok();
 
-        // Execute inline scripts
+        // Share the HTTP client with JS fetch()
+        let client = net::HttpClient::new(&profile)
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
+
+        // Execute inline scripts (fast mode skips external scripts by default)
         for (i, script) in scripts.iter().enumerate() {
-            let name = format!("<script_{}>", i);
-            if let Err(e) = event_loop.execute_script(&script.code) {
-                eprintln!("Script error in {}: {}", name, e);
+            if script.src.is_some() { continue; }
+            if !script.code.is_empty() {
+                if let Err(e) = event_loop.execute_script(&script.code) {
+                    eprintln!("Script error in <script_{}>: {}", i, e);
+                }
             }
         }
-
-        // Skip event loop drain + iframe processing — caller handles this
 
         Ok(Self {
             event_loop,
@@ -118,7 +126,7 @@ impl Page {
     pub async fn from_html_with_url(
         html: &str,
         url: &str,
-        profile: stealth::StealthProfile,
+        profile: Option<stealth::StealthProfile>,
     ) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
 
@@ -130,7 +138,7 @@ impl Page {
         let runtime = BrowserJsRuntime::with_options(
             dom,
             BrowserRuntimeOptions {
-                stealth_profile: Some(profile.clone()),
+                stealth_profile: profile.clone(),
                 stylesheets,
                 ..Default::default()
             },
@@ -143,11 +151,32 @@ impl Page {
             .execute_script(&format!("location.href = '{}';", url_js))
             .ok();
 
-        // Trigger __onNodeInserted on the root elements to correctly
-        // fetch and execute all scripts found in the initial HTML in order.
-        event_loop
-            .execute_script("if (document.head) __onNodeInserted(document.head, true); if (document.documentElement) __onNodeInserted(document.documentElement, true);")
-            .ok();
+        // Share the HTTP client with JS fetch()
+        let p = profile.unwrap_or_else(stealth::presets::chrome_130_ru);
+        let client = net::HttpClient::new(&p)
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
+
+        // Execute scripts in document order
+        for (i, script) in scripts.iter().enumerate() {
+            if let Some(src) = &script.src {
+                if let Some(full_url) = Self::resolve_url(url, src) {
+                    match client.get_follow(&full_url, 10).await {
+                        Ok(resp) => {
+                            let code = resp.text();
+                            if let Err(e) = event_loop.execute_script(&code) {
+                                eprintln!("Script error in <script src={}>: {}", src, e);
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to fetch script {}: {}", src, e),
+                    }
+                }
+            } else if !script.code.is_empty() {
+                if let Err(e) = event_loop.execute_script(&script.code) {
+                    eprintln!("Script error in <script_{}>: {}", i, e);
+                }
+            }
+        }
 
         // Set document.readyState = loading
         event_loop.execute_script("globalThis.__documentReadyState = 'loading';").ok();
@@ -213,7 +242,7 @@ impl Page {
         };
         for info in &iframes {
             if let Some(srcdoc) = &info.srcdoc {
-                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &profile).await {
+                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &p).await {
                     Ok(child) => children.push(child),
                     Err(e) => eprintln!("iframe srcdoc error: {e}"),
                 }
@@ -402,7 +431,7 @@ impl Page {
             .await
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         let html = resp.text();
-        Self::from_html_with_url(&html, url, profile).await
+        Self::from_html_with_url(&html, url, Some(profile)).await
     }
 
     /// Navigate with a stealth profile.
@@ -460,6 +489,11 @@ impl Page {
     /// and any future feature that wants to carry JS across navigations
     /// within a single frame (equivalent to Chromium's
     /// `Page.addScriptToEvaluateOnNewDocument`).
+    /// Like [`Page::navigate`], but installs caller-supplied init scripts on
+    /// every iteration's fresh runtime. Used by [`Page::navigate_humanized`]
+    /// and any future feature that wants to carry JS across navigations
+    /// within a single frame (equivalent to Chromium's
+    /// `Page.addScriptToEvaluateOnNewDocument`).
     pub async fn navigate_with_init(
         url: &str,
         profile: stealth::StealthProfile,
@@ -496,15 +530,62 @@ impl Page {
             
             let html = resp.text();
             let resp_url = resp.url.clone();
-            if let Ok(parsed) = url::Url::parse(&resp_url) {
+            return Self::navigate_loop_internal(html, resp_url, profile.clone(), client.clone(), iterations, iter, init_scripts.clone(), debug_nav).await;
+        }
+
+        // Shouldn't be reachable (iterations >= 1 guaranteed), but fall
+        // back to a plain GET to keep the signature total.
+        let resp = client
+            .get_follow(url, 10)
+            .await
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        Self::build_page_with_scripts(&resp.text(), url, &profile, &client).await
+    }
+
+    /// For tests: start a navigation loop with a provided HTML instead of
+    /// fetching from URL. Subsequent iterations (if any) will fetch from the URL.
+    pub async fn navigate_with_html(
+        html: &str,
+        url: &str,
+        profile: stealth::StealthProfile,
+        max_iterations: u8,
+    ) -> Result<Self, deno_core::error::AnyError> {
+        let client = net::HttpClient::new(&profile)
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
+
+        let iterations = max_iterations.max(1);
+        let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
+
+        // Iteration 0 uses provided HTML
+        Self::navigate_loop_internal(html.to_string(), url.to_string(), profile, client, iterations, 0, vec![], debug_nav).await
+    }
+
+    async fn navigate_loop_internal(
+        html: String,
+        resp_url: String,
+        profile: stealth::StealthProfile,
+        client: net::HttpClient,
+        iterations: u8,
+        start_iter: u8,
+        init_scripts: Vec<String>,
+        debug_nav: bool,
+    ) -> Result<Self, deno_core::error::AnyError> {
+        let mut current_html = html;
+        let mut current_url = resp_url;
+        let mut current_method = "GET".to_string();
+        let mut current_body: Option<String> = None;
+
+        for iter in start_iter..iterations {
+            if let Ok(parsed) = url::Url::parse(&current_url) {
                 let jar_cookies = client.cookies_for_url(&parsed).await.unwrap_or_default();
                 if debug_nav {
                     eprintln!("[navigate] jar cookies: {}", jar_cookies);
                 }
             }
             let mut page = Self::build_page_with_scripts_and_init(
-                &html,
-                &resp_url,
+                &current_html,
+                &current_url,
                 &profile,
                 &client,
                 &init_scripts,
@@ -549,7 +630,7 @@ impl Page {
             }
 
             // Resolve relative pending URLs
-            let next_url = Self::resolve_url(&resp_url, &pending_url)
+            let next_url = Self::resolve_url(&current_url, &pending_url)
                 .ok_or_else(|| deno_core::error::AnyError::msg("Failed to resolve pending URL"))?;
             eprintln!("[navigate] pending navigation (kind: {kind}) -> {next_url} [{pending_method_val}]");
 
@@ -562,16 +643,27 @@ impl Page {
             current_url = next_url;
             current_method = pending_method_val;
             current_body = pending_body_val;
+
+            // Fetch the next page
+            let resp = if current_method == "POST" {
+                client
+                    .post_bytes_follow(&current_url, current_body.as_deref().unwrap_or("").as_bytes(), &[], 10)
+                    .await
+                    .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+            } else {
+                client
+                    .get_follow(&current_url, 10)
+                    .await
+                    .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+            };
+            current_html = resp.text();
+            current_url = resp.url.clone();
         }
 
-        // Shouldn't be reachable (iterations >= 1 guaranteed), but fall
-        // back to a plain GET to keep the signature total.
-        let resp = client
-            .get_follow(url, 10)
-            .await
-            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
-        Self::build_page_with_scripts(&resp.text(), url, &profile, &client).await
+        // Fallback (should be reachable via the loop)
+        Err(deno_core::error::AnyError::msg("Navigation loop terminated without returning a page"))
     }
+
 
     /// [DEPRECATED] Legacy name — now a thin wrapper around [`Page::navigate`].
     ///
@@ -1097,9 +1189,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_from_html_basic() {
-        let mut page = Page::from_html(
-            "<html><head><title>Test</title></head><body><p>Hello</p></body></html>",
-        )
+        let mut page = Page::from_html("<html><head><title>Test</title></head><body><p>Hello</p></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.title(), "Test");
@@ -1108,24 +1198,20 @@ mod tests {
 
     #[tokio::test]
     async fn page_script_execution() {
-        let mut page = Page::from_html(
-            "<html><head></head><body><div id='target'></div><script>document.getElementById('target').textContent = 'JS works!';</script></body></html>"
-        ).await.unwrap();
+        let mut page = Page::from_html("<html><head></head><body><div id='target'></div><script>document.getElementById('target').textContent = 'JS works!';</script></body></html>", None::<stealth::StealthProfile>).await.unwrap();
         assert_eq!(page.text_of("#target"), Some("JS works!".to_string()));
     }
 
     #[tokio::test]
     async fn page_script_creates_elements() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <script>
                     const p = document.createElement('p');
                     p.setAttribute('id', 'created');
                     p.textContent = 'Dynamic content';
                     document.body.appendChild(p);
                 </script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert!(page.has_element("#created"));
@@ -1137,14 +1223,12 @@ mod tests {
 
     #[tokio::test]
     async fn page_script_modifies_inner_html() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <div id="container"></div>
                 <script>
                     document.getElementById('container').innerHTML = '<span class="inner">Injected</span>';
                 </script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.text_of(".inner"), Some("Injected".to_string()));
@@ -1152,16 +1236,14 @@ mod tests {
 
     #[tokio::test]
     async fn page_with_timeout_script() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <div id="output">before</div>
                 <script>
                     setTimeout(() => {
                         document.getElementById('output').textContent = 'after';
                     }, 50);
                 </script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.text_of("#output"), Some("after".to_string()));
@@ -1169,7 +1251,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_evaluate() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page.evaluate("1 + 2").unwrap();
@@ -1178,7 +1260,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_navigator_exists() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page.evaluate("typeof navigator.userAgent").unwrap();
@@ -1187,7 +1269,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_document_has_focus() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page.evaluate("document.hasFocus()").unwrap();
@@ -1195,17 +1277,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn page_webdriver_undefined() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+    async fn page_webdriver_false() {
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page.evaluate("typeof navigator.webdriver").unwrap();
-        assert_eq!(result, "undefined");
+        assert_eq!(result, "boolean");
+        let val = page.evaluate("navigator.webdriver").unwrap();
+        assert_eq!(val, "false");
     }
 
     #[tokio::test]
     async fn page_window_dimensions() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let w = page.evaluate("window.innerWidth").unwrap();
@@ -1216,7 +1300,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_local_storage() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         page.evaluate("localStorage.setItem('key', 'value')")
@@ -1227,7 +1311,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_crypto_random() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page
@@ -1238,16 +1322,14 @@ mod tests {
 
     #[tokio::test]
     async fn page_promise_then() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <div id="out">waiting</div>
                 <script>
                     Promise.resolve('done').then(v => {
                         document.getElementById('out').textContent = v;
                     });
                 </script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.text_of("#out"), Some("done".to_string()));
@@ -1255,14 +1337,12 @@ mod tests {
 
     #[tokio::test]
     async fn page_multiple_scripts() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <div id="out"></div>
                 <script>document.getElementById('out').textContent = 'A';</script>
                 <script>document.getElementById('out').textContent += 'B';</script>
                 <script>document.getElementById('out').textContent += 'C';</script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.text_of("#out"), Some("ABC".to_string()));
@@ -1270,7 +1350,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_take_dom() {
-        let page = Page::from_html("<html><head></head><body><p>test</p></body></html>")
+        let page = Page::from_html("<html><head></head><body><p>test</p></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let dom = page.take_dom();
@@ -1286,7 +1366,7 @@ mod tests {
     async fn navigate_httpbin() {
         let profile = stealth::chrome_130_linux();
         let client = net::HttpClient::new(&profile).unwrap();
-        let mut page = Page::navigate_simple("https://httpbin.org/html", &client)
+        let mut page = Page::navigate_simple("https://httpbin.org/html", &client, stealth::presets::chrome_130_ru())
             .await
             .expect("navigate to httpbin failed");
         let title = page.title();
@@ -1305,7 +1385,7 @@ mod tests {
     async fn navigate_httpbin_user_agent() {
         let profile = stealth::chrome_130_windows();
         let client = net::HttpClient::new(&profile).unwrap();
-        let mut page = Page::navigate_simple("https://httpbin.org/user-agent", &client)
+        let mut page = Page::navigate_simple("https://httpbin.org/user-agent", &client, stealth::presets::chrome_130_ru())
             .await
             .expect("navigate to httpbin/user-agent failed");
         let text = page.text_content();
@@ -1321,7 +1401,7 @@ mod tests {
     async fn navigate_stealth_headers_check() {
         let profile = stealth::chrome_130_linux();
         let client = net::HttpClient::new(&profile).unwrap();
-        let mut page = Page::navigate_simple("https://httpbin.org/headers", &client)
+        let mut page = Page::navigate_simple("https://httpbin.org/headers", &client, stealth::presets::chrome_130_ru())
             .await
             .expect("navigate to httpbin/headers failed");
         let text = page.text_content();

@@ -1,6 +1,7 @@
 //! Iframe V8 isolation tests — verify separate JS context per iframe.
 
 use browser::Page;
+use stealth;
 
 fn html(body: &str) -> String {
     format!(
@@ -11,11 +12,9 @@ fn html(body: &str) -> String {
 
 #[tokio::test]
 async fn iframe_srcdoc_creates_child() {
-    let page = Page::from_html(
-        r#"<!DOCTYPE html><html><body>
+    let page = Page::from_html(r#"<!DOCTYPE html><html><body>
         <iframe srcdoc="<html><body><p>hello from iframe</p></body></html>"></iframe>
-    </body></html>"#,
-    )
+    </body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.child_iframe_count(), 1, "should have 1 child iframe");
@@ -26,7 +25,7 @@ async fn iframe_srcdoc_has_isolated_globals() {
     let mut page = Page::from_html(r#"<!DOCTYPE html><html><body>
         <script>globalThis.parentVar = 42;</script>
         <iframe srcdoc="<html><body><script>globalThis.childVar = 99;</script></body></html>"></iframe>
-    </body></html>"#).await.unwrap();
+    </body></html>"#, None::<stealth::StealthProfile>).await.unwrap();
     // Parent sees its own var
     assert_eq!(page.evaluate("parentVar").unwrap(), "42");
     // Parent does NOT see child's var (isolated context)
@@ -48,12 +47,10 @@ async fn iframe_srcdoc_has_isolated_globals() {
 
 #[tokio::test]
 async fn iframe_child_has_own_document() {
-    let mut page = Page::from_html(
-        r#"<!DOCTYPE html><html><body>
+    let mut page = Page::from_html(r#"<!DOCTYPE html><html><body>
         <p id="parent-p">parent content</p>
         <iframe srcdoc="<html><body><p id='child-p'>child content</p></body></html>"></iframe>
-    </body></html>"#,
-    )
+    </body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     // Parent sees its own DOM
@@ -81,7 +78,7 @@ async fn iframe_child_has_own_document() {
 async fn iframe_srcdoc_executes_scripts() {
     let mut page = Page::from_html(r#"<!DOCTYPE html><html><body>
         <iframe srcdoc="<html><body><div id='target'>before</div><script>document.getElementById('target').textContent = 'after';</script></body></html>"></iframe>
-    </body></html>"#).await.unwrap();
+    </body></html>"#, None::<stealth::StealthProfile>).await.unwrap();
     assert_eq!(
         page.child_iframe(0).unwrap().query_text("#target").unwrap(),
         "after"
@@ -90,12 +87,10 @@ async fn iframe_srcdoc_executes_scripts() {
 
 #[tokio::test]
 async fn multiple_iframes_isolated() {
-    let mut page = Page::from_html(
-        r#"<!DOCTYPE html><html><body>
+    let mut page = Page::from_html(r#"<!DOCTYPE html><html><body>
         <iframe srcdoc="<script>globalThis.x = 'iframe1';</script>"></iframe>
         <iframe srcdoc="<script>globalThis.x = 'iframe2';</script>"></iframe>
-    </body></html>"#,
-    )
+    </body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.child_iframe_count(), 2);

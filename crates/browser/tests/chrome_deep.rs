@@ -3,6 +3,7 @@
 //! whether we match.
 
 use browser::Page;
+use stealth;
 
 fn html(body: &str) -> String {
     format!(
@@ -12,7 +13,7 @@ fn html(body: &str) -> String {
 }
 
 async fn check(js: &str) -> String {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
 }
 
@@ -67,7 +68,7 @@ async fn canvas_fingerprint_produces_unique_data() {
             globalThis.fp = document.getElementById('c').toDataURL();
         </script>
     "#,
-    ))
+    ), None::<stealth::StealthProfile>)
     .await
     .unwrap();
     let fp = page.evaluate("fp").unwrap();
@@ -95,7 +96,7 @@ async fn canvas_different_text_different_fingerprint() {
                 globalThis.fp = document.getElementById('c').toDataURL();
             </script></body></html>"#,
             text
-        ))
+        ), None::<stealth::StealthProfile>)
         .await
         .unwrap();
         page.evaluate("fp").unwrap()
@@ -121,7 +122,7 @@ async fn webgl_unmasked_renderer_not_empty() {
             globalThis.vendor = gl.getParameter(ext.UNMASKED_VENDOR_WEBGL);
         </script>
     "#,
-    ))
+    ), None::<stealth::StealthProfile>)
     .await
     .unwrap();
     let renderer = page.evaluate("renderer").unwrap();
@@ -179,7 +180,7 @@ async fn permissions_query_returns_prompt() {
     assert_eq!(check(r#"
         navigator.permissions.query({ name: 'notifications' }).then(r => globalThis._permState = r.state)
     "#).await, "[object Promise]");
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("navigator.permissions.query({ name: 'notifications' }).then(r => globalThis._ps = r.state)").unwrap();
     page.evaluate_async("void 0", std::time::Duration::from_millis(50))
         .await
@@ -213,7 +214,7 @@ async fn document_visibility_visible() {
 
 #[tokio::test]
 async fn window_dimensions_consistent() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     // outer >= inner
     assert_eq!(page.evaluate("outerWidth >= innerWidth").unwrap(), "true");
     assert_eq!(page.evaluate("outerHeight >= innerHeight").unwrap(), "true");
@@ -251,7 +252,7 @@ async fn performance_memory_chrome_specific() {
 
 #[tokio::test]
 async fn crypto_get_random_values() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("globalThis.arr = new Uint8Array(16); crypto.getRandomValues(globalThis.arr)")
         .unwrap();
     // Should not be all zeros
@@ -280,7 +281,7 @@ async fn event_is_trusted_false_for_dispatched() {
             document.getElementById('el').dispatchEvent(new Event('click'));
         </script>
     "#,
-    ))
+    ), None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.evaluate("trusted").unwrap(), "false");
@@ -294,7 +295,7 @@ async fn event_is_trusted_false_for_dispatched() {
 async fn nodelist_bracket_access() {
     // Real Chrome supports querySelectorAll(...)[0]
     // Our NodeList only supports .item(0)
-    let mut page = Page::from_html(&html("<div class='x'>A</div><div class='x'>B</div>"))
+    let mut page = Page::from_html(&html("<div class='x'>A</div><div class='x'>B</div>"), None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let via_item = page
@@ -317,11 +318,9 @@ async fn nodelist_bracket_access() {
 
 #[tokio::test]
 async fn computed_style_from_style_block() {
-    let mut page = Page::from_html(
-        r#"<!DOCTYPE html><html><head>
+    let mut page = Page::from_html(r#"<!DOCTYPE html><html><head>
         <style>body { margin: 0; } .test { color: green; }</style>
-    </head><body><div id="el" class="test"></div></body></html>"#,
-    )
+    </head><body><div id="el" class="test"></div></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(

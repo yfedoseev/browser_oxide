@@ -65,12 +65,20 @@ const CURVES: &[SslCurve] = &[
 /// ALPN protocols: h2 + http/1.1
 const ALPN_PROTOS: &[u8] = b"\x02h2\x08http/1.1";
 
+use std::sync::OnceLock;
+
+static CHROME_CONNECTOR: OnceLock<SslConnector> = OnceLock::new();
+
 /// Build an `SslConnector` configured with Chrome 130 TLS fingerprint.
 ///
 /// This sets cipher suites, curves, signature algorithms, GREASE,
 /// extension permutation, OCSP stapling, SCT, certificate compression,
 /// and loads Mozilla root certificates into the certificate store.
 pub fn chrome_connector() -> Result<SslConnector, NetError> {
+    if let Some(connector) = CHROME_CONNECTOR.get() {
+        return Ok(connector.clone());
+    }
+
     let mut builder =
         SslConnector::builder(SslMethod::tls()).map_err(|e| NetError::Tls(e.to_string()))?;
 
@@ -130,7 +138,9 @@ pub fn chrome_connector() -> Result<SslConnector, NetError> {
     }
     builder.set_cert_store(cert_store.build());
 
-    Ok(builder.build())
+    let connector = builder.build();
+    let _ = CHROME_CONNECTOR.set(connector.clone());
+    Ok(connector)
 }
 
 /// Configure a per-connection TLS session with ALPS, ECH GREASE, and SNI.

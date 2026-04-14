@@ -17,6 +17,7 @@
 //! L3 PASS is the honest success signal. Anything less is a block.
 
 use std::collections::HashMap;
+use stealth;
 
 /// What a rigorous probe reports for one site.
 struct ProbeResult {
@@ -557,7 +558,7 @@ async fn kasada_poc_canadagoose_dump_body() {
 async fn text_encoder_strict_iife_nested() {
     // Reproduce the Kasada solver's exact pattern: strict-mode IIFE with
     // nested function using `new TextEncoder().encode(...)`.
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -587,7 +588,7 @@ async fn text_encoder_strict_iife_nested() {
 async fn kasada_text_encoder_exact_snippet() {
     // Extract the exact snippet from the solver around `new TextEncoder()`
     // and run it in isolation to see if it reproduces.
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let snippet = r#"(function(){
@@ -640,7 +641,7 @@ async fn kasada_error_unfiltered_stack() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -690,7 +691,7 @@ async fn kasada_function_probe_hunt_full() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -773,7 +774,7 @@ async fn kasada_function_probe_hunt() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -828,7 +829,7 @@ async fn kasada_solver_minimal_load() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -841,7 +842,7 @@ async fn kasada_solver_minimal_load() {
 #[ignore]
 async fn text_encoder_sanity() {
     // Isolation test: does TextEncoder work in our runtime at all?
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r1 = page.evaluate("typeof TextEncoder").unwrap_or_default();
@@ -1067,7 +1068,7 @@ async fn adidas_prototype_patch_hunt() {
         }})()"#,
         sensor
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page

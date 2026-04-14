@@ -99,76 +99,26 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
     runtime.op_state().borrow_mut().put(SseState::new());
 
     // Execute bootstrap JS (static strings)
-    runtime
-        .execute_script(
-            "<console_bootstrap>",
-            include_str!("js/console_bootstrap.js"),
-        )
-        .expect("console bootstrap failed");
-
-    // Early stealth — defines masking helpers used by other bootstraps
-    runtime
-        .execute_script("<stealth_bootstrap>", include_str!("js/stealth_bootstrap.js"))
-        .expect("stealth bootstrap failed");
-
-    runtime
-        .execute_script("<interfaces_bootstrap>", include_str!("js/interfaces_bootstrap.js"))
-        .expect("interfaces bootstrap failed");
-
-    runtime
-        .execute_script("<instances_bootstrap>", include_str!("js/instances_bootstrap.js"))
-        .expect("instances bootstrap failed");
+    const BOOTSTRAP_JS: &str = concat!(
+        include_str!("js/console_bootstrap.js"), "\n",
+        include_str!("js/stealth_bootstrap.js"), "\n",
+        include_str!("js/interfaces_bootstrap.js"), "\n",
+        include_str!("js/instances_bootstrap.js"), "\n",
+        include_str!("js/fetch_bootstrap.js"), "\n",
+        include_str!("js/timer_bootstrap.js"), "\n",
+        include_str!("js/dom_bootstrap.js"), "\n",
+        include_str!("js/event_bootstrap.js"), "\n",
+        include_str!("js/canvas_bootstrap.js"), "\n",
+        include_str!("js/window_bootstrap.js"), "\n",
+        include_str!("js/streams_bootstrap.js"), "\n",
+        include_str!("js/structured_clone.js"), "\n",
+        include_str!("js/cleanup_bootstrap.js"),
+    );
 
     runtime
-        .execute_script("<fetch_bootstrap>", include_str!("js/fetch_bootstrap.js"))
-        .expect("fetch bootstrap failed");
+        .execute_script("<bootstrap>", BOOTSTRAP_JS)
+        .expect("bootstrap failed");
 
-    runtime
-        .execute_script("<timer_bootstrap>", include_str!("js/timer_bootstrap.js"))
-        .expect("timer bootstrap failed");
-
-    runtime
-        .execute_script("<dom_bootstrap>", include_str!("js/dom_bootstrap.js"))
-        .expect("dom bootstrap failed");
-
-    runtime
-        .execute_script("<event_bootstrap>", include_str!("js/event_bootstrap.js"))
-        .expect("event bootstrap failed");
-
-    runtime
-        .execute_script("<canvas_bootstrap>", include_str!("js/canvas_bootstrap.js"))
-        .expect("canvas bootstrap failed");
-
-    runtime
-        .execute_script("<window_bootstrap>", include_str!("js/window_bootstrap.js"))
-        .expect("window bootstrap failed");
-
-
-    // Streams (ReadableStream/WritableStream/TransformStream) —
-    // installs real implementations over the minimal stubs from
-    // window_bootstrap. Must come AFTER window_bootstrap (which
-    // defines the stubs) so this script replaces them with
-    // `_browserOxideReal = true` versions.
-    runtime
-        .execute_script("<streams_bootstrap>", include_str!("js/streams_bootstrap.js"))
-        .expect("streams bootstrap failed");
-
-    // structuredClone must run after window_bootstrap (which installs
-    // Blob and DOMException) but can come after the other feature
-    // bootstraps — it only depends on DOMException and the global
-    // class names for the DataCloneError path.
-    runtime
-        .execute_script(
-            "<structured_clone>",
-            include_str!("js/structured_clone.js"),
-        )
-        .expect("structured_clone bootstrap failed");
-
-    // Final cleanup — hides Deno and internal globals from user JS.
-    // Must run BEFORE init_scripts so they don't see internals.
-    runtime
-        .execute_script("<cleanup_bootstrap>", include_str!("js/cleanup_bootstrap.js"))
-        .expect("cleanup bootstrap failed");
 
     // Run caller-provided init scripts after built-in cleanup.
     // These run in order before any <script> tags parsed from HTML.

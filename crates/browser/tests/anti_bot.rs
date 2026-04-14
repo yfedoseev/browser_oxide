@@ -10,7 +10,7 @@ fn html(body: &str) -> String {
 }
 
 async fn eval(js: &str) -> String {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate(js).unwrap()
 }
 
@@ -183,7 +183,7 @@ async fn text_decoder_exists() {
 
 #[tokio::test]
 async fn local_storage_works() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("localStorage.setItem('test', 'value')")
         .unwrap();
     assert_eq!(
@@ -480,7 +480,7 @@ async fn navigator_get_battery_returns_promise() {
 
 #[tokio::test]
 async fn navigator_get_battery_resolves() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("navigator.getBattery().then(b => { globalThis._bat = b; })")
         .unwrap();
     use std::time::Duration;
@@ -510,7 +510,7 @@ async fn window_scroll_by_exists() {
 
 #[tokio::test]
 async fn window_scroll_to_updates_position() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("window.scrollTo(100, 200)").unwrap();
     assert_eq!(page.evaluate("window.scrollX").unwrap(), "100");
     assert_eq!(page.evaluate("window.scrollY").unwrap(), "200");
@@ -518,7 +518,7 @@ async fn window_scroll_to_updates_position() {
 
 #[tokio::test]
 async fn window_scroll_by_accumulates() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("window.scrollTo(10, 20)").unwrap();
     page.evaluate("window.scrollBy(5, 10)").unwrap();
     assert_eq!(page.evaluate("window.scrollX").unwrap(), "15");
@@ -532,7 +532,7 @@ async fn element_style_exists() {
 
 #[tokio::test]
 async fn element_style_set_and_read() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("document.body.style.backgroundColor = 'red'")
         .unwrap();
     assert_eq!(
@@ -544,7 +544,7 @@ async fn element_style_set_and_read() {
 
 #[tokio::test]
 async fn element_style_set_property() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("document.body.style.setProperty('color', 'blue')")
         .unwrap();
     assert_eq!(
@@ -556,7 +556,7 @@ async fn element_style_set_property() {
 
 #[tokio::test]
 async fn element_style_reflects_in_attribute() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("document.body.style.opacity = '0.5'")
         .unwrap();
     let attr = page
@@ -581,7 +581,7 @@ async fn document_writeln_exists() {
 
 #[tokio::test]
 async fn document_write_appends_content() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate("document.write('<div id=\"injected\">hello</div>')")
         .unwrap();
     let result = page

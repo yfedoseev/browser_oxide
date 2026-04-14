@@ -2,6 +2,7 @@
 //! via the Canvas2D backend.
 
 use browser::Page;
+use stealth;
 
 fn html(body: &str) -> String {
     format!(
@@ -27,7 +28,7 @@ async fn webgl_clear_color_red() {
             globalThis.a = pixels[3];
         </script>
     "#,
-    ))
+    ), None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.evaluate("r").unwrap(), "255", "red channel");
@@ -51,7 +52,7 @@ async fn webgl_clear_color_blue() {
             globalThis.b = pixels[2];
         </script>
     "#,
-    ))
+    ), None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.evaluate("r").unwrap(), "0");
@@ -70,7 +71,7 @@ async fn webgl_to_data_url_has_content() {
             globalThis.url = document.getElementById('c').toDataURL();
         </script>
     "#,
-    ))
+    ), None::<stealth::StealthProfile>)
     .await
     .unwrap();
     let url = page.evaluate("url").unwrap();
@@ -95,7 +96,7 @@ async fn webgl_constants_exist() {
             globalThis.hasUB = gl.UNSIGNED_BYTE === 0x1401;
         </script>
     "#,
-    ))
+    ), None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.evaluate("hasCBB").unwrap(), "true");
