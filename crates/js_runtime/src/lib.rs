@@ -4,6 +4,7 @@
 
 pub mod extensions;
 pub mod runtime;
+pub mod snapshot;
 pub mod state;
 
 use deno_core::JsRuntime;
@@ -39,7 +40,10 @@ impl BrowserJsRuntime {
     }
 
     /// Create with full options.
-    pub fn with_options(dom: Dom, options: BrowserRuntimeOptions) -> Self {
+    pub fn with_options(dom: Dom, mut options: BrowserRuntimeOptions) -> Self {
+        if options.startup_snapshot.is_none() {
+            options.startup_snapshot = Some(snapshot::get_snapshot());
+        }
         Self {
             inner: create_runtime(dom, options),
         }

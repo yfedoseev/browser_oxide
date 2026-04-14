@@ -32,6 +32,8 @@ pub struct BrowserRuntimeOptions {
     pub init_scripts: Vec<String>,
     /// Persistent storage (localStorage / sessionStorage) carried across navigations.
     pub storage: Option<HashMap<String, HashMap<String, String>>>,
+    /// Optional V8 snapshot to speed up startup.
+    pub startup_snapshot: Option<&'static [u8]>,
 }
 
 impl Default for BrowserRuntimeOptions {
@@ -42,6 +44,7 @@ impl Default for BrowserRuntimeOptions {
             stylesheets: Vec::new(),
             init_scripts: Vec::new(),
             storage: None,
+            startup_snapshot: None,
         }
     }
 }
@@ -85,6 +88,7 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
             worker_extension::init_ops(),
             audio_extension::init_ops(),
         ],
+        startup_snapshot: options.startup_snapshot,
         ..Default::default()
     });
 
@@ -98,26 +102,33 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
     runtime.op_state().borrow_mut().put(WebGLState::new());
     runtime.op_state().borrow_mut().put(SseState::new());
 
-    // Execute bootstrap JS (static strings)
-    const BOOTSTRAP_JS: &str = concat!(
-        include_str!("js/console_bootstrap.js"), "\n",
-        include_str!("js/stealth_bootstrap.js"), "\n",
-        include_str!("js/interfaces_bootstrap.js"), "\n",
-        include_str!("js/instances_bootstrap.js"), "\n",
-        include_str!("js/fetch_bootstrap.js"), "\n",
-        include_str!("js/timer_bootstrap.js"), "\n",
-        include_str!("js/dom_bootstrap.js"), "\n",
-        include_str!("js/event_bootstrap.js"), "\n",
-        include_str!("js/canvas_bootstrap.js"), "\n",
-        include_str!("js/window_bootstrap.js"), "\n",
-        include_str!("js/streams_bootstrap.js"), "\n",
-        include_str!("js/structured_clone.js"), "\n",
-        include_str!("js/cleanup_bootstrap.js"),
-    );
+    // Execute bootstrap JS only if NOT starting from snapshot
+    if options.startup_snapshot.is_none() {
+        const BOOTSTRAP_JS: &str = concat!(
+            include_str!("js/console_bootstrap.js"), "\n",
+            include_str!("js/stealth_bootstrap.js"), "\n",
+            include_str!("js/interfaces_bootstrap.js"), "\n",
+            include_str!("js/instances_bootstrap.js"), "\n",
+            include_str!("js/fetch_bootstrap.js"), "\n",
+            include_str!("js/timer_bootstrap.js"), "\n",
+            include_str!("js/dom_bootstrap.js"), "\n",
+            include_str!("js/event_bootstrap.js"), "\n",
+            include_str!("js/canvas_bootstrap.js"), "\n",
+            include_str!("js/window_bootstrap.js"), "\n",
+            include_str!("js/streams_bootstrap.js"), "\n",
+            include_str!("js/structured_clone.js"), "\n",
+            include_str!("js/cleanup_bootstrap.js"),
+        );
 
+        runtime
+            .execute_script("<bootstrap>", BOOTSTRAP_JS)
+            .expect("bootstrap failed");
+    }
+
+    // Always run cleanup to hide internals, even when restoring from snapshot
     runtime
-        .execute_script("<bootstrap>", BOOTSTRAP_JS)
-        .expect("bootstrap failed");
+        .execute_script("<cleanup>", include_str!("js/cleanup_bootstrap.js"))
+        .expect("cleanup failed");
 
 
     // Run caller-provided init scripts after built-in cleanup.
