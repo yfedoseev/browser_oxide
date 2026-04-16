@@ -136,7 +136,7 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
     for (i, code) in options.init_scripts.iter().enumerate() {
         let name: &'static str = Box::leak(format!("<init_script_{i}>").into_boxed_str());
         if let Err(e) = runtime.execute_script(name, code.clone()) {
-            eprintln!("init script {i} failed: {e}");
+            tracing::warn!(script_index = i, error = %e, "init script failed");
         }
     }
 

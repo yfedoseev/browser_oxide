@@ -34,7 +34,7 @@ pub fn op_canvas_create(
     #[smi] width: i32,
     #[smi] height: i32,
 ) -> i32 {
-    eprintln!("[op_canvas_create] width={} height={}", width, height);
+    tracing::debug!(width = width, height = height, "Canvas created");
     let id = state.next_id;
     state.next_id += 1;
     if let Some(canvas) = Canvas2D::new(width.max(1) as u32, height.max(1) as u32) {
@@ -216,7 +216,7 @@ pub fn op_canvas_scale(#[state] state: &mut CanvasState, #[smi] id: i32, x: f64,
 #[op2]
 #[string]
 pub fn op_canvas_to_data_url(#[state] state: &CanvasState, #[smi] id: i32) -> String {
-    eprintln!("[op_canvas_to_data_url] called");
+    tracing::debug!("Canvas to_data_url called");
     state.canvases.get(&id).map(|c| {
         let mut pixels = c.get_image_data(0, 0, c.width(), c.height());
         // Add tiny, invisible jitter to the lowest bit of random pixels

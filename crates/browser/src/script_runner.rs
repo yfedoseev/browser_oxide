@@ -1,5 +1,6 @@
 use dom::node::{NodeData, NodeId};
 use dom::Dom;
+use tracing;
 
 /// Information about a <script> element found in the DOM.
 pub struct ScriptInfo {
@@ -15,9 +16,9 @@ pub fn find_scripts(dom: &Dom) -> Vec<ScriptInfo> {
     collect_scripts(dom, NodeId::DOCUMENT, &mut scripts);
     for (i, s) in scripts.iter().enumerate() {
         if let Some(src) = &s.src {
-            eprintln!("[find_scripts] found external script {}: {}", i, src);
+            tracing::debug!(index = i, src = %src, "Found external script");
         } else {
-            eprintln!("[find_scripts] found inline script {} (len={})", i, s.code.len());
+            tracing::debug!(index = i, code_len = s.code.len(), "Found inline script");
         }
     }
     scripts

@@ -161,14 +161,17 @@ pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
 #[op2]
 #[string]
 pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> String {
-    eprintln!("[op_net_fetch_sync] fetching {}", url);
-    
+    tracing::debug!("[op_net_fetch_sync] fetching {}", url);
+
     // 1. Get a client instance
     let client = if let Some(c) = FETCH_CLIENT.get() {
         c.clone()
     } else {
         let profile = stealth::presets::chrome_130_ru();
-        net::HttpClient::new(&profile).expect("failed to create sync client")
+        match net::HttpClient::new(&profile) {
+            Ok(c) => c,
+            Err(_) => return String::new(),
+        }
     };
 
     // 2. Build browser-native headers for a script fetch
@@ -186,26 +189,29 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
 
     let url_clone = url.clone();
     let result = std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
+        let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .unwrap();
+        {
+            Ok(rt) => rt,
+            Err(_) => return String::new(),
+        };
         rt.block_on(async move {
             match tokio::time::timeout(std::time::Duration::from_secs(10), client.get_with_headers(&url_clone, &extra_headers)).await {
                 Ok(Ok(resp)) => resp.text(),
                 Ok(Err(e)) => {
-                    eprintln!("[op_net_fetch_sync] FAILED fetch {}: {}", url_clone, e);
+                    tracing::debug!("[op_net_fetch_sync] FAILED fetch {}: {}", url_clone, e);
                     String::new()
                 }
                 Err(_) => {
-                    eprintln!("[op_net_fetch_sync] TIMEOUT fetching {}", url_clone);
+                    tracing::debug!("[op_net_fetch_sync] TIMEOUT fetching {}", url_clone);
                     String::new()
                 }
             }
         })
     }).join().unwrap_or_default();
 
-    eprintln!("[op_net_fetch_sync] fetched {} bytes from {}", result.len(), url);
+    tracing::debug!("[op_net_fetch_sync] fetched {} bytes from {}", result.len(), url);
     result
 }
 

@@ -48,7 +48,7 @@ pub fn op_blob_register(
     #[buffer] data: &[u8],
     #[string] content_type: String,
 ) {
-    let mut reg = blob_registry().lock().unwrap();
+    let mut reg = blob_registry().lock().unwrap_or_else(|e| e.into_inner());
     reg.blobs.insert(
         url,
         BlobEntry {
@@ -64,7 +64,7 @@ pub fn op_blob_register(
 #[op2]
 #[string]
 pub fn op_blob_fetch_text(#[string] url: String) -> String {
-    let reg = blob_registry().lock().unwrap();
+    let reg = blob_registry().lock().unwrap_or_else(|e| e.into_inner());
     match reg.blobs.get(&url) {
         Some(entry) => String::from_utf8_lossy(&entry.data).to_string(),
         None => String::new(),
@@ -90,7 +90,7 @@ pub struct JsBlobResponse {
 #[op2]
 #[serde]
 pub fn op_blob_fetch_bytes(#[string] url: String) -> JsBlobResponse {
-    let reg = blob_registry().lock().unwrap();
+    let reg = blob_registry().lock().unwrap_or_else(|e| e.into_inner());
     match reg.blobs.get(&url) {
         Some(entry) => JsBlobResponse {
             bytes: entry.data.clone(),
@@ -107,7 +107,7 @@ pub fn op_blob_fetch_bytes(#[string] url: String) -> JsBlobResponse {
 
 #[op2(fast)]
 pub fn op_blob_revoke(#[string] url: String) {
-    let mut reg = blob_registry().lock().unwrap();
+    let mut reg = blob_registry().lock().unwrap_or_else(|e| e.into_inner());
     reg.blobs.remove(&url);
 }
 
@@ -212,7 +212,7 @@ pub fn op_worker_spawn(
     let worker_id = NEXT_WORKER_ID.fetch_add(1, Ordering::Relaxed);
 
     {
-        let mut reg = worker_registry().lock().unwrap();
+        let mut reg = worker_registry().lock().unwrap_or_else(|e| e.into_inner());
         reg.insert(
             worker_id,
             WorkerSlot {
@@ -240,7 +240,7 @@ pub fn op_worker_spawn(
             {
                 Ok(rt) => rt,
                 Err(e) => {
-                    eprintln!("worker {worker_id}: tokio build error: {e}");
+                    tracing::error!(worker_id = worker_id, error = %e, "worker tokio build error");
                     return;
                 }
             };
@@ -271,17 +271,17 @@ pub fn op_worker_spawn(
                             // want to continue even if the module throws
                             // so the worker stays alive for onmessage.
                             if let Err(e) = eval_fut.await {
-                                eprintln!(
-                                    "worker {worker_id} module eval error: {e}"
+                                tracing::warn!(
+                                    worker_id = worker_id, error = %e, "worker module eval error"
                                 );
                             }
                         }
                         Err(e) => {
-                            eprintln!("worker {worker_id} module load error: {e}");
+                            tracing::error!(worker_id = worker_id, error = %e, "worker module load error");
                         }
                     }
                 } else if let Err(e) = runtime.execute_script("<worker_script>", script) {
-                    eprintln!("worker {worker_id} script error: {e}");
+                    tracing::warn!(worker_id = worker_id, error = %e, "worker script error");
                 }
 
                 // Drive the event loop until terminated. A small polling
@@ -300,7 +300,7 @@ pub fn op_worker_spawn(
                             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                         }
                         Ok(Err(e)) => {
-                            eprintln!("worker {worker_id}: event loop error: {e}");
+                            tracing::warn!(worker_id = worker_id, error = %e, "worker event loop error");
                             break;
                         }
                         Err(_) => {
@@ -316,8 +316,8 @@ pub fn op_worker_spawn(
         });
 
     if let Err(e) = thread_result {
-        eprintln!("worker {worker_id}: thread spawn failed: {e}");
-        worker_registry().lock().unwrap().remove(&worker_id);
+        tracing::error!(worker_id = worker_id, error = %e, "worker thread spawn failed");
+        worker_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&worker_id);
         return 0;
     }
 
@@ -326,7 +326,7 @@ pub fn op_worker_spawn(
 
 #[op2(fast)]
 pub fn op_worker_post_to_worker(#[smi] worker_id: i32, #[string] data: String) {
-    let reg = worker_registry().lock().unwrap();
+    let reg = worker_registry().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(slot) = reg.get(&(worker_id as u32)) {
         let _ = slot.to_worker.send(data);
     }
@@ -338,7 +338,7 @@ pub fn op_worker_post_to_worker(#[smi] worker_id: i32, #[string] data: String) {
 #[op2]
 #[string]
 pub fn op_worker_poll_from_worker(#[smi] worker_id: i32) -> String {
-    let reg = worker_registry().lock().unwrap();
+    let reg = worker_registry().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(slot) = reg.get(&(worker_id as u32)) {
         match slot.from_worker.try_recv() {
             Ok(msg) => return msg,
@@ -350,7 +350,7 @@ pub fn op_worker_poll_from_worker(#[smi] worker_id: i32) -> String {
 
 #[op2(fast)]
 pub fn op_worker_terminate(#[smi] worker_id: i32) {
-    let mut reg = worker_registry().lock().unwrap();
+    let mut reg = worker_registry().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(slot) = reg.get(&(worker_id as u32)) {
         slot.terminate.store(true, Ordering::Release);
     }

@@ -21,7 +21,7 @@ static RUNTIME_SNAPSHOT: OnceLock<Box<[u8]>> = OnceLock::new();
 /// Get or create the cached V8 snapshot.
 pub fn get_snapshot() -> &'static [u8] {
     RUNTIME_SNAPSHOT.get_or_init(|| {
-        eprintln!("[js_runtime] creating cold V8 snapshot...");
+        tracing::info!("Creating cold V8 snapshot");
         
         let mut runtime = JsRuntimeForSnapshot::new(RuntimeOptions {
             extensions: vec![

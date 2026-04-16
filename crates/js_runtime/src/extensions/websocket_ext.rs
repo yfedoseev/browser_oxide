@@ -63,7 +63,7 @@ pub async fn op_ws_connect(
 
             // Assign ID
             let id = {
-                let mut store = WS_CONNECTIONS.lock().unwrap();
+                let mut store = WS_CONNECTIONS.lock().unwrap_or_else(|e| e.into_inner());
                 let id = store.next_id;
                 store.next_id += 1;
                 store.outgoing.insert(id, out_tx);
@@ -115,7 +115,7 @@ pub async fn op_ws_connect(
 /// Send a message on a WebSocket connection.
 #[op2(fast)]
 pub fn op_ws_send(#[smi] id: i32, #[string] data: &str) {
-    let store = WS_CONNECTIONS.lock().unwrap();
+    let store = WS_CONNECTIONS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(sender) = store.outgoing.get(&id) {
         let _ = sender.send(data.to_string());
     }
@@ -126,7 +126,7 @@ pub fn op_ws_send(#[smi] id: i32, #[string] data: &str) {
 #[string]
 pub async fn op_ws_recv(#[smi] id: i32) -> Result<String, deno_core::error::AnyError> {
     let rx = {
-        let store = WS_CONNECTIONS.lock().unwrap();
+        let store = WS_CONNECTIONS.lock().unwrap_or_else(|e| e.into_inner());
         store.incoming.get(&id).cloned()
     };
     match rx {
@@ -144,7 +144,7 @@ pub async fn op_ws_recv(#[smi] id: i32) -> Result<String, deno_core::error::AnyE
 /// Close a WebSocket connection.
 #[op2(fast)]
 pub fn op_ws_close(#[smi] id: i32) {
-    let mut store = WS_CONNECTIONS.lock().unwrap();
+    let mut store = WS_CONNECTIONS.lock().unwrap_or_else(|e| e.into_inner());
     store.outgoing.remove(&id);
     store.incoming.remove(&id);
 }

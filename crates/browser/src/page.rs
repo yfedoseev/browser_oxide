@@ -6,6 +6,7 @@ use event_loop::{BrowserEventLoop, IdleReason};
 use js_runtime::{runtime::BrowserRuntimeOptions, BrowserJsRuntime};
 use std::time::Duration;
 use stealth;
+use tracing;
 
 /// A browser page. Owns a DOM, JS runtime, and event loop.
 ///
@@ -74,7 +75,7 @@ impl Page {
             if script.src.is_some() { continue; }
             if !script.code.is_empty() {
                 if let Err(e) = event_loop.execute_script(&script.code) {
-                    eprintln!("Script error in <script_{}>: {}", i, e);
+                    tracing::warn!(script_index = i, error = %e, "Script error in inline script");
                 }
             }
         }
@@ -117,7 +118,7 @@ impl Page {
                 continue;
             }
             if let Err(e) = self.event_loop.execute_script(&script.code) {
-                eprintln!("Script error in <script_{}>: {}", i, e);
+                tracing::warn!(script_index = i, error = %e, "Script error in inline script");
             }
         }
     }
@@ -165,15 +166,15 @@ impl Page {
                         Ok(resp) => {
                             let code = resp.text();
                             if let Err(e) = event_loop.execute_script(&code) {
-                                eprintln!("Script error in <script src={}>: {}", src, e);
+                                tracing::warn!(script_src = %src, error = %e, "Script error in external script");
                             }
                         }
-                        Err(e) => eprintln!("Failed to fetch script {}: {}", src, e),
+                        Err(e) => tracing::warn!(script_src = %src, error = %e, "Failed to fetch script"),
                     }
                 }
             } else if !script.code.is_empty() {
                 if let Err(e) = event_loop.execute_script(&script.code) {
-                    eprintln!("Script error in <script_{}>: {}", i, e);
+                    tracing::warn!(script_index = i, error = %e, "Script error in inline script");
                 }
             }
         }
@@ -244,7 +245,7 @@ impl Page {
             if let Some(srcdoc) = &info.srcdoc {
                 match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &p).await {
                     Ok(child) => children.push(child),
-                    Err(e) => eprintln!("iframe srcdoc error: {e}"),
+                    Err(e) => tracing::warn!(error = %e, "iframe srcdoc error"),
                 }
             }
         }
@@ -414,7 +415,7 @@ impl Page {
                 js_runtime::state::ConsoleLevel::Error => "[JS ERROR]",
                 _ => "[JS INFO]",
             };
-            eprintln!("  {} {}", prefix, log.args.join(" "));
+            tracing::debug!(level = prefix, message = %log.args.join(" "), "JS console output");
         }
     }
 
@@ -514,7 +515,7 @@ impl Page {
         let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
 
         for iter in 0..iterations {
-            eprintln!("[navigate] iter={iter} url={current_url} method={current_method}");
+            tracing::debug!(iter = iter, url = %current_url, method = %current_method, "navigate iteration");
 
             let resp = if current_method == "POST" {
                 client
@@ -580,7 +581,7 @@ impl Page {
             if let Ok(parsed) = url::Url::parse(&current_url) {
                 let jar_cookies = client.cookies_for_url(&parsed).await.unwrap_or_default();
                 if debug_nav {
-                    eprintln!("[navigate] jar cookies: {}", jar_cookies);
+                    tracing::debug!(cookies = %jar_cookies, "navigate jar cookies");
                 }
             }
             let mut page = Self::build_page_with_scripts_and_init(
@@ -601,7 +602,7 @@ impl Page {
                 .run_until_idle(Duration::from_secs(30))
                 .await
             {
-                eprintln!("[navigate] event loop error: {e}");
+                tracing::warn!(error = %e, "navigate event loop error");
             }
 
             // Did a script request a re-navigation?
@@ -632,10 +633,10 @@ impl Page {
             // Resolve relative pending URLs
             let next_url = Self::resolve_url(&current_url, &pending_url)
                 .ok_or_else(|| deno_core::error::AnyError::msg("Failed to resolve pending URL"))?;
-            eprintln!("[navigate] pending navigation (kind: {kind}) -> {next_url} [{pending_method_val}]");
+            tracing::debug!(kind = kind, url = %next_url, method = %pending_method_val, "navigate pending navigation");
 
             if iter + 1 == iterations {
-                eprintln!("[navigate] hit max_iterations={iterations}, returning current page");
+                tracing::warn!(max_iterations = iterations, "navigate hit max iterations, returning current page");
                 return Ok(page);
             }
 
@@ -730,7 +731,7 @@ impl Page {
                                 }
                             }
                             _ => {
-                                eprintln!("Failed to fetch stylesheet: {}", full_url);
+                                tracing::warn!(url = %full_url, "Failed to fetch stylesheet");
                                 None
                             }
                         }
@@ -766,18 +767,18 @@ impl Page {
                             if text.trim_start().starts_with("<!")
                                 || text.trim_start().starts_with("<html")
                             {
-                                eprintln!("  [script_{}] fetch {} returned HTML, skipping", i, full_url);
+                                tracing::debug!(script_index = i, url = %full_url, "Script fetch returned HTML, skipping");
                                 None
                             } else {
                                 Some((i, text))
                             }
                         }
                         Ok(resp) => {
-                            eprintln!("  [script_{}] fetch {} returned status {}", i, full_url, resp.status);
+                            tracing::warn!(script_index = i, url = %full_url, status = resp.status, "Script fetch returned non-OK status");
                             None
                         }
                         Err(e) => {
-                            eprintln!("  [script_{}] fetch {} failed: {:?}", i, full_url, e);
+                            tracing::warn!(script_index = i, url = %full_url, error = ?e, "Script fetch failed");
                             None
                         }
                     }
@@ -816,10 +817,10 @@ impl Page {
         // Set location
         let url_js = url.replace('\\', "\\\\").replace('\'', "\\'");
         if let Err(e) = event_loop.execute_script(&format!("location.href = '{}';", url_js)) {
-            eprintln!("ERROR SETTING LOCATION: {}", e);
+            tracing::error!(error = %e, "Failed to set location");
         }
         let loc = event_loop.execute_script("globalThis.location.href").unwrap_or_default();
-        eprintln!("LOCATION SET TO: {}", loc);
+        tracing::debug!(location = %loc, "Location set");
         
         // Synchronize cookies from the net client so document.cookie is accurate
         let _ = event_loop.execute_and_run("globalThis.__syncCookiesFromNet && globalThis.__syncCookiesFromNet();", Duration::from_secs(1)).await;
@@ -971,7 +972,7 @@ impl Page {
                 match prefetched.get(&i) {
                     Some(code) => code.clone(),
                     None => {
-                        eprintln!("  [script_{}] NOT PREFETCHED (fetch failed), skipping", i);
+                        tracing::warn!(script_index = i, "Script not prefetched (fetch failed), skipping");
                         continue;
                     }
                 }
@@ -985,7 +986,7 @@ impl Page {
 
             let name = format!("<script_{}>", i);
             if let Err(e) = event_loop.execute_script(&code) {
-                eprintln!("  Script error in {}: {}", name, e);
+                tracing::warn!(script = %name, error = %e, "Script execution error");
             }
 
             // Flush logs for this script
@@ -1004,7 +1005,7 @@ impl Page {
                         js_runtime::state::ConsoleLevel::Error => "[JS ERROR]",
                         _ => "[JS INFO]",
                     };
-                    eprintln!("  {} {}", prefix, log.args.join(" "));
+                    tracing::debug!(level = prefix, message = %log.args.join(" "), "JS console output");
                 }
             }
 
@@ -1065,7 +1066,7 @@ impl Page {
         // Run event loop until idle. Script errors should NOT abort
         // navigation — log and continue, matching real browser behavior.
         if let Err(e) = event_loop.run_until_idle(Duration::from_secs(30)).await {
-            eprintln!("  [event loop] error during run: {}", e);
+            tracing::warn!(error = %e, "Event loop error during run");
         }
 
         // Log errors captured during script execution
@@ -1073,7 +1074,7 @@ impl Page {
         {
             if errors != "[]" {
                 let trimmed: String = errors.chars().take(500).collect();
-                eprintln!("  Script errors: {trimmed}");
+                tracing::warn!(errors = %trimmed, "Script errors during page run");
             }
         }
 
@@ -1085,11 +1086,11 @@ impl Page {
                 use deno_core::serde_json;
                 if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&cookie_writes) {
                     if let Some(arr) = arr.as_array() {
-                        eprintln!("  Cookie writes ({}):", arr.len());
+                        tracing::debug!(count = arr.len(), "Cookie writes");
                         for (i, w) in arr.iter().take(20).enumerate() {
                             if let Some(s) = w.as_str() {
                                 let trim: String = s.chars().take(140).collect();
-                                eprintln!("    [{i:2}] {trim}");
+                                tracing::debug!(index = i, value = %trim, "Cookie write");
                             }
                         }
                     }
@@ -1110,7 +1111,7 @@ impl Page {
                 use deno_core::serde_json;
                 if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&fetches_json) {
                     if let Some(arr) = arr.as_array() {
-                        eprintln!("  Page fetches ({}):", arr.len());
+                        tracing::debug!(count = arr.len(), "Page fetches");
                         for f in arr {
                             let m = f.get("m").and_then(|v| v.as_str()).unwrap_or("");
                             let u = f.get("u").and_then(|v| v.as_str()).unwrap_or("");
@@ -1118,9 +1119,9 @@ impl Page {
                             let e = f.get("e").and_then(|v| v.as_str()).unwrap_or("");
                             let u_trim: String = u.chars().take(100).collect();
                             if s == 0 {
-                                eprintln!("    {m:5} {s} {u_trim} (ERROR: {e})");
+                                tracing::warn!(method = m, status = s, url = %u_trim, error = e, "Page fetch failed");
                             } else {
-                                eprintln!("    {m:5} {s} {u_trim}");
+                                tracing::debug!(method = m, status = s, url = %u_trim, "Page fetch");
                             }
                         }
                     }
@@ -1141,7 +1142,7 @@ impl Page {
             if let Some(srcdoc) = &info.srcdoc {
                 match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &profile).await {
                     Ok(child) => children.push(child),
-                    Err(e) => eprintln!("iframe srcdoc error: {e}"),
+                    Err(e) => tracing::warn!(error = %e, "iframe srcdoc error"),
                 }
             } else if let Some(src) = &info.src {
                 if !src.is_empty() {
@@ -1155,7 +1156,7 @@ impl Page {
                         .await
                         {
                             Ok(child) => children.push(child),
-                            Err(e) => eprintln!("iframe src error for {}: {e}", full_src),
+                            Err(e) => tracing::warn!(src = %full_src, error = %e, "iframe src error"),
                         }
                     }
                 }

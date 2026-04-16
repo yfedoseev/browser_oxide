@@ -9,6 +9,7 @@ use event_loop::BrowserEventLoop;
 use js_runtime::runtime::BrowserRuntimeOptions;
 use js_runtime::BrowserJsRuntime;
 use std::time::Duration;
+use tracing;
 
 /// Info about an iframe found in the DOM.
 pub struct IframeInfo {
@@ -54,7 +55,7 @@ impl ChildIframe {
                 continue;
             }
             if let Err(e) = event_loop.execute_script(&script.code) {
-                eprintln!("iframe script error in <script_{}>: {}", i, e);
+                tracing::warn!(script_index = i, error = %e, "iframe script error");
             }
         }
 
@@ -186,7 +187,7 @@ impl ChildIframe {
                 continue;
             }
             if let Err(e) = event_loop.execute_script(&code) {
-                eprintln!("iframe script error in <script_{}>: {}", i, e);
+                tracing::warn!(script_index = i, error = %e, "iframe script error");
             }
         }
 

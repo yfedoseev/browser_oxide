@@ -60,7 +60,10 @@ impl BrowserJsRuntime {
             .ok_or_else(|| deno_core::error::AnyError::msg("failed to create V8 string"))?;
         let tc_scope = &mut deno_core::v8::TryCatch::new(scope);
         let script = deno_core::v8::Script::compile(tc_scope, source, None).ok_or_else(|| {
-            let exception = tc_scope.exception().unwrap();
+            let exception = match tc_scope.exception() {
+                Some(exc) => exc,
+                None => return deno_core::error::AnyError::msg("script compilation failed"),
+            };
             let msg = exception
                 .to_string(tc_scope)
                 .map(|s| s.to_rust_string_lossy(tc_scope))
@@ -73,7 +76,10 @@ impl BrowserJsRuntime {
                 .map(|s| s.to_rust_string_lossy(tc_scope))
                 .unwrap_or_default()),
             None => {
-                let exception = tc_scope.exception().unwrap();
+                let exception = match tc_scope.exception() {
+                    Some(exc) => exc,
+                    None => return Err(deno_core::error::AnyError::msg("script execution failed")),
+                };
                 let msg = exception
                     .to_string(tc_scope)
                     .map(|s| s.to_rust_string_lossy(tc_scope))

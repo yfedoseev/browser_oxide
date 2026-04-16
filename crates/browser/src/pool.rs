@@ -21,7 +21,7 @@ impl PagePool {
     /// Acquire a page from the pool or create a new one.
     /// The page is sanitized (swapped to empty DOM) before being returned.
     pub async fn acquire(&self, profile: Option<StealthProfile>) -> Result<Page, deno_core::error::AnyError> {
-        let mut pages = self.idle_pages.lock().unwrap();
+        let mut pages = self.idle_pages.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(mut page) = pages.pop_front() {
             // Re-use existing page.
             // Note: In a real implementation, we might want to check if the
@@ -37,7 +37,7 @@ impl PagePool {
 
     /// Return a page to the pool.
     pub fn release(&self, page: Page) {
-        let mut pages = self.idle_pages.lock().unwrap();
+        let mut pages = self.idle_pages.lock().unwrap_or_else(|e| e.into_inner());
         if pages.len() < self.max_size {
             pages.push_back(page);
         }
