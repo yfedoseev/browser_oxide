@@ -518,33 +518,17 @@ impl Page {
         // the V8 isolate hit the same cookie jar as the Rust driver.
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
 
-        let mut current_url = url.to_string();
-        let mut current_method = "GET".to_string();
-        let mut current_body: Option<String> = None;
         let iterations = max_iterations.max(1);
         let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
 
-        for iter in 0..iterations {
-            tracing::debug!(iter = iter, url = %current_url, method = %current_method, "navigate iteration");
-
-            let resp = if current_method == "POST" {
-                client
-                    .post_bytes_follow(&current_url, current_body.as_deref().unwrap_or("").as_bytes(), &[], 10)
-                    .await
-                    .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
-            } else {
-                client
-                    .get_follow(&current_url, 10)
-                    .await
-                    .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
-            };
-            
-            let html = resp.text();
-            let resp_url = resp.url.clone();
-            return Self::navigate_loop_internal(html, resp_url, profile.clone(), client.clone(), iterations, 0, init_scripts.clone(), debug_nav).await;
-        }
-
-        Err(deno_core::error::AnyError::msg("Navigation failed (no iterations)"))
+        tracing::debug!(url = %url, "navigate initial fetch");
+        let resp = client
+            .get_follow(url, 10)
+            .await
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        let html = resp.text();
+        let resp_url = resp.url.clone();
+        Self::navigate_loop_internal(html, resp_url, profile, client, iterations, 0, init_scripts, debug_nav).await
     }
 
     /// For tests: start a navigation loop with a provided HTML instead of
@@ -576,19 +560,36 @@ impl Page {
         init_scripts: Vec<String>,
         debug_nav: bool,
     ) -> Result<Self, deno_core::error::AnyError> {
+        const PENDING_NAV_JS: &str = "(function(){\
+                const p = globalThis.__pendingNavigation;\
+                return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
+            })()";
+
         let mut current_html = html;
         let mut current_url = resp_url;
-        let mut current_method = "GET".to_string();
-        let mut current_body: Option<String> = None;
 
         for iter in start_iter..iterations {
             tracing::info!(iter = iter, url = %current_url, "navigation loop start");
-            if let Ok(parsed) = url::Url::parse(&current_url) {
-                let jar_cookies = client.cookies_for_url(&parsed).await.unwrap_or_default();
-                if debug_nav {
-                    tracing::debug!(cookies = %jar_cookies, "navigate jar cookies");
-                }
+            if debug_nav {
+                eprintln!("[navigate] iter={} url={} html_len={}", iter, current_url, current_html.len());
             }
+
+            // Snapshot cookies for this URL before the page runs. If the jar
+            // gains new cookies during script execution (e.g. Kasada /tl
+            // response set a session cookie), we treat that as the
+            // "challenge-solved" signal and retry — Kasada's ips.js solves
+            // the PoW but never calls location.reload(), relying on the user
+            // to hit F5. This primitive is that F5.
+            let parsed_current = url::Url::parse(&current_url).ok();
+            let cookies_before: String = if let Some(p) = parsed_current.as_ref() {
+                client.cookies_for_url(p).await.unwrap_or_default()
+            } else {
+                String::new()
+            };
+            if debug_nav {
+                tracing::debug!(cookies = %cookies_before, "navigate jar cookies (before)");
+            }
+
             let mut page = Self::build_page_with_scripts_and_init(
                 &current_html,
                 &current_url,
@@ -597,9 +598,6 @@ impl Page {
                 &init_scripts,
             )
             .await?;
-
-            // Clear any synchronous pending navigation
-            page.event_loop().execute_script("globalThis.__pendingNavigation = null;").ok();
 
             // Drain the event loop
             if let Err(e) = page
@@ -613,39 +611,84 @@ impl Page {
             // Did a script request a re-navigation?
             let mut pending_info = page
                 .event_loop()
-                .execute_script("(function(){\
-                        const p = globalThis.__pendingNavigation;\
-                        return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
-                    })()")
+                .execute_script(PENDING_NAV_JS)
                 .unwrap_or_default();
 
             if !pending_info.is_empty() {
                 tracing::info!(pending = %pending_info, "initial pending navigation found");
             }
 
+            // Bounded poll for deferred navigation signals (auto-submitted forms,
+            // PoW completions, challenge-driven assigns). Replaces the previous
+            // fixed 2s wait. Checks every 200ms for up to 10s total; exits early
+            // on first hit.
             if pending_info.is_empty() && page.is_anti_bot_challenge() {
-                tracing::info!("anti-bot challenge detected with no pending navigation, waiting 2s...");
-                let _ = page.event_loop().run_until_idle(Duration::from_secs(2)).await;
-                pending_info = page
-                    .event_loop()
-                    .execute_script("(function(){\
-                            const p = globalThis.__pendingNavigation;\
-                            return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
-                        })()")
-                    .unwrap_or_default();
-                if !pending_info.is_empty() {
-                    tracing::info!(pending = %pending_info, "pending navigation found after 2s wait");
+                tracing::info!("anti-bot challenge detected with no pending navigation, polling up to 10s...");
+                let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                while std::time::Instant::now() < deadline {
+                    let _ = page
+                        .event_loop()
+                        .run_until_idle(Duration::from_millis(200))
+                        .await;
+                    pending_info = page
+                        .event_loop()
+                        .execute_script(PENDING_NAV_JS)
+                        .unwrap_or_default();
+                    if !pending_info.is_empty() {
+                        tracing::info!(pending = %pending_info, "pending navigation found during poll");
+                        break;
+                    }
                 }
             }
 
             if pending_info.is_empty() {
+                // Post-settle cookie-delta retry: if the cookie jar gained new
+                // values during this iteration AND the page still looks like a
+                // challenge AND we have iterations left, retry the same URL
+                // once. Covers engines whose solver sets a session cookie and
+                // expects the NEXT top-level nav to carry it (Kasada; some
+                // Akamai variants). Universal primitive — no per-engine code.
+                if page.is_anti_bot_challenge() && iter + 1 < iterations {
+                    let cookies_after: String = if let Some(p) = parsed_current.as_ref() {
+                        client.cookies_for_url(p).await.unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    if debug_nav {
+                        eprintln!(
+                            "[navigate] iter={} cookies before={}b after={}b delta={}",
+                            iter,
+                            cookies_before.len(),
+                            cookies_after.len(),
+                            cookies_after != cookies_before
+                        );
+                    }
+                    if cookies_after != cookies_before && !cookies_after.is_empty() {
+                        if debug_nav {
+                            eprintln!("[navigate] iter={} POST-SETTLE RETRY firing for {}", iter, current_url);
+                        }
+                        tracing::info!(
+                            before_len = cookies_before.len(),
+                            after_len = cookies_after.len(),
+                            "cookie delta after challenge scripts — retrying same URL (F5 primitive)"
+                        );
+                        drop(page);
+                        let resp = client
+                            .get_follow(&current_url, 10)
+                            .await
+                            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+                        current_html = resp.text();
+                        current_url = resp.url.clone();
+                        continue;
+                    }
+                }
                 return Ok(page);
             }
 
             let p: deno_core::serde_json::Value = deno_core::serde_json::from_str(&pending_info).unwrap_or_default();
             let pending_url = p["url"].as_str().unwrap_or_default();
-            let pending_method_val = p["method"].as_str().unwrap_or("GET").to_string();
-            let pending_body_val = p["body"].as_str().map(|s| s.to_string());
+            let pending_method = p["method"].as_str().unwrap_or("GET").to_string();
+            let pending_body = p["body"].as_str().map(|s| s.to_string());
             let kind = p["kind"].as_str().unwrap_or("unknown");
 
             if pending_url.is_empty() {
@@ -653,9 +696,9 @@ impl Page {
             }
 
             // Resolve relative pending URLs
-            let next_url = Self::resolve_url(&current_url, &pending_url)
+            let next_url = Self::resolve_url(&current_url, pending_url)
                 .ok_or_else(|| deno_core::error::AnyError::msg("Failed to resolve pending URL"))?;
-            tracing::debug!(kind = kind, url = %next_url, method = %pending_method_val, "navigate pending navigation");
+            tracing::debug!(kind = kind, url = %next_url, method = %pending_method, "navigate pending navigation");
 
             if iter + 1 == iterations {
                 tracing::warn!(max_iterations = iterations, "navigate hit max iterations, returning current page");
@@ -663,19 +706,31 @@ impl Page {
             }
 
             drop(page);
-            current_url = next_url;
-            current_method = pending_method_val;
-            current_body = pending_body_val;
 
-            // Fetch the next page
-            let resp = if current_method == "POST" {
+            if debug_nav {
+                eprintln!("[navigate] iter={} FETCH {} {}", iter, pending_method, next_url);
+            }
+
+            // Fetch the next page. For form POSTs we must send the form
+            // Content-Type or the server can't parse the body.
+            let resp = if pending_method == "POST" {
+                let post_headers = vec![
+                    ("content-type".to_string(), "application/x-www-form-urlencoded".to_string()),
+                    ("origin".to_string(), {
+                        url::Url::parse(&current_url)
+                            .ok()
+                            .and_then(|u| u.origin().ascii_serialization().into())
+                            .unwrap_or_default()
+                    }),
+                    ("referer".to_string(), current_url.clone()),
+                ];
                 client
-                    .post_bytes_follow(&current_url, current_body.as_deref().unwrap_or("").as_bytes(), &[], 10)
+                    .post_bytes_follow(&next_url, pending_body.as_deref().unwrap_or("").as_bytes(), &post_headers, 10)
                     .await
                     .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
             } else {
                 client
-                    .get_follow(&current_url, 10)
+                    .get_follow(&next_url, 10)
                     .await
                     .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
             };

@@ -748,27 +748,27 @@
     class HTMLInputElement extends HTMLElement {}
     class HTMLFormElement extends HTMLElement {
         submit() {
-            const action = this.getAttribute('action') || (globalThis.location ? globalThis.location.href : '');
-            const method = (this.getAttribute('method') || 'GET').toUpperCase();
-            
+            const action = this.action || (globalThis.location ? globalThis.location.href : '');
+            const method = (this.method || 'GET').toUpperCase();
+
             // Serialize form data
             const params = new URLSearchParams();
             const inputs = this.querySelectorAll('input, textarea, select');
             for (let i = 0; i < inputs.length; i++) {
                 const el = inputs[i];
-                const name = el.getAttribute('name');
+                const name = el.name;
                 if (!name || el.disabled) continue;
-                
-                const type = (el.getAttribute('type') || '').toLowerCase();
+
+                const type = (el.type || '').toLowerCase();
                 if (type === 'submit' || type === 'button' || type === 'image') continue;
                 if ((type === 'checkbox' || type === 'radio') && !el.checked) continue;
-                
+
                 params.append(name, el.value || '');
             }
 
             let finalUrl = action;
             let finalBody = null;
-            
+
             if (method === 'GET') {
                 const url = new URL(action, globalThis.location ? globalThis.location.href : 'about:blank');
                 params.forEach((v, k) => url.searchParams.append(k, v));
@@ -788,6 +788,45 @@
             this.submit();
         }
     }
+
+    // IDL property ↔ HTML attribute reflection. Scripts that configure form
+    // fields via properties (el.name = 'x', form.action = url, form.method =
+    // 'POST') expect the read-back to see what they set — which only works if
+    // the property setter writes the underlying attribute. Without this,
+    // programmatically-built forms look empty to our submit() serializer.
+    // Universal primitive — matches HTML spec "reflect" behavior.
+    const _reflectStr = (proto, prop, attr = prop, dflt = '') => {
+        Object.defineProperty(proto, prop, {
+            get() { const v = this.getAttribute(attr); return v == null ? dflt : v; },
+            set(v) { this.setAttribute(attr, String(v)); },
+            enumerable: true, configurable: true,
+        });
+    };
+    const _reflectBool = (proto, prop, attr = prop) => {
+        Object.defineProperty(proto, prop, {
+            get() { return this.hasAttribute(attr); },
+            set(v) {
+                if (v) this.setAttribute(attr, '');
+                else this.removeAttribute(attr);
+            },
+            enumerable: true, configurable: true,
+        });
+    };
+    _reflectStr(HTMLInputElement.prototype, 'name');
+    _reflectStr(HTMLInputElement.prototype, 'value');
+    _reflectStr(HTMLInputElement.prototype, 'type', 'type', 'text');
+    _reflectStr(HTMLInputElement.prototype, 'placeholder');
+    _reflectBool(HTMLInputElement.prototype, 'checked');
+    _reflectBool(HTMLInputElement.prototype, 'disabled');
+    _reflectBool(HTMLInputElement.prototype, 'readOnly', 'readonly');
+    _reflectBool(HTMLInputElement.prototype, 'required');
+    _reflectStr(HTMLFormElement.prototype, 'action');
+    _reflectStr(HTMLFormElement.prototype, 'method', 'method', 'get');
+    _reflectStr(HTMLFormElement.prototype, 'enctype', 'enctype', 'application/x-www-form-urlencoded');
+    _reflectStr(HTMLFormElement.prototype, 'target');
+    _reflectStr(HTMLFormElement.prototype, 'name');
+    _reflectBool(HTMLFormElement.prototype, 'noValidate', 'novalidate');
+
     class HTMLButtonElement extends HTMLElement {}
     class HTMLSelectElement extends HTMLElement {}
     class HTMLTextAreaElement extends HTMLElement {}

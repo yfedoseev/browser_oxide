@@ -556,7 +556,10 @@ impl HttpClient {
                 .await?;
                 let mut tls_stream =
                     tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
-                let path = parsed.path().to_string();
+                let path = match parsed.query() {
+                    Some(q) => format!("{}?{}", parsed.path(), q),
+                    None => parsed.path().to_string(),
+                };
                 let raw =
                     h1_client::send_post(&mut tls_stream, host, &path, &hdrs, body).await?;
                 self.build_response_from_raw(raw, url).await?

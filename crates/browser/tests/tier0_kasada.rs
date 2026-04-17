@@ -1761,3 +1761,351 @@ async fn homedepot_full_browser_challenge() {
         Err(e) => println!("  navigate_with_challenges failed: {e}"),
     }
 }
+
+#[tokio::test]
+#[ignore]
+async fn yandex_sso_install_post_dump() {
+    // Walk the flow manually: GET ya.ru, extract form fields from SSO push
+    // page, POST to sso.ya.ru/install, dump response. Tells us whether the
+    // install endpoint accepts our POST and where it redirects.
+    let profile = stealth::presets::chrome_130_ru();
+    let client = net::HttpClient::new(&profile).unwrap();
+
+    // Step 1: GET ya.ru → follow → land on SSO push
+    let push = client.get_follow("https://ya.ru/", 10).await.unwrap();
+    println!("=== STEP 1: GET ya.ru (followed redirects) ===");
+    println!("final url: {}", push.url);
+    println!("status: {}", push.status);
+    println!("body len: {}", push.body.len());
+    let body = push.text();
+
+    // Extract form params by regex: it.host + retpath + container
+    let host = extract_str(&body, r#""host":""#, r#"""#).unwrap_or_default().replace(r"\u002F", "/").replace(r"\/", "/");
+    let retpath = extract_str(&body, r#""retpath":""#, r#"""#).unwrap_or_default().replace(r"\u002F", "/").replace(r"\/", "/");
+    let container = extract_str(&body, r#"element2.value = '"#, "'").unwrap_or_default();
+
+    println!("install host:  {host}");
+    println!("retpath:       {retpath}");
+    println!("container len: {}", container.len());
+
+    // Step 2: POST sso.ya.ru/install
+    let form_body = {
+        let params = [("retpath", retpath.as_str()), ("container", container.as_str())];
+        let mut s = String::new();
+        for (i, (k, v)) in params.iter().enumerate() {
+            if i > 0 { s.push('&'); }
+            s.push_str(k);
+            s.push('=');
+            // minimal urlencode: just percent-encode non-alphanum
+            for b in v.bytes() {
+                match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => s.push(b as char),
+                    _ => s.push_str(&format!("%{:02X}", b)),
+                }
+            }
+        }
+        s
+    };
+    let hdrs = vec![
+        ("content-type".to_string(), "application/x-www-form-urlencoded".to_string()),
+        ("origin".to_string(), "https://sso.passport.yandex.ru".to_string()),
+        ("referer".to_string(), push.url.clone()),
+    ];
+    println!("\n=== STEP 2: POST {host} ===");
+    println!("body len: {}", form_body.len());
+    let install_resp = client
+        .post_bytes_with_headers(&host, form_body.as_bytes(), &hdrs)
+        .await
+        .unwrap();
+    println!("status: {}", install_resp.status);
+    println!("final url: {}", install_resp.url);
+    println!("body len: {}", install_resp.body.len());
+    println!("---response headers---");
+    let mut hs: Vec<_> = install_resp.headers.iter().collect();
+    hs.sort_by_key(|(k, _)| k.as_str());
+    for (k, v) in &hs {
+        println!("  {k}: {}", &v[..v.len().min(200)]);
+    }
+    println!("---set-cookies ({} entries)---", install_resp.set_cookies.len());
+    for c in &install_resp.set_cookies {
+        println!("  set-cookie: {}", &c[..c.len().min(200)]);
+    }
+    println!("---body (first 2000)---");
+    let text = install_resp.text();
+    println!("{}", &text[..text.len().min(2000)]);
+
+    let _ = std::fs::write("/tmp/yandex_install_response.html", text.as_bytes());
+    println!("\nfull body saved to /tmp/yandex_install_response.html");
+}
+
+fn extract_str<'a>(hay: &'a str, start: &str, end: &str) -> Option<String> {
+    let i = hay.find(start)? + start.len();
+    let j = hay[i..].find(end)?;
+    Some(hay[i..i+j].to_string())
+}
+
+#[tokio::test]
+#[ignore]
+async fn yandex_sso_raw_body_dump() {
+    // Fetch ya.ru, follow redirects, dump the SSO push page raw so we can see
+    // what scripts / DOMContentLoaded handlers are expected to trigger nav.
+    let profile = stealth::presets::chrome_130_ru();
+    let client = net::HttpClient::new(&profile).unwrap();
+    let resp = client.get_follow("https://ya.ru/", 10).await.unwrap();
+    println!("=== Yandex SSO raw body ===");
+    println!("final url: {}", resp.url);
+    println!("status: {}", resp.status);
+    println!("body len: {}", resp.body.len());
+    println!("---response headers---");
+    let mut hs: Vec<_> = resp.headers.iter().collect();
+    hs.sort_by_key(|(k, _)| k.as_str());
+    for (k, v) in &hs {
+        println!("  {k}: {}", &v[..v.len().min(200)]);
+    }
+    for c in &resp.set_cookies {
+        println!("  set-cookie: {}", &c[..c.len().min(200)]);
+    }
+    println!("---body---");
+    println!("{}", resp.text());
+}
+
+#[tokio::test]
+#[ignore]
+async fn yandex_sso_form_submit_diagnostic() {
+    // Investigate why navigation stalls on sso.passport.yandex.ru/push?...
+    // Report: final URL, forms, whether our HTMLFormElement.prototype.submit
+    // instrumentation is still in place (or clobbered by page JS), pending nav,
+    // fetch log.
+    // Run: cargo test -p browser --test tier0_kasada yandex_sso_form_submit_diagnostic -- --ignored --test-threads=1 --nocapture
+    println!("\n=== Yandex SSO form-submit diagnostic (ya.ru) ===\n");
+    let profile = stealth::presets::chrome_130_ru();
+    let mut page = match browser::Page::navigate("https://ya.ru/", profile, 5).await {
+        Ok(p) => p,
+        Err(e) => {
+            println!("navigate failed: {e}");
+            return;
+        }
+    };
+    println!("final url:         {}", page.url());
+    let content = page.content();
+    println!("final content len: {} bytes", content.len());
+    let is_sso = content.contains("passport.yandex") || page.url().contains("passport.yandex");
+    let is_captcha = content.contains("SmartCaptcha") || content.contains("smart-captcha");
+    let is_real = content.contains("yandex-verification") || content.contains("data-bem");
+    println!("is_sso_page:       {is_sso}");
+    println!("is_captcha_page:   {is_captcha}");
+    println!("is_real_content:   {is_real}");
+
+    // Is our HTMLFormElement.prototype.submit still the one we installed?
+    let submit_probe = page.evaluate(r#"
+        (() => {
+            const proto = globalThis.HTMLFormElement?.prototype;
+            const s = proto?.submit;
+            const src = s ? String(s) : '(missing)';
+            return JSON.stringify({
+                has: !!s,
+                head: src.substring(0, 300),
+                is_native: src.includes('[native code]'),
+                mentions_pendingNavigation: src.includes('__pendingNavigation'),
+            });
+        })()
+    "#).unwrap_or_default();
+    println!("HTMLFormElement.submit probe: {submit_probe}");
+
+    // Enumerate forms
+    let forms_probe = page.evaluate(r#"
+        (() => {
+            const list = [];
+            const forms = document.getElementsByTagName('form');
+            for (let i = 0; i < forms.length; i++) {
+                const f = forms[i];
+                list.push({
+                    idx: i,
+                    id: f.getAttribute('id') || '',
+                    name: f.getAttribute('name') || '',
+                    action: f.getAttribute('action') || '',
+                    method: f.getAttribute('method') || 'GET',
+                    input_count: f.querySelectorAll('input, textarea, select').length,
+                });
+            }
+            return JSON.stringify(list);
+        })()
+    "#).unwrap_or_default();
+    println!("document.forms ({}): {}", content.matches("<form").count(), forms_probe);
+
+    // Pending nav
+    let pending = page.evaluate("JSON.stringify(globalThis.__pendingNavigation || null)").unwrap_or_default();
+    println!("__pendingNavigation: {pending}");
+
+    // Fetch log (tail)
+    let fl = page.evaluate("JSON.stringify(window.__fetchLog || [])").unwrap_or_default();
+    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&fl) {
+        println!("__fetchLog ({} entries):", arr.len());
+        for (i, e) in arr.iter().enumerate().take(15) {
+            let m = e.get("method").and_then(|v| v.as_str()).unwrap_or("");
+            let u = e.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let s = e.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+            let err = e.get("error").and_then(|v| v.as_str()).unwrap_or("");
+            let u_s: String = u.chars().take(180).collect();
+            println!("  [{i}] {m} {s} {u_s} {err}");
+        }
+    }
+
+    // Script errors
+    let errs = page.evaluate("JSON.stringify(window.__scriptErrors || [])").unwrap_or_default();
+    println!("__scriptErrors: {}", &errs[..errs.len().min(1200)]);
+
+    // Does createElement('form') return an instance with our submit method?
+    let create_probe = page.evaluate(r#"
+        (() => {
+            const f = document.createElement('form');
+            return JSON.stringify({
+                constructor_name: f.constructor ? f.constructor.name : '?',
+                has_submit: typeof f.submit === 'function',
+                submit_is_ours: f.submit !== Object.prototype.toString && typeof f.submit === 'function' && String(f.submit).includes('__pendingNavigation'),
+                has_action_descriptor: !!Object.getOwnPropertyDescriptor(Object.getPrototypeOf(f), 'action'),
+                has_method_descriptor: !!Object.getOwnPropertyDescriptor(Object.getPrototypeOf(f), 'method'),
+                proto_chain: (() => { const chain = []; let p = Object.getPrototypeOf(f); while (p) { chain.push(p.constructor ? p.constructor.name : '?'); p = Object.getPrototypeOf(p); } return chain.join(' -> '); })(),
+            });
+        })()
+    "#).unwrap_or_default();
+    println!("createElement('form') probe: {create_probe}");
+
+    // Can we manually trigger submit? Run the same logic the page script does
+    // and report what happens.
+    let manual = page.evaluate(r#"
+        (() => {
+            try {
+                globalThis.__pendingNavigation = null;
+                const form = document.createElement('form');
+                const i1 = document.createElement('input');
+                i1.name = 'retpath';
+                i1.type = 'hidden';
+                i1.value = 'https://ya.ru/?nr=1';
+                form.appendChild(i1);
+                form.method = 'POST';
+                form.action = 'https://example.com/test';
+                document.body.appendChild(form);
+                const before = typeof form.submit;
+                form.submit();
+                return JSON.stringify({
+                    ok: true,
+                    pending: globalThis.__pendingNavigation,
+                    submit_type: before,
+                    form_action: form.action,
+                    form_method: form.method,
+                    form_outerHTML: form.outerHTML.substring(0, 400),
+                });
+            } catch (e) {
+                return JSON.stringify({ ok: false, err: String(e.message), stack: String(e.stack).substring(0, 400) });
+            }
+        })()
+    "#).unwrap_or_default();
+    println!("manual submit test: {manual}");
+
+    // Content head + meta refresh presence (stringified properly)
+    let head_probe = page.evaluate(r#"
+        JSON.stringify({
+            title: document.title || '',
+            meta_refresh: (document.querySelector('meta[http-equiv="refresh"]')?.getAttribute('content')) || '',
+            body_head: (document.body?.innerHTML || '').substring(0, 2000),
+        })
+    "#).unwrap_or_default();
+    println!("head probe: {}", &head_probe[..head_probe.len().min(3000)]);
+}
+
+#[tokio::test]
+#[ignore]
+async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
+    // Targeted root-cause diagnostic. After navigate loop exits, report:
+    // - final URL / content len
+    // - __fetchLog (every fetch ips.js made)
+    // - __cookieWrites (every document.cookie = ... the scripts did)
+    // - document.cookie visible to JS at exit time
+    // - __scriptErrors
+    // Run with: cargo test -p browser --test tier0_kasada kasada_canadagoose_cookie_and_fetch_diagnostic -- --ignored --test-threads=1 --nocapture
+    println!("\n=== Kasada cookie+fetch diagnostic (canadagoose.com) ===\n");
+    let profile = stealth::chrome_130_windows();
+    let mut page = match browser::Page::navigate("https://www.canadagoose.com/", profile, 5).await {
+        Ok(p) => p,
+        Err(e) => {
+            println!("navigate failed: {e}");
+            return;
+        }
+    };
+    println!("final url:        {}", page.url());
+    let content = page.content();
+    println!("final content len: {} bytes", content.len());
+    let is_challenge = content.contains("/ips.js") || content.contains("/149e9513-") || content.contains("KPSDK");
+    let is_real = content.contains("Canada Goose") && !is_challenge;
+    println!("is_challenge:     {is_challenge}");
+    println!("is_real_content:  {is_real}");
+
+    // document.cookie from V8's perspective
+    let doc_cookie = page.evaluate("document.cookie").unwrap_or_default();
+    println!("document.cookie:  {}", &doc_cookie[..doc_cookie.len().min(800)]);
+
+    // Pending nav (usually cleared by cleanup_bootstrap, but try)
+    let pending = page
+        .evaluate("JSON.stringify(globalThis.__pendingNavigation || null)")
+        .unwrap_or_default();
+    println!("__pendingNavigation: {pending}");
+
+    // What did scripts write to document.cookie?
+    let cw = page.evaluate("JSON.stringify(window.__cookieWrites || [])").unwrap_or_default();
+    println!("__cookieWrites ({} entries):", cw.matches(',').count() + 1);
+    println!("  {}", &cw[..cw.len().min(2000)]);
+
+    // Full fetch log from the JS side (URL, method, status, req/resp headers)
+    let fl = page
+        .evaluate("JSON.stringify(window.__fetchLog || [])")
+        .unwrap_or_default();
+    println!("__fetchLog len: {} chars", fl.len());
+    // Parse and pretty-print each entry with just URL + status + KP headers
+    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&fl) {
+        println!("__fetchLog ({} entries):", arr.len());
+        for (i, e) in arr.iter().enumerate() {
+            let m = e.get("method").and_then(|v| v.as_str()).unwrap_or("");
+            let u = e.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let s = e.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+            let err = e.get("error").and_then(|v| v.as_str()).unwrap_or("");
+            let u_s: String = u.chars().take(160).collect();
+            println!("  [{i}] {m} {} {u_s} {}", s, err);
+            // Print any x-kpsdk-* headers seen in request or response
+            if let Some(rh) = e.get("reqHeaders").and_then(|v| v.as_object()) {
+                for (k, v) in rh {
+                    if k.to_lowercase().starts_with("x-kpsdk") {
+                        println!("      req  {k}: {}", v.as_str().unwrap_or(""));
+                    }
+                }
+            }
+            if let Some(rh) = e.get("respHeaders").and_then(|v| v.as_object()) {
+                for (k, v) in rh {
+                    if k.to_lowercase().starts_with("x-kpsdk") {
+                        println!("      resp {k}: {}", v.as_str().unwrap_or(""));
+                    }
+                }
+            }
+        }
+    } else {
+        println!("(could not parse __fetchLog JSON; raw first 500: {})", &fl[..fl.len().min(500)]);
+    }
+
+    // Script errors
+    let errs = page.evaluate("JSON.stringify(window.__scriptErrors || [])").unwrap_or_default();
+    println!("__scriptErrors: {}", &errs[..errs.len().min(800)]);
+
+    // location.reload / href behavior — check if pending nav was ever triggered
+    // by looking for 'reload' kind in the log.
+    let reload_check = page.evaluate(r#"
+        (() => {
+            const hasPatched = typeof window.fetch === 'function' && window.fetch.toString().indexOf('_origFetch') !== -1;
+            // Detect if ips.js patched fetch (it wraps the original)
+            return JSON.stringify({
+                fetch_patched_by_engine: hasPatched,
+                fetch_tostring_head: String(window.fetch).substring(0, 200),
+            });
+        })()
+    "#).unwrap_or_default();
+    println!("fetch state: {reload_check}");
+}

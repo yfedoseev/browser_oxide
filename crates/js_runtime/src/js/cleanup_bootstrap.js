@@ -8,8 +8,13 @@
         '__bootstrap',
         '__boxide',
         '__syncCookiesFromNet',
-        '__documentReadyState',
-        '__pendingNavigation'
+        '__documentReadyState'
+        // __pendingNavigation intentionally kept: it is a signal for the
+        // Rust navigation driver. Synchronous inline scripts (form.submit,
+        // location.href = ...) set it during the same tick cleanup runs,
+        // so deleting it here loses the signal before run_until_idle and
+        // the driver check. It is defined non-enumerable in
+        // window_bootstrap.js so it does not leak via Object.keys.
     ];
 
     for (const name of internals) {
