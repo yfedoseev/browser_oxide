@@ -20,28 +20,37 @@
 ---
 
 ## 3. Issue: Kasada (Canada Goose / Hyatt)
-**Symptom**: Stuck in challenge loop (200 OK) or 429 Rate Limit.
+**Symptom**: Stuck on 732-byte challenge page. Solver runs end-to-end but server never upgrades us to real content.
 
-### Technical Debt / Hypothesis
-In `crates/browser/src/page.rs`, we pre-fetch external scripts manually.
-*   **The Gap**: Our manual script fetch logic uses a custom header map that might be missing `Accept-Encoding: gzip, deflate, br` or failing to propagate cookies from the initial HTML response.
-*   **Evidence**: `ips.js` (Kasada's solver) is 500KB+. If we receive a small dummy script, Kasada has detected the fetch as a bot.
-*   **Fix Path**: Refactor `Page::build_page_with_scripts_and_init` to use the full `HttpClient` defaults for pre-fetching, ensuring it behaves identically to a real browser's script tag engine.
+### Diagnostic Findings (this session — AM "pre-fetch" hypothesis was WRONG)
+`ips.js` loads at full 519KB and executes. Fetch log shows the full success trace:
+*   `POST /149e9513-…/tl` returns `200` with `x-kpsdk-cr: true` — server accepts challenge
+*   Fresh `x-kpsdk-ct` returned, Set-Cookie with `akm_bmfp_b2=…` lands in jar
+*   `document.cookie` at exit contains the new token (cookie sync works)
+*   Our post-settle retry primitive fires on every iteration carrying the fresh cookie
+*   Server still returns the 732-byte challenge on the retry
+
+TLS / H2 / headers all match Chrome 146 capture (verified via tls.peet.ws). Script-fetch headers include referer + sec-fetch-*. `ips.js` contains **zero** `location`/`reload`/`href` references in 519KB — it never triggers navigation, relying on user-initiated reload.
+
+### Remaining Candidate Factors (need external evidence)
+*   TLS session-ticket pinning across the post-settle retry
+*   H2 connection-id binding by the Kasada edge
+*   `sec-fetch-user` / `sec-fetch-site` nuance: JS-initiated reload vs user F5 (we currently send `none` + `user=?1`, matches a fresh nav, not a reload)
+
+### Fix Path
+Capture real Chrome 130 HAR against canadagoose.com. Diff byte-for-byte against our request stream on the post-solve GET. Do not speculate further without evidence.
 
 ---
 
-## 4. General Engine Issues to Fix
+## 4. General Engine Work
 
-### A. Navigation Loop Polish
-*   **Stability**: The 2-second "anti-bot wait" in `navigate_loop_internal` should be replaced with a more robust signal if possible.
-
-### B. Worker OpState Robustness
+### A. Worker OpState Robustness
 *   **Status**: Fixed the crash where workers lacked `OpState`.
 *   **Next Step**: Verify that workers spawned *by other workers* (nested workers) correctly inherit the `StealthProfile`.
 
-### C. TLS Wire-Level Fingerprinting
-*   **Status**: Using BoringSSL.
-*   **Next Step**: Some sites (including potentially Kasada) use JA4 fingerprinting. Ensure `crates/net/src/tls.rs` matches real Chrome 130 cipher suites.
+### B. TLS Wire-Level Fingerprinting
+*   **Status**: Using BoringSSL with Chrome 146-matched cipher order, H2 pseudo-header order, and SETTINGS frame. Verified via tls.peet.ws.
+*   **Next Step**: JA4-level diff against a live Chrome 130 capture for Kasada-specific sites.
 
 ---
 
