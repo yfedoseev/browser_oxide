@@ -22,23 +22,28 @@
 ## 3. Issue: Kasada (Canada Goose / Hyatt)
 **Symptom**: Stuck on 732-byte challenge page. Solver runs end-to-end but server never upgrades us to real content.
 
-### Diagnostic Findings (this session — AM "pre-fetch" hypothesis was WRONG)
+### Diagnostic Findings
 `ips.js` loads at full 519KB and executes. Fetch log shows the full success trace:
 *   `POST /149e9513-…/tl` returns `200` with `x-kpsdk-cr: true` — server accepts challenge
 *   Fresh `x-kpsdk-ct` returned, Set-Cookie with `akm_bmfp_b2=…` lands in jar
 *   `document.cookie` at exit contains the new token (cookie sync works)
-*   Our post-settle retry primitive fires on every iteration carrying the fresh cookie
-*   Server still returns the 732-byte challenge on the retry
+*   Post-settle retry + in-V8 refetch both fire carrying the fresh cookie
+*   Server still returns the 732-byte challenge on every retry
 
-TLS / H2 / headers all match Chrome 146 capture (verified via tls.peet.ws). Script-fetch headers include referer + sec-fetch-*. `ips.js` contains **zero** `location`/`reload`/`href` references in 519KB — it never triggers navigation, relying on user-initiated reload.
+TLS / H2 / headers match Chrome 146 capture (verified via tls.peet.ws). Script-fetch headers include referer + sec-fetch-*. `ips.js` contains **zero** `location`/`reload`/`href` references in 519KB — it never triggers navigation itself.
+
+### Ruled Out This Session
+*   **ips.js does NOT patch `window.fetch` globally.** `window.fetch.toString()` still returns OUR wrapper unchanged after ips.js runs. ips.js passes `x-kpsdk-ct` explicitly as `init.headers` only on its own requests to `/tl` and `/fp`. So the "Option A" in-V8 refetch (leveraging a patched fetch) doesn't help on Kasada's top-level URLs.
+*   **KPSDK state is closure-private.** After solve, `window.KPSDK` only exposes `{now, start, scriptStart}`. The solved token lives in ips.js closures, unreachable from outside. No public `getClientToken()` method.
+*   **Cookies alone don't upgrade the session.** Jar carries the fresh `akm_bmfp_b2` on every retry; server keeps issuing new challenges.
 
 ### Remaining Candidate Factors (need external evidence)
-*   TLS session-ticket pinning across the post-settle retry
-*   H2 connection-id binding by the Kasada edge
-*   `sec-fetch-user` / `sec-fetch-site` nuance: JS-initiated reload vs user F5 (we currently send `none` + `user=?1`, matches a fresh nav, not a reload)
+*   TLS session-ticket resumption — Kasada likely pins sessions to TLS state, not cookies. Verify with a Wireshark capture: does real Chrome reuse the session ticket from the solve POST on its retry GET? Does our connection pool reuse it?
+*   H2 connection-id stickiness on the Kasada edge
+*   Timing window between solve and retry
 
 ### Fix Path
-Capture real Chrome 130 HAR against canadagoose.com. Diff byte-for-byte against our request stream on the post-solve GET. Do not speculate further without evidence.
+Capture real Chrome 130 HAR + TLS keylog against canadagoose.com. Compare the TLS handshake on the post-solve GET against our Rust client. If session resumption is the tell, enable ticket reuse in `crates/net/src/tls.rs`. If it's something else, the HAR will show it. **Do not speculate further without this evidence.**
 
 ---
 

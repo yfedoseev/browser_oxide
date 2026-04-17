@@ -2100,7 +2100,6 @@ async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
     let reload_check = page.evaluate(r#"
         (() => {
             const hasPatched = typeof window.fetch === 'function' && window.fetch.toString().indexOf('_origFetch') !== -1;
-            // Detect if ips.js patched fetch (it wraps the original)
             return JSON.stringify({
                 fetch_patched_by_engine: hasPatched,
                 fetch_tostring_head: String(window.fetch).substring(0, 200),
@@ -2108,4 +2107,29 @@ async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
         })()
     "#).unwrap_or_default();
     println!("fetch state: {reload_check}");
+
+    // Dump KPSDK state — methods, properties, token, ready flag.
+    let kpsdk = page.evaluate(r#"
+        (() => {
+            if (typeof window.KPSDK === 'undefined') return JSON.stringify({present: false});
+            const k = window.KPSDK;
+            const out = { present: true, keys: [], methods: [], values: {} };
+            for (const key of Object.getOwnPropertyNames(k)) {
+                try {
+                    const v = k[key];
+                    out.keys.push(key);
+                    if (typeof v === 'function') {
+                        out.methods.push(key);
+                        try { out.values[key] = String(v(...[])).substring(0, 200); } catch (e) { out.values[key] = '[threw:'+e.message.substring(0,80)+']'; }
+                    } else if (typeof v === 'object' && v !== null) {
+                        try { out.values[key] = JSON.stringify(v).substring(0, 300); } catch { out.values[key] = '[unserializable]'; }
+                    } else {
+                        out.values[key] = String(v).substring(0, 200);
+                    }
+                } catch (e) { out.keys.push(key+'[err]'); }
+            }
+            return JSON.stringify(out);
+        })()
+    "#).unwrap_or_default();
+    println!("KPSDK state: {}", &kpsdk[..kpsdk.len().min(2000)]);
 }

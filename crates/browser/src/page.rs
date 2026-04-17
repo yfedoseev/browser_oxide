@@ -670,15 +670,93 @@ impl Page {
                         tracing::info!(
                             before_len = cookies_before.len(),
                             after_len = cookies_after.len(),
-                            "cookie delta after challenge scripts — retrying same URL (F5 primitive)"
+                            "cookie delta after challenge scripts — retrying"
                         );
+
+                        // Option A: try an in-V8 refetch first. If a challenge
+                        // engine (Kasada/PerimeterX/etc.) patched window.fetch
+                        // during script execution to inject session headers
+                        // (x-kpsdk-ct and friends), those headers ride along
+                        // on this fetch — which a fresh Rust-side GET would
+                        // not carry. The page stays alive while we refetch so
+                        // the patched fetch state is preserved.
+                        let refetch_js = r#"
+                            (async () => {
+                                globalThis.__psrHtml = null;
+                                globalThis.__psrStatus = 0;
+                                globalThis.__psrErr = null;
+                                try {
+                                    const resp = await fetch(location.href, {
+                                        method: 'GET',
+                                        credentials: 'include',
+                                        headers: {
+                                            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                                        },
+                                    });
+                                    globalThis.__psrStatus = resp.status;
+                                    globalThis.__psrHtml = await resp.text();
+                                } catch (e) {
+                                    globalThis.__psrErr = String((e && e.message) || e);
+                                }
+                            })();
+                        "#;
+                        let _ = page
+                            .event_loop()
+                            .execute_and_run(refetch_js, Duration::from_secs(15))
+                            .await;
+                        let status_str = page
+                            .event_loop()
+                            .execute_script("String(globalThis.__psrStatus || 0)")
+                            .unwrap_or_default();
+                        let err_str = page
+                            .event_loop()
+                            .execute_script("String(globalThis.__psrErr || '')")
+                            .unwrap_or_default();
+                        let v8_html = page
+                            .event_loop()
+                            .execute_script("String(globalThis.__psrHtml || '')")
+                            .unwrap_or_default();
+                        if debug_nav {
+                            eprintln!(
+                                "[navigate] iter={} in-V8 refetch status={} err={} html_len={}",
+                                iter,
+                                status_str,
+                                err_str,
+                                v8_html.len()
+                            );
+                        }
+
+                        // Accept the V8-fetched body if it's larger than the
+                        // current challenge page AND doesn't re-trigger our
+                        // anti-bot content markers. Otherwise fall back to a
+                        // Rust-side GET (cookie-only flow — works for simpler
+                        // engines that upgrade on any authenticated request).
+                        let v8_html_is_real = !v8_html.is_empty()
+                            && v8_html.len() > current_html.len()
+                            && !v8_html.contains("/ips.js")
+                            && !v8_html.contains("/149e9513-")
+                            && !v8_html.contains("kpsdk")
+                            && !v8_html.contains("_abck")
+                            && !v8_html.contains("bm_sz");
+
                         drop(page);
-                        let resp = client
-                            .get_follow(&current_url, 10)
-                            .await
-                            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
-                        current_html = resp.text();
-                        current_url = resp.url.clone();
+                        if v8_html_is_real {
+                            if debug_nav {
+                                eprintln!(
+                                    "[navigate] iter={} USING V8-fetched body ({} bytes)",
+                                    iter,
+                                    v8_html.len()
+                                );
+                            }
+                            current_html = v8_html;
+                        } else {
+                            let resp = client
+                                .get_follow(&current_url, 10)
+                                .await
+                                .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+                            current_html = resp.text();
+                            current_url = resp.url.clone();
+                        }
                         continue;
                     }
                 }
@@ -705,7 +783,103 @@ impl Page {
                 return Ok(page);
             }
 
+            // In-V8 refetch for same-origin reloads on challenge pages.
+            // If the page's own scripts triggered a reload-style navigation
+            // (location.href/reload/same-host assign) while challenge markers
+            // are still present, the server is likely gating on a token that
+            // only an engine-patched window.fetch injects (Kasada x-kpsdk-ct,
+            // PerimeterX, etc.). A fresh Rust-side GET bypasses that patch.
+            // Try the refetch through the live V8 fetch first; if the result
+            // still looks like a challenge, fall back to the normal Rust path.
+            let same_host_reload = pending_method == "GET"
+                && page.is_anti_bot_challenge()
+                && {
+                    let cur = url::Url::parse(&current_url).ok();
+                    let nxt = url::Url::parse(&next_url).ok();
+                    matches!(
+                        (cur, nxt),
+                        (Some(a), Some(b)) if a.host_str() == b.host_str()
+                    )
+                };
+            let v8_refetched: Option<String> = if same_host_reload {
+                let refetch_js = format!(
+                    r#"
+                    (async () => {{
+                        globalThis.__psrHtml = null;
+                        globalThis.__psrStatus = 0;
+                        globalThis.__psrErr = null;
+                        try {{
+                            const resp = await fetch({url_js}, {{
+                                method: 'GET',
+                                credentials: 'include',
+                                headers: {{
+                                    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                                }},
+                            }});
+                            globalThis.__psrStatus = resp.status;
+                            globalThis.__psrHtml = await resp.text();
+                        }} catch (e) {{
+                            globalThis.__psrErr = String((e && e.message) || e);
+                        }}
+                    }})();
+                    "#,
+                    url_js = deno_core::serde_json::to_string(&next_url).unwrap_or_else(|_| "''".to_string())
+                );
+                let _ = page
+                    .event_loop()
+                    .execute_and_run(&refetch_js, Duration::from_secs(15))
+                    .await;
+                let status = page
+                    .event_loop()
+                    .execute_script("String(globalThis.__psrStatus || 0)")
+                    .unwrap_or_default();
+                let err = page
+                    .event_loop()
+                    .execute_script("String(globalThis.__psrErr || '')")
+                    .unwrap_or_default();
+                let html = page
+                    .event_loop()
+                    .execute_script("String(globalThis.__psrHtml || '')")
+                    .unwrap_or_default();
+                if debug_nav {
+                    eprintln!(
+                        "[navigate] iter={} in-V8 refetch status={} err={} html_len={}",
+                        iter,
+                        status,
+                        err,
+                        html.len()
+                    );
+                }
+                let looks_real = !html.is_empty()
+                    && html.len() > current_html.len()
+                    && !html.contains("/ips.js")
+                    && !html.contains("/149e9513-")
+                    && !html.contains("kpsdk")
+                    && !html.contains("_abck")
+                    && !html.contains("bm_sz");
+                if looks_real {
+                    Some(html)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             drop(page);
+
+            if let Some(html) = v8_refetched {
+                if debug_nav {
+                    eprintln!(
+                        "[navigate] iter={} USING V8-fetched body ({} bytes)",
+                        iter,
+                        html.len()
+                    );
+                }
+                current_html = html;
+                // current_url unchanged (same origin reload)
+                continue;
+            }
 
             if debug_nav {
                 eprintln!("[navigate] iter={} FETCH {} {}", iter, pending_method, next_url);
