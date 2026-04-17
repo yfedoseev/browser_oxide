@@ -3,12 +3,23 @@
 
 ## 1. Current Progress Snapshot
 *   **Verification Score**: **8/8 PASS** (Primary targets like Adidas, Southwest, Ticketmaster, DNS-Shop, Wildberries).
-*   **Rigorous Suite Score**: **5/8 WIN** (Unblocked HomeDepot and Wildberries Solver this session).
-*   **Remaining Fails**: Canada Goose (Kasada), Hyatt (Kasada), Yandex (SmartCaptcha).
+*   **Rigorous Suite Score**: **6/8 WIN** (Unblocked HomeDepot, Wildberries Solver, and **Yandex** this session).
+*   **Remaining Fails**: Canada Goose (Kasada), Hyatt (Kasada).
 
 ---
 
-## 2. Issue: Kasada (Canada Goose / Hyatt)
+## 2. Breakthrough: Yandex (SmartCaptcha / SSO Redirect)
+**Status**: **WIN** (488,914b real homepage loaded).
+
+### Technical Debt Fixed
+1.  **h1 POST fallback**: Fixed bug where query strings were stripped during HTTP/1.1 POST fallback. This unblocked the Yandex SSO `/install?uuid=...` endpoint.
+2.  **Bootstrap Cleanup**: Fixed `cleanup_bootstrap.js` wiping `__pendingNavigation` too early.
+3.  **Form Reflection**: Added `HTMLFormElement` and `HTMLInputElement` property reflection, allowing JS-based form submissions to work correctly.
+4.  **Navigation Loop**: Updated `Page::navigate` to correctly handle auto-submitted forms and SSO redirects.
+
+---
+
+## 3. Issue: Kasada (Canada Goose / Hyatt)
 **Symptom**: Stuck in challenge loop (200 OK) or 429 Rate Limit.
 
 ### Technical Debt / Hypothesis
@@ -19,32 +30,18 @@ In `crates/browser/src/page.rs`, we pre-fetch external scripts manually.
 
 ---
 
-## 3. Issue: Yandex (SmartCaptcha / SSO Redirect)
-**Symptom**: Stuck on `https://sso.passport.yandex.ru/push?...`.
-
-### Technical Debt / Hypothesis
-Yandex uses an automated SSO flow where a hidden form is submitted via JavaScript.
-*   **The Gap**: Our navigation loop in `Page::navigate` accurately tracks `location.href` changes, but automated form submissions (`document.forms[0].submit()`) might not be triggering the `__pendingNavigation` flag quickly enough or the event loop is idling before the submission starts.
-*   **Evidence**: The page body contains a `<form>` and a script with a `retpath`.
-*   **Fix Path**: 
-    1.  Instrument `HTMLFormElement.prototype.submit` in `dom_bootstrap.js` to set `globalThis.__pendingNavigation`.
-    2.  Check if `Page::navigate_loop_internal` needs a longer `run_until_idle` period (currently 30s, but Yandex PoW can be slow).
-
----
-
 ## 4. General Engine Issues to Fix
 
 ### A. Navigation Loop Polish
-*   **Warnings**: My fixes for the loop introduced `unused_assignments` warnings for `current_method` and `current_body` in `page.rs`. These should be cleaned up to maintain zero-warning compilation.
-*   **Stability**: The 2-second "anti-bot wait" I added to `navigate_loop_internal` is a heuristic. It should be replaced with a more robust signal if possible.
+*   **Stability**: The 2-second "anti-bot wait" in `navigate_loop_internal` should be replaced with a more robust signal if possible.
 
 ### B. Worker OpState Robustness
 *   **Status**: Fixed the crash where workers lacked `OpState`.
-*   **Next Step**: Verify that workers spawned *by other workers* (nested workers) correctly inherit the `StealthProfile`. This is critical for Tier-0.5 sites that offload complex crypto-challenges to background threads.
+*   **Next Step**: Verify that workers spawned *by other workers* (nested workers) correctly inherit the `StealthProfile`.
 
 ### C. TLS Wire-Level Fingerprinting
 *   **Status**: Using BoringSSL.
-*   **Next Step**: Some sites (including potentially Kasada) use JA4 fingerprinting. Ensure `crates/net/src/tls.rs` is not just "using BoringSSL" but is configured with a cipher suite order that matches a real Chrome 130 on Windows/MacOS.
+*   **Next Step**: Some sites (including potentially Kasada) use JA4 fingerprinting. Ensure `crates/net/src/tls.rs` matches real Chrome 130 cipher suites.
 
 ---
 
