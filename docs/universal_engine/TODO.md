@@ -5,12 +5,10 @@ sense to do given the "zero per-engine runtime logic" goal and the research
 findings in `03_research_landscape.md`. Items in `plans/` have detailed
 step-by-step implementation documents.
 
-**Current state snapshot**: see `09_session_2026_04_11_state.md` for the
-post-probe reality. As of 2026-04-11, **Sprints 0, 1 (partial), 2, and 3
-are done** (1005 passing workspace tests). The tier-0.5 blocker probe is
-still 0/8 — diagnosed as residual **TLS wire-level fingerprint gap** plus
-a few site-specific solver gaps. See section "What's actually blocking us
-now" below.
+**Current state snapshot**: see `11_session_2026_04_17_state.md` for the
+latest status. As of 2026-04-17, **Sprints 0, 1, 2, 3, and 4 are done**
+(1005 passing workspace tests). A critical `op_worker_spawn` regression
+was fixed, unblocking Tier-0.5 sites that use background workers.
 
 **Status legend**: ☐ not started, ◐ in progress, ☑ done, ✗ cancelled
 
@@ -251,8 +249,7 @@ open-source frontier and should budget accordingly.
 **Workspace health**: 1005 passing tests, 0 failing (up from 962
 pre-session).
 
-**Current tier-0.5 blocker score**: **7/8 PASS** (Adidas, Southwest, Tinkoff, Lamoda, Wildberries Baseline, Ticketmaster, Ticketmaster-UK). Up from 2/8. 
-
+**Current tier-0.5 blocker score**: **8/8 PASS** (Adidas, Southwest, Tinkoff, Lamoda, Wildberries Solver, Ticketmaster, Ticketmaster-UK, DNS Shop). 5/8 WIN in Rigorous content-marker suite.
 ---
 
 ## What's actually blocking us now (post-SOTA-masking)

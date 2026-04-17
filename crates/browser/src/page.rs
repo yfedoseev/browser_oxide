@@ -31,6 +31,18 @@ impl Drop for Page {
 }
 
 impl Page {
+    /// Detect if the current page is an anti-bot challenge (Kasada, Akamai, etc.)
+    pub fn is_anti_bot_challenge(&mut self) -> bool {
+        let body = self.content();
+        body.contains("ips.js") || 
+        body.contains("kpsdk") || 
+        body.contains("_abck") || 
+        body.contains("bm_sz") ||
+        body.contains("perimeterx") ||
+        body.contains("human security") ||
+        body.contains("smartcaptcha") ||
+        body.contains("checkbox-captcha")
+    }
     /// Create a page from an HTML string. Parses HTML, executes inline scripts,
     /// and runs the event loop until idle (or 30s timeout).
     pub async fn from_html(
@@ -184,9 +196,7 @@ impl Page {
 
         // Fire DOMContentLoaded and load events — many scripts wait for these
         event_loop
-            .execute_script(
-                "document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));",
-            )
+            .execute_script("document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));")
             .ok();
         
         // After DOMContentLoaded, readyState = interactive
@@ -400,7 +410,7 @@ impl Page {
         Self::build_page_with_scripts_and_init(html, url, &profile, &client, &[]).await
     }
 
-    fn print_console_logs(&mut self) {
+    pub fn consume_and_print_logs(&mut self) {
         let logs = {
             let runtime = self.event_loop.runtime_mut().inner();
             let state = runtime.op_state();
@@ -415,7 +425,7 @@ impl Page {
                 js_runtime::state::ConsoleLevel::Error => "[JS ERROR]",
                 _ => "[JS INFO]",
             };
-            tracing::debug!(level = prefix, message = %log.args.join(" "), "JS console output");
+            println!("    {} {}", prefix, log.args.join(" "));
         }
     }
 
@@ -531,16 +541,10 @@ impl Page {
             
             let html = resp.text();
             let resp_url = resp.url.clone();
-            return Self::navigate_loop_internal(html, resp_url, profile.clone(), client.clone(), iterations, iter, init_scripts.clone(), debug_nav).await;
+            return Self::navigate_loop_internal(html, resp_url, profile.clone(), client.clone(), iterations, 0, init_scripts.clone(), debug_nav).await;
         }
 
-        // Shouldn't be reachable (iterations >= 1 guaranteed), but fall
-        // back to a plain GET to keep the signature total.
-        let resp = client
-            .get_follow(url, 10)
-            .await
-            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
-        Self::build_page_with_scripts(&resp.text(), url, &profile, &client).await
+        Err(deno_core::error::AnyError::msg("Navigation failed (no iterations)"))
     }
 
     /// For tests: start a navigation loop with a provided HTML instead of
@@ -578,6 +582,7 @@ impl Page {
         let mut current_body: Option<String> = None;
 
         for iter in start_iter..iterations {
+            tracing::info!(iter = iter, url = %current_url, "navigation loop start");
             if let Ok(parsed) = url::Url::parse(&current_url) {
                 let jar_cookies = client.cookies_for_url(&parsed).await.unwrap_or_default();
                 if debug_nav {
@@ -606,15 +611,32 @@ impl Page {
             }
 
             // Did a script request a re-navigation?
-            let pending_info = page
+            let mut pending_info = page
                 .event_loop()
-                .execute_script(
-                    "(function(){\
+                .execute_script("(function(){\
                         const p = globalThis.__pendingNavigation;\
                         return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
-                    })()",
-                )
+                    })()")
                 .unwrap_or_default();
+
+            if !pending_info.is_empty() {
+                tracing::info!(pending = %pending_info, "initial pending navigation found");
+            }
+
+            if pending_info.is_empty() && page.is_anti_bot_challenge() {
+                tracing::info!("anti-bot challenge detected with no pending navigation, waiting 2s...");
+                let _ = page.event_loop().run_until_idle(Duration::from_secs(2)).await;
+                pending_info = page
+                    .event_loop()
+                    .execute_script("(function(){\
+                            const p = globalThis.__pendingNavigation;\
+                            return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
+                        })()")
+                    .unwrap_or_default();
+                if !pending_info.is_empty() {
+                    tracing::info!(pending = %pending_info, "pending navigation found after 2s wait");
+                }
+            }
 
             if pending_info.is_empty() {
                 return Ok(page);
@@ -829,8 +851,7 @@ impl Page {
         // debugging — lets us see what values scripts assign to
         // `document.cookie` during the page run.
         event_loop
-            .execute_script(
-                r#"Object.defineProperty(window, '__cookieWrites', { value: [], enumerable: false, configurable: true });
+            .execute_script(r#"Object.defineProperty(window, '__cookieWrites', { value: [], enumerable: false, configurable: true });
             (function() {
                 const proto = Document.prototype || (document && Object.getPrototypeOf(document));
                 if (!proto) return;
@@ -856,15 +877,13 @@ impl Page {
                         return origSet.call(this, v);
                     },
                 });
-            })();"#,
-            )
+            })();"#)
             .ok();
 
         // Install error tracking + fetch/XHR logging BEFORE scripts run.
         // Generic request log, equivalent to DevTools' Network tab.
         event_loop
-            .execute_script(
-                r#"Object.defineProperty(window, '__scriptErrors', { value: [], enumerable: false, configurable: true });
+            .execute_script(r#"Object.defineProperty(window, '__scriptErrors', { value: [], enumerable: false, configurable: true });
             Object.defineProperty(window, '__fetchLog', { value: [], enumerable: false, configurable: true });
             // Temporarily disable the stack filter so we can see the real
             // call sites when a TypeError fires inside a challenge VM.
@@ -960,8 +979,7 @@ impl Page {
                     entry.error = String(e && e.message || e).substring(0, 200);
                     throw e;
                 }
-            };"#,
-            )
+            };"#)
             .ok();
 
         // Execute scripts in document order using pre-fetched code.
@@ -984,8 +1002,12 @@ impl Page {
                 continue;
             }
 
-            let name = format!("<script_{}>", i);
-            if let Err(e) = event_loop.execute_script(&code) {
+            let name = if let Some(src) = &script.src {
+                src.clone()
+            } else {
+                format!("<script_{}>", i)
+            };
+            if let Err(e) = event_loop.execute_script_with_name(&code, &name) {
                 tracing::warn!(script = %name, error = %e, "Script execution error");
             }
 
@@ -1022,23 +1044,20 @@ impl Page {
         // within the event loop (not synchronously during script setup).
         // This ensures async handlers can create Promises that the event loop tracks.
         event_loop
-            .execute_script(
-                r#"
+            .execute_script(r#"
             setTimeout(() => {
                 document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
                 window.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
                 window.dispatchEvent(new Event('load'));
             }, 0);
-        "#,
-            )
+        "#)
             .ok();
 
         // Scan for <meta http-equiv="refresh" content="N;url=..."> and
         // schedule a pending navigation. Generic navigation primitive —
         // the Rust driver loop sees __pendingNavigation and re-fetches.
         event_loop
-            .execute_script(
-                r#"
+            .execute_script(r#"
             (function() {
                 const metas = document.getElementsByTagName('meta');
                 for (let i = 0; i < metas.length; i++) {
@@ -1059,8 +1078,7 @@ impl Page {
                     break;
                 }
             })();
-        "#,
-            )
+        "#)
             .ok();
 
         // Run event loop until idle. Script errors should NOT abort
@@ -1105,8 +1123,7 @@ impl Page {
                 u: f.url,
                 s: f.status,
                 e: f.error,
-            })))"#,
-        ) {
+            })))"#) {
             if fetches_json != "[]" {
                 use deno_core::serde_json;
                 if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&fetches_json) {

@@ -54,7 +54,7 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                         .attrs
                         .iter()
                         .find(|a| a.name.local == "src")
-                        .map(|a| a.value.clone());
+                        .map(|a| decode_html_entities(a.value.as_str()));
 
                     if src.is_some() {
                         // External script — store the URL for fetching
@@ -79,4 +79,12 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
             collect_scripts(dom, child_id, scripts);
         }
     }
+}
+
+fn decode_html_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
 }

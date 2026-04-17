@@ -11,6 +11,7 @@
 //! inline scripts).
 
 use deno_core::op2;
+use crate::state::DomState;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -200,12 +201,12 @@ thread_local! {
 #[op2(fast)]
 #[smi]
 pub fn op_worker_spawn(
-    #[state] state: &mut deno_core::OpState,
+    #[state] state: &mut DomState,
     #[string] script: String,
     #[string] _name: String,
     is_module: bool,
 ) -> i32 {
-    let profile = state.borrow::<crate::state::DomState>().stealth_profile.clone();
+    let profile = state.stealth_profile.clone();
     let (to_worker_tx, to_worker_rx) = std::sync::mpsc::channel::<String>();
     let (to_parent_tx, to_parent_rx) = std::sync::mpsc::channel::<String>();
     let terminate = Arc::new(AtomicBool::new(false));

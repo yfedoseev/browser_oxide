@@ -54,12 +54,32 @@ impl BrowserJsRuntime {
     /// Uses V8 directly in a single HandleScope — avoids the overhead of
     /// deno_core's `execute_script` (which allocates a Global handle) and
     /// a second `handle_scope()` call for stringification.
-    pub fn execute_script(&mut self, code: &str) -> Result<String, deno_core::error::AnyError> {
+    pub fn execute_script(&mut self, code: &str, name: Option<&str>) -> Result<String, deno_core::error::AnyError> {
         let scope = &mut self.inner.handle_scope();
         let source = deno_core::v8::String::new(scope, code)
             .ok_or_else(|| deno_core::error::AnyError::msg("failed to create V8 string"))?;
+        
+        let mut script_origin = None;
+        if let Some(n) = name {
+            let n_v8 = deno_core::v8::String::new(scope, n).unwrap();
+            let resource_name = n_v8.into();
+            script_origin = Some(deno_core::v8::ScriptOrigin::new(
+                scope,
+                resource_name,
+                0,
+                0,
+                false,
+                0,
+                None,
+                false,
+                false,
+                false,
+                None,
+            ));
+        }
+
         let tc_scope = &mut deno_core::v8::TryCatch::new(scope);
-        let script = deno_core::v8::Script::compile(tc_scope, source, None).ok_or_else(|| {
+        let script = deno_core::v8::Script::compile(tc_scope, source, script_origin.as_ref()).ok_or_else(|| {
             let exception = match tc_scope.exception() {
                 Some(exc) => exc,
                 None => return deno_core::error::AnyError::msg("script compilation failed"),
