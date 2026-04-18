@@ -38,6 +38,31 @@ pub fn chrome_headers(profile: &StealthProfile) -> Vec<(String, String)> {
     chrome_headers_impl(profile, false)
 }
 
+/// Build headers that match a JavaScript-initiated `location.reload()` /
+/// same-origin assign — NOT a fresh user navigation. Differences from
+/// `chrome_headers`:
+///   - `sec-fetch-site: same-origin` (was `none`)
+///   - `sec-fetch-user` is OMITTED (no user gesture)
+///   - `Referer: <current_url>` is added
+///
+/// Used on post-challenge retries where the challenge engine may be
+/// distinguishing fresh user navs from programmatic reloads.
+pub fn chrome_headers_reload(profile: &StealthProfile, referer: &str) -> Vec<(String, String)> {
+    let mut hdrs: Vec<(String, String)> = chrome_headers_impl(profile, false)
+        .into_iter()
+        .filter(|(k, _)| k != "sec-fetch-user")
+        .map(|(k, v)| {
+            if k == "sec-fetch-site" {
+                (k, "same-origin".to_string())
+            } else {
+                (k, v)
+            }
+        })
+        .collect();
+    hdrs.push(("referer".to_string(), referer.to_string()));
+    hdrs
+}
+
 /// Build headers for a request that should include the high-entropy
 /// Client Hints (sec-ch-ua-arch, -bitness, -full-version-list, -model,
 /// -platform-version, -wow64). Only applicable on a follow-up request

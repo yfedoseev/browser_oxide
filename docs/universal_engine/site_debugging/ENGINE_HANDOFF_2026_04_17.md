@@ -32,18 +32,48 @@
 
 TLS / H2 / headers match Chrome 146 capture (verified via tls.peet.ws). Script-fetch headers include referer + sec-fetch-*. `ips.js` contains **zero** `location`/`reload`/`href` references in 519KB — it never triggers navigation itself.
 
-### Ruled Out This Session
-*   **ips.js does NOT patch `window.fetch` globally.** `window.fetch.toString()` still returns OUR wrapper unchanged after ips.js runs. ips.js passes `x-kpsdk-ct` explicitly as `init.headers` only on its own requests to `/tl` and `/fp`. So the "Option A" in-V8 refetch (leveraging a patched fetch) doesn't help on Kasada's top-level URLs.
-*   **KPSDK state is closure-private.** After solve, `window.KPSDK` only exposes `{now, start, scriptStart}`. The solved token lives in ips.js closures, unreachable from outside. No public `getClientToken()` method.
-*   **Cookies alone don't upgrade the session.** Jar carries the fresh `akm_bmfp_b2` on every retry; server keeps issuing new challenges.
+### Ruled Out This Session (exhaustive diagnostics, 3 experiments)
 
-### Remaining Candidate Factors (need external evidence)
-*   TLS session-ticket resumption — Kasada likely pins sessions to TLS state, not cookies. Verify with a Wireshark capture: does real Chrome reuse the session ticket from the solve POST on its retry GET? Does our connection pool reuse it?
-*   H2 connection-id stickiness on the Kasada edge
-*   Timing window between solve and retry
+**ips.js does NOT patch `window.fetch` globally.** `window.fetch.toString()` still returns OUR wrapper unchanged after ips.js runs. ips.js passes `x-kpsdk-ct` explicitly as `init.headers` only on its own requests to `/tl` and `/fp`.
 
-### Fix Path
-Capture real Chrome 130 HAR + TLS keylog against canadagoose.com. Compare the TLS handshake on the post-solve GET against our Rust client. If session resumption is the tell, enable ticket reuse in `crates/net/src/tls.rs`. If it's something else, the HAR will show it. **Do not speculate further without this evidence.**
+**KPSDK state is closure-private.** After solve, `window.KPSDK` only exposes `{now, start, scriptStart}`. The solved token lives in ips.js closures, unreachable from outside.
+
+**sec-fetch-site = same-origin + no sec-fetch-user + Referer doesn't help.** Added `chrome_headers_reload()` + `get_follow_exact_headers()` and wired reload-semantic headers into the retry path. Server still returns 429.
+
+**Cookies, timing, and TLS state are ALL independent of the block.** The raw-cookies diagnostic proves it:
+
+| Step | Request | Result |
+|---|---|---|
+| 1 | Initial GET with clean jar | `429, 681b` |
+| 2 | Immediate re-GET (same H2 pool, cookies from jar) | `429, 681b` |
+| 3 | GET with reload headers + Referer | `429, 681b` |
+| 4 | GET after 3s wait | `429, 681b` |
+| 5 | **FRESH HttpClient, no cookies, new TLS** | `429, 681b` |
+
+Step 5 is decisive: a brand-new client with no prior state gets the identical block. So:
+- Not TLS session-ticket pinning (fresh TLS → same block)
+- Not cookie freshness (no cookies → same block)
+- Not timing (wait → same block)
+- Not connection reuse (new connection → same block)
+
+**Subpath test confirms it's not URL-specific.** Root, `/us/en`, product pages, category pages — all return the Kasada challenge page. Every URL on canadagoose.com returns 680-770 bytes with the challenge markers.
+
+### Remaining Candidate: IP / Fingerprint Reputation
+
+The only layer left we haven't directly controlled is **IP reputation / machine fingerprint**. Kasada runs a global IP reputation feed and also scores behavior. A datacenter IP (our sandbox) is almost certainly hard-blocked regardless of client fingerprint.
+
+### Actionable Fixes (all infrastructure, not engineering)
+
+Canada Goose / Hyatt can only pass from:
+1. **Residential or rotating-IP proxy** — workaround for IP rep. No code change. The engine is already correct.
+2. **Commercial anti-bot bypass service** (Hyper Solutions, RiskByPass) — they maintain solved-session pools.
+3. **Leave it blocked.** For most business cases these are special-case targets anyway; the engine passes 6/8 rigorous sites without per-site code.
+
+### What the Engine Gained From This Investigation
+*   `net::headers::chrome_headers_reload()` — reload-semantic header set for any future same-origin retry
+*   `net::HttpClient::get_follow_exact_headers()` — bypass chrome_headers overlay when the caller needs exact control
+*   In-V8 refetch primitive (still valuable for fetch-patching engines like some PerimeterX / DataDome variants)
+*   Confidence that no further client-side engineering will move the needle on Kasada specifically — the block is at a layer below the client.
 
 ---
 

@@ -750,8 +750,14 @@ impl Page {
                             }
                             current_html = v8_html;
                         } else {
+                            // Reload-style headers: matches a JS-triggered
+                            // reload, not a fresh user nav. Engines like
+                            // Kasada may check sec-fetch-site == same-origin
+                            // (with no sec-fetch-user) to recognise a solved
+                            // session's F5 vs. a new address-bar visit.
+                            let reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
                             let resp = client
-                                .get_follow(&current_url, 10)
+                                .get_follow_exact_headers(&current_url, &reload_hdrs, 10)
                                 .await
                                 .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
                             current_html = resp.text();
@@ -886,7 +892,10 @@ impl Page {
             }
 
             // Fetch the next page. For form POSTs we must send the form
-            // Content-Type or the server can't parse the body.
+            // Content-Type or the server can't parse the body. For GETs that
+            // are same-origin reload-style navigations (location.href/reload
+            // assign from JS), use reload-semantic headers so engines can
+            // distinguish a solved-session reload from a fresh user nav.
             let resp = if pending_method == "POST" {
                 let post_headers = vec![
                     ("content-type".to_string(), "application/x-www-form-urlencoded".to_string()),
@@ -903,10 +912,23 @@ impl Page {
                     .await
                     .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
             } else {
-                client
-                    .get_follow(&next_url, 10)
-                    .await
-                    .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+                let same_origin = {
+                    let a = url::Url::parse(&current_url).ok();
+                    let b = url::Url::parse(&next_url).ok();
+                    matches!((a, b), (Some(u), Some(v)) if u.host_str() == v.host_str())
+                };
+                if same_origin {
+                    let reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
+                    client
+                        .get_follow_exact_headers(&next_url, &reload_hdrs, 10)
+                        .await
+                        .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+                } else {
+                    client
+                        .get_follow(&next_url, 10)
+                        .await
+                        .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+                }
             };
             current_html = resp.text();
             current_url = resp.url.clone();

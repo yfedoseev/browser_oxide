@@ -2016,6 +2016,72 @@ async fn yandex_sso_form_submit_diagnostic() {
 
 #[tokio::test]
 #[ignore]
+async fn kasada_canadagoose_subpath_diagnostic() {
+    // Try visiting a product page directly instead of root. Maybe Kasada
+    // treats "/" as always-challenge and subpages as real content.
+    println!("\n=== Kasada canadagoose subpath test ===");
+    let profile = stealth::chrome_130_windows();
+    for url in ["https://www.canadagoose.com/us/en/home-page",
+                "https://www.canadagoose.com/us/en/shop/all",
+                "https://www.canadagoose.com/us/en",
+                "https://www.canadagoose.com/us/en/shop/men-outerwear-parkas"] {
+        match browser::Page::navigate(url, profile.clone(), 5).await {
+            Ok(mut p) => {
+                let c = p.content();
+                let url_final = p.url().to_string();
+                let is_challenge = c.contains("/ips.js") || c.contains("/149e9513-");
+                let has_real = c.contains("Canada Goose") && !is_challenge;
+                println!("  {url}");
+                println!("    final_url: {url_final}");
+                println!("    content_len: {}, challenge: {}, real: {}", c.len(), is_challenge, has_real);
+            }
+            Err(e) => println!("  {url} failed: {e}"),
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn kasada_canadagoose_raw_with_cookies_test() {
+    // Test: do a first GET to establish a session, then a second GET with
+    // the cookies from the first. See if a plain re-fetch with cookies
+    // (NO JS solve) already changes the behavior. This answers: is the
+    // cookie/TLS-session pair sufficient, or do we need the solve?
+    println!("\n=== Kasada raw-cookies test ===");
+    let profile = stealth::chrome_130_windows();
+    let client = net::HttpClient::new(&profile).unwrap();
+
+    println!("\nStep 1: initial GET");
+    let r1 = client.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    println!("  status={} body={}b", r1.status, r1.body.len());
+    println!("  set-cookies ({}):", r1.set_cookies.len());
+    for c in &r1.set_cookies {
+        println!("    {}", &c[..c.len().min(200)]);
+    }
+
+    println!("\nStep 2: immediate re-GET (same connection pool, cookies from jar)");
+    let r2 = client.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    println!("  status={} body={}b", r2.status, r2.body.len());
+
+    println!("\nStep 3: GET with reload-style headers + Referer");
+    let reload_hdrs = net::headers::chrome_headers_reload(&profile, "https://www.canadagoose.com/");
+    let r3 = client.get_follow_exact_headers("https://www.canadagoose.com/", &reload_hdrs, 10).await.unwrap();
+    println!("  status={} body={}b", r3.status, r3.body.len());
+
+    println!("\nStep 4: Wait 3s, then GET (timing test)");
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    let r4 = client.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    println!("  status={} body={}b", r4.status, r4.body.len());
+
+    println!("\nStep 5: GET with NO cookies (fresh client - new jar)");
+    let profile2 = stealth::chrome_130_windows();
+    let client2 = net::HttpClient::new(&profile2).unwrap();
+    let r5 = client2.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    println!("  status={} body={}b", r5.status, r5.body.len());
+}
+
+#[tokio::test]
+#[ignore]
 async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
     // Targeted root-cause diagnostic. After navigate loop exits, report:
     // - final URL / content len

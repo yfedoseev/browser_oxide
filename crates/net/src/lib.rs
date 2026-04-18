@@ -252,6 +252,101 @@ impl HttpClient {
         self.get_with_headers(url, &[]).await
     }
 
+    /// GET with the caller's exact header set — NO chrome_headers overlay.
+    /// Used for "reload" flavors where sec-fetch-user must be omitted
+    /// (chrome_headers always adds it). The caller is responsible for
+    /// providing user-agent, accept, etc. Cookies are still auto-injected
+    /// from the jar unless the caller already included a Cookie header.
+    pub async fn get_with_exact_headers(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+    ) -> Result<Response, NetError> {
+        let parsed = Url::parse(url)?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
+        let port = parsed.port().unwrap_or(443);
+
+        let mut hdrs: Vec<(String, String)> = headers
+            .iter()
+            .filter(|(k, _)| {
+                let lower = k.to_ascii_lowercase();
+                !lower.starts_with(':') && lower != "host" && lower != "connection"
+            })
+            .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
+            .collect();
+
+        if !has_header(&hdrs, "cookie") {
+            let jar = self.cookies.lock().await;
+            if let Some(cookie_str) = jar.cookies_for(&parsed) {
+                hdrs.push(("cookie".to_string(), cookie_str));
+            }
+        }
+
+        let response = 'h2: {
+            for attempt in 0..2 {
+                let sender_res = self.get_sender(host, port).await;
+                let mut sender = match sender_res {
+                    Ok(s) => s,
+                    Err(_) => break 'h2 None,
+                };
+                let uri = parsed.as_str();
+                match h2_client::send_get(&mut sender, uri, host, &hdrs).await {
+                    Ok((parts, body)) => {
+                        let resp = self.build_response(parts, body, url).await?;
+                        break 'h2 Some(resp);
+                    }
+                    Err(e) if attempt == 0 && is_stale_conn_error(&e) => {
+                        self.pool.evict(host, port).await;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            None
+        };
+        let response = match response {
+            Some(r) => r,
+            None => {
+                let tcp_stream =
+                    tcp::connect_with_cache(host, port, std::time::Duration::from_secs(10), Some(&self.dns_cache)).await?;
+                let mut tls_stream = tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
+                let path = if parsed.query().is_some() {
+                    format!("{}?{}", parsed.path(), parsed.query().unwrap())
+                } else {
+                    parsed.path().to_string()
+                };
+                let raw = h1_client::send_get(&mut tls_stream, host, &path, &hdrs).await?;
+                self.build_response_from_raw(raw, url).await?
+            }
+        };
+        self.learn_alt_svc(url, &response.headers).await;
+        self.store_set_cookies(&parsed, &response.set_cookies).await;
+        Ok(response)
+    }
+
+    /// GET follow for exact-header requests.
+    pub async fn get_follow_exact_headers(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        max_redirects: u8,
+    ) -> Result<Response, NetError> {
+        let mut current_url = url.to_string();
+        for _ in 0..max_redirects {
+            let resp = self.get_with_exact_headers(&current_url, headers).await?;
+            if matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
+                if let Some(loc) = resp.headers.get("location") {
+                    current_url = resolve_redirect(&current_url, loc)?;
+                    continue;
+                }
+            }
+            return Ok(resp);
+        }
+        self.get_with_exact_headers(&current_url, headers).await
+    }
+
     /// GET with caller-provided extra headers (e.g., from JS fetch init.headers).
     /// Extra headers override any matching profile headers (case-insensitive match).
     pub async fn get_with_headers(
