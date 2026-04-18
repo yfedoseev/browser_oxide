@@ -1230,6 +1230,25 @@ impl Page {
                 if (!window.__fetchLog) window.__fetchLog = [];
                 const entry = { method: 'GET', url: '', hasBody: false };
                 let args = Array.from(arguments);
+
+                // Pre-check: reject non-fetch URL schemes BEFORE the logging
+                // try/catch below (which silently swallows). Real Chrome
+                // throws TypeError for fetch("ftp:"), fetch("file:"), etc.
+                // ips.js uses fetch("ftp:") as a browser-authenticity canary.
+                (() => {
+                    let pre = '';
+                    if (typeof args[0] === 'string') pre = args[0];
+                    else if (args[0] && typeof args[0].url === 'string') pre = args[0].url;
+                    else if (args[0] instanceof URL) pre = args[0].href;
+                    const m = pre && pre.match(/^([a-z][a-z0-9+.-]*):/i);
+                    if (m) {
+                        const sch = m[1].toLowerCase();
+                        if (!['http','https','data','blob','file','about'].includes(sch)) {
+                            throw new TypeError("Failed to fetch: URL scheme \"" + sch + "\" is not supported.");
+                        }
+                    }
+                })();
+
                 try {
                     let urlStr = '';
                     let isRequest = false;
@@ -1242,7 +1261,12 @@ impl Page {
                         urlStr = args[0].href;
                     }
                     
-                    if (urlStr && !urlStr.startsWith('http') && !urlStr.startsWith('data:') && !urlStr.startsWith('blob:')) {
+                    // Skip URL resolution if urlStr is already absolute
+                    // (has a scheme). This prevents our URL polyfill from
+                    // treating "ftp:" as a relative path.
+                    const _schemeMatch = urlStr ? urlStr.match(/^([a-z][a-z0-9+.-]*):/i) : null;
+                    const _scheme = _schemeMatch ? _schemeMatch[1].toLowerCase() : '';
+                    if (urlStr && !_scheme) {
                         try {
                             let base = globalThis.location ? globalThis.location.href : 'about:blank';
                             if (base === 'about:blank' || base === 'javascript:;' || base === '') {

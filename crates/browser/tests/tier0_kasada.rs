@@ -2016,6 +2016,103 @@ async fn yandex_sso_form_submit_diagnostic() {
 
 #[tokio::test]
 #[ignore]
+async fn kasada_ftp_scheme_via_navigate() {
+    // Use Page::navigate_with_html so the real fetch wrapper (which includes
+    // scheme rejection) is active, then probe fetch("ftp:").
+    let profile = stealth::chrome_130_windows();
+    let mut page = browser::Page::navigate_with_html(
+        r#"<!DOCTYPE html><html><head></head><body>
+        <script>
+            (async () => {
+                globalThis.__tests = {};
+                async function try_(u) {
+                    try {
+                        const r = await fetch(u);
+                        globalThis.__tests[u] = {type:'response',status:r.status};
+                    } catch (e) {
+                        globalThis.__tests[u] = {type:'threw', err:String(e.message)};
+                    }
+                }
+                await try_('ftp:');
+                await try_('file:');
+                await try_('chrome:');
+                await try_('/ftp:');
+            })();
+        </script>
+        </body></html>"#,
+        "https://www.canadagoose.com/",
+        profile,
+        1,
+    ).await.unwrap();
+    let _ = page.evaluate_async("", std::time::Duration::from_secs(3)).await;
+    let result = page.evaluate("JSON.stringify(globalThis.__tests || {})").unwrap_or_default();
+    println!("navigate+wrapper fetch(ftp:) test: {result}");
+}
+
+#[tokio::test]
+#[ignore]
+async fn kasada_ftp_url_behavior_probe() {
+    // ips.js uses a "/ftp:" (or "ftp:") canary after each solve. Real Chrome
+    // throws TypeError for fetch("ftp:") because ftp scheme is rejected by
+    // fetch. If our engine resolves "ftp:" to a relative path and makes an
+    // HTTP request, the 429 response looks "normal" to ips.js and it keeps
+    // solving instead of exiting. Verify our URL handling.
+    let mut page = browser::Page::from_html(
+        r#"<!DOCTYPE html><html><head></head><body></body></html>"#,
+        Some(stealth::chrome_130_windows()),
+    )
+    .await
+    .unwrap();
+    // Set location to simulate a site context.
+    let _ = page.evaluate(r#"location.href = 'https://www.canadagoose.com/'"#);
+
+    let probe = page.evaluate(r#"
+        (function() {
+            function tryResolve(input, base) {
+                try {
+                    const u = new URL(input, base);
+                    return {href: u.href, protocol: u.protocol, host: u.host, pathname: u.pathname};
+                } catch (e) {
+                    return {err: String(e.message)};
+                }
+            }
+            return JSON.stringify({
+                resolve_ftp_colon_abs: tryResolve('ftp:', 'https://www.canadagoose.com/'),
+                resolve_slash_ftp_colon: tryResolve('/ftp:', 'https://www.canadagoose.com/'),
+                resolve_ftp_colon_aboutblank: tryResolve('ftp:', 'about:blank'),
+                resolve_ftp_colon_only: (() => { try { return new URL('ftp:').href } catch (e) { return 'ERR: ' + e.message } })(),
+            });
+        })()
+    "#).unwrap_or_default();
+    println!("URL resolution probe: {probe}");
+
+    // Now test what fetch() does with these inputs.
+    let _ = page.evaluate_async(r#"
+        (async () => {
+            globalThis.__fetchTests = {};
+            async function tryFetch(input) {
+                try {
+                    const r = await fetch(input);
+                    globalThis.__fetchTests[input] = {status: r.status, ok: r.ok, type: 'response'};
+                } catch (e) {
+                    globalThis.__fetchTests[input] = {type: 'threw', err: String(e && e.message || e), name: e && e.name};
+                }
+            }
+            await tryFetch('ftp:');
+            await tryFetch('/ftp:');
+        })();
+    "#, std::time::Duration::from_secs(10)).await;
+    let fetch_results = page.evaluate("JSON.stringify(globalThis.__fetchTests || {})").unwrap_or_default();
+    println!("fetch() behavior probe: {fetch_results}");
+
+    // What does real Chrome do? Per WHATWG URL spec:
+    //   new URL("ftp:", "https://example.com/")  → "ftp:"  (ftp is a scheme)
+    //   new URL("/ftp:", "https://example.com/") → "https://example.com/ftp:"
+    // And fetch("ftp:") throws TypeError because ftp scheme is not a fetch scheme.
+}
+
+#[tokio::test]
+#[ignore]
 async fn kasada_ips_deep_instrumentation() {
     // Heavy instrumentation harness: run ips.js with every observable
     // access and state change captured, then search captured state for
