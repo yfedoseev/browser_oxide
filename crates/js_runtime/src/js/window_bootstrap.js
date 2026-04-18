@@ -313,7 +313,44 @@
 
     // Prototype methods.
     _defNavMethod('javaEnabled', function javaEnabled() { return false; });
-    _defNavMethod('sendBeacon', function sendBeacon(url, data) { return true; });
+    // Real sendBeacon: fires a fetch with keepalive=true so the server
+    // actually receives the payload. A no-op stub silently drops data that
+    // challenge engines (Kasada, etc.) send on solve completion, blocking
+    // the session from being upgraded.
+    _defNavMethod('sendBeacon', function sendBeacon(url, data) {
+        try {
+            let absUrl = String(url);
+            if (!/^https?:/i.test(absUrl)) {
+                absUrl = new URL(absUrl, globalThis.location && globalThis.location.href || 'about:blank').href;
+            }
+            let init = { method: 'POST', keepalive: true, credentials: 'include' };
+            if (data != null) {
+                if (typeof data === 'string') {
+                    init.body = data;
+                    init.headers = { 'content-type': 'text/plain;charset=UTF-8' };
+                } else if (data instanceof Blob) {
+                    init.body = data;
+                    if (data.type) init.headers = { 'content-type': data.type };
+                } else if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+                    init.body = data;
+                    init.headers = { 'content-type': 'application/octet-stream' };
+                } else if (typeof FormData !== 'undefined' && data instanceof FormData) {
+                    init.body = data;
+                } else if (typeof URLSearchParams !== 'undefined' && data instanceof URLSearchParams) {
+                    init.body = String(data);
+                    init.headers = { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' };
+                } else {
+                    init.body = String(data);
+                    init.headers = { 'content-type': 'text/plain;charset=UTF-8' };
+                }
+            }
+            // Fire and forget — sendBeacon is non-blocking by spec.
+            Promise.resolve().then(() => fetch(absUrl, init).catch(() => {}));
+            return true;
+        } catch (_) {
+            return false;
+        }
+    });
     _defNavMethod('getBattery', function getBattery() {
         return Promise.resolve({
             charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1.0,

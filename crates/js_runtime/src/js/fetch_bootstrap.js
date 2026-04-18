@@ -262,6 +262,19 @@
             headers["content-type"] = "text/plain;charset=UTF-8";
         }
 
+        // Pass the page's origin as a pseudo header so the net layer can
+        // compute sec-fetch-site (same-origin vs cross-site) and set Origin /
+        // Referer correctly. Chrome's fetch API always carries these.
+        try {
+            const loc = globalThis.location;
+            if (loc && loc.origin && loc.origin !== "null") {
+                headers["x-boxide-origin"] = loc.origin;
+            } else if (loc && loc.href && loc.href !== "about:blank") {
+                const u = new URL(loc.href);
+                headers["x-boxide-origin"] = u.origin;
+            }
+        } catch {}
+
         try {
             const result = await ops.op_fetch(url, method, headers, body);
             

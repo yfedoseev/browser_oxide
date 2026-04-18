@@ -252,6 +252,149 @@ impl HttpClient {
         self.get_with_headers(url, &[]).await
     }
 
+    /// Fetch-API-style GET: uses `chrome_headers_fetch` (accept: */*, no
+    /// upgrade-insecure-requests, sec-fetch-dest: empty, etc.) as the base
+    /// header set, with caller's extras merged in. `origin` is the page's
+    /// origin string (e.g. "https://www.canadagoose.com"); if `None`, the
+    /// request looks like it came from a `no-origin` context (first navigation).
+    pub async fn fetch_get(
+        &self,
+        url: &str,
+        extra_headers: &[(String, String)],
+        origin: Option<&str>,
+    ) -> Result<Response, NetError> {
+        let mut hdrs = headers::chrome_headers_fetch(&self.profile, url, origin);
+        merge_headers(&mut hdrs, extra_headers);
+        self.get_with_exact_headers(url, &hdrs).await
+    }
+
+    /// Fetch-API-style POST with raw bytes.
+    pub async fn fetch_post_bytes(
+        &self,
+        url: &str,
+        body: &[u8],
+        extra_headers: &[(String, String)],
+        origin: Option<&str>,
+    ) -> Result<Response, NetError> {
+        let mut hdrs = headers::chrome_headers_fetch(&self.profile, url, origin);
+        merge_headers(&mut hdrs, extra_headers);
+        self.post_bytes_exact_headers(url, body, &hdrs).await
+    }
+
+    /// POST with the caller's exact header set — NO chrome_headers overlay.
+    /// Counterpart to `get_with_exact_headers` for JS fetch POSTs.
+    pub async fn post_bytes_exact_headers(
+        &self,
+        url: &str,
+        body: &[u8],
+        headers: &[(String, String)],
+    ) -> Result<Response, NetError> {
+        let parsed = Url::parse(url)?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
+        let port = parsed.port().unwrap_or(443);
+
+        let mut hdrs: Vec<(String, String)> = headers
+            .iter()
+            .filter(|(k, _)| {
+                let lower = k.to_ascii_lowercase();
+                !lower.starts_with(':') && lower != "host" && lower != "connection"
+            })
+            .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
+            .collect();
+
+        if !has_header(&hdrs, "cookie") {
+            let jar = self.cookies.lock().await;
+            if let Some(cookie_str) = jar.cookies_for(&parsed) {
+                hdrs.push(("cookie".to_string(), cookie_str));
+            }
+        }
+
+        // Env-gated POST body dump — preserved from post_bytes_with_headers.
+        if let Ok(dir) = std::env::var("BOXIDE_DUMP_POST_DIR") {
+            use std::io::Write;
+            let _ = std::fs::create_dir_all(&dir);
+            let counter_path = format!("{}/.counter", dir);
+            let next: usize = std::fs::read_to_string(&counter_path)
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0)
+                + 1;
+            let _ = std::fs::write(&counter_path, next.to_string());
+            let stem = format!("{}/{:03}", dir, next);
+            if let Ok(mut f) = std::fs::File::create(format!("{stem}.body")) {
+                let _ = f.write_all(body);
+            }
+            let mut meta = String::new();
+            meta.push_str("{\n");
+            meta.push_str(&format!(
+                "  \"url\": {},\n",
+                serde_json::to_string(url).unwrap_or_else(|_| "\"\"".into())
+            ));
+            meta.push_str(&format!("  \"body_len\": {},\n", body.len()));
+            meta.push_str("  \"headers\": {\n");
+            for (i, (k, v)) in hdrs.iter().enumerate() {
+                let trailing = if i + 1 == hdrs.len() { "" } else { "," };
+                meta.push_str(&format!(
+                    "    {}: {}{}\n",
+                    serde_json::to_string(k).unwrap_or_else(|_| "\"\"".into()),
+                    serde_json::to_string(v).unwrap_or_else(|_| "\"\"".into()),
+                    trailing
+                ));
+            }
+            meta.push_str("  }\n}\n");
+            let _ = std::fs::write(format!("{stem}.meta.json"), meta);
+        }
+
+        let response = 'h2: {
+            for attempt in 0..2 {
+                let sender_res = self.get_sender(host, port).await;
+                let mut sender = match sender_res {
+                    Ok(s) => s,
+                    Err(_) => break 'h2 None,
+                };
+                let uri = parsed.as_str();
+                match h2_client::send_post(&mut sender, uri, host, &hdrs, body).await {
+                    Ok((parts, resp_body)) => {
+                        let resp = self.build_response(parts, resp_body, url).await?;
+                        break 'h2 Some(resp);
+                    }
+                    Err(e) if attempt == 0 && is_stale_conn_error(&e) => {
+                        self.pool.evict(host, port).await;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            None
+        };
+
+        let response = match response {
+            Some(r) => r,
+            None => {
+                let tcp_stream = tcp::connect_with_cache(
+                    host,
+                    port,
+                    std::time::Duration::from_secs(10),
+                    Some(&self.dns_cache),
+                )
+                .await?;
+                let mut tls_stream =
+                    tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
+                let path = match parsed.query() {
+                    Some(q) => format!("{}?{}", parsed.path(), q),
+                    None => parsed.path().to_string(),
+                };
+                let raw = h1_client::send_post(&mut tls_stream, host, &path, &hdrs, body).await?;
+                self.build_response_from_raw(raw, url).await?
+            }
+        };
+
+        self.store_set_cookies(&parsed, &response.set_cookies).await;
+        Ok(response)
+    }
+
     /// GET with the caller's exact header set — NO chrome_headers overlay.
     /// Used for "reload" flavors where sec-fetch-user must be omitted
     /// (chrome_headers always adds it). The caller is responsible for

@@ -739,6 +739,45 @@ impl Page {
                             && !v8_html.contains("_abck")
                             && !v8_html.contains("bm_sz");
 
+                        // Extract any challenge-engine session headers that
+                        // scripts collected during solves. For Kasada: the
+                        // last successful POST /tl response carried a fresh
+                        // x-kpsdk-ct that the retry GET must forward AS A
+                        // REQUEST HEADER (Hyper-Solutions' Go SDK docs it
+                        // explicitly). Cookies alone are not enough.
+                        let kpsdk_headers_js = r#"
+                            JSON.stringify((() => {
+                                const log = globalThis.__fetchLog || [];
+                                const out = {};
+                                for (const entry of log) {
+                                    const resp = entry.respHeaders || {};
+                                    for (const k of Object.keys(resp)) {
+                                        if (k.toLowerCase().startsWith('x-kpsdk')) {
+                                            out[k.toLowerCase()] = resp[k];
+                                        }
+                                    }
+                                    const req = entry.reqHeaders || {};
+                                    for (const k of Object.keys(req)) {
+                                        const lk = k.toLowerCase();
+                                        if (lk.startsWith('x-kpsdk') && !out[lk]) {
+                                            out[lk] = req[k];
+                                        }
+                                    }
+                                }
+                                return out;
+                            })())
+                        "#;
+                        let kpsdk_json = page
+                            .event_loop()
+                            .execute_script(kpsdk_headers_js)
+                            .unwrap_or_default();
+                        let kpsdk: std::collections::HashMap<String, String> =
+                            deno_core::serde_json::from_str(&kpsdk_json).unwrap_or_default();
+                        if debug_nav && !kpsdk.is_empty() {
+                            let keys: Vec<&str> = kpsdk.keys().map(|s| s.as_str()).collect();
+                            eprintln!("[navigate] iter={} harvested x-kpsdk-* headers: {:?}", iter, keys);
+                        }
+
                         drop(page);
                         if v8_html_is_real {
                             if debug_nav {
@@ -750,12 +789,12 @@ impl Page {
                             }
                             current_html = v8_html;
                         } else {
-                            // Reload-style headers: matches a JS-triggered
-                            // reload, not a fresh user nav. Engines like
-                            // Kasada may check sec-fetch-site == same-origin
-                            // (with no sec-fetch-user) to recognise a solved
-                            // session's F5 vs. a new address-bar visit.
-                            let reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
+                            // Reload-style headers + harvested x-kpsdk-*
+                            // tokens on the retry GET.
+                            let mut reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
+                            for (k, v) in &kpsdk {
+                                reload_hdrs.push((k.clone(), v.clone()));
+                            }
                             let resp = client
                                 .get_follow_exact_headers(&current_url, &reload_hdrs, 10)
                                 .await
@@ -787,6 +826,44 @@ impl Page {
             if iter + 1 == iterations {
                 tracing::warn!(max_iterations = iterations, "navigate hit max iterations, returning current page");
                 return Ok(page);
+            }
+
+            // Harvest x-kpsdk-* headers from __fetchLog before dropping the
+            // page. The last successful POST /tl response carries a fresh
+            // x-kpsdk-ct that the retry GET must forward AS A REQUEST HEADER
+            // (per Hyper-Solutions' Go SDK). Cookies alone are not enough.
+            let harvested_kpsdk: std::collections::HashMap<String, String> = {
+                let js = r#"
+                    JSON.stringify((() => {
+                        const log = globalThis.__fetchLog || [];
+                        const out = {};
+                        for (const entry of log) {
+                            const resp = entry.respHeaders || {};
+                            for (const k of Object.keys(resp)) {
+                                if (k.toLowerCase().startsWith('x-kpsdk')) {
+                                    out[k.toLowerCase()] = resp[k];
+                                }
+                            }
+                            const req = entry.reqHeaders || {};
+                            for (const k of Object.keys(req)) {
+                                const lk = k.toLowerCase();
+                                if (lk.startsWith('x-kpsdk') && !out[lk]) {
+                                    out[lk] = req[k];
+                                }
+                            }
+                        }
+                        return out;
+                    })())
+                "#;
+                let j = page.event_loop().execute_script(js).unwrap_or_default();
+                deno_core::serde_json::from_str(&j).unwrap_or_default()
+            };
+            if debug_nav && !harvested_kpsdk.is_empty() {
+                let keys: Vec<&str> = harvested_kpsdk.keys().map(|s| s.as_str()).collect();
+                eprintln!(
+                    "[navigate] iter={} harvested x-kpsdk-* for retry: {:?}",
+                    iter, keys
+                );
             }
 
             // In-V8 refetch for same-origin reloads on challenge pages.
@@ -918,7 +995,10 @@ impl Page {
                     matches!((a, b), (Some(u), Some(v)) if u.host_str() == v.host_str())
                 };
                 if same_origin {
-                    let reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
+                    let mut reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
+                    for (k, v) in &harvested_kpsdk {
+                        reload_hdrs.push((k.clone(), v.clone()));
+                    }
                     client
                         .get_follow_exact_headers(&next_url, &reload_hdrs, 10)
                         .await

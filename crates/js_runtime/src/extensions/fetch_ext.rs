@@ -85,11 +85,19 @@ pub async fn op_fetch(
         }
     };
 
-    // Convert JS headers to ordered pairs for the net layer.
-    let extra_headers: Vec<(String, String)> = headers
-        .into_iter()
-        .map(|(k, v)| (k.to_ascii_lowercase(), v))
-        .collect();
+    // Pull JS-provided headers. JS may pass "x-boxide-origin" as a pseudo
+    // header carrying the page's origin; strip it here and forward as the
+    // origin context so the net layer can compute sec-fetch-site correctly.
+    let mut extra_headers: Vec<(String, String)> = Vec::with_capacity(headers.len());
+    let mut origin: Option<String> = None;
+    for (k, v) in headers.into_iter() {
+        let lk = k.to_ascii_lowercase();
+        if lk == "x-boxide-origin" {
+            origin = Some(v);
+            continue;
+        }
+        extra_headers.push((lk, v));
+    }
 
     // Decode the body marker. Legacy callers that don't set a marker send
     // plain UTF-8 strings; we treat those as 's' by default.
@@ -104,14 +112,22 @@ pub async fn op_fetch(
         body.as_bytes().to_vec()
     };
 
+    // Use fetch-API-style headers (accept: */*, sec-fetch-dest: empty, no
+    // upgrade-insecure-requests) — this is a JS fetch() call, not a navigation.
+    // Kasada and similar engines use the nav-vs-fetch header distinction as a
+    // strong bot signal.
     let method_upper = method.to_uppercase();
     let resp = match method_upper.as_str() {
         "POST" | "PUT" | "PATCH" => {
             client
-                .post_bytes_with_headers(&url, &body_bytes, &extra_headers)
+                .fetch_post_bytes(&url, &body_bytes, &extra_headers, origin.as_deref())
                 .await
         }
-        _ => client.get_with_headers(&url, &extra_headers).await,
+        _ => {
+            client
+                .fetch_get(&url, &extra_headers, origin.as_deref())
+                .await
+        }
     };
 
     let resp = match resp {

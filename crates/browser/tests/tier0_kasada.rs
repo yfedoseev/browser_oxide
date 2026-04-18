@@ -2122,6 +2122,25 @@ async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
     println!("__cookieWrites ({} entries):", cw.matches(',').count() + 1);
     println!("  {}", &cw[..cw.len().min(2000)]);
 
+    // All unique x-kpsdk-* header keys seen in req+resp across __fetchLog
+    let all_kpsdk = page.evaluate(r#"
+        JSON.stringify((() => {
+            const log = globalThis.__fetchLog || [];
+            const reqKeys = new Set(), respKeys = new Set();
+            const reqVals = {}, respVals = {};
+            for (const e of log) {
+                for (const k of Object.keys(e.reqHeaders || {})) {
+                    if (k.toLowerCase().startsWith('x-kpsdk')) { reqKeys.add(k.toLowerCase()); reqVals[k.toLowerCase()] = (e.reqHeaders[k] || '').substring(0,40); }
+                }
+                for (const k of Object.keys(e.respHeaders || {})) {
+                    if (k.toLowerCase().startsWith('x-kpsdk')) { respKeys.add(k.toLowerCase()); respVals[k.toLowerCase()] = (e.respHeaders[k] || '').substring(0,40); }
+                }
+            }
+            return { req: [...reqKeys], resp: [...respKeys], reqVals, respVals };
+        })())
+    "#).unwrap_or_default();
+    println!("All x-kpsdk-* headers in __fetchLog: {}", &all_kpsdk[..all_kpsdk.len().min(2000)]);
+
     // Full fetch log from the JS side (URL, method, status, req/resp headers)
     let fl = page
         .evaluate("JSON.stringify(window.__fetchLog || [])")

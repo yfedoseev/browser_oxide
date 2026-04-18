@@ -69,11 +69,71 @@ Canada Goose / Hyatt can only pass from:
 2. **Commercial anti-bot bypass service** (Hyper Solutions, RiskByPass) — they maintain solved-session pools.
 3. **Leave it blocked.** For most business cases these are special-case targets anyway; the engine passes 6/8 rigorous sites without per-site code.
 
-### What the Engine Gained From This Investigation
-*   `net::headers::chrome_headers_reload()` — reload-semantic header set for any future same-origin retry
-*   `net::HttpClient::get_follow_exact_headers()` — bypass chrome_headers overlay when the caller needs exact control
-*   In-V8 refetch primitive (still valuable for fetch-patching engines like some PerimeterX / DataDome variants)
-*   Confidence that no further client-side engineering will move the needle on Kasada specifically — the block is at a layer below the client.
+### What the Engine Gained From This Investigation (universal primitives)
+
+1. **MAJOR: fetch-API header style on op_fetch** (`chrome_headers_fetch` +
+   `HttpClient::fetch_get/fetch_post_bytes`). Previously every JS `fetch()` call
+   was sent with NAVIGATION headers (`upgrade-insecure-requests`, `accept: text/html`,
+   `sec-fetch-dest: document`, `sec-fetch-mode: navigate`, `sec-fetch-user: ?1`,
+   `priority: u=0`). Now proper fetch API style: `accept: */*`,
+   `sec-fetch-dest: empty`, `sec-fetch-mode: cors`, auto-computed `sec-fetch-site`,
+   `origin` + `referer` auto-injected, `priority: u=1, i`. This was a huge
+   latent bot tell affecting every JS fetch on every site.
+
+2. **Real `navigator.sendBeacon`** — was a no-op stub returning `true`. Now
+   fires a real `fetch(..., {keepalive: true})`. Some challenge engines send
+   solve-completion payloads via sendBeacon.
+
+3. **x-kpsdk-* harvesting primitive** — navigate_loop_internal extracts every
+   `x-kpsdk-*` header seen in req/resp across `__fetchLog` and injects them on
+   the same-origin retry GET. Per Hyper-Solutions Go SDK, Kasada retries need
+   8 of these as REQUEST headers; we successfully harvest 6.
+
+4. `chrome_headers_reload()` + `get_follow_exact_headers()` — reload-semantic
+   header set for any future same-origin retry.
+
+5. In-V8 refetch primitive — valuable for fetch-patching engines
+   (PerimeterX / DataDome variants).
+
+### Kasada Remaining Gap
+
+After all fixes: still 429 on Canada Goose top-level nav. We harvest 6 of 8
+headers Hyper-Solutions' SDK forwards:
+
+| Hyper-Solutions header | We have | Source |
+|---|---|---|
+| x-kpsdk-ct | ✓ | /tl request + response |
+| x-kpsdk-dt | ✓ | /tl request |
+| x-kpsdk-r | ✓ | /ftp: response |
+| x-kpsdk-im | ✓ | /tl request |
+| x-kpsdk-st | ✓ | /tl response |
+| x-kpsdk-cr | ✓ | /tl response |
+| **x-kpsdk-v** | ✗ | ips.js closure-internal |
+| **x-kpsdk-dv** | ✗ | ips.js closure-internal |
+| **x-kpsdk-h** | ✗ | ips.js closure-internal |
+| **x-kpsdk-fc** | ✗ | ips.js closure-internal |
+
+The missing four are computed inside ips.js closures and never surface on any
+observable request/response. ips.js expects to add them to the final retry via
+a mechanism we haven't identified — possibly a Chromium-internal API surface,
+a ServiceWorker integration, or deep ips.js reverse engineering would be
+required. This is what Hyper-Solutions' paid service provides — they have
+reverse-engineered ips.js to the point of reproducing these headers.
+
+### Fix Path for Kasada Specifically
+
+Three options, none are pure client-side engineering:
+1. **Commercial service** (Hyper-Solutions, RiskByPass) — they maintain the
+   full ips.js reverse-engineered bypass.
+2. **Full ips.js reverse engineering** — multi-week effort; Kasada rotates
+   the bytecode every few weeks.
+3. **Headless Chromium via CDP for just these sites** — use a real Chromium
+   that naturally computes the missing headers, while keeping our engine for
+   the other 6+ passing sites.
+
+The universal engine is now ~90% of the way to Kasada: everything reachable
+from public Browser API surface is covered. The final 10% lives in Chromium
+internals.
 
 ---
 
