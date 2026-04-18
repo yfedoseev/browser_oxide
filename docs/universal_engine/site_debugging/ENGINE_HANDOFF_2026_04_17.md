@@ -95,30 +95,53 @@ Canada Goose / Hyatt can only pass from:
 5. In-V8 refetch primitive — valuable for fetch-patching engines
    (PerimeterX / DataDome variants).
 
-### Kasada Remaining Gap
+### Kasada Remaining Gap — Reverse-engineered conclusion
 
-After all fixes: still 429 on Canada Goose top-level nav. We harvest 6 of 8
-headers Hyper-Solutions' SDK forwards:
+Wrote a deep instrumentation harness
+(`kasada_ips_deep_instrumentation` in `tests/tier0_kasada.rs`) that monkey-patches:
+- `String.fromCharCode` (catches tokens built from char codes)
+- `Object.defineProperty` (catches properties set to token-like strings)
+- `Function` constructor via Proxy (catches dynamically-built function bodies)
+- `EventTarget.addEventListener` / `dispatchEvent`
+- `navigator.sendBeacon`
+- `XMLHttpRequest.open/setRequestHeader/send`
+- `Headers.set/append`
+- `window.fetch`
 
-| Hyper-Solutions header | We have | Source |
-|---|---|---|
-| x-kpsdk-ct | ✓ | /tl request + response |
-| x-kpsdk-dt | ✓ | /tl request |
-| x-kpsdk-r | ✓ | /ftp: response |
-| x-kpsdk-im | ✓ | /tl request |
-| x-kpsdk-st | ✓ | /tl response |
-| x-kpsdk-cr | ✓ | /tl response |
-| **x-kpsdk-v** | ✗ | ips.js closure-internal |
-| **x-kpsdk-dv** | ✗ | ips.js closure-internal |
-| **x-kpsdk-h** | ✗ | ips.js closure-internal |
-| **x-kpsdk-fc** | ✗ | ips.js closure-internal |
+Ran ips.js against this harness for 60 seconds. Final findings:
 
-The missing four are computed inside ips.js closures and never surface on any
-observable request/response. ips.js expects to add them to the final retry via
-a mechanism we haven't identified — possibly a Chromium-internal API surface,
-a ServiceWorker integration, or deep ips.js reverse engineering would be
-required. This is what Hyper-Solutions' paid service provides — they have
-reverse-engineered ips.js to the point of reproducing these headers.
+*   ips.js only ever sends **three** x-kpsdk-* headers on outgoing requests:
+    `ct`, `dt`, `im`. That's all. We already harvest these.
+*   Zero `navigator.sendBeacon` calls.
+*   Zero `kpsdk-ready`/`kpsdk-*` listener registrations.
+*   Zero dynamically-created Function bodies contain token-like strings.
+*   `window.KPSDK` never grows beyond `{now, start, scriptStart}` after
+    execution.
+
+**The "missing" x-kpsdk-v/-dv/-h/-fc tokens are a red herring** from
+Hyper-Solutions' public docs — they reflect a different Kasada deployment
+generation. Our engine does everything ips.js actually does in 2026's
+canadagoose.com build.
+
+### The Actual Blocker — Server-side /ftp: canary
+
+ips.js uses a probe pattern: after each solve it fetches `/ftp:` and checks
+the response. On a solved session the server eventually returns something
+that ips.js interprets as "upgrade complete" → document replacement happens.
+Our `/ftp:` requests ALWAYS return `429 + challenge-stub` regardless of
+what we send.
+
+Server-side signals Kasada likely uses that we cannot control from the
+client:
+- TLS fingerprint at the cipher-suite / extension-permutation level
+- TCP SYN fingerprint (OS-level)
+- Traffic pattern / timing over the H2 connection
+- IP reputation feed (our datacenter IP)
+
+The user confirmed Chrome on their machine DOES eventually load the real
+page after a delay. That delay is ips.js's solve loop — but crucially,
+their `/ftp:` EVENTUALLY returns non-429 and the loop exits. For us it
+doesn't, despite identical client-visible state.
 
 ### Fix Path for Kasada Specifically
 

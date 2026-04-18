@@ -2016,6 +2016,268 @@ async fn yandex_sso_form_submit_diagnostic() {
 
 #[tokio::test]
 #[ignore]
+async fn kasada_ips_deep_instrumentation() {
+    // Heavy instrumentation harness: run ips.js with every observable
+    // access and state change captured, then search captured state for
+    // the x-kpsdk-v / -dv / -h / -fc values we can't see on requests.
+    //
+    // Strategy: monkey-patch String.fromCharCode, String.prototype to record
+    // every string constructed; Proxy globalThis and built-ins to log every
+    // property read; capture all Function-constructor bodies; capture all
+    // event dispatch names. At the end, grep captured data for "x-kpsdk"
+    // occurrences and dump the strings built around them.
+    use std::fs;
+    let solver_code = match fs::read_to_string("/tmp/kasada_solver.js") {
+        Ok(s) => s,
+        Err(_) => {
+            println!("run kasada_poc_fetch_ips_js first to dump solver to /tmp/kasada_solver.js");
+            return;
+        }
+    };
+
+    // Build a Page that sets up the challenge DOM, then installs
+    // instrumentation BEFORE we execute ips.js.
+    let mut page = browser::Page::from_html(
+        r#"<!DOCTYPE html><html><head></head><body>
+        <script>window.KPSDK={};KPSDK.now=typeof performance!=='undefined'&&performance.now?performance.now.bind(performance):Date.now.bind(Date);KPSDK.start=KPSDK.now();</script>
+        </body></html>"#,
+        Some(stealth::chrome_130_windows()),
+    )
+    .await
+    .unwrap();
+
+    // Install instrumentation.
+    let instrument = r#"
+        globalThis.__TRACE = {
+            strings: [],            // every string that contains "kpsdk" or "x-" or looks like a header
+            events: [],             // every dispatchEvent call
+            listeners: [],          // every addEventListener call
+            defines: [],            // every Object.defineProperty call
+            funcs: [],              // every new Function(...) body
+            reads: {},              // property read counts per (target, key)
+            respHeaders: {},        // last response's header map (set by fetch wrapper)
+        };
+
+        const _origFromChar = String.fromCharCode;
+        String.fromCharCode = function(...args) {
+            const s = _origFromChar.apply(String, args);
+            if (s.length > 2 && (s.toLowerCase().includes('kpsdk') || /^[a-z0-9-]+$/i.test(s) && s.length > 5 && s.length < 40)) {
+                globalThis.__TRACE.strings.push({via: 'fromCharCode', s, stack: (new Error().stack || '').substring(0, 200)});
+            }
+            return s;
+        };
+
+        const _origConcat = String.prototype.concat;
+        // Don't wrap concat — most strings will flow through it in normal code
+        // Instead, hook Object.defineProperty to capture any property set
+        // to a value that looks like a header or a base64-ish token.
+        const _origDefProp = Object.defineProperty;
+        Object.defineProperty = function(target, key, desc) {
+            try {
+                if (desc && 'value' in desc && typeof desc.value === 'string' &&
+                    desc.value.length > 8 && desc.value.length < 256) {
+                    const v = desc.value;
+                    if (v.toLowerCase().includes('kpsdk') || /^[A-Za-z0-9_-]{10,}$/.test(v)) {
+                        globalThis.__TRACE.defines.push({target: String(target).substring(0, 60), key: String(key), value: v.substring(0, 120)});
+                    }
+                }
+            } catch {}
+            return _origDefProp.apply(Object, arguments);
+        };
+
+        const _origAddEventListener = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function(type, fn, opts) {
+            try {
+                if (typeof type === 'string' && (type.includes('kp') || type.includes('ready') || type === 'message' || type === 'DOMContentLoaded' || type === 'load')) {
+                    globalThis.__TRACE.listeners.push({target: this.constructor && this.constructor.name || '?', type});
+                }
+            } catch {}
+            return _origAddEventListener.apply(this, arguments);
+        };
+
+        const _origDispatchEvent = EventTarget.prototype.dispatchEvent;
+        EventTarget.prototype.dispatchEvent = function(ev) {
+            try {
+                if (ev && typeof ev.type === 'string') {
+                    globalThis.__TRACE.events.push({target: this.constructor && this.constructor.name || '?', type: ev.type, detail: typeof ev.detail === 'object' ? JSON.stringify(ev.detail).substring(0, 200) : String(ev.detail)});
+                }
+            } catch {}
+            return _origDispatchEvent.apply(this, arguments);
+        };
+
+        // Wrap Function constructor to log every dynamically-built function body.
+        const _OrigFn = Function;
+        globalThis.Function = new Proxy(_OrigFn, {
+            construct(target, args) {
+                const body = args[args.length - 1];
+                if (typeof body === 'string' && body.length > 5) {
+                    globalThis.__TRACE.funcs.push(body.substring(0, 400));
+                }
+                return Reflect.construct(target, args);
+            },
+            apply(target, thisArg, args) {
+                const body = args[args.length - 1];
+                if (typeof body === 'string' && body.length > 5) {
+                    globalThis.__TRACE.funcs.push(body.substring(0, 400));
+                }
+                return Reflect.apply(target, thisArg, args);
+            },
+        });
+        globalThis.Function.prototype = _OrigFn.prototype;
+
+        // Wrap window.fetch to capture every request's full headers so we can
+        // see any x-kpsdk-v/-dv/-h/-fc that ips.js adds but we normally miss.
+        const _origFetch = globalThis.fetch;
+        globalThis.fetch = async function(input, init) {
+            const headers = init && init.headers ? Object.assign({}, init.headers) : {};
+            const url = typeof input === 'string' ? input : (input && input.url) || '';
+            globalThis.__TRACE.fetchReq = globalThis.__TRACE.fetchReq || [];
+            globalThis.__TRACE.fetchReq.push({url: String(url).substring(0, 200), headers});
+            const resp = await _origFetch.apply(this, arguments);
+            try {
+                const h = {};
+                if (resp && resp.headers && resp.headers.forEach) {
+                    resp.headers.forEach((v, k) => { h[k.toLowerCase()] = String(v).substring(0, 200); });
+                }
+                globalThis.__TRACE.respHeaders = h;
+            } catch {}
+            return resp;
+        };
+
+        // Wrap navigator.sendBeacon
+        if (navigator && navigator.sendBeacon) {
+            const _origSend = navigator.sendBeacon;
+            navigator.sendBeacon = function(url, data) {
+                globalThis.__TRACE.beacons = globalThis.__TRACE.beacons || [];
+                globalThis.__TRACE.beacons.push({url: String(url).substring(0,200), dataType: typeof data, dataLen: data ? (data.length || data.byteLength || 0) : 0});
+                return _origSend.apply(this, arguments);
+            };
+        }
+
+        // Wrap XMLHttpRequest to capture its setRequestHeader calls
+        if (globalThis.XMLHttpRequest) {
+            const _origOpen = XMLHttpRequest.prototype.open;
+            const _origSetHdr = XMLHttpRequest.prototype.setRequestHeader;
+            const _origSend2 = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this.__xhrInfo = {method, url: String(url).substring(0,200), headers: {}};
+                return _origOpen.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.setRequestHeader = function(k, v) {
+                if (this.__xhrInfo) this.__xhrInfo.headers[String(k).toLowerCase()] = String(v);
+                return _origSetHdr.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function() {
+                if (this.__xhrInfo) {
+                    globalThis.__TRACE.xhrReq = globalThis.__TRACE.xhrReq || [];
+                    globalThis.__TRACE.xhrReq.push(this.__xhrInfo);
+                }
+                return _origSend2.apply(this, arguments);
+            };
+        }
+
+        // Trap setRequestHeader-style lookups on the Request object (fetch API)
+        // Also wrap Headers.append + set to catch direct manipulation.
+        if (globalThis.Headers && Headers.prototype.set) {
+            const _origHSet = Headers.prototype.set;
+            const _origHAppend = Headers.prototype.append;
+            Headers.prototype.set = function(k, v) {
+                if (typeof k === 'string' && k.toLowerCase().startsWith('x-kpsdk')) {
+                    globalThis.__TRACE.kpsdkHeaders = globalThis.__TRACE.kpsdkHeaders || {};
+                    globalThis.__TRACE.kpsdkHeaders[k.toLowerCase()] = String(v).substring(0, 200);
+                }
+                return _origHSet.apply(this, arguments);
+            };
+            Headers.prototype.append = function(k, v) {
+                if (typeof k === 'string' && k.toLowerCase().startsWith('x-kpsdk')) {
+                    globalThis.__TRACE.kpsdkHeaders = globalThis.__TRACE.kpsdkHeaders || {};
+                    globalThis.__TRACE.kpsdkHeaders[k.toLowerCase()] = String(v).substring(0, 200);
+                }
+                return _origHAppend.apply(this, arguments);
+            };
+        }
+    "#;
+    page.evaluate(instrument).unwrap();
+
+    // Run ips.js and let it churn for 60 seconds — user observed browsers
+    // "wait like JS check and some delay" before the real page loads.
+    let _ = page.evaluate(&solver_code);
+    let _ = page.evaluate_async("", std::time::Duration::from_secs(60)).await;
+
+    // Collect trace.
+    let kpsdk_in_headers = page.evaluate("JSON.stringify(globalThis.__TRACE.kpsdkHeaders || {})").unwrap_or_default();
+    println!("=== x-kpsdk-* headers seen via Headers.set/append: {}", kpsdk_in_headers);
+
+    let events = page.evaluate("JSON.stringify((globalThis.__TRACE.events || []).slice(0, 30))").unwrap_or_default();
+    println!("=== events dispatched: {}", &events[..events.len().min(1500)]);
+
+    let listeners = page.evaluate("JSON.stringify(globalThis.__TRACE.listeners || [])").unwrap_or_default();
+    println!("=== listeners registered: {}", &listeners[..listeners.len().min(1500)]);
+
+    let beacons = page.evaluate("JSON.stringify(globalThis.__TRACE.beacons || [])").unwrap_or_default();
+    println!("=== sendBeacon calls: {}", &beacons[..beacons.len().min(800)]);
+
+    let xhr_req = page.evaluate("JSON.stringify(globalThis.__TRACE.xhrReq || [])").unwrap_or_default();
+    println!("=== XHR calls: {}", &xhr_req[..xhr_req.len().min(1000)]);
+
+    let fetch_req = page.evaluate(r#"JSON.stringify((globalThis.__TRACE.fetchReq || []).map(r => {
+        const kp = {};
+        for (const k of Object.keys(r.headers || {})) {
+            if (k.toLowerCase().startsWith('x-kpsdk') || k.toLowerCase().startsWith('x-kp')) kp[k] = String(r.headers[k]).substring(0, 50);
+        }
+        return {url: r.url, kpsdk: kp};
+    }))"#).unwrap_or_default();
+    println!("=== fetch calls (x-kpsdk-* only): {}", &fetch_req[..fetch_req.len().min(2000)]);
+
+    let defines = page.evaluate("JSON.stringify((globalThis.__TRACE.defines || []).slice(0, 20))").unwrap_or_default();
+    println!("=== defineProperty with token-looking values ({} entries): {}", defines.len(), &defines[..defines.len().min(1500)]);
+
+    let fn_cnt = page.evaluate("String((globalThis.__TRACE.funcs || []).length)").unwrap_or_default();
+    let fn_tokens = page.evaluate(r#"
+        JSON.stringify((() => {
+            const list = globalThis.__TRACE.funcs || [];
+            const matches = [];
+            for (let i = 0; i < list.length; i++) {
+                const body = list[i];
+                // Look for any body containing x-kpsdk or a base64-like token
+                if (/x-?kpsdk-[a-z]+/i.test(body) || body.includes('KP_') || /[A-Za-z0-9_-]{30,}/.test(body)) {
+                    matches.push({i, head: body.substring(0, 200)});
+                }
+                if (matches.length >= 10) break;
+            }
+            return matches;
+        })())
+    "#).unwrap_or_default();
+    println!("=== Function bodies (of {}): {}", fn_cnt, &fn_tokens[..fn_tokens.len().min(3000)]);
+
+    // Search KPSDK for any newly-added keys after running ips.js.
+    let kpsdk_final = page.evaluate(r#"
+        JSON.stringify((() => {
+            if (!window.KPSDK) return {};
+            const out = {};
+            for (const k of Object.getOwnPropertyNames(window.KPSDK)) {
+                try {
+                    const v = window.KPSDK[k];
+                    if (typeof v === 'function') out[k] = '[fn]';
+                    else if (typeof v === 'object' && v !== null) out[k] = JSON.stringify(v).substring(0, 200);
+                    else out[k] = String(v).substring(0, 200);
+                } catch (e) { out[k] = '[err]'; }
+            }
+            return out;
+        })())
+    "#).unwrap_or_default();
+    println!("=== window.KPSDK after ips.js run: {}", kpsdk_final);
+
+    // Dump the last 20 funcs verbatim for offline inspection
+    let _ = page.evaluate(r#"globalThis.__TRACE_DUMP = JSON.stringify((globalThis.__TRACE.funcs || []).slice(-50))"#);
+    if let Ok(dump) = page.evaluate("globalThis.__TRACE_DUMP") {
+        let _ = std::fs::write("/tmp/kasada_trace_funcs.json", dump);
+        println!("wrote /tmp/kasada_trace_funcs.json");
+    }
+}
+
+#[tokio::test]
+#[ignore]
 async fn kasada_canadagoose_subpath_diagnostic() {
     // Try visiting a product page directly instead of root. Maybe Kasada
     // treats "/" as always-challenge and subpages as real content.
