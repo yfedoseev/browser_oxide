@@ -146,6 +146,21 @@ fingerprinting at lower levels than Chromium's user-space stack), not in
 our JS implementation. Running genuine Chrome from the user's residential
 IP works; running genuine Chrome from this datacenter IP does not.
 
+**Extended cross-tool probe (also saved in this dir):**
+
+| Tool | Implementation | Result on canadagoose.com |
+|---|---|---|
+| Our browser_oxide engine | From-scratch Rust + V8 | 429 + 732b |
+| `playwright_probe.js` — vanilla Playwright | Real Chromium | 429 + 740b |
+| `patchright_probe.js` — Patchright stealth Playwright | Real Chromium + JS stealth patches | 429 + 740b |
+| `nodriver_probe.py` — nodriver (UC successor) | CDP-direct, no Selenium | 429 + 721b |
+
+Every mainstream open-source "Kasada bypass" tool produces an identical
+blocked response from this IP. Per every published bypass guide in 2026
+(ZenRows, Scrapfly, roundproxies), Kasada-passing workflows ALWAYS pair
+the stealth browser with residential-proxy rotation. A stealth browser
+alone does not bypass an IP-reputation block — by design.
+
 Hyatt specifically returned an Akamai error code, not Kasada — they may
 have shifted engines, but the outcome (block from this IP) is identical.
 
