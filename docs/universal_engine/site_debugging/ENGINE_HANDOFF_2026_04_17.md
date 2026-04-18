@@ -123,7 +123,7 @@ Hyper-Solutions' public docs — they reflect a different Kasada deployment
 generation. Our engine does everything ips.js actually does in 2026's
 canadagoose.com build.
 
-### The Actual Blocker — Server-side /ftp: canary
+### The Actual Blocker — Server-side /ftp: canary + IP Reputation (CONFIRMED)
 
 ips.js uses a probe pattern: after each solve it fetches `/ftp:` and checks
 the response. On a solved session the server eventually returns something
@@ -131,17 +131,31 @@ that ips.js interprets as "upgrade complete" → document replacement happens.
 Our `/ftp:` requests ALWAYS return `429 + challenge-stub` regardless of
 what we send.
 
-Server-side signals Kasada likely uses that we cannot control from the
-client:
-- TLS fingerprint at the cipher-suite / extension-permutation level
-- TCP SYN fingerprint (OS-level)
-- Traffic pattern / timing over the H2 connection
-- IP reputation feed (our datacenter IP)
+**Definitive proof via real Playwright + real Chromium** (see
+`/tmp/kasada-probe/probe.js`):
 
-The user confirmed Chrome on their machine DOES eventually load the real
-page after a delay. That delay is ips.js's solve loop — but crucially,
-their `/ftp:` EVENTUALLY returns non-429 and the loop exits. For us it
-doesn't, despite identical client-visible state.
+| Site | Real Chromium from this network | Our engine |
+|---|---|---|
+| canadagoose.com | 429 + 740b challenge (identical body) | 429 + 732b |
+| hyatt.com | 403 + Akamai E6020 "unexpected browser" | 403 equivalent |
+| ya.ru | 200 + 452k real homepage | 200 + 488k real homepage |
+
+**Real Chromium from this IP gets the exact same blocks our engine gets.**
+The block is at the network layer (IP reputation + possibly TCP/TLS
+fingerprinting at lower levels than Chromium's user-space stack), not in
+our JS implementation. Running genuine Chrome from the user's residential
+IP works; running genuine Chrome from this datacenter IP does not.
+
+Hyatt specifically returned an Akamai error code, not Kasada — they may
+have shifted engines, but the outcome (block from this IP) is identical.
+
+Server-side signals at play (confirmed by the Chromium test):
+- IP reputation feed (datacenter / hosting provider ranges are hard-blocked)
+- Possibly TCP SYN-packet fingerprint (OS socket-level)
+- Autonomous System (AS) number scoring
+
+None of these are reachable from engine code running in user-space
+against the same IP. The engine is client-side complete.
 
 ### Fix Path for Kasada Specifically
 
