@@ -418,3 +418,121 @@ async fn scorer_browserleaks_webgl() {
         .unwrap_or_default();
     println!("webgl report: {report}");
 }
+
+// §6.6 item 1 — navigator.plugins / mimeTypes parity with fixture §10.1.
+// Verifies: shape, count driven by profile, stable identity, item/namedItem,
+// enabledPlugin linking, iteration, numeric indexing.
+#[tokio::test]
+async fn test_plugins_parity() {
+    let profile = stealth::chrome_130_windows();
+    let mut page = browser::Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
+
+    let probe = r#"
+        (() => {
+            const arr = [];
+            for (const p of navigator.plugins) arr.push(p.name);
+            const mimeArr = [];
+            for (const m of navigator.mimeTypes) mimeArr.push(m.type);
+            const p0 = navigator.plugins[0];
+            return JSON.stringify({
+                plugins_length: navigator.plugins.length,
+                mimeTypes_length: navigator.mimeTypes.length,
+                identity_stable: navigator.plugins === navigator.plugins,
+                mime_identity_stable: navigator.mimeTypes === navigator.mimeTypes,
+                item_matches_index: navigator.plugins.item(0) === navigator.plugins[0],
+                namedItem_matches: navigator.plugins.namedItem('PDF Viewer') === navigator.plugins[0],
+                namedItem_missing: navigator.plugins.namedItem('Not A Real Plugin'),
+                mime_item_matches: navigator.mimeTypes.item(0) === navigator.mimeTypes[0],
+                p0_name: p0 && p0.name,
+                p0_filename: p0 && p0.filename,
+                p0_description: p0 && p0.description,
+                p0_length: p0 && p0.length,
+                p0_mime0_type: p0 && p0[0] && p0[0].type,
+                mime0_enabledPlugin_is_p0: navigator.mimeTypes[0].enabledPlugin === p0,
+                mime0_type: navigator.mimeTypes[0] && navigator.mimeTypes[0].type,
+                mime1_type: navigator.mimeTypes[1] && navigator.mimeTypes[1].type,
+                iter_names: arr,
+                iter_mime_types: mimeArr,
+                plugins_is_PluginArray: navigator.plugins instanceof PluginArray,
+                mimeTypes_is_MimeTypeArray: navigator.mimeTypes instanceof MimeTypeArray,
+                p0_is_Plugin: p0 instanceof Plugin,
+            });
+        })()
+    "#;
+    let raw = page.evaluate(probe).unwrap();
+    let obj: serde_json::Value = serde_json::from_str(&raw)
+        .unwrap_or_else(|_| panic!("plugins probe result was not JSON: {}", raw));
+
+    assert_eq!(obj["plugins_length"], 5, "default preset ships 5 plugins");
+    assert_eq!(
+        obj["mimeTypes_length"], 2,
+        "default preset ships 2 mime types"
+    );
+    assert_eq!(obj["identity_stable"], true);
+    assert_eq!(obj["mime_identity_stable"], true);
+    assert_eq!(obj["item_matches_index"], true);
+    assert_eq!(obj["namedItem_matches"], true);
+    assert!(obj["namedItem_missing"].is_null());
+    assert_eq!(obj["mime_item_matches"], true);
+    assert_eq!(obj["p0_name"], "PDF Viewer");
+    assert_eq!(obj["p0_filename"], "internal-pdf-viewer");
+    assert_eq!(obj["p0_description"], "Portable Document Format");
+    assert_eq!(
+        obj["p0_length"], 2,
+        "Plugin exposes its mime types by length"
+    );
+    assert_eq!(obj["p0_mime0_type"], "application/pdf");
+    assert_eq!(obj["mime0_enabledPlugin_is_p0"], true);
+    assert_eq!(obj["mime0_type"], "application/pdf");
+    assert_eq!(obj["mime1_type"], "text/pdf");
+    assert_eq!(obj["plugins_is_PluginArray"], true);
+    assert_eq!(obj["mimeTypes_is_MimeTypeArray"], true);
+    assert_eq!(obj["p0_is_Plugin"], true);
+
+    let names: Vec<&str> = obj["iter_names"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "PDF Viewer",
+            "Chrome PDF Viewer",
+            "Chromium PDF Viewer",
+            "Microsoft Edge PDF Viewer",
+            "WebKit built-in PDF",
+        ]
+    );
+    let mimes: Vec<&str> = obj["iter_mime_types"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(mimes, vec!["application/pdf", "text/pdf"]);
+}
+
+// §6.6 item 1 — profile.plugins_count is respected. Build a profile that
+// claims only 3 plugins / 1 mime type and verify the JS surface slices.
+#[tokio::test]
+async fn test_plugins_count_from_profile() {
+    let mut profile = stealth::chrome_130_windows();
+    profile.plugins_count = 3;
+    profile.mime_types_count = 1;
+    let mut page = browser::Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
+
+    assert_eq!(page.evaluate("navigator.plugins.length").unwrap(), "3");
+    assert_eq!(page.evaluate("navigator.mimeTypes.length").unwrap(), "1");
+    // Last plugin in the 5-array is out of range now
+    assert_eq!(
+        page.evaluate("navigator.plugins[3] === undefined || navigator.plugins[3] === null")
+            .unwrap(),
+        "true"
+    );
+}

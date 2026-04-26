@@ -6,8 +6,10 @@ async fn audit_global_this_leaks() {
     let profile = presets::chrome_130_ru();
 
     // We use a blank page but our bootstrap scripts will run
-    let mut page: Page = Page::with_profile("", "about:blank", profile).await.unwrap();
-    
+    let mut page: Page = Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
+
     let audit_script = r#"
         (function() {
             function getProps(obj) {
@@ -42,11 +44,11 @@ async fn audit_global_this_leaks() {
 
     // Basic assertions to catch obvious leaks
     let result_json: serde_json::Value = serde_json::from_str(&result).unwrap();
-    
+
     if result_json["denoExists"].as_bool().unwrap_or(false) {
         println!("FAIL: Deno global is leaked!");
     }
-    
+
     if result_json["opsExists"].as_bool().unwrap_or(false) {
         println!("FAIL: Deno.core.ops is leaked!");
     }
@@ -56,8 +58,10 @@ async fn audit_global_this_leaks() {
 async fn audit_function_to_string_leaks() {
     let profile = presets::chrome_130_ru();
 
-    let mut page: Page = Page::with_profile("", "about:blank", profile).await.unwrap();
-    
+    let mut page: Page = Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
+
     // Check toString of some standard properties that we might have patched or backed with ops
     let check_script = r#"
         (function() {
@@ -109,4 +113,76 @@ async fn audit_function_to_string_leaks() {
 
     let result: String = page.evaluate(check_script).unwrap();
     println!("Function toString Audit Result: {}", result);
+}
+
+// §6 item 7 — navigator.permissions.query must return a per-name state map
+// matching headed Chrome 133. A blanket "prompt" (or the headless "denied"
+// for notifications) is the classic automation tell.
+#[tokio::test]
+async fn test_permissions_query_defaults() {
+    let profile = presets::chrome_130_windows();
+    let mut page: Page = Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
+
+    let probe = r#"
+        (async () => {
+            const names = [
+                'notifications', 'geolocation', 'camera', 'microphone', 'midi',
+                'persistent-storage', 'background-sync', 'clipboard-write',
+                'accelerometer', 'gyroscope', 'magnetometer', 'screen-wake-lock'
+            ];
+            const out = {};
+            for (const name of names) {
+                try {
+                    const r = await navigator.permissions.query({ name });
+                    out[name] = r.state;
+                } catch (e) {
+                    out[name] = 'THREW:' + e.message;
+                }
+            }
+            // invalid name must reject with TypeError
+            try {
+                await navigator.permissions.query({ name: 'not-a-real-permission' });
+                out['_invalid'] = 'DID-NOT-THROW';
+            } catch (e) {
+                out['_invalid'] = e.constructor.name;
+            }
+            // missing descriptor must reject
+            try {
+                await navigator.permissions.query();
+                out['_missing'] = 'DID-NOT-THROW';
+            } catch (e) {
+                out['_missing'] = e.constructor.name;
+            }
+            globalThis.__permResult = JSON.stringify(out);
+        })()
+    "#;
+    page.evaluate(probe).unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(100))
+        .await
+        .ok();
+    let raw = page.evaluate("globalThis.__permResult").unwrap();
+    let obj: serde_json::Value = serde_json::from_str(&raw)
+        .unwrap_or_else(|_| panic!("permissions probe result was not JSON: {}", raw));
+
+    // W3C PermissionState: granted | denied | prompt. Never 'default'.
+    assert_eq!(
+        obj["notifications"], "prompt",
+        "headless 'denied' is a classic tell"
+    );
+    assert_eq!(obj["geolocation"], "prompt");
+    assert_eq!(obj["camera"], "prompt");
+    assert_eq!(obj["microphone"], "prompt");
+    assert_eq!(obj["midi"], "prompt");
+    assert_eq!(obj["persistent-storage"], "granted");
+    assert_eq!(obj["background-sync"], "granted");
+    assert_eq!(obj["clipboard-write"], "granted");
+    assert_eq!(obj["accelerometer"], "granted");
+    assert_eq!(obj["gyroscope"], "granted");
+    assert_eq!(obj["magnetometer"], "granted");
+    assert_eq!(obj["screen-wake-lock"], "granted");
+    // Chrome rejects invalid permission names with TypeError
+    assert_eq!(obj["_invalid"], "TypeError");
+    assert_eq!(obj["_missing"], "TypeError");
 }

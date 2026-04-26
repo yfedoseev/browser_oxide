@@ -38,7 +38,8 @@ async fn location_reload_sets_pending_navigation() {
             location.reload();\
          </script></body></html>",
         "https://example.com/path",
-     stealth::presets::chrome_130_ru())
+        Some(stealth::presets::chrome_130_ru()),
+    )
     .await
     .expect("build page");
 
@@ -57,7 +58,8 @@ async fn location_href_assignment_sets_pending_navigation() {
             location.href = 'https://example.com/other';\
          </script></body></html>",
         "https://example.com/",
-     stealth::presets::chrome_130_ru())
+        Some(stealth::presets::chrome_130_ru()),
+    )
     .await
     .expect("build page");
 
@@ -73,7 +75,8 @@ async fn location_replace_sets_pending_navigation() {
             location.replace('https://example.com/replaced');\
          </script></body></html>",
         "https://example.com/",
-     stealth::presets::chrome_130_ru())
+        Some(stealth::presets::chrome_130_ru()),
+    )
     .await
     .expect("build page");
 
@@ -89,7 +92,8 @@ async fn location_assign_sets_pending_navigation() {
             location.assign('https://example.com/assigned');\
          </script></body></html>",
         "https://example.com/",
-     stealth::presets::chrome_130_ru())
+        Some(stealth::presets::chrome_130_ru()),
+    )
     .await
     .expect("build page");
 
@@ -133,9 +137,13 @@ async fn meta_refresh_sets_pending_navigation() {
         </script>
         </body></html>
     "#;
-    let mut page = Page::from_html_with_url(html, "https://source.example/", stealth::presets::chrome_130_ru())
-        .await
-        .expect("build page");
+    let mut page = Page::from_html_with_url(
+        html,
+        "https://source.example/",
+        Some(stealth::presets::chrome_130_ru()),
+    )
+    .await
+    .expect("build page");
 
     // The scanner uses setTimeout(…, 0) — drain the event loop so it fires.
     page.evaluate_async("1", Duration::from_secs(1))

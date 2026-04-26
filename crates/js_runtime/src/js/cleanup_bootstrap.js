@@ -8,7 +8,8 @@
         '__bootstrap',
         '__boxide',
         '__syncCookiesFromNet',
-        '__documentReadyState'
+        '__documentReadyState',
+        '__errors'
         // __pendingNavigation intentionally kept: it is a signal for the
         // Rust navigation driver. Synchronous inline scripts (form.submit,
         // location.href = ...) set it during the same tick cleanup runs,

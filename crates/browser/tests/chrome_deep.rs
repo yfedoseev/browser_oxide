@@ -13,7 +13,9 @@ fn html(body: &str) -> String {
 }
 
 async fn check(js: &str) -> String {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
 }
 
@@ -53,8 +55,9 @@ async fn date_now_returns_number() {
 
 #[tokio::test]
 async fn canvas_fingerprint_produces_unique_data() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <canvas id="c" width="200" height="50"></canvas>
         <script>
             const ctx = document.getElementById('c').getContext('2d');
@@ -68,7 +71,9 @@ async fn canvas_fingerprint_produces_unique_data() {
             globalThis.fp = document.getElementById('c').toDataURL();
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
     let fp = page.evaluate("fp").unwrap();
@@ -86,8 +91,9 @@ async fn canvas_fingerprint_produces_unique_data() {
 #[tokio::test]
 async fn canvas_different_text_different_fingerprint() {
     async fn render(text: &str) -> String {
-        let mut page = Page::from_html(&format!(
-            r#"<!DOCTYPE html><html><head></head><body>
+        let mut page = Page::from_html(
+            &format!(
+                r#"<!DOCTYPE html><html><head></head><body>
             <canvas id="c" width="200" height="50"></canvas>
             <script>
                 const ctx = document.getElementById('c').getContext('2d');
@@ -95,8 +101,10 @@ async fn canvas_different_text_different_fingerprint() {
                 ctx.fillText('{}', 10, 25);
                 globalThis.fp = document.getElementById('c').toDataURL();
             </script></body></html>"#,
-            text
-        ), None::<stealth::StealthProfile>)
+                text
+            ),
+            None::<stealth::StealthProfile>,
+        )
         .await
         .unwrap();
         page.evaluate("fp").unwrap()
@@ -112,8 +120,9 @@ async fn canvas_different_text_different_fingerprint() {
 
 #[tokio::test]
 async fn webgl_unmasked_renderer_not_empty() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <canvas id="c"></canvas>
         <script>
             const gl = document.getElementById('c').getContext('webgl');
@@ -122,7 +131,9 @@ async fn webgl_unmasked_renderer_not_empty() {
             globalThis.vendor = gl.getParameter(ext.UNMASKED_VENDOR_WEBGL);
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
     let renderer = page.evaluate("renderer").unwrap();
@@ -174,13 +185,174 @@ async fn chrome_object_structure() {
     assert_eq!(check("typeof chrome.loadTimes").await, "function");
 }
 
+// §6.6 item 8 — navigator.userAgentData high-entropy values must be driven
+// by the active StealthProfile. Regression target: architecture/platform/
+// platformVersion/model used to be hardcoded in window_bootstrap.js.
+#[tokio::test]
+async fn test_user_agent_data_highentropy() {
+    // macOS Apple Silicon exercises the arm path — if any hint still
+    // hardcodes "x86"/"Windows" we fail here.
+    let profile = stealth::presets::chrome_130_macos();
+    let browser_full = profile.browser_version.clone();
+    let browser_major = browser_full
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let page = Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
+
+    let probe = r#"
+        (async () => {
+            const low = {
+                brands: navigator.userAgentData.brands.map(b => b.brand).sort(),
+                brandVersions: navigator.userAgentData.brands,
+                mobile: navigator.userAgentData.mobile,
+                platform: navigator.userAgentData.platform,
+            };
+            const hi = await navigator.userAgentData.getHighEntropyValues([
+                'architecture','bitness','model','platformVersion',
+                'uaFullVersion','fullVersionList','wow64',
+            ]);
+            let threw = null;
+            try { await navigator.userAgentData.getHighEntropyValues("not-an-array"); }
+            catch (e) { threw = e.constructor.name; }
+            const chromeBrand = hi.fullVersionList.find(b => b.brand === 'Google Chrome');
+            globalThis.__uaResult = JSON.stringify({
+                lowBrands: low.brands,
+                brandVersions: low.brandVersions,
+                platform: low.platform,
+                mobile: low.mobile,
+                architecture: hi.architecture,
+                bitness: hi.bitness,
+                model: hi.model,
+                platformVersion: hi.platformVersion,
+                uaFullVersion: hi.uaFullVersion,
+                wow64: hi.wow64,
+                fullVersionListLen: hi.fullVersionList.length,
+                chromeBrandVersion: chromeBrand && chromeBrand.version,
+                nonArrayRejection: threw,
+                invalidHintIgnored: (await navigator.userAgentData.getHighEntropyValues(['not-a-real-hint'])),
+            });
+        })()
+    "#;
+    {
+        let mut page = page;
+        page.evaluate(probe).unwrap();
+        page.evaluate_async("void 0", std::time::Duration::from_millis(200))
+            .await
+            .ok();
+        let raw = page.evaluate("globalThis.__uaResult").unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&raw)
+            .unwrap_or_else(|_| panic!("ua probe result not JSON: {}", raw));
+
+        assert_eq!(obj["platform"], "macOS", "platform must honor os_name");
+        assert_eq!(obj["mobile"], false);
+        assert_eq!(obj["architecture"], "arm", "macOS Apple Silicon → arm");
+        assert_eq!(obj["bitness"], "64");
+        assert_eq!(obj["model"], "", "desktop profile has empty model");
+        assert_eq!(obj["platformVersion"], "15.2.0");
+        assert_eq!(obj["uaFullVersion"], browser_full);
+        assert_eq!(obj["wow64"], false);
+        assert_eq!(obj["fullVersionListLen"], 3);
+        assert_eq!(obj["chromeBrandVersion"], browser_full);
+        let sorted: Vec<&str> = obj["lowBrands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(sorted, vec!["Chromium", "Google Chrome", "Not-A.Brand"]);
+        assert_eq!(obj["nonArrayRejection"], "TypeError");
+        let invalid = &obj["invalidHintIgnored"];
+        assert!(!invalid.is_null());
+        assert!(invalid.get("not-a-real-hint").is_none());
+        let brand_versions: Vec<&str> = obj["brandVersions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|b| b.get("version").and_then(|v| v.as_str()))
+            .collect();
+        assert!(
+            brand_versions.contains(&browser_major.as_str()),
+            "low-entropy brands must contain '{}', got {:?}",
+            browser_major,
+            brand_versions
+        );
+    }
+}
+
+// §6.6 item 2 — window.chrome surface parity (chrome.webstore legacy surface).
+#[tokio::test]
+async fn test_chrome_api_surface() {
+    // keys_sorted must contain at least the 4-surface set from the handoff
+    // fixture §10.2. We do not over-pin here (order may evolve) but we
+    // require webstore — that's the gap this test guards against.
+    let keys = check("Object.keys(chrome).sort().join(',')").await;
+    for required in ["app", "csi", "loadTimes", "webstore"] {
+        assert!(
+            keys.contains(required),
+            "chrome.{} missing (keys: {})",
+            required,
+            keys
+        );
+    }
+
+    // chrome.webstore surface
+    assert_eq!(check("typeof chrome.webstore").await, "object");
+    assert_eq!(check("typeof chrome.webstore.install").await, "function");
+    assert!(
+        check("chrome.webstore.install.toString().includes('[native code]')")
+            .await
+            .eq("true"),
+        "chrome.webstore.install must mask as native"
+    );
+    // Event-listener-style handles — present + standard method set
+    for prop in ["onInstallStageChanged", "onDownloadProgress"] {
+        assert_eq!(
+            check(&format!("typeof chrome.webstore.{}", prop)).await,
+            "object",
+            "{} missing",
+            prop
+        );
+        assert_eq!(
+            check(&format!("typeof chrome.webstore.{}.addListener", prop)).await,
+            "function"
+        );
+        assert_eq!(
+            check(&format!("typeof chrome.webstore.{}.removeListener", prop)).await,
+            "function"
+        );
+        assert_eq!(
+            check(&format!("chrome.webstore.{}.hasListener()", prop)).await,
+            "false"
+        );
+    }
+
+    // chrome.loadTimes behavioural asserts from §10.2 fixture
+    assert_eq!(
+        check("chrome.loadTimes().wasFetchedViaSpdy === true").await,
+        "true"
+    );
+    assert_eq!(check("chrome.loadTimes().connectionInfo").await, "h2");
+
+    // chrome.csi keys
+    assert_eq!(
+        check("Object.keys(chrome.csi()).sort().join(',')").await,
+        "onloadT,pageT,startE,tran"
+    );
+}
+
 #[tokio::test]
 async fn permissions_query_returns_prompt() {
     // Chrome returns { state: "prompt" } for notifications permission
     assert_eq!(check(r#"
         navigator.permissions.query({ name: 'notifications' }).then(r => globalThis._permState = r.state)
     "#).await, "[object Promise]");
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     page.evaluate("navigator.permissions.query({ name: 'notifications' }).then(r => globalThis._ps = r.state)").unwrap();
     page.evaluate_async("void 0", std::time::Duration::from_millis(50))
         .await
@@ -214,7 +386,9 @@ async fn document_visibility_visible() {
 
 #[tokio::test]
 async fn window_dimensions_consistent() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     // outer >= inner
     assert_eq!(page.evaluate("outerWidth >= innerWidth").unwrap(), "true");
     assert_eq!(page.evaluate("outerHeight >= innerHeight").unwrap(), "true");
@@ -252,7 +426,9 @@ async fn performance_memory_chrome_specific() {
 
 #[tokio::test]
 async fn crypto_get_random_values() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     page.evaluate("globalThis.arr = new Uint8Array(16); crypto.getRandomValues(globalThis.arr)")
         .unwrap();
     // Should not be all zeros
@@ -270,8 +446,9 @@ async fn crypto_get_random_values() {
 #[tokio::test]
 async fn event_is_trusted_false_for_dispatched() {
     // Manually dispatched events have isTrusted = false
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="el"></div>
         <script>
             globalThis.trusted = null;
@@ -281,7 +458,9 @@ async fn event_is_trusted_false_for_dispatched() {
             document.getElementById('el').dispatchEvent(new Event('click'));
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
     assert_eq!(page.evaluate("trusted").unwrap(), "false");
@@ -295,9 +474,12 @@ async fn event_is_trusted_false_for_dispatched() {
 async fn nodelist_bracket_access() {
     // Real Chrome supports querySelectorAll(...)[0]
     // Our NodeList only supports .item(0)
-    let mut page = Page::from_html(&html("<div class='x'>A</div><div class='x'>B</div>"), None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html(
+        &html("<div class='x'>A</div><div class='x'>B</div>"),
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     let via_item = page
         .evaluate("document.querySelectorAll('.x').item(0).textContent")
         .unwrap();
@@ -318,9 +500,12 @@ async fn nodelist_bracket_access() {
 
 #[tokio::test]
 async fn computed_style_from_style_block() {
-    let mut page = Page::from_html(r#"<!DOCTYPE html><html><head>
+    let mut page = Page::from_html(
+        r#"<!DOCTYPE html><html><head>
         <style>body { margin: 0; } .test { color: green; }</style>
-    </head><body><div id="el" class="test"></div></body></html>"#, None::<stealth::StealthProfile>)
+    </head><body><div id="el" class="test"></div></body></html>"#,
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
     assert_eq!(

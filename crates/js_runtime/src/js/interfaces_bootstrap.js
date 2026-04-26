@@ -5,7 +5,6 @@
 ((globalThis) => {
     function _define(name, cls) {
         if (globalThis[name]) {
-            console.log(`[IDL] ${name} already exists, skipping`);
             return;
         }
         Object.defineProperty(cls.prototype, Symbol.toStringTag, {
@@ -14,7 +13,6 @@
         Object.defineProperty(globalThis, name, {
             value: cls, configurable: true, writable: true, enumerable: false
         });
-        console.log(`[IDL] defined ${name}`);
     }
 
     _define("Navigator", class Navigator {});
@@ -68,8 +66,13 @@
         };
     }
 
-    // Global error handler for challenge debugging
-    globalThis.__errors = [];
+    // __errors is an internal buffer for challenge debugging. Must not
+    // leak to page scripts — a site that does `Object.keys(window)`
+    // would see it and flag us. Kept non-enumerable and deleted by
+    // cleanup_bootstrap.js.
+    Object.defineProperty(globalThis, '__errors', {
+        value: [], enumerable: false, configurable: true, writable: true,
+    });
     globalThis.onerror = function(msg, url, line, col, error) {
         globalThis.__errors.push({
             msg: String(msg),
@@ -78,7 +81,6 @@
             col: col,
             stack: error ? String(error.stack) : ""
         });
-        console.log(`[JS ERROR] ${msg} at ${url}:${line}:${col}`);
         return false;
     };
 

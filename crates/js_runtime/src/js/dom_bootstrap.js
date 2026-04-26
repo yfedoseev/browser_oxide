@@ -1,5 +1,4 @@
 ((globalThis) => {
-    console.log("[DOM] bootstrap start");
     const core = Deno.core;
     const ops = core.ops;
     const _nodeIds = new WeakMap();
@@ -1412,19 +1411,15 @@
     globalThis.Selection = Selection;
     globalThis.getSelection = function() { return _selection; };
 
-    // Image constructor — new Image(width, height)
-    globalThis.Image = class Image {
-        constructor(width, height) {
-            const el = _document.createElement("img");
-            if (width !== undefined) el.setAttribute("width", String(width));
-            if (height !== undefined) el.setAttribute("height", String(height));
-            // Copy properties onto el
-            el.naturalWidth = 0;
-            el.naturalHeight = 0;
-            el.complete = false;
-            el.src = "";
-            return el;
-        }
+    // Image constructor — new Image(width, height). Returns an
+    // HTMLImageElement whose naturalWidth/naturalHeight/complete are
+    // accessors defined on the prototype (getters; not writable).
+    // Constructor return of an object is the caller's `new Image(...)`.
+    globalThis.Image = function Image(width, height) {
+        const el = _document.createElement("img");
+        if (width !== undefined) el.setAttribute("width", String(width));
+        if (height !== undefined) el.setAttribute("height", String(height));
+        return el;
     };
 
     // DOMParser
@@ -1732,5 +1727,16 @@
     // Minimal window stub
     globalThis.window = globalThis;
     globalThis.self = globalThis;
-    console.log("[DOM] bootstrap end");
+
+    // Expose node-id resolution to sibling bootstrap files that need it
+    // (event_bootstrap.js wires listeners by nodeId, not by Node identity).
+    // Installed non-enumerable; cleanup_bootstrap.js deletes __boxide
+    // before page scripts run. Callers must CAPTURE the helper during
+    // their own bootstrap execution, not look it up per-call.
+    Object.defineProperty(globalThis, '__boxide', {
+        value: Object.freeze({ _getNodeId }),
+        enumerable: false,
+        configurable: true,
+        writable: false,
+    });
 })(globalThis);

@@ -22,8 +22,9 @@ fn html(body: &str) -> String {
 #[tokio::test]
 async fn html_to_dom_to_js_roundtrip() {
     // HTML is parsed into DOM, JS reads from DOM, mutates it, and we read back
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="data" data-count="3">original</div>
         <script>
             const el = document.getElementById('data');
@@ -38,7 +39,9 @@ async fn html_to_dom_to_js_roundtrip() {
             el.setAttribute('data-processed', 'true');
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -64,8 +67,9 @@ async fn html_to_dom_to_js_roundtrip() {
 
 #[tokio::test]
 async fn dom_mutations_are_visible_to_queries() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <ul id="list">
             <li id="a">A</li>
             <li id="b">B</li>
@@ -86,7 +90,9 @@ async fn dom_mutations_are_visible_to_queries() {
             document.getElementById('a').replaceWith(e);
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -138,8 +144,9 @@ async fn dom_mutations_are_visible_to_queries() {
 
 #[tokio::test]
 async fn events_bubble_through_dom_tree() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="outer">
             <div id="inner">
                 <button id="btn">Click</button>
@@ -153,7 +160,9 @@ async fn events_bubble_through_dom_tree() {
             document.getElementById('btn').dispatchEvent(new Event('click', { bubbles: true }));
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -165,8 +174,9 @@ async fn events_bubble_through_dom_tree() {
 
 #[tokio::test]
 async fn event_listener_removal_works() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="el"></div>
         <script>
             globalThis.count = 0;
@@ -178,7 +188,9 @@ async fn event_listener_removal_works() {
             el.dispatchEvent(new Event('test'));
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -187,8 +199,9 @@ async fn event_listener_removal_works() {
 
 #[tokio::test]
 async fn custom_event_with_detail() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="el"></div>
         <script>
             globalThis.received = null;
@@ -200,7 +213,9 @@ async fn custom_event_with_detail() {
             );
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -213,8 +228,9 @@ async fn custom_event_with_detail() {
 
 #[tokio::test]
 async fn async_chain_mutates_dom() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="status">start</div>
         <script>
             const el = document.getElementById('status');
@@ -229,7 +245,9 @@ async fn async_chain_mutates_dom() {
             }, 10);
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -242,8 +260,9 @@ async fn async_chain_mutates_dom() {
 
 #[tokio::test]
 async fn set_interval_fires_multiple_times() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             globalThis.ticks = 0;
             const id = setInterval(() => {
@@ -252,7 +271,9 @@ async fn set_interval_fires_multiple_times() {
             }, 20);
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -266,14 +287,17 @@ async fn set_interval_fires_multiple_times() {
 
 #[tokio::test]
 async fn cookie_read_write() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             document.cookie = 'session=abc123; path=/';
             document.cookie = 'theme=dark; path=/';
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -290,14 +314,17 @@ async fn cookie_read_write() {
 
 #[tokio::test]
 async fn localstorage_persists() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             localStorage.setItem('user', 'alice');
             localStorage.setItem('count', '42');
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -329,8 +356,9 @@ async fn localstorage_persists() {
 
 #[tokio::test]
 async fn style_mutations_reflect_in_dom() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="box"></div>
         <script>
             const box = document.getElementById('box');
@@ -339,7 +367,9 @@ async fn style_mutations_reflect_in_dom() {
             box.style.setProperty('border', '1px solid black');
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -367,8 +397,9 @@ async fn style_mutations_reflect_in_dom() {
 
 #[tokio::test]
 async fn clone_and_modify_independently() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <template id="tpl">
             <div class="card"><span class="name"></span></div>
         </template>
@@ -385,7 +416,9 @@ async fn clone_and_modify_independently() {
             }
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -409,8 +442,9 @@ async fn clone_and_modify_independently() {
 
 #[tokio::test]
 async fn insert_adjacent_html_builds_complex_dom() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="target">middle</div>
         <script>
             const el = document.getElementById('target');
@@ -420,7 +454,9 @@ async fn insert_adjacent_html_builds_complex_dom() {
             el.insertAdjacentHTML('beforeend', '<span>-end</span>');
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -462,10 +498,14 @@ async fn stealth_profile_wired_end_to_end() {
     assert!(ua.contains("Windows NT 10.0"), "UA: {}", ua);
     assert_eq!(page.evaluate("navigator.platform").unwrap(), "Win32");
     assert_eq!(page.evaluate("navigator.vendor").unwrap(), "Google Inc.");
+    // Chrome 130+ exposes navigator.webdriver as a boolean getter
+    // (non-enumerable, returns false when automation is off). Older
+    // Chrome made it `undefined`; that expectation is stale.
     assert_eq!(
         page.evaluate("typeof navigator.webdriver").unwrap(),
-        "undefined"
+        "boolean"
     );
+    assert_eq!(page.evaluate("navigator.webdriver").unwrap(), "false");
     assert_eq!(page.evaluate("navigator.cookieEnabled").unwrap(), "true");
     assert_eq!(page.evaluate("navigator.language").unwrap(), "en-US");
     assert_eq!(page.evaluate("navigator.hardwareConcurrency").unwrap(), "8");
@@ -544,8 +584,9 @@ async fn chinese_locale_profile() {
 
 #[tokio::test]
 async fn canvas_renders_and_exports() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             const c = document.createElement('canvas');
             c.width = 200;
@@ -560,7 +601,9 @@ async fn canvas_renders_and_exports() {
             globalThis.textWidth = ctx.measureText('Hello').width;
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -580,8 +623,9 @@ async fn canvas_renders_and_exports() {
 
 #[tokio::test]
 async fn webgl_context_and_parameters() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             const gl = document.createElement('canvas').getContext('webgl');
             globalThis.vendor = gl.getParameter(gl.VENDOR);
@@ -591,7 +635,9 @@ async fn webgl_context_and_parameters() {
             globalThis.maxTexture = gl.getParameter(0x0D33); // GL_MAX_TEXTURE_SIZE
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -616,7 +662,9 @@ async fn webgl_context_and_parameters() {
 
 #[tokio::test]
 async fn audio_context_exists() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     assert_eq!(page.evaluate("typeof AudioContext").unwrap(), "function");
     assert_eq!(
         page.evaluate("typeof OfflineAudioContext").unwrap(),
@@ -630,11 +678,14 @@ async fn audio_context_exists() {
 
 #[tokio::test]
 async fn layout_returns_dimensions() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="box" style="width:200px; height:100px;"></div>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -655,8 +706,9 @@ async fn layout_returns_dimensions() {
 
 #[tokio::test]
 async fn history_navigation() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             history.pushState({ page: 1 }, '', '/page1');
             history.pushState({ page: 2 }, '', '/page2');
@@ -665,7 +717,9 @@ async fn history_navigation() {
             history.back();
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -679,7 +733,9 @@ async fn history_navigation() {
 
 #[tokio::test]
 async fn url_parsing() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     assert_eq!(
         page.evaluate("new URL('https://example.com/path?q=1#hash').hostname")
             .unwrap(),
@@ -708,8 +764,9 @@ async fn url_parsing() {
 
 #[tokio::test]
 async fn abort_controller_lifecycle() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             const ac = new AbortController();
             globalThis.events = [];
@@ -719,7 +776,9 @@ async fn abort_controller_lifecycle() {
             events.push('after:' + ac.signal.aborted);
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -735,8 +794,9 @@ async fn abort_controller_lifecycle() {
 
 #[tokio::test]
 async fn domparser_parses_html() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             const parser = new DOMParser();
             const doc = parser.parseFromString(
@@ -745,7 +805,9 @@ async fn domparser_parses_html() {
             globalThis.text = doc.querySelector('#inner').textContent;
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -758,8 +820,9 @@ async fn domparser_parses_html() {
 
 #[tokio::test]
 async fn formdata_and_urlsearchparams() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             const fd = new FormData();
             fd.append('name', 'test');
@@ -774,7 +837,9 @@ async fn formdata_and_urlsearchparams() {
             globalThis.uspStr = usp.toString();
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -789,7 +854,9 @@ async fn formdata_and_urlsearchparams() {
 
 #[tokio::test]
 async fn match_media_evaluates_queries() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     // innerWidth defaults to 1920
     assert_eq!(
         page.evaluate("matchMedia('(min-width: 768px)').matches")
@@ -813,14 +880,17 @@ async fn match_media_evaluates_queries() {
 
 #[tokio::test]
 async fn document_write_injects_content() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <div id="before">before</div>
         <script>
             document.write('<div id="written">injected</div>');
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -901,8 +971,9 @@ async fn spa_like_render_cycle() {
 
 #[tokio::test]
 async fn is_connected_tracks_dom_attachment() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             const div = document.createElement('div');
             globalThis.step1 = div.isConnected; // false — not in tree
@@ -912,7 +983,9 @@ async fn is_connected_tracks_dom_attachment() {
             globalThis.step3 = div.isConnected; // false — removed
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -983,7 +1056,8 @@ async fn full_pipeline_wikipedia() {
 async fn e2e_style_block_to_computed_style() {
     // Full pipeline: HTML with <style> block → parse → collect stylesheets →
     // JS reads computed style → gets correct value from cascade
-    let mut page = Page::from_html(r#"<!DOCTYPE html>
+    let mut page = Page::from_html(
+        r#"<!DOCTYPE html>
         <html><head>
             <style>
                 .highlight { color: red; font-size: 24px; }
@@ -998,7 +1072,9 @@ async fn e2e_style_block_to_computed_style() {
                 globalThis.fontSize = cs.fontSize;
                 globalThis.bg = cs.backgroundColor;
             </script>
-        </body></html>"#, None::<stealth::StealthProfile>)
+        </body></html>"#,
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -1013,8 +1089,9 @@ async fn e2e_style_block_to_computed_style() {
 
 #[tokio::test]
 async fn e2e_canvas_gradient_renders_pixels() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <canvas id="c" width="100" height="100"></canvas>
         <script>
             const ctx = document.getElementById('c').getContext('2d');
@@ -1026,7 +1103,9 @@ async fn e2e_canvas_gradient_renders_pixels() {
             globalThis.dataUrl = document.getElementById('c').toDataURL();
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -1083,15 +1162,18 @@ async fn e2e_mutation_observer_in_pipeline() {
 
 #[tokio::test]
 async fn e2e_websocket_constructor_stores_url() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             const ws = new WebSocket('wss://echo.websocket.org');
             globalThis.wsUrl = ws.url;
             globalThis.wsState = ws.readyState;
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -1106,8 +1188,9 @@ async fn e2e_websocket_constructor_stores_url() {
 
 #[tokio::test]
 async fn e2e_iframe_content_window_exists() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             const iframe = document.createElement('iframe');
             document.body.appendChild(iframe);
@@ -1116,7 +1199,9 @@ async fn e2e_iframe_content_window_exists() {
             globalThis.parentIsWindow = iframe.contentWindow.parent === window;
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -1131,7 +1216,8 @@ async fn e2e_iframe_content_window_exists() {
 
 #[tokio::test]
 async fn e2e_spa_with_css_cascade() {
-    let mut page = Page::from_html(r#"<!DOCTYPE html>
+    let mut page = Page::from_html(
+        r#"<!DOCTYPE html>
         <html><head>
             <style>
                 .card { color: navy; font-size: 14px; }
@@ -1178,7 +1264,9 @@ async fn e2e_spa_with_css_cascade() {
                 bob.dispatchEvent(new Event('click'));
                 globalThis.bobActive = bob.classList.contains('active');
             </script>
-        </body></html>"#, None::<stealth::StealthProfile>)
+        </body></html>"#,
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -1216,8 +1304,9 @@ async fn e2e_spa_with_css_cascade() {
 #[tokio::test]
 #[ignore] // requires network
 async fn e2e_websocket_tls_connects() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <script>
             globalThis.wsResult = 'pending';
             globalThis.wsError = '';
@@ -1231,7 +1320,9 @@ async fn e2e_websocket_tls_connects() {
             }
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -1305,8 +1396,9 @@ async fn e2e_stylesheet_collector_finds_link_tags() {
 
 #[tokio::test]
 async fn e2e_webgl_renders_in_pipeline() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <canvas id="c" width="64" height="64"></canvas>
         <script>
             const gl = document.getElementById('c').getContext('webgl');
@@ -1326,7 +1418,9 @@ async fn e2e_webgl_renders_in_pipeline() {
             globalThis.hasContent = document.getElementById('c').toDataURL().length > 100;
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -1353,10 +1447,13 @@ async fn e2e_webgl_renders_in_pipeline() {
 
 #[tokio::test]
 async fn e2e_iframe_srcdoc_isolated() {
-    let mut page = Page::from_html(r#"<!DOCTYPE html><html><body>
+    let mut page = Page::from_html(
+        r#"<!DOCTYPE html><html><body>
         <script>globalThis.scope = 'parent';</script>
         <iframe srcdoc="<script>globalThis.scope = 'child';</script>"></iframe>
-    </body></html>"#, None::<stealth::StealthProfile>)
+    </body></html>"#,
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 
@@ -1370,10 +1467,13 @@ async fn e2e_iframe_srcdoc_isolated() {
 
 #[tokio::test]
 async fn e2e_iframe_dom_isolated() {
-    let mut page = Page::from_html(r#"<!DOCTYPE html><html><body>
+    let mut page = Page::from_html(
+        r#"<!DOCTYPE html><html><body>
         <div id="p">parent-dom</div>
         <iframe srcdoc="<div id='c'>child-dom</div>"></iframe>
-    </body></html>"#, None::<stealth::StealthProfile>)
+    </body></html>"#,
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
 

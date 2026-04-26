@@ -111,43 +111,162 @@
         Object.defineProperty(p, '_name', { value: name });
         Object.defineProperty(p, '_desc', { value: desc });
         Object.defineProperty(p, '_file', { value: file });
+        Object.defineProperty(p, '_mimeTypes', { value: [], writable: true });
         return p;
     };
+    const _makeMime = (type, suffixes, desc, plugin) => {
+        const m = Object.create(_MimeTypeProto);
+        Object.defineProperty(m, '_type', { value: type });
+        Object.defineProperty(m, '_suffixes', { value: suffixes });
+        Object.defineProperty(m, '_desc', { value: desc });
+        Object.defineProperty(m, '_plugin', { value: plugin });
+        return m;
+    };
 
-    const _plugins = [
-        _makePlugin("PDF Viewer", "Portable Document Format", "internal-pdf-viewer"),
-        _makePlugin("Chrome PDF Viewer", "Portable Document Format", "internal-pdf-viewer"),
-        _makePlugin("Chromium PDF Viewer", "Portable Document Format", "internal-pdf-viewer"),
-        _makePlugin("Microsoft Edge PDF Viewer", "Portable Document Format", "internal-pdf-viewer"),
-        _makePlugin("WebKit built-in PDF", "Portable Document Format", "internal-pdf-viewer"),
+    // Canonical Chrome 133 plugin set. All real Chrome 133 browsers ship
+    // exactly these 5 plugins + 2 mime types; the profile fields
+    // plugins_count / mime_types_count let a profile CLAIM a subset.
+    //
+    // IMPORTANT: the bootstrap runs at V8-snapshot-build time with NO
+    // stealth profile installed, so any eager `_pInt` read here captures
+    // the default (5/2) into the snapshot. Count resolution MUST happen
+    // lazily via getters so each runtime navigator.plugins.length call
+    // reads the live profile.
+    const _PDF_DESC = "Portable Document Format";
+    const _PDF_FILE = "internal-pdf-viewer";
+    const _allPlugins = [
+        _makePlugin("PDF Viewer", _PDF_DESC, _PDF_FILE),
+        _makePlugin("Chrome PDF Viewer", _PDF_DESC, _PDF_FILE),
+        _makePlugin("Chromium PDF Viewer", _PDF_DESC, _PDF_FILE),
+        _makePlugin("Microsoft Edge PDF Viewer", _PDF_DESC, _PDF_FILE),
+        _makePlugin("WebKit built-in PDF", _PDF_DESC, _PDF_FILE),
     ];
+    const _allMimes = [
+        _makeMime("application/pdf", "pdf", _PDF_DESC, _allPlugins[0]),
+        _makeMime("text/pdf", "pdf", _PDF_DESC, _allPlugins[0]),
+    ];
+    // Cross-link: each plugin reports the same mime type list per Chrome.
+    _allPlugins.forEach(p => { p._mimeTypes = _allMimes; });
 
-    // 2. Setup PluginArray.prototype
+    // Runtime count resolvers — clamped to physical array size so a probe
+    // that walks plugins[i] for i<length never hits undefined.
+    const _pluginsLen = () => Math.max(0, Math.min(_allPlugins.length, _pInt("plugins_count", _allPlugins.length)));
+    const _mimesLen = () => Math.max(0, Math.min(_allMimes.length, _pInt("mime_types_count", _allMimes.length)));
+
+    // 2. Setup PluginArray.prototype — length + item() dispatch via live count.
     const _PluginArrayProto = PluginArray.prototype;
     Object.defineProperty(_PluginArrayProto, Symbol.toStringTag, { value: "PluginArray", enumerable: false, configurable: true });
-    Object.defineProperty(_PluginArrayProto, 'length', { get: () => _plugins.length, enumerable: true, configurable: true });
-    _defProtoMethod(_PluginArrayProto, 'item', (i) => _plugins[i] || null);
-    _defProtoMethod(_PluginArrayProto, 'namedItem', (n) => _plugins.find(p => p.name === n) || null);
+    Object.defineProperty(_PluginArrayProto, 'length', { get: () => _pluginsLen(), enumerable: true, configurable: true });
+    _defProtoMethod(_PluginArrayProto, 'item', function item(i) {
+        const n = _pluginsLen();
+        return (i >= 0 && i < n) ? _allPlugins[i] : null;
+    });
+    _defProtoMethod(_PluginArrayProto, 'namedItem', function namedItem(n) {
+        const len = _pluginsLen();
+        for (let i = 0; i < len; i++) if (_allPlugins[i].name === n) return _allPlugins[i];
+        return null;
+    });
     _defProtoMethod(_PluginArrayProto, 'refresh', () => {});
+    // Symbol.iterator iterates the live sliced range.
+    Object.defineProperty(_PluginArrayProto, Symbol.iterator, {
+        value: function* iter() {
+            const n = _pluginsLen();
+            for (let i = 0; i < n; i++) yield _allPlugins[i];
+        },
+        configurable: true,
+    });
 
-    // Setup MimeTypeArray.prototype
+    // Setup MimeTypeArray.prototype — same pattern.
     const _MimeTypeArrayProto = MimeTypeArray.prototype;
     Object.defineProperty(_MimeTypeArrayProto, Symbol.toStringTag, { value: "MimeTypeArray", enumerable: false, configurable: true });
-    Object.defineProperty(_MimeTypeArrayProto, 'length', { get: () => 0, enumerable: true, configurable: true });
-    _defProtoMethod(_MimeTypeArrayProto, 'item', (i) => null);
-    _defProtoMethod(_MimeTypeArrayProto, 'namedItem', (n) => null);
-    
-    // Support numeric indices on the instance (Chrome behavior)
+    Object.defineProperty(_MimeTypeArrayProto, 'length', { get: () => _mimesLen(), enumerable: true, configurable: true });
+    _defProtoMethod(_MimeTypeArrayProto, 'item', function item(i) {
+        const n = _mimesLen();
+        return (i >= 0 && i < n) ? _allMimes[i] : null;
+    });
+    _defProtoMethod(_MimeTypeArrayProto, 'namedItem', function namedItem(n) {
+        const len = _mimesLen();
+        for (let i = 0; i < len; i++) if (_allMimes[i].type === n) return _allMimes[i];
+        return null;
+    });
+    Object.defineProperty(_MimeTypeArrayProto, Symbol.iterator, {
+        value: function* iter() {
+            const n = _mimesLen();
+            for (let i = 0; i < n; i++) yield _allMimes[i];
+        },
+        configurable: true,
+    });
+
+    // Instance: install numeric index accessors that gate on live count.
     const _navPlugins = Object.create(_PluginArrayProto);
-    _plugins.forEach((p, i) => {
-        Object.defineProperty(_navPlugins, i, { value: p, enumerable: true, configurable: true });
+    _allPlugins.forEach((p, i) => {
+        Object.defineProperty(_navPlugins, i, {
+            get: () => (i < _pluginsLen() ? p : undefined),
+            enumerable: true,
+            configurable: true,
+        });
+    });
+
+    // Plugin instance behaves like a MimeTypeArray over its mime types.
+    _allPlugins.forEach(p => {
+        Object.defineProperty(p, 'length', { get: () => _mimesLen(), enumerable: true, configurable: true });
+        Object.defineProperty(p, 'item', {
+            value: function item(i) {
+                const n = _mimesLen();
+                return (i >= 0 && i < n) ? p._mimeTypes[i] : null;
+            },
+            enumerable: false, configurable: true,
+        });
+        Object.defineProperty(p, 'namedItem', {
+            value: function namedItem(n) {
+                const len = _mimesLen();
+                for (let i = 0; i < len; i++) if (p._mimeTypes[i].type === n) return p._mimeTypes[i];
+                return null;
+            },
+            enumerable: false, configurable: true,
+        });
+        p._mimeTypes.forEach((m, i) => {
+            Object.defineProperty(p, i, {
+                get: () => (i < _mimesLen() ? m : undefined),
+                enumerable: true, configurable: true,
+            });
+        });
     });
 
     const _navMimeTypes = Object.create(_MimeTypeArrayProto);
+    _allMimes.forEach((m, i) => {
+        Object.defineProperty(_navMimeTypes, i, {
+            get: () => (i < _mimesLen() ? m : undefined),
+            enumerable: true, configurable: true,
+        });
+    });
 
     let MediaDevices = globalThis.MediaDevices || class MediaDevices {};
     const _navMediaDevices = Object.create(MediaDevices.prototype);
-    _navMediaDevices.enumerateDevices = function () { return Promise.resolve(_pJson("media_devices", [])); };
+    // enumerateDevices: apply the two spec behaviors real Chrome does and we
+    // previously missed:
+    //   (1) WebIDL camelCase on output (deviceId / groupId — NOT snake_case).
+    //       The profile ships snake_case; we transform here.
+    //   (2) label === "" until the corresponding permission is GRANTED
+    //       (audioinput/audiooutput → microphone; videoinput → camera).
+    //       Leaking populated labels pre-permission is a classic automation
+    //       tell. _PERMISSION_STATE_MAP is defined below; reference resolves
+    //       lazily when this function is called. §6.6 item 9 / item 7.
+    _navMediaDevices.enumerateDevices = function enumerateDevices() {
+        const raw = _pJson("media_devices", []);
+        const permFor = (kind) => {
+            if (kind === "videoinput") return _PERMISSION_STATE_MAP["camera"] || "prompt";
+            if (kind === "audioinput" || kind === "audiooutput") return _PERMISSION_STATE_MAP["microphone"] || "prompt";
+            return "granted"; // unknown kinds — don't blank
+        };
+        const out = raw.map((d) => {
+            const deviceId = d.deviceId != null ? d.deviceId : (d.device_id || "");
+            const groupId = d.groupId != null ? d.groupId : (d.group_id || "");
+            const label = permFor(d.kind) === "granted" ? (d.label || "") : "";
+            return { deviceId, kind: d.kind || "", label, groupId };
+        });
+        return Promise.resolve(out);
+    };
     _navMediaDevices.getUserMedia = function () { return Promise.reject(new Error("Permission denied")); };
     _navMediaDevices.getDisplayMedia = function () { return Promise.reject(new Error("Permission denied")); };
     _navMediaDevices.getSupportedConstraints = function () {
@@ -157,10 +276,39 @@
     _navMediaDevices.removeEventListener = function () {};
     _navMediaDevices.dispatchEvent = function () { return true; };
 
+    // Permission name → state map matching headed Chrome defaults.
+    // W3C PermissionState enum: 'granted' | 'denied' | 'prompt'. Headless
+    // Chrome's well-known 'denied' return for notifications is the single
+    // biggest fingerprint tell this function fixes.
+    const _PERMISSION_STATE_MAP = {
+        "notifications": "prompt",
+        "geolocation": "prompt",
+        "camera": "prompt",
+        "microphone": "prompt",
+        "midi": "prompt",
+        "push": "prompt",
+        "persistent-storage": "granted",
+        "background-sync": "granted",
+        "background-fetch": "granted",
+        "clipboard-read": "prompt",
+        "clipboard-write": "granted",
+        "payment-handler": "granted",
+        "accelerometer": "granted",
+        "gyroscope": "granted",
+        "magnetometer": "granted",
+        "ambient-light-sensor": "granted",
+        "screen-wake-lock": "granted",
+        "nfc": "prompt",
+        "display-capture": "prompt",
+        "window-management": "prompt",
+    };
+
     class PermissionStatus {
         constructor(name) { this._name = name; }
         get name() { return this._name; }
-        get state() { return "prompt"; }
+        get state() {
+            return _PERMISSION_STATE_MAP[this._name] || "prompt";
+        }
         get onchange() { return null; }
         set onchange(_v) {}
         addEventListener() {}
@@ -177,7 +325,19 @@
         value: "Permissions", configurable: true,
     });
     Permissions.prototype.query = function query(desc) {
-        return Promise.resolve(new PermissionStatus(desc && desc.name));
+        if (desc == null || typeof desc !== 'object') {
+            return Promise.reject(new TypeError(
+                "Failed to execute 'query' on 'Permissions': parameter 1 is not of type 'PermissionDescriptor'."
+            ));
+        }
+        const name = desc.name;
+        if (typeof name !== 'string' || !(name in _PERMISSION_STATE_MAP)) {
+            return Promise.reject(new TypeError(
+                "Failed to execute 'query' on 'Permissions': The provided value '" +
+                String(name) + "' is not a valid enum value of type PermissionName."
+            ));
+        }
+        return Promise.resolve(new PermissionStatus(name));
     };
     globalThis.Permissions = Permissions;
     const _navPermissions = Object.create(Permissions.prototype);
@@ -254,7 +414,17 @@
     const _navMediaSession = {};
     const _navScheduling = { isInputPending() { return false; } };
     const _navUserActivation = { isActive: false, hasBeenActive: false };
-    const _navLanguagesCache = Object.freeze(_pJson("languages", ["en-US", "en"]));
+    // navigator.languages is CACHED per runtime — Chrome returns the same
+    // frozen array reference on every access, so we memoize after the first
+    // lazy read (bootstrap time has no profile; the cache must be deferred).
+    // Assertions tested elsewhere: Object.isFrozen === true, identity stable.
+    let _navLanguagesCache = null;
+    const _getNavLanguages = () => {
+        if (_navLanguagesCache === null) {
+            _navLanguagesCache = Object.freeze(_pJson("languages", ["en-US", "en"]));
+        }
+        return _navLanguagesCache;
+    };
 
     // Scalar getters — read from stealth profile each call (idempotent).
     _defNav('userAgent', () => _p("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
@@ -267,7 +437,7 @@
     _defNav('appName', () => "Netscape");
     _defNav('product', () => "Gecko");
     _defNav('language', () => _p("language", "ru-RU"));
-    _defNav('languages', () => _navLanguagesCache);
+    _defNav('languages', _getNavLanguages);
     _defNav('onLine', () => true);
     _defNav('cookieEnabled', () => true);
     _defNav('hardwareConcurrency', () => _pInt("hardware_concurrency", 8));
@@ -534,11 +704,14 @@
     globalThis.isSecureContext = true;
     globalThis.crossOriginIsolated = false;
     globalThis.origin = "null";
-    globalThis.innerWidth = _pInt("inner_width", 1920);
-    globalThis.innerHeight = _pInt("inner_height", 1080);
-    globalThis.outerWidth = _pInt("outer_width", 1920);
-    globalThis.outerHeight = _pInt("outer_height", 1080);
-    globalThis.devicePixelRatio = _pFloat("device_pixel_ratio", 1);
+    // Window metrics must resolve LAZILY — bootstrap runs at V8-snapshot
+    // build time with no profile installed; eager values get baked as
+    // defaults and never update when the profile loads.
+    Object.defineProperty(globalThis, 'innerWidth',  { get: () => _pInt("inner_width", 1920),   configurable: true });
+    Object.defineProperty(globalThis, 'innerHeight', { get: () => _pInt("inner_height", 1080),  configurable: true });
+    Object.defineProperty(globalThis, 'outerWidth',  { get: () => _pInt("outer_width", 1920),   configurable: true });
+    Object.defineProperty(globalThis, 'outerHeight', { get: () => _pInt("outer_height", 1080),  configurable: true });
+    Object.defineProperty(globalThis, 'devicePixelRatio', { get: () => _pFloat("device_pixel_ratio", 1), configurable: true });
     globalThis.screenX = 0;
     globalThis.screenY = 0;
     globalThis.pageXOffset = 0;
@@ -606,6 +779,28 @@
         value: function toString() { return 'function loadTimes() { [native code] }'; },
         configurable: true,
     });
+    // chrome.webstore — legacy API (pre-2018). Modern Chrome still exposes
+    // the object on the top-frame; its methods throw off-webstore. Probes
+    // assert: typeof chrome.webstore === 'object', install is a function,
+    // onInstallStageChanged/onDownloadProgress expose the standard
+    // Event-listener-style {addListener, removeListener, hasListener}.
+    const _webstoreInstall = function install(url, onSuccess, onFailure) {
+        // Real Chrome off the Web Store throws here; emulate that shape.
+        if (typeof onFailure === 'function') {
+            try { onFailure("Invalid Chrome Web Store item ID"); } catch (_) {}
+        }
+    };
+    Object.defineProperty(_webstoreInstall, 'toString', {
+        value: function toString() { return 'function install() { [native code] }'; },
+        configurable: true,
+    });
+    const _makeListenerHandle = () => ({
+        addListener() {},
+        removeListener() {},
+        hasListener() { return false; },
+        hasListeners() { return false; },
+    });
+
     globalThis.chrome = {
         app: {
             isInstalled: false,
@@ -620,8 +815,8 @@
             RequestUpdateCheckStatus: {NO_UPDATE:"no_update",THROTTLED:"throttled",UPDATE_AVAILABLE:"update_available"},
             OnRestartRequiredReason: {APP_UPDATE:"app_update",OS_UPDATE:"os_update",PERIODIC:"periodic"},
             id: "kjmdfpjcpgidgjglkaonfhgmjjmghmfe", // Standard Chrome Web Store ID format
-            onConnect: { addListener() {}, removeListener() {}, hasListener() { return false; } },
-            onMessage: { addListener() {}, removeListener() {}, hasListener() { return false; } },
+            onConnect: _makeListenerHandle(),
+            onMessage: _makeListenerHandle(),
             connect() {},
             sendMessage() {},
             getURL(s) { return "chrome-extension://kjmdfpjcpgidgjglkaonfhgmjjmghmfe/" + s; },
@@ -629,6 +824,11 @@
         },
         csi: _chromeCsi,
         loadTimes: _chromeLoadTimes,
+        webstore: {
+            install: _webstoreInstall,
+            onInstallStageChanged: _makeListenerHandle(),
+            onDownloadProgress: _makeListenerHandle(),
+        },
     };
 
     // --- Document visibility/hidden stubs ---
@@ -638,60 +838,20 @@
     Object.defineProperty(Document.prototype, 'webkitHidden', { get() { return false; }, enumerable: true, configurable: true });
 
     if (globalThis.navigator) {
-        // Match Chrome's exact descriptor for webdriver: false, non-enumerable
+        // Match Chrome's exact descriptor for webdriver: false, non-enumerable.
+        // (All other navigator.* getters are installed once above, reading
+        // lazily from the stealth profile — do NOT re-install them here.
+        // A duplicate _defNav('languages', () => _pJson(...)) returned a
+        // fresh unfrozen array each call, breaking nav_languages_is_frozen.)
         Object.defineProperty(_NavProto, 'webdriver', {
             get: () => false,
             enumerable: false,
             configurable: true
         });
-        _defNav('onLine', () => true);
-        _defNav('cookieEnabled', () => true);
-        _defNav('vendor', () => 'Google Inc.');
-        _defNav('productSub', () => '20030107');
-        _defNav('language', () => _p("language", "ru-RU"));
-        _defNav('languages', () => _pJson("languages", ["ru-RU", "ru", "en-US", "en"]));
-        _defNav('pdfViewerEnabled', () => true);
-        _defNav('deviceMemory', () => _pInt("device_memory", 8));
-        _defNav('hardwareConcurrency', () => _pInt("hardware_concurrency", 8));
-        _defNav('doNotTrack', () => null);
 
-        // Realistic Plugins and MimeTypes
-        const _pluginsData = [
-            { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-            { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-            { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-            { name: "Microsoft Edge PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-            { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-        ];
-        const _mimesData = [
-            { type: "application/pdf", suffixes: "pdf", description: "Portable Document Format", __pluginName: "PDF Viewer" },
-            { type: "text/pdf", suffixes: "pdf", description: "Portable Document Format", __pluginName: "PDF Viewer" }
-        ];
-        
-        const _navPlugins = _pluginsData.map(p => {
-            const obj = Object.create(globalThis.Plugin?.prototype || Object.prototype);
-            Object.defineProperty(obj, 'name', { value: p.name, enumerable: true });
-            Object.defineProperty(obj, 'filename', { value: p.filename, enumerable: true });
-            Object.defineProperty(obj, 'description', { value: p.description, enumerable: true });
-            return obj;
-        });
-        const _navMimeTypes = _mimesData.map(m => {
-            const obj = Object.create(globalThis.MimeType?.prototype || Object.prototype);
-            Object.defineProperty(obj, 'type', { value: m.type, enumerable: true });
-            Object.defineProperty(obj, 'suffixes', { value: m.suffixes, enumerable: true });
-            Object.defineProperty(obj, 'description', { value: m.description, enumerable: true });
-            const plugin = _navPlugins.find(p => p.name === m.__pluginName);
-            Object.defineProperty(obj, 'enabledPlugin', { get: () => plugin, enumerable: true });
-            return obj;
-        });
-
-        _navPlugins.item = function(i) { return this[i] || null; };
-        _navPlugins.namedItem = function(n) { return this.find(p => p.name === n) || null; };
-        _navMimeTypes.item = function(i) { return this[i] || null; };
-        _navMimeTypes.namedItem = function(n) { return this.find(m => m.type === n) || null; };
-        
-        _defNav('plugins', () => _navPlugins);
-        _defNav('mimeTypes', () => _navMimeTypes);
+        // navigator.plugins / mimeTypes are defined at the top of this file
+        // (search for _allPlugins). Count is driven by profile.plugins_count
+        // and profile.mime_types_count. Do not override here.
     }
 
     if (globalThis.navigator) {
@@ -722,94 +882,125 @@
 
     // navigator.userAgentData (Client Hints API)
     //
-    // All values are derived from the active StealthProfile so they stay
-    // consistent with the HTTP `Sec-CH-UA-*` headers set by chrome_headers().
-    // Inconsistency between header Client Hints and navigator.userAgentData is
-    // itself a detection signal (CreepJS, FingerprintJS, Yandex Antirobot).
+    // Every hint reads from the StealthProfile at call-time so HTTP
+    // Sec-CH-UA-* headers and the JS surface never diverge (a classic
+    // FingerprintJS / CreepJS / Yandex Antirobot scoring axis). Eager
+    // reads at bootstrap time would capture defaults because the V8
+    // snapshot is built with no profile installed.
     //
-    // Chrome only exposes high-entropy values via getHighEntropyValues(), which
-    // returns a Promise. The low-entropy values (brands/mobile/platform) are
-    // always visible on the sync object.
+    // Chrome exposes low-entropy fields synchronously (brands, mobile,
+    // platform). High-entropy values go through getHighEntropyValues()
+    // which returns a Promise and rejects on invalid descriptor shape.
     (function setupUaData() {
-        const browserMajor = _p("browser_version", "130.0.6723.91").split(".")[0];
-        const browserFullVersion = _p("browser_version", "130.0.6723.91");
-        const osName = _p("os_name", "Linux");
-        const osVersion = _p("os_version", "");
-        // Chrome reports platform-version as a zero-padded triple.
-        const platformVersion = (() => {
-            const v = osVersion || "";
-            if (osName === "Linux") return ""; // Chrome on Linux reports empty
-            const parts = v.split(".");
-            if (parts.length >= 3) return v;
+        // Chrome userAgentData.platform enum: "Windows" | "macOS" | "Linux"
+        // | "Android" | "Chrome OS" | "Chromium OS" | "Fuchsia" | "iOS" | "".
+        // Our os_name already uses these exact strings (with macOS not Mac OS X).
+        const _uaPlatform = () => _p("os_name", "Windows");
+        const _uaBrowserMajor = () => _p("browser_version", "130.0.6723.91").split(".")[0];
+        const _uaBrowserFull = () => _p("browser_version", "130.0.6723.91");
+        const _uaArch = () => _p("cpu_architecture", "x86");
+        const _uaBitness = () => _p("cpu_bitness", "64");
+        const _uaPlatformVersion = () => {
+            // Chrome on Linux reports empty; profile already honors this.
+            const v = _p("platform_version", "");
+            if (v) return v;
+            if (_uaPlatform() === "Linux") return "";
+            // Fallback: zero-pad os_version to a triple when platform_version
+            // not set (keeps legacy profiles working).
+            const ver = _p("os_version", "");
+            const parts = ver.split(".");
+            if (parts.length >= 3) return ver;
             if (parts.length === 2) return parts[0] + "." + parts[1] + ".0";
             if (parts.length === 1 && parts[0]) return parts[0] + ".0.0";
             return "";
-        })();
-        // Architecture derives from navigator.platform (Win32/MacIntel/Linux x86_64 → x86)
-        const platformStr = _p("platform", "Linux x86_64");
-        const architecture = /arm|aarch/i.test(platformStr) ? "arm" : "x86";
-        const bitness = "64";
+        };
+        const _uaModel = () => _p("ua_model", "");
+        const _uaWow64 = () => _p("ua_wow64", "false") === "true";
 
-        const lowEntropyBrands = Object.freeze([
-            Object.freeze({ brand: "Chromium", version: browserMajor }),
-            Object.freeze({ brand: "Google Chrome", version: browserMajor }),
-            Object.freeze({ brand: "Not-A.Brand", version: "24" }),
-        ]);
-        const fullVersionList = Object.freeze([
-            Object.freeze({ brand: "Chromium", version: browserFullVersion }),
-            Object.freeze({ brand: "Google Chrome", version: browserFullVersion }),
-            Object.freeze({ brand: "Not-A.Brand", version: "24.0.0.0" }),
-        ]);
-
-        function _shuffled(arr) {
-            const copy = [...arr];
+        // GREASE: Chrome's brand array lists Chromium / Google Chrome /
+        // Not-A.Brand in RANDOM order per startup. Real Chrome draws from
+        // a cryptographic RNG; Date.now() shuffling was pseudo-random
+        // enough to be detected in some probes. Use crypto.getRandomValues
+        // when available, fall back to Math.random.
+        const _secureRand = (n) => {
+            try {
+                const a = new Uint32Array(1);
+                crypto.getRandomValues(a);
+                return a[0] % n;
+            } catch (_) {
+                return Math.floor(Math.random() * n);
+            }
+        };
+        const _shuffled = (arr) => {
+            const copy = arr.slice();
             for (let i = copy.length - 1; i > 0; i--) {
-                const j = ((Date.now() * 0x9e3779b9 + i) >>> 0) % (i + 1);
+                const j = _secureRand(i + 1);
                 [copy[i], copy[j]] = [copy[j], copy[i]];
             }
             return copy;
-        }
-        const _shuffledLow = Object.freeze(_shuffled(lowEntropyBrands));
-        const _shuffledFull = Object.freeze(_shuffled(fullVersionList));
-
-        // The superset object used by getHighEntropyValues()
-        const allHints = {
-            architecture: "x86",
-            bitness: "64",
-            brands: _shuffledFull,
-            fullVersionList: _shuffledFull,
-            mobile: false,
-            model: "",
-            platform: "Windows",
-            platformVersion: "10.0.0",
-            uaFullVersion: browserFullVersion,
-            wow64: false,
         };
 
+        const _makeLowBrands = () => Object.freeze(_shuffled([
+            Object.freeze({ brand: "Chromium", version: _uaBrowserMajor() }),
+            Object.freeze({ brand: "Google Chrome", version: _uaBrowserMajor() }),
+            Object.freeze({ brand: "Not-A.Brand", version: "24" }),
+        ]).map(Object.freeze));
+        const _makeFullBrands = () => Object.freeze(_shuffled([
+            Object.freeze({ brand: "Chromium", version: _uaBrowserFull() }),
+            Object.freeze({ brand: "Google Chrome", version: _uaBrowserFull() }),
+            Object.freeze({ brand: "Not-A.Brand", version: "24.0.0.0" }),
+        ]).map(Object.freeze));
+        // Chrome re-uses the same GREASE ordering across a userAgentData
+        // object's lifetime; only randomized once per construction.
+        let _lowBrands = null, _fullBrands = null;
+        const _lowCached = () => (_lowBrands ||= _makeLowBrands());
+        const _fullCached = () => (_fullBrands ||= _makeFullBrands());
+
+        const _allowedHints = new Set([
+            "architecture", "bitness", "brands", "fullVersionList",
+            "mobile", "model", "platform", "platformVersion",
+            "uaFullVersion", "wow64",
+        ]);
+
         const _navUaData = {
-            get brands() { return _shuffledLow; },
-            mobile: false,
-            platform: "Windows",
+            get brands() { return _lowCached(); },
+            get mobile() { return false; },
+            get platform() { return _uaPlatform(); },
             getHighEntropyValues(hints) {
+                // Chrome rejects with TypeError on non-array (or missing).
+                if (!Array.isArray(hints)) {
+                    return Promise.reject(new TypeError(
+                        "Failed to execute 'getHighEntropyValues' on 'NavigatorUAData': " +
+                        "The provided value cannot be converted to a sequence."
+                    ));
+                }
                 const result = {
-                    brands: _shuffledFull,
+                    brands: _lowCached(),
                     mobile: false,
-                    platform: "Windows",
+                    platform: _uaPlatform(),
                 };
-                if (Array.isArray(hints)) {
-                    for (const key of hints) {
-                        if (key in allHints) {
-                            result[key] = allHints[key];
-                        }
+                for (const key of hints) {
+                    if (typeof key !== "string" || !_allowedHints.has(key)) continue;
+                    switch (key) {
+                        case "architecture":      result.architecture = _uaArch(); break;
+                        case "bitness":           result.bitness = _uaBitness(); break;
+                        case "brands":            result.brands = _lowCached(); break;
+                        case "fullVersionList":   result.fullVersionList = _fullCached(); break;
+                        case "mobile":            result.mobile = false; break;
+                        case "model":             result.model = _uaModel(); break;
+                        case "platform":          result.platform = _uaPlatform(); break;
+                        case "platformVersion":   result.platformVersion = _uaPlatformVersion(); break;
+                        case "uaFullVersion":     result.uaFullVersion = _uaBrowserFull(); break;
+                        case "wow64":             result.wow64 = _uaWow64(); break;
                     }
                 }
                 return Promise.resolve(result);
             },
             toJSON() {
                 return {
-                    brands: _shuffledLow.map(b => ({ brand: b.brand, version: b.version })),
+                    brands: _lowCached().map(b => ({ brand: b.brand, version: b.version })),
                     mobile: false,
-                    platform: "Windows",
+                    platform: _uaPlatform(),
                 };
             },
         };
@@ -1309,92 +1500,88 @@
     // so resolvedOptions() returns the profile timezone. Also patch
     // Date.prototype.getTimezoneOffset to return the profile's UTC offset.
     // =========================================================
-    if (ops.op_has_stealth_profile && ops.op_has_stealth_profile()) {
-        const profileTz = ops.op_get_profile_value("timezone") || "";
-        const profileLocale = ops.op_get_profile_value("language") || "ru-RU";
-        
-        if (globalThis.Intl) {
-            const _patchIntl = (klass) => {
-                if (!globalThis.Intl[klass]) return;
-                const _Orig = globalThis.Intl[klass];
-                const Patched = function(...args) {
-                    let locales = args[0];
-                    let options = args[1] || {};
-                    // If no locale provided, use profile locale
-                    if (!locales) locales = profileLocale;
-                    // For DateTimeFormat, also force timezone
-                    if (klass === 'DateTimeFormat' && !options.timeZone) {
-                        options = Object.assign({}, options, { timeZone: profileTz });
-                    }
-                    return new _Orig(locales, options);
-                };
-                Patched.prototype = _Orig.prototype;
-                if (_Orig.supportedLocalesOf) Patched.supportedLocalesOf = _Orig.supportedLocalesOf.bind(_Orig);
-                Object.defineProperty(globalThis.Intl, klass, { value: Patched, writable: true, configurable: true });
-            };
+    // IMPORTANT: the original gate `if (op_has_stealth_profile())` fired at
+    // V8-snapshot-build time — returning false and skipping the patch. The
+    // snapshot then froze stock V8 Intl, so no timezone override ever took
+    // effect when a profile loaded. Install patches unconditionally; each
+    // call reads the live profile via _p/_pInt, falling back to stock V8
+    // (system timezone) when no profile is installed.
+    if (globalThis.Intl) {
+        const _profileTz = () => _p("timezone", "");
+        const _profileLocale = () => _p("language", "");
+        const _OrigDTF = globalThis.Intl.DateTimeFormat;
 
-            _patchIntl('DateTimeFormat');
-            _patchIntl('NumberFormat');
-            _patchIntl('Collator');
-            _patchIntl('PluralRules');
-            _patchIntl('RelativeTimeFormat');
-
-            // --- Deep prototype override ---
-            const _intlClasses = ['DateTimeFormat', 'NumberFormat', 'Collator', 'PluralRules', 'RelativeTimeFormat'];
-            for (const klass of _intlClasses) {
-                if (globalThis.Intl[klass]) {
-                    const proto = globalThis.Intl[klass].prototype;
-                    const origResolved = proto.resolvedOptions;
-                    proto.resolvedOptions = function() {
-                        const res = origResolved.call(this);
-                        res.timeZone = profileTz || res.timeZone;
-                        res.locale = profileLocale || res.locale;
-                        return res;
-                    };
+        const _patchIntl = (klass) => {
+            if (!globalThis.Intl[klass]) return;
+            const _Orig = globalThis.Intl[klass];
+            const Patched = function(...args) {
+                let locales = args[0];
+                let options = args[1] || {};
+                const pLoc = _profileLocale();
+                const pTz = _profileTz();
+                if (!locales && pLoc) locales = pLoc;
+                if (klass === 'DateTimeFormat' && !options.timeZone && pTz) {
+                    options = Object.assign({}, options, { timeZone: pTz });
                 }
+                return new _Orig(locales, options);
+            };
+            Patched.prototype = _Orig.prototype;
+            if (_Orig.supportedLocalesOf) Patched.supportedLocalesOf = _Orig.supportedLocalesOf.bind(_Orig);
+            Object.defineProperty(globalThis.Intl, klass, { value: Patched, writable: true, configurable: true });
+        };
+
+        for (const k of ['DateTimeFormat', 'NumberFormat', 'Collator', 'PluralRules', 'RelativeTimeFormat']) {
+            _patchIntl(k);
+        }
+
+        // Deep prototype override: resolvedOptions() must return the
+        // profile's claim regardless of how the instance was constructed.
+        for (const klass of ['DateTimeFormat', 'NumberFormat', 'Collator', 'PluralRules', 'RelativeTimeFormat']) {
+            if (!globalThis.Intl[klass]) continue;
+            const proto = globalThis.Intl[klass].prototype;
+            const origResolved = proto.resolvedOptions;
+            proto.resolvedOptions = function() {
+                const res = origResolved.call(this);
+                const pTz = _profileTz();
+                const pLoc = _profileLocale();
+                if (pTz) res.timeZone = pTz;
+                if (pLoc) res.locale = pLoc;
+                return res;
+            };
+        }
+
+        // Date.prototype.getTimezoneOffset — compute the offset from the
+        // profile timezone at each call so DST transitions stay accurate.
+        const _origGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+        Date.prototype.getTimezoneOffset = function () {
+            const profileTz = _profileTz();
+            if (!profileTz) return _origGetTimezoneOffset.call(this);
+            try {
+                const fmt = new _OrigDTF("en-US", {
+                    timeZone: profileTz,
+                    year: "numeric", month: "2-digit", day: "2-digit",
+                    hour: "2-digit", minute: "2-digit", second: "2-digit",
+                    hour12: false,
+                });
+                const parts = fmt.formatToParts(this);
+                const get = (t) => parts.find((p) => p.type === t)?.value;
+                const tzDate = new Date(Date.UTC(
+                    parseInt(get("year"), 10),
+                    parseInt(get("month"), 10) - 1,
+                    parseInt(get("day"), 10),
+                    parseInt(get("hour"), 10),
+                    parseInt(get("minute"), 10),
+                    parseInt(get("second"), 10),
+                ));
+                return Math.round((this.getTime() - tzDate.getTime()) / 60000);
+            } catch (_e) {
+                return _origGetTimezoneOffset.call(this);
             }
-        }
-
-        if (profileTz) {
-            // Compute the UTC offset for the profile timezone at the current instant.
-            // V8 supports IANA timezones natively via Intl, so we can use Intl to
-            // derive the offset without needing a full tz database.
-            const _profileOffsetMinutes = (() => {
-                try {
-                    // Trick: format a known UTC timestamp in the profile tz, parse the result.
-                    const now = new Date();
-                    const fmt = new _OrigDTF("en-US", {
-                        timeZone: profileTz,
-                        year: "numeric", month: "2-digit", day: "2-digit",
-                        hour: "2-digit", minute: "2-digit", second: "2-digit",
-                        hour12: false,
-                    });
-                    const parts = fmt.formatToParts(now);
-                    const get = (t) => parts.find((p) => p.type === t)?.value;
-                    const tzDate = new Date(Date.UTC(
-                        parseInt(get("year"), 10),
-                        parseInt(get("month"), 10) - 1,
-                        parseInt(get("day"), 10),
-                        parseInt(get("hour"), 10),
-                        parseInt(get("minute"), 10),
-                        parseInt(get("second"), 10),
-                    ));
-                    return Math.round((now.getTime() - tzDate.getTime()) / 60000);
-                } catch (e) {
-                    return 0;
-                }
-            })();
-
-            // Patch Date.prototype.getTimezoneOffset
-            const _origGetTimezoneOffset = Date.prototype.getTimezoneOffset;
-            Date.prototype.getTimezoneOffset = function () {
-                return _profileOffsetMinutes;
-            };
-            Object.defineProperty(Date.prototype.getTimezoneOffset, "toString", {
-                value: () => "function getTimezoneOffset() { [native code] }",
-                configurable: true,
-            });
-        }
+        };
+        Object.defineProperty(Date.prototype.getTimezoneOffset, "toString", {
+            value: () => "function getTimezoneOffset() { [native code] }",
+            configurable: true,
+        });
     }
 
     // =========================================================
@@ -2066,10 +2253,17 @@
     };
     globalThis.cancelIdleCallback = clearTimeout;
 
-    // getComputedStyle — reads inline style from actual element, falls back to CSS defaults
+    // getComputedStyle — reads inline style from actual element, falls back to CSS defaults.
+    // CAPTURE _getNodeId at bootstrap time: cleanup_bootstrap.js deletes
+    // __boxide before page scripts run, so per-call lookup degrades to
+    // nodeId=0 (same bug that broke event_stop_propagation). This was why
+    // every getComputedStyle() call returned the same root-element defaults
+    // regardless of which element was passed.
+    const _getNodeIdForCompStyle = (globalThis.__boxide && globalThis.__boxide._getNodeId)
+        ? globalThis.__boxide._getNodeId
+        : (() => 0);
     globalThis.getComputedStyle = function(element, pseudoElt) {
-        const helper = globalThis.__boxide && globalThis.__boxide._getNodeId;
-        const nodeId = helper ? helper(element) : 0;
+        const nodeId = _getNodeIdForCompStyle(element);
         return new Proxy({}, {
             get(target, prop) {
                 if (prop === "getPropertyValue") {
@@ -3369,46 +3563,9 @@
         }
     }
 
-    // ================================================================
-    // Permissions API — consistent Chrome-like responses
-    // ================================================================
-    {
-        // Override the basic stub with proper PermissionStatus objects
-        const _permissionDefaults = {
-            "geolocation": "prompt",
-            "notifications": "prompt",
-            "push": "prompt",
-            "midi": "prompt",
-            "camera": "prompt",
-            "microphone": "prompt",
-            "speaker": "prompt",
-            "clipboard-read": "prompt",
-            "clipboard-write": "granted",
-            "payment-handler": "prompt",
-            "persistent-storage": "prompt",
-            "background-sync": "granted",
-            "ambient-light-sensor": "prompt",
-            "accelerometer": "prompt",
-            "gyroscope": "prompt",
-            "magnetometer": "prompt",
-            "accessibility-events": "prompt",
-        };
-
-        if (navigator.permissions) {
-            navigator.permissions.query = function(desc) {
-                const state = _permissionDefaults[desc?.name] || "prompt";
-                const status = {
-                    state,
-                    name: desc?.name,
-                    onchange: null,
-                    addEventListener() {},
-                    removeEventListener() {},
-                };
-                Object.defineProperty(status, 'toString', { value: () => `[object PermissionStatus]` });
-                return Promise.resolve(status);
-            };
-        }
-    }
+    // Permissions API is defined at the top of this file (search for
+    // _PERMISSION_STATE_MAP). That implementation is the single source of
+    // truth — do not override navigator.permissions.query here.
 
     // ================================================================
     // Battery API — realistic values (already exists but enhance)
