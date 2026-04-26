@@ -5,8 +5,9 @@
     const _nodeCache = new Map();
 
     function _getNodeId(node) {
+        if (node === globalThis || node === globalThis.window) return -999;
         const id = _nodeIds.get(node);
-        if (id === undefined) throw new Error("Invalid node");
+        if (id === undefined) return 0; // Return 0 instead of throwing to be more resilient
         return id;
     }
 
@@ -18,6 +19,16 @@
             if (obj) return obj;
         }
         const nodeType = ops.op_dom_get_node_type(nodeId);
+        return _wrapNodeWithType(nodeId, nodeType);
+    }
+
+    function _wrapNodeWithType(nodeId, nodeType) {
+        if (nodeId === null || nodeId === undefined || nodeId === -1) return null;
+        const cached = _nodeCache.get(nodeId);
+        if (cached) {
+            const obj = cached.deref();
+            if (obj) return obj;
+        }
         let node;
         switch (nodeType) {
             case 1:
@@ -34,12 +45,124 @@
         return node;
     }
 
+    function _onNodeInserted(child, sync = true) {
+        if (!child) return;
+
+        // 1. Dynamic script loading
+        const childTag = (child.tagName || child.nodeName || "").toLowerCase();
+        const type = (child.getAttribute?.('type') || '').toLowerCase();
+        const isJs = !type || type === 'text/javascript' || type === 'application/javascript' || type === 'module';
+        
+        if (childTag === 'script' && !isJs) {
+            return; // Skip non-JS scripts like application/ld+json
+        }
+
+        const childSrc = (childTag === 'script') ? (child.src || child.getAttribute?.('src')) : null;
+
+        if (childTag === 'script' && !childSrc) {
+            const code = child.textContent || child.innerText || '';
+            if (code && code.trim()) {
+                console.log(`[DOM] executing inline script (${code.length} bytes)`);
+                try { (0, eval)(code); } catch (e) {
+                    console.log(`[DOM] inline eval error: ${e.message}`);
+                }
+            }
+        }
+
+        if (childTag === 'script' && childSrc) {
+            const src = childSrc;
+            const scriptEl = child;
+            let fullUrl = src;
+            if (!src.startsWith('http') && !src.startsWith('data:')) {
+                try {
+                    const base = globalThis.location ? globalThis.location.href : 'about:blank';
+                    fullUrl = new URL(src, base).href;
+                } catch(e) {}
+            }
+
+            if (sync) {
+                console.log(`[DOM] sync fetching script: ${fullUrl}`);
+                try {
+                    const code = ops.op_net_fetch_sync(fullUrl, globalThis.location?.href || "");
+                    if (code) {
+                        console.log(`[DOM] sync executing script (${code.length} bytes): ${fullUrl}`);
+                        try {
+                            (0, eval)(code);
+                            console.log(`[DOM] sync execution SUCCESS: ${fullUrl}`);
+                        } catch(e) {
+                            console.log(`[DOM] sync eval ERROR for ${fullUrl}: ${e.message}\n${e.stack}`);
+                            if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                        }
+                    } else {
+                        console.log(`[DOM] sync fetch FAILED (empty) for ${fullUrl}`);
+                        if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                        scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                    }
+                    if (scriptEl.onload) scriptEl.onload(new Event('load'));
+                    scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
+                } catch(e) {
+                    console.log(`[DOM] sync fetch OP error for ${fullUrl}: ${e.message}`);
+                    if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                    scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                }
+            } else {
+                console.log(`[DOM] async fetching script: ${fullUrl}`);
+                (async () => {
+                    try {
+                        const resp = await globalThis.fetch(fullUrl);
+                        if (resp.ok) {
+                            const code = await resp.text();
+                            console.log(`[DOM] async executing script (${code.length} bytes): ${fullUrl}`);
+                            try {
+                                (0, eval)(code);
+                                console.log(`[DOM] async execution SUCCESS: ${fullUrl}`);
+                                if (scriptEl.onload) scriptEl.onload(new Event('load'));
+                                scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
+                            } catch(e) {
+                                console.log(`[DOM] async eval ERROR for ${fullUrl}: ${e.message}\n${e.stack}`);
+                                if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                                scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                            }
+                        } else {
+                            console.log(`[DOM] async fetch FAILED (status ${resp.status}) for ${fullUrl}`);
+                            if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                        }
+                    } catch(e) {
+                        console.log(`[DOM] async fetch ERROR for ${fullUrl}: ${e.message}`);
+                        if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                        scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                    }
+                })();
+            }
+        }
+
+        // 2. Recursive check for children (handles <div><script>...</script></div>)
+        if (child.childNodes && child.childNodes.length > 0) {
+            for (let i = 0; i < child.childNodes.length; i++) {
+                _onNodeInserted(child.childNodes[i], sync);
+            }
+        }
+    }
+
+    globalThis.__onNodeInserted = _onNodeInserted;
+
     class NodeList {
-        constructor(ids) {
-            this._ids = ids;
-            // Populate numeric indices for bracket access (Chrome behavior)
-            for (let i = 0; i < ids.length; i++) {
-                this[i] = _wrapNode(ids[i]);
+        constructor(data, isTyped = false) {
+            if (isTyped) {
+                this._ids = [];
+                for (let i = 0; i < data.length; i += 2) {
+                    const id = data[i];
+                    const type = data[i+1];
+                    this._ids.push(id);
+                    this[i/2] = _wrapNodeWithType(id, type);
+                }
+            } else {
+                this._ids = data;
+                for (let i = 0; i < data.length; i++) {
+                    this[i] = _wrapNode(data[i]);
+                }
             }
         }
         get length() { return this._ids.length; }
@@ -160,7 +283,7 @@
             const p = this.parentNode;
             return p && p.nodeType === 1 ? p : null;
         }
-        get childNodes() { return new NodeList(ops.op_dom_get_children(_getNodeId(this))); }
+        get childNodes() { return new NodeList(ops.op_dom_get_children_with_types(_getNodeId(this)), true); }
         get firstChild() { return _wrapNode(ops.op_dom_get_first_child(_getNodeId(this))); }
         get lastChild() { return _wrapNode(ops.op_dom_get_last_child(_getNodeId(this))); }
         get nextSibling() { return _wrapNode(ops.op_dom_get_next_sibling(_getNodeId(this))); }
@@ -169,59 +292,11 @@
         set textContent(val) { ops.op_dom_set_text_content(_getNodeId(this), String(val)); }
         appendChild(child) {
             ops.op_dom_append_child(_getNodeId(this), _getNodeId(child));
-            // Dynamic script loading: when a <script src="..."> is appended to the DOM,
-            // fetch and execute the script, then fire "load" event (like a real browser).
-            // This is how challenge scripts (Wildberries, Cloudflare, DataDome) load their solvers.
-            const childTag = child.tagName?.toLowerCase?.() || child.nodeName?.toLowerCase?.() || '';
-            // Check both JS property (.src) and DOM attribute (getAttribute('src'))
-            // Scripts set src via property: script.src = url (not setAttribute)
-            const childSrc = (childTag === 'script') ? (child.src || child.getAttribute?.('src')) : null;
-            // Inline script: <script>...code...</script> inserted via createElement + textContent.
-            // Real Chrome executes these synchronously on insertion. Rare in WB's WBAAS flow but
-            // common for other antibot solvers and for site-level bootstrap code.
-            if (childTag === 'script' && !childSrc) {
-                const code = child.textContent || child.innerText || '';
-                if (code && code.trim()) {
-                    try { (0, eval)(code); } catch (e) { /* execution error — real browsers swallow these */ }
-                }
-            }
-            if (childTag === 'script' && childSrc) {
-                // Dynamic script detected
-                const src = childSrc;
-                const scriptEl = child;
-                // Resolve relative URLs
-                let fullUrl = src;
-                if (!src.startsWith('http') && !src.startsWith('data:')) {
-                    try { fullUrl = new URL(src, globalThis.location?.href || 'about:blank').href; } catch(e) {}
-                }
-                // Async fetch + execute
-                (async () => {
-                    try {
-                        const resp = await globalThis.fetch(fullUrl);
-                        if (resp.ok) {
-                            const code = await resp.text();
-                            try {
-                                (0, eval)(code); // indirect eval = global scope
-                            } catch(e) {
-                                if (scriptEl.onerror) scriptEl.onerror(e);
-                                scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
-                                return;
-                            }
-                            if (scriptEl.onload) scriptEl.onload(new Event('load'));
-                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
-                        } else {
-                            if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
-                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
-                        }
-                    } catch(e) {
-                        if (scriptEl.onerror) scriptEl.onerror(e);
-                        scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
-                    }
-                })();
-            }
+            _onNodeInserted(child);
             return child;
         }
         removeChild(child) {
+            _ceDisconnected(child);
             ops.op_dom_remove_child(_getNodeId(this), _getNodeId(child));
             return child;
         }
@@ -229,13 +304,16 @@
             const parent = _getNodeId(this);
             const oldId = _getNodeId(oldChild);
             const newId = _getNodeId(newChild);
+            _ceDisconnected(oldChild);
             ops.op_dom_insert_before(parent, newId, oldId);
             ops.op_dom_remove_child(parent, oldId);
+            _onNodeInserted(newChild);
             return oldChild;
         }
         insertBefore(newChild, refChild) {
             if (refChild === null || refChild === undefined) return this.appendChild(newChild);
             ops.op_dom_insert_before(_getNodeId(this), _getNodeId(newChild), _getNodeId(refChild));
+            _onNodeInserted(newChild);
             return newChild;
         }
         cloneNode(deep = false) {
@@ -291,9 +369,15 @@
             if (other.contains(this)) return 10; // DOCUMENT_POSITION_CONTAINS | PRECEDING
             return 4; // DOCUMENT_POSITION_FOLLOWING
         }
-        // _getNodeId bridge for event_bootstrap
-        _getNodeId() { return _getNodeId(this); }
     }
+
+    // --- Internal Bridge ---
+    if (!globalThis.__boxide) {
+        Object.defineProperty(globalThis, '__boxide', { value: {}, enumerable: false, configurable: true });
+    }
+    globalThis.__boxide._getNodeId = _getNodeId;
+    globalThis.__boxide._wrapNode = _wrapNode;
+    globalThis.__boxide._setCurrentScript = _setCurrentScript;
 
     function _createStyleProxy(nodeId) {
         const cache = {};
@@ -376,7 +460,7 @@
         set innerHTML(val) { ops.op_dom_set_inner_html(_getNodeId(this), String(val)); }
         get outerHTML() { return ops.op_dom_get_outer_html(_getNodeId(this)); }
         get children() {
-            return new NodeList(ops.op_dom_get_child_elements(_getNodeId(this)));
+            return new NodeList(ops.op_dom_get_child_elements_with_types(_getNodeId(this)), true);
         }
         get firstElementChild() {
             const els = ops.op_dom_get_child_elements(_getNodeId(this));
@@ -633,12 +717,141 @@
     class HTMLHeadingElement extends HTMLElement {}
     class HTMLAnchorElement extends HTMLElement {}
     class HTMLImageElement extends HTMLElement {}
+    Object.defineProperty(HTMLImageElement.prototype, "width", {
+        get() {
+            const attr = this.getAttribute("width");
+            return attr ? parseInt(attr, 10) : 0;
+        },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "height", {
+        get() {
+            const attr = this.getAttribute("height");
+            return attr ? parseInt(attr, 10) : 0;
+        },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "naturalWidth", {
+        get() { return this.width; },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "naturalHeight", {
+        get() { return this.height; },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "complete", {
+        get() { return true; }, 
+        enumerable: true, configurable: true
+    });
+    HTMLImageElement.prototype.decode = function() { return Promise.resolve(); };
     class HTMLInputElement extends HTMLElement {}
-    class HTMLFormElement extends HTMLElement {}
+    class HTMLFormElement extends HTMLElement {
+        submit() {
+            const action = this.action || (globalThis.location ? globalThis.location.href : '');
+            const method = (this.method || 'GET').toUpperCase();
+
+            // Serialize form data
+            const params = new URLSearchParams();
+            const inputs = this.querySelectorAll('input, textarea, select');
+            for (let i = 0; i < inputs.length; i++) {
+                const el = inputs[i];
+                const name = el.name;
+                if (!name || el.disabled) continue;
+
+                const type = (el.type || '').toLowerCase();
+                if (type === 'submit' || type === 'button' || type === 'image') continue;
+                if ((type === 'checkbox' || type === 'radio') && !el.checked) continue;
+
+                params.append(name, el.value || '');
+            }
+
+            let finalUrl = action;
+            let finalBody = null;
+
+            if (method === 'GET') {
+                const url = new URL(action, globalThis.location ? globalThis.location.href : 'about:blank');
+                params.forEach((v, k) => url.searchParams.append(k, v));
+                finalUrl = url.href;
+            } else {
+                finalBody = params.toString();
+            }
+
+            globalThis.__pendingNavigation = {
+                url: finalUrl,
+                method: method,
+                body: finalBody,
+                kind: 'assign'
+            };
+        }
+        requestSubmit(submitter) {
+            this.submit();
+        }
+    }
+
+    // IDL property ↔ HTML attribute reflection. Scripts that configure form
+    // fields via properties (el.name = 'x', form.action = url, form.method =
+    // 'POST') expect the read-back to see what they set — which only works if
+    // the property setter writes the underlying attribute. Without this,
+    // programmatically-built forms look empty to our submit() serializer.
+    // Universal primitive — matches HTML spec "reflect" behavior.
+    const _reflectStr = (proto, prop, attr = prop, dflt = '') => {
+        Object.defineProperty(proto, prop, {
+            get() { const v = this.getAttribute(attr); return v == null ? dflt : v; },
+            set(v) { this.setAttribute(attr, String(v)); },
+            enumerable: true, configurable: true,
+        });
+    };
+    const _reflectBool = (proto, prop, attr = prop) => {
+        Object.defineProperty(proto, prop, {
+            get() { return this.hasAttribute(attr); },
+            set(v) {
+                if (v) this.setAttribute(attr, '');
+                else this.removeAttribute(attr);
+            },
+            enumerable: true, configurable: true,
+        });
+    };
+    _reflectStr(HTMLInputElement.prototype, 'name');
+    _reflectStr(HTMLInputElement.prototype, 'value');
+    _reflectStr(HTMLInputElement.prototype, 'type', 'type', 'text');
+    _reflectStr(HTMLInputElement.prototype, 'placeholder');
+    _reflectBool(HTMLInputElement.prototype, 'checked');
+    _reflectBool(HTMLInputElement.prototype, 'disabled');
+    _reflectBool(HTMLInputElement.prototype, 'readOnly', 'readonly');
+    _reflectBool(HTMLInputElement.prototype, 'required');
+    _reflectStr(HTMLFormElement.prototype, 'action');
+    _reflectStr(HTMLFormElement.prototype, 'method', 'method', 'get');
+    _reflectStr(HTMLFormElement.prototype, 'enctype', 'enctype', 'application/x-www-form-urlencoded');
+    _reflectStr(HTMLFormElement.prototype, 'target');
+    _reflectStr(HTMLFormElement.prototype, 'name');
+    _reflectBool(HTMLFormElement.prototype, 'noValidate', 'novalidate');
+
     class HTMLButtonElement extends HTMLElement {}
     class HTMLSelectElement extends HTMLElement {}
     class HTMLTextAreaElement extends HTMLElement {}
     class HTMLCanvasElement extends HTMLElement {}
+    Object.defineProperty(HTMLCanvasElement.prototype, "width", {
+        get() {
+            const attr = this.getAttribute("width");
+            return attr ? parseInt(attr, 10) : 300;
+        },
+        set(v) { this.setAttribute("width", v); },
+        enumerable: true, configurable: true
+    });
+    Object.defineProperty(HTMLCanvasElement.prototype, "height", {
+        get() {
+            const attr = this.getAttribute("height");
+            return attr ? parseInt(attr, 10) : 150;
+        },
+        set(v) { this.setAttribute("height", v); },
+        enumerable: true, configurable: true
+    });
+    HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
+        if (!this._canvasId) {
+            this._canvasId = ops.op_canvas_create(this.width, this.height);
+        }
+        return ops.op_canvas_to_data_url(this._canvasId);
+    };
     class HTMLScriptElement extends HTMLElement {}
     class HTMLStyleElement extends HTMLElement {}
     class HTMLLinkElement extends HTMLElement {}
@@ -734,7 +947,58 @@
 
     class DocumentFragment extends Node {}
 
+    let _currentScript = null;
+    function _setCurrentScript(el) { _currentScript = el; }
+
+    class HTMLAllCollection {
+        constructor(doc) {
+            this._doc = doc;
+        }
+        get length() { return this._doc.querySelectorAll("*").length; }
+        item(i) { return this._doc.querySelectorAll("*")[i] || null; }
+        namedItem(n) {
+            return this._doc.getElementById(n) || 
+                   this._doc.querySelector(`[name="${CSS.escape(n)}"]`) || 
+                   null;
+        }
+        [Symbol.iterator]() {
+            const nodes = this._doc.querySelectorAll("*");
+            let i = 0;
+            return {
+                next() {
+                    return i < nodes.length ? { value: nodes[i++], done: false } : { done: true };
+                }
+            };
+        }
+    }
+
     class Document extends Node {
+        constructor() {
+            super();
+            if (!globalThis.__boxide) {
+                Object.defineProperty(globalThis, '__boxide', { value: {}, enumerable: false, configurable: true });
+            }
+            // Capture initial base URL from ops or a global hint
+            globalThis.__boxide._baseUrl = ops.op_dom_get_base_url && ops.op_dom_get_base_url();
+            
+            const all = new HTMLAllCollection(this);
+            // Hide 'all' from enumeration but keep it truthy
+            Object.defineProperty(this, 'all', {
+                get() { return all; },
+                enumerable: false,
+                configurable: true
+            });
+        }
+        get scripts() { return this.getElementsByTagName("script"); }
+        get currentScript() { return _currentScript; }
+        get visibilityState() { return "visible"; }
+        get hidden() { return false; }
+        get webkitVisibilityState() { return "visible"; }
+        get webkitHidden() { return false; }
+        get fullscreenEnabled() { return true; }
+        get webkitFullscreenEnabled() { return true; }
+        get webkitIsFullScreen() { return false; }
+
         get documentElement() {
             const els = ops.op_dom_get_child_elements(ops.op_dom_document_node());
             return els.length > 0 ? _wrapNode(els[0]) : null;
@@ -768,6 +1032,10 @@
         }
         createElement(tag) {
             return _wrapNode(ops.op_dom_create_element(tag));
+        }
+        createElementNS(ns, tag) {
+            // For now, treat namespaced elements same as regular ones.
+            return this.createElement(tag);
         }
         createTextNode(text) {
             return _wrapNode(ops.op_dom_create_text_node(text));
@@ -805,8 +1073,21 @@
         // document.open/close — reset and finalize document stream
         open() { return this; }
         close() {}
-        write(html) { ops.op_dom_document_write(String(html)); }
-        writeln(html) { ops.op_dom_document_write(String(html) + "\n"); }
+        write(html) {
+            // Document.write in Chrome synchronously executes any <script> tags
+            // it inserts. Since op_dom_document_write returns the IDs of the
+            // newly created nodes, we wrap them and trigger our insertion logic.
+            const newIds = ops.op_dom_document_write(String(html));
+            if (Array.isArray(newIds)) {
+                for (const id of newIds) {
+                    const node = _wrapNode(id);
+                    if (node) _onNodeInserted(node, true); // Always sync for document.write
+                }
+            }
+        }
+        writeln(html) {
+            this.write(html + "\n");
+        }
         // Selection and editing
         execCommand(command, showUI, value) { return false; }
         queryCommandSupported(command) { return false; }
@@ -817,7 +1098,7 @@
         elementsFromPoint(x, y) { return this.body ? [this.body] : []; }
         caretPositionFromPoint(x, y) { return null; }
         hasFocus() { return true; }  // Anti-bot: must return true
-        get readyState() { return "complete"; }
+        get readyState() { return globalThis.__documentReadyState || "complete"; }
         get URL() { return globalThis.location?.href || "about:blank"; }
         get documentURI() { return this.URL; }
         get domain() { return globalThis.location?.hostname || ""; }
@@ -850,12 +1131,14 @@
             } else {
                 globalThis.__jsCookies[key] = value;
             }
-            // Fire-and-forget propagation to the net layer. Safe because the next
-            // fetch()/navigation reads from the shared jar.
+            // Fire-and-forget propagation to the net layer.
             try {
-                const url = globalThis.location?.href;
-                if (url && url !== "about:blank" && globalThis.Deno?.core?.ops?.op_cookie_set) {
-                    globalThis.Deno.core.ops.op_cookie_set(url, String(val));
+                let url = globalThis.location?.href;
+                if (!url || url === "about:blank" || url === "javascript:;" || url === "") {
+                    url = globalThis.__boxide && globalThis.__boxide._baseUrl;
+                }
+                if (url && ops.op_cookie_set) {
+                    ops.op_cookie_set(url, String(val));
                 }
             } catch (e) { /* ignore */ }
         }
@@ -1073,6 +1356,8 @@
     _tag(DOMTokenList, "DOMTokenList");
 
     globalThis.document = _document;
+    globalThis.Document = Document;
+    globalThis.HTMLDocument = Document;
     globalThis.Node = Node;
     globalThis.Element = Element;
     // Expose the real HTMLElement subclasses — the prototype chain is
@@ -1126,19 +1411,15 @@
     globalThis.Selection = Selection;
     globalThis.getSelection = function() { return _selection; };
 
-    // Image constructor — new Image(width, height)
-    globalThis.Image = class Image {
-        constructor(width, height) {
-            const el = _document.createElement("img");
-            if (width !== undefined) el.setAttribute("width", String(width));
-            if (height !== undefined) el.setAttribute("height", String(height));
-            // Copy properties onto el
-            el.naturalWidth = 0;
-            el.naturalHeight = 0;
-            el.complete = false;
-            el.src = "";
-            return el;
-        }
+    // Image constructor — new Image(width, height). Returns an
+    // HTMLImageElement whose naturalWidth/naturalHeight/complete are
+    // accessors defined on the prototype (getters; not writable).
+    // Constructor return of an object is the caller's `new Image(...)`.
+    globalThis.Image = function Image(width, height) {
+        const el = _document.createElement("img");
+        if (width !== undefined) el.setAttribute("width", String(width));
+        if (height !== undefined) el.setAttribute("height", String(height));
+        return el;
     };
 
     // DOMParser
@@ -1261,20 +1542,18 @@
         }
     }
 
-    // Wrap DOM mutation methods to fire MO notifications + CE lifecycle
+    // Wrap DOM mutation methods to fire MO notifications
     const _origAppendChild = Node.prototype.appendChild;
     Node.prototype.appendChild = function(child) {
         const result = _origAppendChild.call(this, child);
         if (_moObservers.length > 0) {
             _notifyMO("childList", _getNodeId(this), { target: this, addedNodes: [child] });
         }
-        _ceConnected(child);
         return result;
     };
 
     const _origRemoveChild = Node.prototype.removeChild;
     Node.prototype.removeChild = function(child) {
-        _ceDisconnected(child);
         const result = _origRemoveChild.call(this, child);
         if (_moObservers.length > 0) {
             _notifyMO("childList", _getNodeId(this), { target: this, removedNodes: [child] });
@@ -1288,7 +1567,6 @@
         if (_moObservers.length > 0) {
             _notifyMO("childList", _getNodeId(this), { target: this, addedNodes: [newChild] });
         }
-        _ceConnected(newChild);
         return result;
     };
 
@@ -1371,11 +1649,14 @@
             getElementById() { return null; },
             getElementsByTagName() { return new NodeList([]); },
             createElement(tag) { return _document.createElement(tag); },
+            createElementNS(ns, tag) { return _document.createElementNS(ns, tag); },
+            createEvent(type) { return _document.createEvent(type); },
+            createRange() { return _document.createRange(); },
             createTextNode(text) { return _document.createTextNode(text); },
-            write() {},
-            writeln() {},
-            open() { return this; },
-            close() {},
+            write(html) { return _document.write(html); },
+            writeln(html) { return _document.writeln(html); },
+            open() { return _document.open(); },
+            close() { return _document.close(); },
         };
         const iframeLocals = {
             document: iframeDoc,
@@ -1446,4 +1727,16 @@
     // Minimal window stub
     globalThis.window = globalThis;
     globalThis.self = globalThis;
+
+    // Expose node-id resolution to sibling bootstrap files that need it
+    // (event_bootstrap.js wires listeners by nodeId, not by Node identity).
+    // Installed non-enumerable; cleanup_bootstrap.js deletes __boxide
+    // before page scripts run. Callers must CAPTURE the helper during
+    // their own bootstrap execution, not look it up per-call.
+    Object.defineProperty(globalThis, '__boxide', {
+        value: Object.freeze({ _getNodeId }),
+        enumerable: false,
+        configurable: true,
+        writable: false,
+    });
 })(globalThis);

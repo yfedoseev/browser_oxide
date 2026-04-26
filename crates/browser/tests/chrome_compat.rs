@@ -5,6 +5,7 @@
 //! Failures here = gaps vs real Chrome.
 
 use browser::Page;
+use stealth;
 
 fn html(body: &str) -> String {
     format!(
@@ -14,7 +15,7 @@ fn html(body: &str) -> String {
 }
 
 async fn check(js: &str) -> String {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
 }
 
@@ -243,7 +244,7 @@ async fn nav_pdf_viewer_enabled() {
 }
 #[tokio::test]
 async fn nav_webdriver() {
-    assert_eq!(check("typeof navigator.webdriver").await, "undefined");
+    assert_eq!(check("typeof navigator.webdriver").await, "boolean");
 }
 #[tokio::test]
 async fn nav_plugins_length() {
@@ -305,7 +306,7 @@ async fn nav_ua_data_get_high_entropy_returns_promise() {
 // populated by the time the second evaluate() reads it.
 #[tokio::test]
 async fn nav_ua_data_high_entropy_full_version_list() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate(
         r#"window.__r = null;
         navigator.userAgentData.getHighEntropyValues(['fullVersionList']).then(r => { window.__r = r; });"#
@@ -326,7 +327,7 @@ async fn nav_ua_data_high_entropy_full_version_list() {
 }
 #[tokio::test]
 async fn nav_ua_data_high_entropy_architecture_and_bitness() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate(
         r#"window.__r = null;
         navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness']).then(r => { window.__r = r; });"#
@@ -347,7 +348,7 @@ async fn nav_ua_data_high_entropy_architecture_and_bitness() {
 }
 #[tokio::test]
 async fn nav_ua_data_high_entropy_only_returns_requested_plus_low_entropy() {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
     page.evaluate(
         r#"window.__r = null;
         navigator.userAgentData.getHighEntropyValues(['architecture']).then(r => { window.__r = r; });"#
@@ -1554,8 +1555,8 @@ async fn k_no_script_id_webdriver_not_on_instance() {
 }
 
 #[tokio::test]
-async fn k_no_script_id_webdriver_on_prototype_returns_undefined() {
-    assert_eq!(check("navigator.webdriver === undefined").await, "true");
+async fn k_no_script_id_webdriver_on_prototype_returns_false() {
+    assert_eq!(check("navigator.webdriver === false").await, "true");
 }
 
 #[tokio::test]
@@ -1868,8 +1869,8 @@ async fn to_string_tag_event_target_prototype() {
 // --- Kasada/Akamai specific Navigator shape checks ---
 
 #[tokio::test]
-async fn nav_webdriver_typeof_undefined() {
-    assert_eq!(check("typeof navigator.webdriver").await, "undefined");
+async fn nav_webdriver_typeof_boolean() {
+    assert_eq!(check("typeof navigator.webdriver").await, "boolean");
 }
 
 #[tokio::test]

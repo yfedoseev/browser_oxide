@@ -17,6 +17,7 @@
 //! L3 PASS is the honest success signal. Anything less is a block.
 
 use std::collections::HashMap;
+use stealth;
 
 /// What a rigorous probe reports for one site.
 struct ProbeResult {
@@ -557,7 +558,7 @@ async fn kasada_poc_canadagoose_dump_body() {
 async fn text_encoder_strict_iife_nested() {
     // Reproduce the Kasada solver's exact pattern: strict-mode IIFE with
     // nested function using `new TextEncoder().encode(...)`.
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -587,7 +588,7 @@ async fn text_encoder_strict_iife_nested() {
 async fn kasada_text_encoder_exact_snippet() {
     // Extract the exact snippet from the solver around `new TextEncoder()`
     // and run it in isolation to see if it reproduces.
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let snippet = r#"(function(){
@@ -640,7 +641,7 @@ async fn kasada_error_unfiltered_stack() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -690,7 +691,7 @@ async fn kasada_function_probe_hunt_full() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -773,7 +774,7 @@ async fn kasada_function_probe_hunt() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -828,7 +829,7 @@ async fn kasada_solver_minimal_load() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -841,7 +842,7 @@ async fn kasada_solver_minimal_load() {
 #[ignore]
 async fn text_encoder_sanity() {
     // Isolation test: does TextEncoder work in our runtime at all?
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r1 = page.evaluate("typeof TextEncoder").unwrap_or_default();
@@ -1067,7 +1068,7 @@ async fn adidas_prototype_patch_hunt() {
         }})()"#,
         sensor
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>")
+    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     let r = page
@@ -1759,4 +1760,820 @@ async fn homedepot_full_browser_challenge() {
         }
         Err(e) => println!("  navigate_with_challenges failed: {e}"),
     }
+}
+
+#[tokio::test]
+#[ignore]
+async fn yandex_sso_install_post_dump() {
+    // Walk the flow manually: GET ya.ru, extract form fields from SSO push
+    // page, POST to sso.ya.ru/install, dump response. Tells us whether the
+    // install endpoint accepts our POST and where it redirects.
+    let profile = stealth::presets::chrome_130_ru();
+    let client = net::HttpClient::new(&profile).unwrap();
+
+    // Step 1: GET ya.ru → follow → land on SSO push
+    let push = client.get_follow("https://ya.ru/", 10).await.unwrap();
+    println!("=== STEP 1: GET ya.ru (followed redirects) ===");
+    println!("final url: {}", push.url);
+    println!("status: {}", push.status);
+    println!("body len: {}", push.body.len());
+    let body = push.text();
+
+    // Extract form params by regex: it.host + retpath + container
+    let host = extract_str(&body, r#""host":""#, r#"""#).unwrap_or_default().replace(r"\u002F", "/").replace(r"\/", "/");
+    let retpath = extract_str(&body, r#""retpath":""#, r#"""#).unwrap_or_default().replace(r"\u002F", "/").replace(r"\/", "/");
+    let container = extract_str(&body, r#"element2.value = '"#, "'").unwrap_or_default();
+
+    println!("install host:  {host}");
+    println!("retpath:       {retpath}");
+    println!("container len: {}", container.len());
+
+    // Step 2: POST sso.ya.ru/install
+    let form_body = {
+        let params = [("retpath", retpath.as_str()), ("container", container.as_str())];
+        let mut s = String::new();
+        for (i, (k, v)) in params.iter().enumerate() {
+            if i > 0 { s.push('&'); }
+            s.push_str(k);
+            s.push('=');
+            // minimal urlencode: just percent-encode non-alphanum
+            for b in v.bytes() {
+                match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => s.push(b as char),
+                    _ => s.push_str(&format!("%{:02X}", b)),
+                }
+            }
+        }
+        s
+    };
+    let hdrs = vec![
+        ("content-type".to_string(), "application/x-www-form-urlencoded".to_string()),
+        ("origin".to_string(), "https://sso.passport.yandex.ru".to_string()),
+        ("referer".to_string(), push.url.clone()),
+    ];
+    println!("\n=== STEP 2: POST {host} ===");
+    println!("body len: {}", form_body.len());
+    let install_resp = client
+        .post_bytes_with_headers(&host, form_body.as_bytes(), &hdrs)
+        .await
+        .unwrap();
+    println!("status: {}", install_resp.status);
+    println!("final url: {}", install_resp.url);
+    println!("body len: {}", install_resp.body.len());
+    println!("---response headers---");
+    let mut hs: Vec<_> = install_resp.headers.iter().collect();
+    hs.sort_by_key(|(k, _)| k.as_str());
+    for (k, v) in &hs {
+        println!("  {k}: {}", &v[..v.len().min(200)]);
+    }
+    println!("---set-cookies ({} entries)---", install_resp.set_cookies.len());
+    for c in &install_resp.set_cookies {
+        println!("  set-cookie: {}", &c[..c.len().min(200)]);
+    }
+    println!("---body (first 2000)---");
+    let text = install_resp.text();
+    println!("{}", &text[..text.len().min(2000)]);
+
+    let _ = std::fs::write("/tmp/yandex_install_response.html", text.as_bytes());
+    println!("\nfull body saved to /tmp/yandex_install_response.html");
+}
+
+fn extract_str<'a>(hay: &'a str, start: &str, end: &str) -> Option<String> {
+    let i = hay.find(start)? + start.len();
+    let j = hay[i..].find(end)?;
+    Some(hay[i..i+j].to_string())
+}
+
+#[tokio::test]
+#[ignore]
+async fn yandex_sso_raw_body_dump() {
+    // Fetch ya.ru, follow redirects, dump the SSO push page raw so we can see
+    // what scripts / DOMContentLoaded handlers are expected to trigger nav.
+    let profile = stealth::presets::chrome_130_ru();
+    let client = net::HttpClient::new(&profile).unwrap();
+    let resp = client.get_follow("https://ya.ru/", 10).await.unwrap();
+    println!("=== Yandex SSO raw body ===");
+    println!("final url: {}", resp.url);
+    println!("status: {}", resp.status);
+    println!("body len: {}", resp.body.len());
+    println!("---response headers---");
+    let mut hs: Vec<_> = resp.headers.iter().collect();
+    hs.sort_by_key(|(k, _)| k.as_str());
+    for (k, v) in &hs {
+        println!("  {k}: {}", &v[..v.len().min(200)]);
+    }
+    for c in &resp.set_cookies {
+        println!("  set-cookie: {}", &c[..c.len().min(200)]);
+    }
+    println!("---body---");
+    println!("{}", resp.text());
+}
+
+#[tokio::test]
+#[ignore]
+async fn yandex_sso_form_submit_diagnostic() {
+    // Investigate why navigation stalls on sso.passport.yandex.ru/push?...
+    // Report: final URL, forms, whether our HTMLFormElement.prototype.submit
+    // instrumentation is still in place (or clobbered by page JS), pending nav,
+    // fetch log.
+    // Run: cargo test -p browser --test tier0_kasada yandex_sso_form_submit_diagnostic -- --ignored --test-threads=1 --nocapture
+    println!("\n=== Yandex SSO form-submit diagnostic (ya.ru) ===\n");
+    let profile = stealth::presets::chrome_130_ru();
+    let mut page = match browser::Page::navigate("https://ya.ru/", profile, 5).await {
+        Ok(p) => p,
+        Err(e) => {
+            println!("navigate failed: {e}");
+            return;
+        }
+    };
+    println!("final url:         {}", page.url());
+    let content = page.content();
+    println!("final content len: {} bytes", content.len());
+    let is_sso = content.contains("passport.yandex") || page.url().contains("passport.yandex");
+    let is_captcha = content.contains("SmartCaptcha") || content.contains("smart-captcha");
+    let is_real = content.contains("yandex-verification") || content.contains("data-bem");
+    println!("is_sso_page:       {is_sso}");
+    println!("is_captcha_page:   {is_captcha}");
+    println!("is_real_content:   {is_real}");
+
+    // Is our HTMLFormElement.prototype.submit still the one we installed?
+    let submit_probe = page.evaluate(r#"
+        (() => {
+            const proto = globalThis.HTMLFormElement?.prototype;
+            const s = proto?.submit;
+            const src = s ? String(s) : '(missing)';
+            return JSON.stringify({
+                has: !!s,
+                head: src.substring(0, 300),
+                is_native: src.includes('[native code]'),
+                mentions_pendingNavigation: src.includes('__pendingNavigation'),
+            });
+        })()
+    "#).unwrap_or_default();
+    println!("HTMLFormElement.submit probe: {submit_probe}");
+
+    // Enumerate forms
+    let forms_probe = page.evaluate(r#"
+        (() => {
+            const list = [];
+            const forms = document.getElementsByTagName('form');
+            for (let i = 0; i < forms.length; i++) {
+                const f = forms[i];
+                list.push({
+                    idx: i,
+                    id: f.getAttribute('id') || '',
+                    name: f.getAttribute('name') || '',
+                    action: f.getAttribute('action') || '',
+                    method: f.getAttribute('method') || 'GET',
+                    input_count: f.querySelectorAll('input, textarea, select').length,
+                });
+            }
+            return JSON.stringify(list);
+        })()
+    "#).unwrap_or_default();
+    println!("document.forms ({}): {}", content.matches("<form").count(), forms_probe);
+
+    // Pending nav
+    let pending = page.evaluate("JSON.stringify(globalThis.__pendingNavigation || null)").unwrap_or_default();
+    println!("__pendingNavigation: {pending}");
+
+    // Fetch log (tail)
+    let fl = page.evaluate("JSON.stringify(window.__fetchLog || [])").unwrap_or_default();
+    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&fl) {
+        println!("__fetchLog ({} entries):", arr.len());
+        for (i, e) in arr.iter().enumerate().take(15) {
+            let m = e.get("method").and_then(|v| v.as_str()).unwrap_or("");
+            let u = e.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let s = e.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+            let err = e.get("error").and_then(|v| v.as_str()).unwrap_or("");
+            let u_s: String = u.chars().take(180).collect();
+            println!("  [{i}] {m} {s} {u_s} {err}");
+        }
+    }
+
+    // Script errors
+    let errs = page.evaluate("JSON.stringify(window.__scriptErrors || [])").unwrap_or_default();
+    println!("__scriptErrors: {}", &errs[..errs.len().min(1200)]);
+
+    // Does createElement('form') return an instance with our submit method?
+    let create_probe = page.evaluate(r#"
+        (() => {
+            const f = document.createElement('form');
+            return JSON.stringify({
+                constructor_name: f.constructor ? f.constructor.name : '?',
+                has_submit: typeof f.submit === 'function',
+                submit_is_ours: f.submit !== Object.prototype.toString && typeof f.submit === 'function' && String(f.submit).includes('__pendingNavigation'),
+                has_action_descriptor: !!Object.getOwnPropertyDescriptor(Object.getPrototypeOf(f), 'action'),
+                has_method_descriptor: !!Object.getOwnPropertyDescriptor(Object.getPrototypeOf(f), 'method'),
+                proto_chain: (() => { const chain = []; let p = Object.getPrototypeOf(f); while (p) { chain.push(p.constructor ? p.constructor.name : '?'); p = Object.getPrototypeOf(p); } return chain.join(' -> '); })(),
+            });
+        })()
+    "#).unwrap_or_default();
+    println!("createElement('form') probe: {create_probe}");
+
+    // Can we manually trigger submit? Run the same logic the page script does
+    // and report what happens.
+    let manual = page.evaluate(r#"
+        (() => {
+            try {
+                globalThis.__pendingNavigation = null;
+                const form = document.createElement('form');
+                const i1 = document.createElement('input');
+                i1.name = 'retpath';
+                i1.type = 'hidden';
+                i1.value = 'https://ya.ru/?nr=1';
+                form.appendChild(i1);
+                form.method = 'POST';
+                form.action = 'https://example.com/test';
+                document.body.appendChild(form);
+                const before = typeof form.submit;
+                form.submit();
+                return JSON.stringify({
+                    ok: true,
+                    pending: globalThis.__pendingNavigation,
+                    submit_type: before,
+                    form_action: form.action,
+                    form_method: form.method,
+                    form_outerHTML: form.outerHTML.substring(0, 400),
+                });
+            } catch (e) {
+                return JSON.stringify({ ok: false, err: String(e.message), stack: String(e.stack).substring(0, 400) });
+            }
+        })()
+    "#).unwrap_or_default();
+    println!("manual submit test: {manual}");
+
+    // Content head + meta refresh presence (stringified properly)
+    let head_probe = page.evaluate(r#"
+        JSON.stringify({
+            title: document.title || '',
+            meta_refresh: (document.querySelector('meta[http-equiv="refresh"]')?.getAttribute('content')) || '',
+            body_head: (document.body?.innerHTML || '').substring(0, 2000),
+        })
+    "#).unwrap_or_default();
+    println!("head probe: {}", &head_probe[..head_probe.len().min(3000)]);
+}
+
+#[tokio::test]
+#[ignore]
+async fn kasada_ftp_scheme_via_navigate() {
+    // Use Page::navigate_with_html so the real fetch wrapper (which includes
+    // scheme rejection) is active, then probe fetch("ftp:").
+    let profile = stealth::chrome_130_windows();
+    let mut page = browser::Page::navigate_with_html(
+        r#"<!DOCTYPE html><html><head></head><body>
+        <script>
+            (async () => {
+                globalThis.__tests = {};
+                async function try_(u) {
+                    try {
+                        const r = await fetch(u);
+                        globalThis.__tests[u] = {type:'response',status:r.status};
+                    } catch (e) {
+                        globalThis.__tests[u] = {type:'threw', err:String(e.message)};
+                    }
+                }
+                await try_('ftp:');
+                await try_('file:');
+                await try_('chrome:');
+                await try_('/ftp:');
+            })();
+        </script>
+        </body></html>"#,
+        "https://www.canadagoose.com/",
+        profile,
+        1,
+    ).await.unwrap();
+    let _ = page.evaluate_async("", std::time::Duration::from_secs(3)).await;
+    let result = page.evaluate("JSON.stringify(globalThis.__tests || {})").unwrap_or_default();
+    println!("navigate+wrapper fetch(ftp:) test: {result}");
+}
+
+#[tokio::test]
+#[ignore]
+async fn kasada_ftp_url_behavior_probe() {
+    // ips.js uses a "/ftp:" (or "ftp:") canary after each solve. Real Chrome
+    // throws TypeError for fetch("ftp:") because ftp scheme is rejected by
+    // fetch. If our engine resolves "ftp:" to a relative path and makes an
+    // HTTP request, the 429 response looks "normal" to ips.js and it keeps
+    // solving instead of exiting. Verify our URL handling.
+    let mut page = browser::Page::from_html(
+        r#"<!DOCTYPE html><html><head></head><body></body></html>"#,
+        Some(stealth::chrome_130_windows()),
+    )
+    .await
+    .unwrap();
+    // Set location to simulate a site context.
+    let _ = page.evaluate(r#"location.href = 'https://www.canadagoose.com/'"#);
+
+    let probe = page.evaluate(r#"
+        (function() {
+            function tryResolve(input, base) {
+                try {
+                    const u = new URL(input, base);
+                    return {href: u.href, protocol: u.protocol, host: u.host, pathname: u.pathname};
+                } catch (e) {
+                    return {err: String(e.message)};
+                }
+            }
+            return JSON.stringify({
+                resolve_ftp_colon_abs: tryResolve('ftp:', 'https://www.canadagoose.com/'),
+                resolve_slash_ftp_colon: tryResolve('/ftp:', 'https://www.canadagoose.com/'),
+                resolve_ftp_colon_aboutblank: tryResolve('ftp:', 'about:blank'),
+                resolve_ftp_colon_only: (() => { try { return new URL('ftp:').href } catch (e) { return 'ERR: ' + e.message } })(),
+            });
+        })()
+    "#).unwrap_or_default();
+    println!("URL resolution probe: {probe}");
+
+    // Now test what fetch() does with these inputs.
+    let _ = page.evaluate_async(r#"
+        (async () => {
+            globalThis.__fetchTests = {};
+            async function tryFetch(input) {
+                try {
+                    const r = await fetch(input);
+                    globalThis.__fetchTests[input] = {status: r.status, ok: r.ok, type: 'response'};
+                } catch (e) {
+                    globalThis.__fetchTests[input] = {type: 'threw', err: String(e && e.message || e), name: e && e.name};
+                }
+            }
+            await tryFetch('ftp:');
+            await tryFetch('/ftp:');
+        })();
+    "#, std::time::Duration::from_secs(10)).await;
+    let fetch_results = page.evaluate("JSON.stringify(globalThis.__fetchTests || {})").unwrap_or_default();
+    println!("fetch() behavior probe: {fetch_results}");
+
+    // What does real Chrome do? Per WHATWG URL spec:
+    //   new URL("ftp:", "https://example.com/")  → "ftp:"  (ftp is a scheme)
+    //   new URL("/ftp:", "https://example.com/") → "https://example.com/ftp:"
+    // And fetch("ftp:") throws TypeError because ftp scheme is not a fetch scheme.
+}
+
+#[tokio::test]
+#[ignore]
+async fn kasada_ips_deep_instrumentation() {
+    // Heavy instrumentation harness: run ips.js with every observable
+    // access and state change captured, then search captured state for
+    // the x-kpsdk-v / -dv / -h / -fc values we can't see on requests.
+    //
+    // Strategy: monkey-patch String.fromCharCode, String.prototype to record
+    // every string constructed; Proxy globalThis and built-ins to log every
+    // property read; capture all Function-constructor bodies; capture all
+    // event dispatch names. At the end, grep captured data for "x-kpsdk"
+    // occurrences and dump the strings built around them.
+    use std::fs;
+    let solver_code = match fs::read_to_string("/tmp/kasada_solver.js") {
+        Ok(s) => s,
+        Err(_) => {
+            println!("run kasada_poc_fetch_ips_js first to dump solver to /tmp/kasada_solver.js");
+            return;
+        }
+    };
+
+    // Build a Page that sets up the challenge DOM, then installs
+    // instrumentation BEFORE we execute ips.js.
+    let mut page = browser::Page::from_html(
+        r#"<!DOCTYPE html><html><head></head><body>
+        <script>window.KPSDK={};KPSDK.now=typeof performance!=='undefined'&&performance.now?performance.now.bind(performance):Date.now.bind(Date);KPSDK.start=KPSDK.now();</script>
+        </body></html>"#,
+        Some(stealth::chrome_130_windows()),
+    )
+    .await
+    .unwrap();
+
+    // Install instrumentation.
+    let instrument = r#"
+        globalThis.__TRACE = {
+            strings: [],            // every string that contains "kpsdk" or "x-" or looks like a header
+            events: [],             // every dispatchEvent call
+            listeners: [],          // every addEventListener call
+            defines: [],            // every Object.defineProperty call
+            funcs: [],              // every new Function(...) body
+            reads: {},              // property read counts per (target, key)
+            respHeaders: {},        // last response's header map (set by fetch wrapper)
+        };
+
+        const _origFromChar = String.fromCharCode;
+        String.fromCharCode = function(...args) {
+            const s = _origFromChar.apply(String, args);
+            if (s.length > 2 && (s.toLowerCase().includes('kpsdk') || /^[a-z0-9-]+$/i.test(s) && s.length > 5 && s.length < 40)) {
+                globalThis.__TRACE.strings.push({via: 'fromCharCode', s, stack: (new Error().stack || '').substring(0, 200)});
+            }
+            return s;
+        };
+
+        const _origConcat = String.prototype.concat;
+        // Don't wrap concat — most strings will flow through it in normal code
+        // Instead, hook Object.defineProperty to capture any property set
+        // to a value that looks like a header or a base64-ish token.
+        const _origDefProp = Object.defineProperty;
+        Object.defineProperty = function(target, key, desc) {
+            try {
+                if (desc && 'value' in desc && typeof desc.value === 'string' &&
+                    desc.value.length > 8 && desc.value.length < 256) {
+                    const v = desc.value;
+                    if (v.toLowerCase().includes('kpsdk') || /^[A-Za-z0-9_-]{10,}$/.test(v)) {
+                        globalThis.__TRACE.defines.push({target: String(target).substring(0, 60), key: String(key), value: v.substring(0, 120)});
+                    }
+                }
+            } catch {}
+            return _origDefProp.apply(Object, arguments);
+        };
+
+        const _origAddEventListener = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function(type, fn, opts) {
+            try {
+                if (typeof type === 'string' && (type.includes('kp') || type.includes('ready') || type === 'message' || type === 'DOMContentLoaded' || type === 'load')) {
+                    globalThis.__TRACE.listeners.push({target: this.constructor && this.constructor.name || '?', type});
+                }
+            } catch {}
+            return _origAddEventListener.apply(this, arguments);
+        };
+
+        const _origDispatchEvent = EventTarget.prototype.dispatchEvent;
+        EventTarget.prototype.dispatchEvent = function(ev) {
+            try {
+                if (ev && typeof ev.type === 'string') {
+                    globalThis.__TRACE.events.push({target: this.constructor && this.constructor.name || '?', type: ev.type, detail: typeof ev.detail === 'object' ? JSON.stringify(ev.detail).substring(0, 200) : String(ev.detail)});
+                }
+            } catch {}
+            return _origDispatchEvent.apply(this, arguments);
+        };
+
+        // Wrap Function constructor to log every dynamically-built function body.
+        const _OrigFn = Function;
+        globalThis.Function = new Proxy(_OrigFn, {
+            construct(target, args) {
+                const body = args[args.length - 1];
+                if (typeof body === 'string' && body.length > 5) {
+                    globalThis.__TRACE.funcs.push(body.substring(0, 400));
+                }
+                return Reflect.construct(target, args);
+            },
+            apply(target, thisArg, args) {
+                const body = args[args.length - 1];
+                if (typeof body === 'string' && body.length > 5) {
+                    globalThis.__TRACE.funcs.push(body.substring(0, 400));
+                }
+                return Reflect.apply(target, thisArg, args);
+            },
+        });
+        globalThis.Function.prototype = _OrigFn.prototype;
+
+        // Wrap window.fetch to capture every request's full headers so we can
+        // see any x-kpsdk-v/-dv/-h/-fc that ips.js adds but we normally miss.
+        const _origFetch = globalThis.fetch;
+        globalThis.fetch = async function(input, init) {
+            const headers = init && init.headers ? Object.assign({}, init.headers) : {};
+            const url = typeof input === 'string' ? input : (input && input.url) || '';
+            globalThis.__TRACE.fetchReq = globalThis.__TRACE.fetchReq || [];
+            globalThis.__TRACE.fetchReq.push({url: String(url).substring(0, 200), headers});
+            const resp = await _origFetch.apply(this, arguments);
+            try {
+                const h = {};
+                if (resp && resp.headers && resp.headers.forEach) {
+                    resp.headers.forEach((v, k) => { h[k.toLowerCase()] = String(v).substring(0, 200); });
+                }
+                globalThis.__TRACE.respHeaders = h;
+            } catch {}
+            return resp;
+        };
+
+        // Wrap navigator.sendBeacon
+        if (navigator && navigator.sendBeacon) {
+            const _origSend = navigator.sendBeacon;
+            navigator.sendBeacon = function(url, data) {
+                globalThis.__TRACE.beacons = globalThis.__TRACE.beacons || [];
+                globalThis.__TRACE.beacons.push({url: String(url).substring(0,200), dataType: typeof data, dataLen: data ? (data.length || data.byteLength || 0) : 0});
+                return _origSend.apply(this, arguments);
+            };
+        }
+
+        // Wrap XMLHttpRequest to capture its setRequestHeader calls
+        if (globalThis.XMLHttpRequest) {
+            const _origOpen = XMLHttpRequest.prototype.open;
+            const _origSetHdr = XMLHttpRequest.prototype.setRequestHeader;
+            const _origSend2 = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this.__xhrInfo = {method, url: String(url).substring(0,200), headers: {}};
+                return _origOpen.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.setRequestHeader = function(k, v) {
+                if (this.__xhrInfo) this.__xhrInfo.headers[String(k).toLowerCase()] = String(v);
+                return _origSetHdr.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function() {
+                if (this.__xhrInfo) {
+                    globalThis.__TRACE.xhrReq = globalThis.__TRACE.xhrReq || [];
+                    globalThis.__TRACE.xhrReq.push(this.__xhrInfo);
+                }
+                return _origSend2.apply(this, arguments);
+            };
+        }
+
+        // Trap setRequestHeader-style lookups on the Request object (fetch API)
+        // Also wrap Headers.append + set to catch direct manipulation.
+        if (globalThis.Headers && Headers.prototype.set) {
+            const _origHSet = Headers.prototype.set;
+            const _origHAppend = Headers.prototype.append;
+            Headers.prototype.set = function(k, v) {
+                if (typeof k === 'string' && k.toLowerCase().startsWith('x-kpsdk')) {
+                    globalThis.__TRACE.kpsdkHeaders = globalThis.__TRACE.kpsdkHeaders || {};
+                    globalThis.__TRACE.kpsdkHeaders[k.toLowerCase()] = String(v).substring(0, 200);
+                }
+                return _origHSet.apply(this, arguments);
+            };
+            Headers.prototype.append = function(k, v) {
+                if (typeof k === 'string' && k.toLowerCase().startsWith('x-kpsdk')) {
+                    globalThis.__TRACE.kpsdkHeaders = globalThis.__TRACE.kpsdkHeaders || {};
+                    globalThis.__TRACE.kpsdkHeaders[k.toLowerCase()] = String(v).substring(0, 200);
+                }
+                return _origHAppend.apply(this, arguments);
+            };
+        }
+    "#;
+    page.evaluate(instrument).unwrap();
+
+    // Run ips.js and let it churn for 60 seconds — user observed browsers
+    // "wait like JS check and some delay" before the real page loads.
+    let _ = page.evaluate(&solver_code);
+    let _ = page.evaluate_async("", std::time::Duration::from_secs(60)).await;
+
+    // Collect trace.
+    let kpsdk_in_headers = page.evaluate("JSON.stringify(globalThis.__TRACE.kpsdkHeaders || {})").unwrap_or_default();
+    println!("=== x-kpsdk-* headers seen via Headers.set/append: {}", kpsdk_in_headers);
+
+    let events = page.evaluate("JSON.stringify((globalThis.__TRACE.events || []).slice(0, 30))").unwrap_or_default();
+    println!("=== events dispatched: {}", &events[..events.len().min(1500)]);
+
+    let listeners = page.evaluate("JSON.stringify(globalThis.__TRACE.listeners || [])").unwrap_or_default();
+    println!("=== listeners registered: {}", &listeners[..listeners.len().min(1500)]);
+
+    let beacons = page.evaluate("JSON.stringify(globalThis.__TRACE.beacons || [])").unwrap_or_default();
+    println!("=== sendBeacon calls: {}", &beacons[..beacons.len().min(800)]);
+
+    let xhr_req = page.evaluate("JSON.stringify(globalThis.__TRACE.xhrReq || [])").unwrap_or_default();
+    println!("=== XHR calls: {}", &xhr_req[..xhr_req.len().min(1000)]);
+
+    let fetch_req = page.evaluate(r#"JSON.stringify((globalThis.__TRACE.fetchReq || []).map(r => {
+        const kp = {};
+        for (const k of Object.keys(r.headers || {})) {
+            if (k.toLowerCase().startsWith('x-kpsdk') || k.toLowerCase().startsWith('x-kp')) kp[k] = String(r.headers[k]).substring(0, 50);
+        }
+        return {url: r.url, kpsdk: kp};
+    }))"#).unwrap_or_default();
+    println!("=== fetch calls (x-kpsdk-* only): {}", &fetch_req[..fetch_req.len().min(2000)]);
+
+    let defines = page.evaluate("JSON.stringify((globalThis.__TRACE.defines || []).slice(0, 20))").unwrap_or_default();
+    println!("=== defineProperty with token-looking values ({} entries): {}", defines.len(), &defines[..defines.len().min(1500)]);
+
+    let fn_cnt = page.evaluate("String((globalThis.__TRACE.funcs || []).length)").unwrap_or_default();
+    let fn_tokens = page.evaluate(r#"
+        JSON.stringify((() => {
+            const list = globalThis.__TRACE.funcs || [];
+            const matches = [];
+            for (let i = 0; i < list.length; i++) {
+                const body = list[i];
+                // Look for any body containing x-kpsdk or a base64-like token
+                if (/x-?kpsdk-[a-z]+/i.test(body) || body.includes('KP_') || /[A-Za-z0-9_-]{30,}/.test(body)) {
+                    matches.push({i, head: body.substring(0, 200)});
+                }
+                if (matches.length >= 10) break;
+            }
+            return matches;
+        })())
+    "#).unwrap_or_default();
+    println!("=== Function bodies (of {}): {}", fn_cnt, &fn_tokens[..fn_tokens.len().min(3000)]);
+
+    // Search KPSDK for any newly-added keys after running ips.js.
+    let kpsdk_final = page.evaluate(r#"
+        JSON.stringify((() => {
+            if (!window.KPSDK) return {};
+            const out = {};
+            for (const k of Object.getOwnPropertyNames(window.KPSDK)) {
+                try {
+                    const v = window.KPSDK[k];
+                    if (typeof v === 'function') out[k] = '[fn]';
+                    else if (typeof v === 'object' && v !== null) out[k] = JSON.stringify(v).substring(0, 200);
+                    else out[k] = String(v).substring(0, 200);
+                } catch (e) { out[k] = '[err]'; }
+            }
+            return out;
+        })())
+    "#).unwrap_or_default();
+    println!("=== window.KPSDK after ips.js run: {}", kpsdk_final);
+
+    // Dump the last 20 funcs verbatim for offline inspection
+    let _ = page.evaluate(r#"globalThis.__TRACE_DUMP = JSON.stringify((globalThis.__TRACE.funcs || []).slice(-50))"#);
+    if let Ok(dump) = page.evaluate("globalThis.__TRACE_DUMP") {
+        let _ = std::fs::write("/tmp/kasada_trace_funcs.json", dump);
+        println!("wrote /tmp/kasada_trace_funcs.json");
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn kasada_canadagoose_subpath_diagnostic() {
+    // Try visiting a product page directly instead of root. Maybe Kasada
+    // treats "/" as always-challenge and subpages as real content.
+    println!("\n=== Kasada canadagoose subpath test ===");
+    let profile = stealth::chrome_130_windows();
+    for url in ["https://www.canadagoose.com/us/en/home-page",
+                "https://www.canadagoose.com/us/en/shop/all",
+                "https://www.canadagoose.com/us/en",
+                "https://www.canadagoose.com/us/en/shop/men-outerwear-parkas"] {
+        match browser::Page::navigate(url, profile.clone(), 5).await {
+            Ok(mut p) => {
+                let c = p.content();
+                let url_final = p.url().to_string();
+                let is_challenge = c.contains("/ips.js") || c.contains("/149e9513-");
+                let has_real = c.contains("Canada Goose") && !is_challenge;
+                println!("  {url}");
+                println!("    final_url: {url_final}");
+                println!("    content_len: {}, challenge: {}, real: {}", c.len(), is_challenge, has_real);
+            }
+            Err(e) => println!("  {url} failed: {e}"),
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn kasada_canadagoose_raw_with_cookies_test() {
+    // Test: do a first GET to establish a session, then a second GET with
+    // the cookies from the first. See if a plain re-fetch with cookies
+    // (NO JS solve) already changes the behavior. This answers: is the
+    // cookie/TLS-session pair sufficient, or do we need the solve?
+    println!("\n=== Kasada raw-cookies test ===");
+    let profile = stealth::chrome_130_windows();
+    let client = net::HttpClient::new(&profile).unwrap();
+
+    println!("\nStep 1: initial GET");
+    let r1 = client.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    println!("  status={} body={}b", r1.status, r1.body.len());
+    println!("  set-cookies ({}):", r1.set_cookies.len());
+    for c in &r1.set_cookies {
+        println!("    {}", &c[..c.len().min(200)]);
+    }
+
+    println!("\nStep 2: immediate re-GET (same connection pool, cookies from jar)");
+    let r2 = client.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    println!("  status={} body={}b", r2.status, r2.body.len());
+
+    println!("\nStep 3: GET with reload-style headers + Referer");
+    let reload_hdrs = net::headers::chrome_headers_reload(&profile, "https://www.canadagoose.com/");
+    let r3 = client.get_follow_exact_headers("https://www.canadagoose.com/", &reload_hdrs, 10).await.unwrap();
+    println!("  status={} body={}b", r3.status, r3.body.len());
+
+    println!("\nStep 4: Wait 3s, then GET (timing test)");
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    let r4 = client.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    println!("  status={} body={}b", r4.status, r4.body.len());
+
+    println!("\nStep 5: GET with NO cookies (fresh client - new jar)");
+    let profile2 = stealth::chrome_130_windows();
+    let client2 = net::HttpClient::new(&profile2).unwrap();
+    let r5 = client2.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    println!("  status={} body={}b", r5.status, r5.body.len());
+}
+
+#[tokio::test]
+#[ignore]
+async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
+    // Targeted root-cause diagnostic. After navigate loop exits, report:
+    // - final URL / content len
+    // - __fetchLog (every fetch ips.js made)
+    // - __cookieWrites (every document.cookie = ... the scripts did)
+    // - document.cookie visible to JS at exit time
+    // - __scriptErrors
+    // Run with: cargo test -p browser --test tier0_kasada kasada_canadagoose_cookie_and_fetch_diagnostic -- --ignored --test-threads=1 --nocapture
+    println!("\n=== Kasada cookie+fetch diagnostic (canadagoose.com) ===\n");
+    let profile = stealth::chrome_130_windows();
+    let mut page = match browser::Page::navigate("https://www.canadagoose.com/", profile, 5).await {
+        Ok(p) => p,
+        Err(e) => {
+            println!("navigate failed: {e}");
+            return;
+        }
+    };
+    println!("final url:        {}", page.url());
+    let content = page.content();
+    println!("final content len: {} bytes", content.len());
+    let is_challenge = content.contains("/ips.js") || content.contains("/149e9513-") || content.contains("KPSDK");
+    let is_real = content.contains("Canada Goose") && !is_challenge;
+    println!("is_challenge:     {is_challenge}");
+    println!("is_real_content:  {is_real}");
+
+    // document.cookie from V8's perspective
+    let doc_cookie = page.evaluate("document.cookie").unwrap_or_default();
+    println!("document.cookie:  {}", &doc_cookie[..doc_cookie.len().min(800)]);
+
+    // Pending nav (usually cleared by cleanup_bootstrap, but try)
+    let pending = page
+        .evaluate("JSON.stringify(globalThis.__pendingNavigation || null)")
+        .unwrap_or_default();
+    println!("__pendingNavigation: {pending}");
+
+    // What did scripts write to document.cookie?
+    let cw = page.evaluate("JSON.stringify(window.__cookieWrites || [])").unwrap_or_default();
+    println!("__cookieWrites ({} entries):", cw.matches(',').count() + 1);
+    println!("  {}", &cw[..cw.len().min(2000)]);
+
+    // All unique x-kpsdk-* header keys seen in req+resp across __fetchLog
+    let all_kpsdk = page.evaluate(r#"
+        JSON.stringify((() => {
+            const log = globalThis.__fetchLog || [];
+            const reqKeys = new Set(), respKeys = new Set();
+            const reqVals = {}, respVals = {};
+            for (const e of log) {
+                for (const k of Object.keys(e.reqHeaders || {})) {
+                    if (k.toLowerCase().startsWith('x-kpsdk')) { reqKeys.add(k.toLowerCase()); reqVals[k.toLowerCase()] = (e.reqHeaders[k] || '').substring(0,40); }
+                }
+                for (const k of Object.keys(e.respHeaders || {})) {
+                    if (k.toLowerCase().startsWith('x-kpsdk')) { respKeys.add(k.toLowerCase()); respVals[k.toLowerCase()] = (e.respHeaders[k] || '').substring(0,40); }
+                }
+            }
+            return { req: [...reqKeys], resp: [...respKeys], reqVals, respVals };
+        })())
+    "#).unwrap_or_default();
+    println!("All x-kpsdk-* headers in __fetchLog: {}", &all_kpsdk[..all_kpsdk.len().min(2000)]);
+
+    // Full fetch log from the JS side (URL, method, status, req/resp headers)
+    let fl = page
+        .evaluate("JSON.stringify(window.__fetchLog || [])")
+        .unwrap_or_default();
+    println!("__fetchLog len: {} chars", fl.len());
+    // Parse and pretty-print each entry with just URL + status + KP headers
+    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&fl) {
+        println!("__fetchLog ({} entries):", arr.len());
+        for (i, e) in arr.iter().enumerate() {
+            let m = e.get("method").and_then(|v| v.as_str()).unwrap_or("");
+            let u = e.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let s = e.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+            let err = e.get("error").and_then(|v| v.as_str()).unwrap_or("");
+            let u_s: String = u.chars().take(160).collect();
+            println!("  [{i}] {m} {} {u_s} {}", s, err);
+            // Print any x-kpsdk-* headers seen in request or response
+            if let Some(rh) = e.get("reqHeaders").and_then(|v| v.as_object()) {
+                for (k, v) in rh {
+                    if k.to_lowercase().starts_with("x-kpsdk") {
+                        println!("      req  {k}: {}", v.as_str().unwrap_or(""));
+                    }
+                }
+            }
+            if let Some(rh) = e.get("respHeaders").and_then(|v| v.as_object()) {
+                for (k, v) in rh {
+                    if k.to_lowercase().starts_with("x-kpsdk") {
+                        println!("      resp {k}: {}", v.as_str().unwrap_or(""));
+                    }
+                }
+            }
+        }
+    } else {
+        println!("(could not parse __fetchLog JSON; raw first 500: {})", &fl[..fl.len().min(500)]);
+    }
+
+    // Script errors
+    let errs = page.evaluate("JSON.stringify(window.__scriptErrors || [])").unwrap_or_default();
+    println!("__scriptErrors: {}", &errs[..errs.len().min(800)]);
+
+    // location.reload / href behavior — check if pending nav was ever triggered
+    // by looking for 'reload' kind in the log.
+    let reload_check = page.evaluate(r#"
+        (() => {
+            const hasPatched = typeof window.fetch === 'function' && window.fetch.toString().indexOf('_origFetch') !== -1;
+            return JSON.stringify({
+                fetch_patched_by_engine: hasPatched,
+                fetch_tostring_head: String(window.fetch).substring(0, 200),
+            });
+        })()
+    "#).unwrap_or_default();
+    println!("fetch state: {reload_check}");
+
+    // Dump KPSDK state — methods, properties, token, ready flag.
+    let kpsdk = page.evaluate(r#"
+        (() => {
+            if (typeof window.KPSDK === 'undefined') return JSON.stringify({present: false});
+            const k = window.KPSDK;
+            const out = { present: true, keys: [], methods: [], values: {} };
+            for (const key of Object.getOwnPropertyNames(k)) {
+                try {
+                    const v = k[key];
+                    out.keys.push(key);
+                    if (typeof v === 'function') {
+                        out.methods.push(key);
+                        try { out.values[key] = String(v(...[])).substring(0, 200); } catch (e) { out.values[key] = '[threw:'+e.message.substring(0,80)+']'; }
+                    } else if (typeof v === 'object' && v !== null) {
+                        try { out.values[key] = JSON.stringify(v).substring(0, 300); } catch { out.values[key] = '[unserializable]'; }
+                    } else {
+                        out.values[key] = String(v).substring(0, 200);
+                    }
+                } catch (e) { out.keys.push(key+'[err]'); }
+            }
+            return JSON.stringify(out);
+        })()
+    "#).unwrap_or_default();
+    println!("KPSDK state: {}", &kpsdk[..kpsdk.len().min(2000)]);
 }

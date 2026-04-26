@@ -62,7 +62,16 @@ impl BrowserEventLoop {
 
     /// Execute a script in the runtime.
     pub fn execute_script(&mut self, code: &str) -> Result<String, deno_core::error::AnyError> {
-        self.runtime.execute_script(code)
+        self.runtime.execute_script(code, None)
+    }
+
+    /// Execute a script in the runtime with a given source name.
+    pub fn execute_script_with_name(
+        &mut self,
+        code: &str,
+        name: &str,
+    ) -> Result<String, deno_core::error::AnyError> {
+        self.runtime.execute_script(code, Some(name))
     }
 
     /// Run scripts then wait for idle.
@@ -71,7 +80,7 @@ impl BrowserEventLoop {
         code: &str,
         timeout: Duration,
     ) -> Result<IdleReason, deno_core::error::AnyError> {
-        self.runtime.execute_script(code)?;
+        self.runtime.execute_script(code, None)?;
         self.run_until_idle(timeout).await
     }
 

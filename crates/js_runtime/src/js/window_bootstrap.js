@@ -1,5 +1,24 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
+    const _boxide = globalThis.__boxide;
+
+    if (globalThis.WebAssembly) {
+        // Streaming stubs
+        WebAssembly.instantiateStreaming = async function(source, importObject) {
+            const resp = await source;
+            const bytes = await resp.arrayBuffer();
+            return WebAssembly.instantiate(bytes, importObject);
+        };
+        WebAssembly.compileStreaming = async function(source) {
+            const resp = await source;
+            const bytes = await resp.arrayBuffer();
+            return WebAssembly.compile(bytes);
+        };
+    }
+
+    // Masking helpers are provided by stealth_bootstrap.js
+    const _maskFunction = globalThis._maskFunction;
+    const _maskAsNative = globalThis._maskAsNative;
 
     // Helper: read from stealth profile or use default
     const _p = (key, fallback) => {
@@ -26,101 +45,270 @@
     // ================================================================
     // Prototype-install helpers — kNoScriptId-safe layout
     // ================================================================
-    // Real Chrome: DOM-wrapped objects (navigator, screen, history, etc.)
-    // have ZERO own properties; every data/accessor lives on the class's
-    // prototype. Kasada/Castle probes call
-    // Object.getOwnPropertyDescriptor(obj, 'x') — if the result is
-    // defined, they take a path that flags the accessor as "fake native"
-    // (V8 kNoScriptId guard, May 2025 patch). Installing on the prototype
-    // makes the own-descriptor probe return undefined, matching Chrome.
-    //
-    // _defProtoGetter(proto, name, getter)  → accessor on proto, masked toString
-    // _defProtoMethod(proto, name, fn)      → method on proto, masked toString
-    // _makeProtoInstance(Cls)               → Object.create(Cls.prototype)
-
-    const _defProtoGetter = (proto, name, getter) => {
+    const _defProtoGetter = (proto, name, getter, setter) => {
         Object.defineProperty(proto, name, {
             get: getter,
-            set: undefined,
+            set: setter,
             enumerable: true,
             configurable: true,
         });
-        try {
-            const d = Object.getOwnPropertyDescriptor(proto, name);
-            Object.defineProperty(d.get, 'name', { value: `get ${name}`, configurable: true });
-            Object.defineProperty(d.get, 'toString', {
-                value: function toString() { return `function get ${name}() { [native code] }`; },
-                configurable: true,
-            });
-        } catch {}
+        _maskFunction(getter, `get ${name}`);
+        if (setter) _maskFunction(setter, `set ${name}`);
     };
     const _defProtoMethod = (proto, name, fn) => {
         Object.defineProperty(proto, name, {
             value: fn, writable: true, enumerable: true, configurable: true,
         });
-        try {
-            Object.defineProperty(fn, 'name', { value: name, configurable: true });
-            Object.defineProperty(fn, 'toString', {
-                value: function toString() { return `function ${name}() { [native code] }`; },
-                configurable: true,
-            });
-        } catch {}
+        _maskFunction(fn, name);
     };
 
     // ================================================================
     // Navigator class + prototype — kNoScriptId-safe layout
     // ================================================================
-    class Navigator {}
-    globalThis.Navigator = Navigator;
-    const _NavProto = Navigator.prototype;
+    const _NavProto = globalThis.Navigator.prototype;
     const _defNav = (name, getter) => _defProtoGetter(_NavProto, name, getter);
     const _defNavMethod = (name, fn) => _defProtoMethod(_NavProto, name, fn);
 
     // Stable-object references — object getters return the same reference
     // on every call, matching the behavior of real DOM-wrapped properties.
-    //
-    // Each of these navigator sub-objects is an instance of a properly-named
-    // class (NetworkInformation, MediaDevices, StorageManager, Bluetooth, …)
-    // so that `Object.getPrototypeOf(nav.X).constructor.name` and
-    // `Object.prototype.toString.call(nav.X)` return Chrome-shaped values.
-    // Sensor VMs (e.g., Akamai BMP v3) inspect these brands and refuse to
-    // upgrade trust if they see "[object Object]".
-    class NetworkInformation {}
-    Object.defineProperty(NetworkInformation.prototype, Symbol.toStringTag, {
-        value: "NetworkInformation", configurable: true,
-    });
-    globalThis.NetworkInformation = NetworkInformation;
+    let NetworkInformation = globalThis.NetworkInformation || class NetworkInformation {};
     const _navConnection = Object.create(NetworkInformation.prototype);
     Object.defineProperty(_navConnection, 'effectiveType', { get: () => _p("connection_effective_type", "4g"), enumerable: true });
-    Object.defineProperty(_navConnection, 'rtt', { get: () => _pInt("connection_rtt", 50), enumerable: true });
-    Object.defineProperty(_navConnection, 'downlink', { get: () => _pFloat("connection_downlink", 10), enumerable: true });
+    Object.defineProperty(_navConnection, 'rtt', { get: () => Math.round(_pInt("connection_rtt", 50) / 25) * 25, enumerable: true });
+    Object.defineProperty(_navConnection, 'downlink', { get: () => Math.round(_pFloat("connection_downlink", 10) * 40) / 40, enumerable: true });
     Object.defineProperty(_navConnection, 'saveData', { get: () => false, enumerable: true });
-    Object.defineProperty(_navConnection, 'type', { get: () => 'wifi', enumerable: true });
     Object.defineProperty(_navConnection, 'downlinkMax', { get: () => Infinity, enumerable: true });
+    _navConnection.addEventListener = function addEventListener() {};
+    _navConnection.removeEventListener = function removeEventListener() {};
+    _navConnection.dispatchEvent = function dispatchEvent() { return true; };
+    _navConnection.onchange = null;
 
-    const _navPlugins = { length: _pInt("plugins_count", 5), item() { return null; }, namedItem() { return null; }, refresh() {} };
-    const _navMimeTypes = { length: 2, item() { return null; }, namedItem() { return null; } };
+    let PluginArray = globalThis.PluginArray || class PluginArray {};
+    let MimeTypeArray = globalThis.MimeTypeArray || class MimeTypeArray {};
+    let Plugin = globalThis.Plugin || class Plugin {};
+    let MimeType = globalThis.MimeType || class MimeType {};
 
-    class MediaDevices {}
-    Object.defineProperty(MediaDevices.prototype, Symbol.toStringTag, {
-        value: "MediaDevices", configurable: true,
+    // 1. Setup Plugin.prototype
+    const _PluginProto = Plugin.prototype;
+    Object.defineProperty(_PluginProto, Symbol.toStringTag, { value: "Plugin", enumerable: false, configurable: true });
+    _defProtoGetter(_PluginProto, 'name', function() { return this._name || ""; });
+    _defProtoGetter(_PluginProto, 'description', function() { return this._desc || ""; });
+    _defProtoGetter(_PluginProto, 'filename', function() { return this._file || ""; });
+    _defProtoGetter(_PluginProto, 'length', function() { return 0; });
+    _defProtoMethod(_PluginProto, 'item', function item() { return null; });
+    _defProtoMethod(_PluginProto, 'namedItem', function namedItem() { return null; });
+
+    // Setup MimeType.prototype
+    const _MimeTypeProto = MimeType.prototype;
+    Object.defineProperty(_MimeTypeProto, Symbol.toStringTag, { value: "MimeType", enumerable: false, configurable: true });
+    _defProtoGetter(_MimeTypeProto, 'type', function() { return this._type || ""; });
+    _defProtoGetter(_MimeTypeProto, 'description', function() { return this._desc || ""; });
+    _defProtoGetter(_MimeTypeProto, 'suffixes', function() { return this._suffixes || ""; });
+    _defProtoGetter(_MimeTypeProto, 'enabledPlugin', function() { return this._plugin || null; });
+
+    const _makePlugin = (name, desc, file) => {
+        const p = Object.create(_PluginProto);
+        Object.defineProperty(p, '_name', { value: name });
+        Object.defineProperty(p, '_desc', { value: desc });
+        Object.defineProperty(p, '_file', { value: file });
+        Object.defineProperty(p, '_mimeTypes', { value: [], writable: true });
+        return p;
+    };
+    const _makeMime = (type, suffixes, desc, plugin) => {
+        const m = Object.create(_MimeTypeProto);
+        Object.defineProperty(m, '_type', { value: type });
+        Object.defineProperty(m, '_suffixes', { value: suffixes });
+        Object.defineProperty(m, '_desc', { value: desc });
+        Object.defineProperty(m, '_plugin', { value: plugin });
+        return m;
+    };
+
+    // Canonical Chrome 133 plugin set. All real Chrome 133 browsers ship
+    // exactly these 5 plugins + 2 mime types; the profile fields
+    // plugins_count / mime_types_count let a profile CLAIM a subset.
+    //
+    // IMPORTANT: the bootstrap runs at V8-snapshot-build time with NO
+    // stealth profile installed, so any eager `_pInt` read here captures
+    // the default (5/2) into the snapshot. Count resolution MUST happen
+    // lazily via getters so each runtime navigator.plugins.length call
+    // reads the live profile.
+    const _PDF_DESC = "Portable Document Format";
+    const _PDF_FILE = "internal-pdf-viewer";
+    const _allPlugins = [
+        _makePlugin("PDF Viewer", _PDF_DESC, _PDF_FILE),
+        _makePlugin("Chrome PDF Viewer", _PDF_DESC, _PDF_FILE),
+        _makePlugin("Chromium PDF Viewer", _PDF_DESC, _PDF_FILE),
+        _makePlugin("Microsoft Edge PDF Viewer", _PDF_DESC, _PDF_FILE),
+        _makePlugin("WebKit built-in PDF", _PDF_DESC, _PDF_FILE),
+    ];
+    const _allMimes = [
+        _makeMime("application/pdf", "pdf", _PDF_DESC, _allPlugins[0]),
+        _makeMime("text/pdf", "pdf", _PDF_DESC, _allPlugins[0]),
+    ];
+    // Cross-link: each plugin reports the same mime type list per Chrome.
+    _allPlugins.forEach(p => { p._mimeTypes = _allMimes; });
+
+    // Runtime count resolvers — clamped to physical array size so a probe
+    // that walks plugins[i] for i<length never hits undefined.
+    const _pluginsLen = () => Math.max(0, Math.min(_allPlugins.length, _pInt("plugins_count", _allPlugins.length)));
+    const _mimesLen = () => Math.max(0, Math.min(_allMimes.length, _pInt("mime_types_count", _allMimes.length)));
+
+    // 2. Setup PluginArray.prototype — length + item() dispatch via live count.
+    const _PluginArrayProto = PluginArray.prototype;
+    Object.defineProperty(_PluginArrayProto, Symbol.toStringTag, { value: "PluginArray", enumerable: false, configurable: true });
+    Object.defineProperty(_PluginArrayProto, 'length', { get: () => _pluginsLen(), enumerable: true, configurable: true });
+    _defProtoMethod(_PluginArrayProto, 'item', function item(i) {
+        const n = _pluginsLen();
+        return (i >= 0 && i < n) ? _allPlugins[i] : null;
     });
-    MediaDevices.prototype.enumerateDevices = function () { return Promise.resolve(_pJson("media_devices", [])); };
-    MediaDevices.prototype.getUserMedia = function () { return Promise.reject(new Error("Permission denied")); };
-    MediaDevices.prototype.getDisplayMedia = function () { return Promise.reject(new Error("Permission denied")); };
-    MediaDevices.prototype.getSupportedConstraints = function () {
+    _defProtoMethod(_PluginArrayProto, 'namedItem', function namedItem(n) {
+        const len = _pluginsLen();
+        for (let i = 0; i < len; i++) if (_allPlugins[i].name === n) return _allPlugins[i];
+        return null;
+    });
+    _defProtoMethod(_PluginArrayProto, 'refresh', () => {});
+    // Symbol.iterator iterates the live sliced range.
+    Object.defineProperty(_PluginArrayProto, Symbol.iterator, {
+        value: function* iter() {
+            const n = _pluginsLen();
+            for (let i = 0; i < n; i++) yield _allPlugins[i];
+        },
+        configurable: true,
+    });
+
+    // Setup MimeTypeArray.prototype — same pattern.
+    const _MimeTypeArrayProto = MimeTypeArray.prototype;
+    Object.defineProperty(_MimeTypeArrayProto, Symbol.toStringTag, { value: "MimeTypeArray", enumerable: false, configurable: true });
+    Object.defineProperty(_MimeTypeArrayProto, 'length', { get: () => _mimesLen(), enumerable: true, configurable: true });
+    _defProtoMethod(_MimeTypeArrayProto, 'item', function item(i) {
+        const n = _mimesLen();
+        return (i >= 0 && i < n) ? _allMimes[i] : null;
+    });
+    _defProtoMethod(_MimeTypeArrayProto, 'namedItem', function namedItem(n) {
+        const len = _mimesLen();
+        for (let i = 0; i < len; i++) if (_allMimes[i].type === n) return _allMimes[i];
+        return null;
+    });
+    Object.defineProperty(_MimeTypeArrayProto, Symbol.iterator, {
+        value: function* iter() {
+            const n = _mimesLen();
+            for (let i = 0; i < n; i++) yield _allMimes[i];
+        },
+        configurable: true,
+    });
+
+    // Instance: install numeric index accessors that gate on live count.
+    const _navPlugins = Object.create(_PluginArrayProto);
+    _allPlugins.forEach((p, i) => {
+        Object.defineProperty(_navPlugins, i, {
+            get: () => (i < _pluginsLen() ? p : undefined),
+            enumerable: true,
+            configurable: true,
+        });
+    });
+
+    // Plugin instance behaves like a MimeTypeArray over its mime types.
+    _allPlugins.forEach(p => {
+        Object.defineProperty(p, 'length', { get: () => _mimesLen(), enumerable: true, configurable: true });
+        Object.defineProperty(p, 'item', {
+            value: function item(i) {
+                const n = _mimesLen();
+                return (i >= 0 && i < n) ? p._mimeTypes[i] : null;
+            },
+            enumerable: false, configurable: true,
+        });
+        Object.defineProperty(p, 'namedItem', {
+            value: function namedItem(n) {
+                const len = _mimesLen();
+                for (let i = 0; i < len; i++) if (p._mimeTypes[i].type === n) return p._mimeTypes[i];
+                return null;
+            },
+            enumerable: false, configurable: true,
+        });
+        p._mimeTypes.forEach((m, i) => {
+            Object.defineProperty(p, i, {
+                get: () => (i < _mimesLen() ? m : undefined),
+                enumerable: true, configurable: true,
+            });
+        });
+    });
+
+    const _navMimeTypes = Object.create(_MimeTypeArrayProto);
+    _allMimes.forEach((m, i) => {
+        Object.defineProperty(_navMimeTypes, i, {
+            get: () => (i < _mimesLen() ? m : undefined),
+            enumerable: true, configurable: true,
+        });
+    });
+
+    let MediaDevices = globalThis.MediaDevices || class MediaDevices {};
+    const _navMediaDevices = Object.create(MediaDevices.prototype);
+    // enumerateDevices: apply the two spec behaviors real Chrome does and we
+    // previously missed:
+    //   (1) WebIDL camelCase on output (deviceId / groupId — NOT snake_case).
+    //       The profile ships snake_case; we transform here.
+    //   (2) label === "" until the corresponding permission is GRANTED
+    //       (audioinput/audiooutput → microphone; videoinput → camera).
+    //       Leaking populated labels pre-permission is a classic automation
+    //       tell. _PERMISSION_STATE_MAP is defined below; reference resolves
+    //       lazily when this function is called. §6.6 item 9 / item 7.
+    _navMediaDevices.enumerateDevices = function enumerateDevices() {
+        const raw = _pJson("media_devices", []);
+        const permFor = (kind) => {
+            if (kind === "videoinput") return _PERMISSION_STATE_MAP["camera"] || "prompt";
+            if (kind === "audioinput" || kind === "audiooutput") return _PERMISSION_STATE_MAP["microphone"] || "prompt";
+            return "granted"; // unknown kinds — don't blank
+        };
+        const out = raw.map((d) => {
+            const deviceId = d.deviceId != null ? d.deviceId : (d.device_id || "");
+            const groupId = d.groupId != null ? d.groupId : (d.group_id || "");
+            const label = permFor(d.kind) === "granted" ? (d.label || "") : "";
+            return { deviceId, kind: d.kind || "", label, groupId };
+        });
+        return Promise.resolve(out);
+    };
+    _navMediaDevices.getUserMedia = function () { return Promise.reject(new Error("Permission denied")); };
+    _navMediaDevices.getDisplayMedia = function () { return Promise.reject(new Error("Permission denied")); };
+    _navMediaDevices.getSupportedConstraints = function () {
         return { aspectRatio: true, autoGainControl: true, brightness: true, channelCount: true, colorTemperature: true, contrast: true, deviceId: true, displaySurface: true, echoCancellation: true, exposureCompensation: true, exposureMode: true, exposureTime: true, facingMode: true, focusDistance: true, focusMode: true, frameRate: true, groupId: true, height: true, iso: true, latency: true, noiseSuppression: true, pan: true, pointsOfInterest: true, resizeMode: true, sampleRate: true, sampleSize: true, saturation: true, sharpness: true, suppressLocalAudioPlayback: true, tilt: true, torch: true, whiteBalanceMode: true, width: true, zoom: true };
     };
-    MediaDevices.prototype.addEventListener = function () {};
-    MediaDevices.prototype.removeEventListener = function () {};
-    MediaDevices.prototype.dispatchEvent = function () { return true; };
-    globalThis.MediaDevices = MediaDevices;
-    const _navMediaDevices = Object.create(MediaDevices.prototype);
+    _navMediaDevices.addEventListener = function () {};
+    _navMediaDevices.removeEventListener = function () {};
+    _navMediaDevices.dispatchEvent = function () { return true; };
+
+    // Permission name → state map matching headed Chrome defaults.
+    // W3C PermissionState enum: 'granted' | 'denied' | 'prompt'. Headless
+    // Chrome's well-known 'denied' return for notifications is the single
+    // biggest fingerprint tell this function fixes.
+    const _PERMISSION_STATE_MAP = {
+        "notifications": "prompt",
+        "geolocation": "prompt",
+        "camera": "prompt",
+        "microphone": "prompt",
+        "midi": "prompt",
+        "push": "prompt",
+        "persistent-storage": "granted",
+        "background-sync": "granted",
+        "background-fetch": "granted",
+        "clipboard-read": "prompt",
+        "clipboard-write": "granted",
+        "payment-handler": "granted",
+        "accelerometer": "granted",
+        "gyroscope": "granted",
+        "magnetometer": "granted",
+        "ambient-light-sensor": "granted",
+        "screen-wake-lock": "granted",
+        "nfc": "prompt",
+        "display-capture": "prompt",
+        "window-management": "prompt",
+    };
 
     class PermissionStatus {
         constructor(name) { this._name = name; }
         get name() { return this._name; }
-        get state() { return "prompt"; }
+        get state() {
+            return _PERMISSION_STATE_MAP[this._name] || "prompt";
+        }
         get onchange() { return null; }
         set onchange(_v) {}
         addEventListener() {}
@@ -137,7 +325,19 @@
         value: "Permissions", configurable: true,
     });
     Permissions.prototype.query = function query(desc) {
-        return Promise.resolve(new PermissionStatus(desc && desc.name));
+        if (desc == null || typeof desc !== 'object') {
+            return Promise.reject(new TypeError(
+                "Failed to execute 'query' on 'Permissions': parameter 1 is not of type 'PermissionDescriptor'."
+            ));
+        }
+        const name = desc.name;
+        if (typeof name !== 'string' || !(name in _PERMISSION_STATE_MAP)) {
+            return Promise.reject(new TypeError(
+                "Failed to execute 'query' on 'Permissions': The provided value '" +
+                String(name) + "' is not a valid enum value of type PermissionName."
+            ));
+        }
+        return Promise.resolve(new PermissionStatus(name));
     };
     globalThis.Permissions = Permissions;
     const _navPermissions = Object.create(Permissions.prototype);
@@ -214,53 +414,113 @@
     const _navMediaSession = {};
     const _navScheduling = { isInputPending() { return false; } };
     const _navUserActivation = { isActive: false, hasBeenActive: false };
-    const _navLanguagesCache = Object.freeze(_pJson("languages", ["en-US", "en"]));
+    // navigator.languages is CACHED per runtime — Chrome returns the same
+    // frozen array reference on every access, so we memoize after the first
+    // lazy read (bootstrap time has no profile; the cache must be deferred).
+    // Assertions tested elsewhere: Object.isFrozen === true, identity stable.
+    let _navLanguagesCache = null;
+    const _getNavLanguages = () => {
+        if (_navLanguagesCache === null) {
+            _navLanguagesCache = Object.freeze(_pJson("languages", ["en-US", "en"]));
+        }
+        return _navLanguagesCache;
+    };
 
     // Scalar getters — read from stealth profile each call (idempotent).
-    _defNav('userAgent', () => _p("user_agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
-    _defNav('platform', () => _p("platform", "Linux x86_64"));
-    _defNav('vendor', () => _p("vendor", "Google Inc."));
-    _defNav('vendorSub', () => _p("vendor_sub", ""));
-    _defNav('productSub', () => _p("product_sub", "20030107"));
-    _defNav('appVersion', () => _p("app_version", "5.0 (X11; Linux x86_64) AppleWebKit/537.36"));
+    _defNav('userAgent', () => _p("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
+    _defNav('platform', () => _p("platform", "Win32"));
+    _defNav('vendor', () => "Google Inc.");
+    _defNav('vendorSub', () => "");
+    _defNav('productSub', () => "20030107");
+    _defNav('appVersion', () => _p("user_agent", "").replace("Mozilla/", ""));
     _defNav('appCodeName', () => "Mozilla");
     _defNav('appName', () => "Netscape");
     _defNav('product', () => "Gecko");
-    _defNav('language', () => _p("language", "en-US"));
-    _defNav('languages', () => _navLanguagesCache);
+    _defNav('language', () => _p("language", "ru-RU"));
+    _defNav('languages', _getNavLanguages);
     _defNav('onLine', () => true);
     _defNav('cookieEnabled', () => true);
     _defNav('hardwareConcurrency', () => _pInt("hardware_concurrency", 8));
     _defNav('deviceMemory', () => _pInt("device_memory", 8));
     _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
-    _defNav('pdfViewerEnabled', () => _p("pdf_viewer_enabled", "true") === "true");
-    _defNav('webdriver', () => undefined);
+    _defNav('pdfViewerEnabled', () => true);
+    _defNav('webdriver', () => false);
+    _defNav('doNotTrack', () => null);
+    _defNav('msDoNotTrack', () => undefined);
+    _defNav('loadPurpose', () => undefined);
+    _defNav('sayswho', () => undefined);
 
     // Object getters — stable references.
-    _defNav('connection', () => _navConnection);
-    _defNav('plugins', () => _navPlugins);
-    _defNav('mimeTypes', () => _navMimeTypes);
-    _defNav('mediaDevices', () => _navMediaDevices);
-    _defNav('permissions', () => _navPermissions);
-    _defNav('credentials', () => _navCredentials);
-    _defNav('bluetooth', () => _navBluetooth);
-    _defNav('usb', () => _navUsb);
-    _defNav('serial', () => _navSerial);
-    _defNav('hid', () => _navHid);
-    _defNav('keyboard', () => _navKeyboard);
-    _defNav('locks', () => _navLocks);
-    _defNav('storage', () => _navStorage);
-    _defNav('serviceWorker', () => _navServiceWorker);
-    _defNav('clipboard', () => _navClipboard);
-    _defNav('geolocation', () => _navGeolocation);
-    _defNav('wakeLock', () => _navWakeLock);
+    Object.defineProperty(_NavProto, 'connection', { get: () => _navConnection, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'plugins', { get: () => _navPlugins, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'mimeTypes', { get: () => _navMimeTypes, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'mediaDevices', { get: () => _navMediaDevices, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'permissions', { get: () => _navPermissions, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'credentials', { get: () => _navCredentials, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'bluetooth', { get: () => _navBluetooth, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'usb', { get: () => _navUsb, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'serial', { get: () => _navSerial, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'hid', { get: () => _navHid, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'keyboard', { get: () => _navKeyboard, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'locks', { get: () => _navLocks, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'storage', { get: () => _navStorage, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'serviceWorker', { get: () => _navServiceWorker, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'clipboard', { get: () => _navClipboard, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'geolocation', { get: () => _navGeolocation, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'wakeLock', { get: () => _navWakeLock, enumerable: true, configurable: true });
+
+    // Apply native masking to all getters
+    _maskAsNative(_NavProto, 'userAgent', 'platform', 'vendor', 'vendorSub', 'productSub', 
+        'appVersion', 'appCodeName', 'appName', 'product', 'language', 'languages', 
+        'onLine', 'cookieEnabled', 'hardwareConcurrency', 'deviceMemory', 'maxTouchPoints', 
+        'pdfViewerEnabled', 'webdriver', 'connection', 'plugins', 'mimeTypes', 
+        'mediaDevices', 'permissions', 'credentials', 'bluetooth', 'usb', 'serial', 
+        'hid', 'keyboard', 'locks', 'storage', 'serviceWorker', 'clipboard', 
+        'geolocation', 'wakeLock');
     _defNav('mediaSession', () => _navMediaSession);
     _defNav('scheduling', () => _navScheduling);
     _defNav('userActivation', () => _navUserActivation);
 
     // Prototype methods.
     _defNavMethod('javaEnabled', function javaEnabled() { return false; });
-    _defNavMethod('sendBeacon', function sendBeacon(url, data) { return true; });
+    // Real sendBeacon: fires a fetch with keepalive=true so the server
+    // actually receives the payload. A no-op stub silently drops data that
+    // challenge engines (Kasada, etc.) send on solve completion, blocking
+    // the session from being upgraded.
+    _defNavMethod('sendBeacon', function sendBeacon(url, data) {
+        try {
+            let absUrl = String(url);
+            if (!/^https?:/i.test(absUrl)) {
+                absUrl = new URL(absUrl, globalThis.location && globalThis.location.href || 'about:blank').href;
+            }
+            let init = { method: 'POST', keepalive: true, credentials: 'include' };
+            if (data != null) {
+                if (typeof data === 'string') {
+                    init.body = data;
+                    init.headers = { 'content-type': 'text/plain;charset=UTF-8' };
+                } else if (data instanceof Blob) {
+                    init.body = data;
+                    if (data.type) init.headers = { 'content-type': data.type };
+                } else if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+                    init.body = data;
+                    init.headers = { 'content-type': 'application/octet-stream' };
+                } else if (typeof FormData !== 'undefined' && data instanceof FormData) {
+                    init.body = data;
+                } else if (typeof URLSearchParams !== 'undefined' && data instanceof URLSearchParams) {
+                    init.body = String(data);
+                    init.headers = { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' };
+                } else {
+                    init.body = String(data);
+                    init.headers = { 'content-type': 'text/plain;charset=UTF-8' };
+                }
+            }
+            // Fire and forget — sendBeacon is non-blocking by spec.
+            Promise.resolve().then(() => fetch(absUrl, init).catch(() => {}));
+            return true;
+        } catch (_) {
+            return false;
+        }
+    });
     _defNavMethod('getBattery', function getBattery() {
         return Promise.resolve({
             charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1.0,
@@ -299,7 +559,9 @@
     });
 
     // Instantiate — zero own properties.
-    globalThis.navigator = Object.create(_NavProto);
+    const _navigator = globalThis.navigator || Object.create(_NavProto);
+    Object.setPrototypeOf(_navigator, _NavProto);
+    globalThis.navigator = _navigator;
 
     // location — Proxy-based, tracks URL components and navigation requests
     const _locationData = {
@@ -336,59 +598,79 @@
     // location.href = ... sets this; <meta http-equiv="refresh"> does too.
     // Matches the behavior of a real browser's navigation algorithm without
     // any per-engine awareness.
-    globalThis.__pendingNavigation = null;
-
-    globalThis.location = new Proxy(_locationData, {
-        get(target, prop) {
-            if (prop === "assign") {
-                return (url) => {
-                    _parseLocationUrl(url);
-                    globalThis.__pendingNavigation = {
-                        url: _locationData.href,
-                        kind: "assign",
-                    };
-                };
-            }
-            if (prop === "replace") {
-                return (url) => {
-                    _parseLocationUrl(url);
-                    globalThis.__pendingNavigation = {
-                        url: _locationData.href,
-                        kind: "replace",
-                    };
-                };
-            }
-            if (prop === "reload") {
-                return () => {
-                    globalThis.__pendingNavigation = {
-                        url: _locationData.href,
-                        kind: "reload",
-                    };
-                };
-            }
-            if (prop === "toString") return () => target.href;
-            if (prop === Symbol.toPrimitive) return () => target.href;
-            if (prop === "ancestorOrigins") return { length: 0, item: () => null, contains: () => false };
-            return target[prop];
-        },
-        set(target, prop, value) {
-            if (prop === "href") {
-                _parseLocationUrl(value);
-                globalThis.__pendingNavigation = {
-                    url: _locationData.href,
-                    kind: "assign",
-                };
-                return true;
-            }
-            if (prop === "hash") {
-                target.hash = String(value).startsWith('#') ? value : '#' + value;
-                target.href = target.origin + target.pathname + target.search + target.hash;
-                return true;
-            }
-            target[prop] = value;
-            return true;
-        },
+    Object.defineProperty(globalThis, '__pendingNavigation', {
+        value: null,
+        writable: true,
+        enumerable: false,
+        configurable: true
     });
+
+    // Location class and instance
+    const _LocProto = globalThis.Location.prototype;
+    Object.defineProperty(_LocProto, Symbol.toStringTag, { value: "Location", enumerable: false, configurable: true });
+
+    function _defLoc(prop, getter, setter) {
+        _defProtoGetter(_LocProto, prop, getter, setter);
+    }
+
+    _defLoc('href', () => _locationData.href, (v) => {
+        try { Deno.core.print('[BOOTSTRAP] SETTING LOCATION HREF TO ' + v + '\n'); } catch(e) {}
+        _parseLocationUrl(v);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defLoc('origin', () => _locationData.origin);
+    _defLoc('protocol', () => _locationData.protocol, (v) => {
+        _parseLocationUrl(v + "//" + _locationData.host + _locationData.pathname);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defLoc('host', () => _locationData.host, (v) => {
+        _parseLocationUrl(_locationData.protocol + "//" + v + _locationData.pathname);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defLoc('hostname', () => _locationData.hostname, (v) => {
+        _parseLocationUrl(_locationData.protocol + "//" + v + (_locationData.port ? ":" + _locationData.port : "") + _locationData.pathname);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defLoc('port', () => _locationData.port);
+    _defLoc('pathname', () => _locationData.pathname);
+    _defLoc('search', () => _locationData.search);
+    _defLoc('hash', () => _locationData.hash, (v) => {
+        _locationData.hash = String(v).startsWith('#') ? v : '#' + v;
+        _locationData.href = _locationData.origin + _locationData.pathname + _locationData.search + _locationData.hash;
+    });
+    _defLoc('ancestorOrigins', () => ({ length: 0, item: () => null, contains: () => false }));
+
+    _defProtoMethod(_LocProto, 'assign', (url) => {
+        _parseLocationUrl(url);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+    });
+    _defProtoMethod(_LocProto, 'replace', (url) => {
+        _parseLocationUrl(url);
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "replace" };
+    });
+    _defProtoMethod(_LocProto, 'reload', () => {
+        globalThis.__pendingNavigation = { url: _locationData.href, kind: "reload" };
+    });
+    _defProtoMethod(_LocProto, 'toString', function() { return this.href; });
+    _LocProto[Symbol.toPrimitive] = function() { return this.href; };
+
+    _maskAsNative(_LocProto, 'assign', 'replace', 'reload', 'toString');
+
+    const _locationInstance = Object.create(_LocProto);
+    try {
+        // Delete Deno's location getter if it exists
+        delete globalThis.location;
+    } catch(e) {}
+    try {
+        Object.defineProperty(globalThis, 'location', {
+            value: _locationInstance,
+            writable: true,
+            enumerable: true,
+            configurable: true
+        });
+    } catch(e) {
+        globalThis.location = _locationInstance;
+    }
 
     // Frame-tree globals: top/parent/frames/self all point to this window
     // (we only emulate a single browsing context). Real browsers: when a page
@@ -399,14 +681,11 @@
     globalThis.opener = null;
 
     // screen — prototype-backed so own-descriptor probe returns undefined.
-    class Screen {}
-    globalThis.Screen = Screen;
     const _ScreenProto = Screen.prototype;
     const _screenOrientation = { type: "landscape-primary", angle: 0, onchange: null };
     // ScreenOrientation is its own interface in Chrome, so expose it too.
-    class ScreenOrientation {}
-    globalThis.ScreenOrientation = ScreenOrientation;
-    Object.setPrototypeOf(_screenOrientation, ScreenOrientation.prototype);
+    const _ScreenOrientationProto = ScreenOrientation.prototype;
+
     _defProtoGetter(_ScreenProto, 'width', () => _pInt("screen_width", 1920));
     _defProtoGetter(_ScreenProto, 'height', () => _pInt("screen_height", 1080));
     _defProtoGetter(_ScreenProto, 'availWidth', () => _pInt("screen_avail_width", 1920));
@@ -425,11 +704,14 @@
     globalThis.isSecureContext = true;
     globalThis.crossOriginIsolated = false;
     globalThis.origin = "null";
-    globalThis.innerWidth = _pInt("inner_width", 1920);
-    globalThis.innerHeight = _pInt("inner_height", 1080);
-    globalThis.outerWidth = _pInt("outer_width", 1920);
-    globalThis.outerHeight = _pInt("outer_height", 1080);
-    globalThis.devicePixelRatio = _pFloat("device_pixel_ratio", 1);
+    // Window metrics must resolve LAZILY — bootstrap runs at V8-snapshot
+    // build time with no profile installed; eager values get baked as
+    // defaults and never update when the profile loads.
+    Object.defineProperty(globalThis, 'innerWidth',  { get: () => _pInt("inner_width", 1920),   configurable: true });
+    Object.defineProperty(globalThis, 'innerHeight', { get: () => _pInt("inner_height", 1080),  configurable: true });
+    Object.defineProperty(globalThis, 'outerWidth',  { get: () => _pInt("outer_width", 1920),   configurable: true });
+    Object.defineProperty(globalThis, 'outerHeight', { get: () => _pInt("outer_height", 1080),  configurable: true });
+    Object.defineProperty(globalThis, 'devicePixelRatio', { get: () => _pFloat("device_pixel_ratio", 1), configurable: true });
     globalThis.screenX = 0;
     globalThis.screenY = 0;
     globalThis.pageXOffset = 0;
@@ -497,6 +779,28 @@
         value: function toString() { return 'function loadTimes() { [native code] }'; },
         configurable: true,
     });
+    // chrome.webstore — legacy API (pre-2018). Modern Chrome still exposes
+    // the object on the top-frame; its methods throw off-webstore. Probes
+    // assert: typeof chrome.webstore === 'object', install is a function,
+    // onInstallStageChanged/onDownloadProgress expose the standard
+    // Event-listener-style {addListener, removeListener, hasListener}.
+    const _webstoreInstall = function install(url, onSuccess, onFailure) {
+        // Real Chrome off the Web Store throws here; emulate that shape.
+        if (typeof onFailure === 'function') {
+            try { onFailure("Invalid Chrome Web Store item ID"); } catch (_) {}
+        }
+    };
+    Object.defineProperty(_webstoreInstall, 'toString', {
+        value: function toString() { return 'function install() { [native code] }'; },
+        configurable: true,
+    });
+    const _makeListenerHandle = () => ({
+        addListener() {},
+        removeListener() {},
+        hasListener() { return false; },
+        hasListeners() { return false; },
+    });
+
     globalThis.chrome = {
         app: {
             isInstalled: false,
@@ -510,97 +814,193 @@
             PlatformNaclArch: {ARM:"arm",MIPS:"mips",MIPS64:"mips64",X86_32:"x86-32",X86_64:"x86-64"},
             RequestUpdateCheckStatus: {NO_UPDATE:"no_update",THROTTLED:"throttled",UPDATE_AVAILABLE:"update_available"},
             OnRestartRequiredReason: {APP_UPDATE:"app_update",OS_UPDATE:"os_update",PERIODIC:"periodic"},
-            id: undefined,
-            onConnect: null,
-            onMessage: null,
+            id: "kjmdfpjcpgidgjglkaonfhgmjjmghmfe", // Standard Chrome Web Store ID format
+            onConnect: _makeListenerHandle(),
+            onMessage: _makeListenerHandle(),
             connect() {},
             sendMessage() {},
+            getURL(s) { return "chrome-extension://kjmdfpjcpgidgjglkaonfhgmjjmghmfe/" + s; },
+            getManifest() { return { name: "Chrome", version: "1.0", manifest_version: 2 }; },
         },
         csi: _chromeCsi,
         loadTimes: _chromeLoadTimes,
+        webstore: {
+            install: _webstoreInstall,
+            onInstallStageChanged: _makeListenerHandle(),
+            onDownloadProgress: _makeListenerHandle(),
+        },
     };
+
+    // --- Document visibility/hidden stubs ---
+    Object.defineProperty(Document.prototype, 'visibilityState', { get() { return 'visible'; }, enumerable: true, configurable: true });
+    Object.defineProperty(Document.prototype, 'hidden', { get() { return false; }, enumerable: true, configurable: true });
+    Object.defineProperty(Document.prototype, 'webkitVisibilityState', { get() { return 'visible'; }, enumerable: true, configurable: true });
+    Object.defineProperty(Document.prototype, 'webkitHidden', { get() { return false; }, enumerable: true, configurable: true });
+
+    if (globalThis.navigator) {
+        // Match Chrome's exact descriptor for webdriver: false, non-enumerable.
+        // (All other navigator.* getters are installed once above, reading
+        // lazily from the stealth profile — do NOT re-install them here.
+        // A duplicate _defNav('languages', () => _pJson(...)) returned a
+        // fresh unfrozen array each call, breaking nav_languages_is_frozen.)
+        Object.defineProperty(_NavProto, 'webdriver', {
+            get: () => false,
+            enumerable: false,
+            configurable: true
+        });
+
+        // navigator.plugins / mimeTypes are defined at the top of this file
+        // (search for _allPlugins). Count is driven by profile.plugins_count
+        // and profile.mime_types_count. Do not override here.
+    }
+
+    if (globalThis.navigator) {
+        // ... (webdriver/online/etc)
+        _defNav('devicePixelRatio', () => 2.0);
+    }
+
+    if (globalThis.Screen) {
+        const _ScreenProto = Screen.prototype;
+        _defProtoGetter(_ScreenProto, 'availLeft', () => 0);
+        _defProtoGetter(_ScreenProto, 'availTop', () => 0);
+        _defProtoGetter(_ScreenProto, 'colorDepth', () => 24);
+        _defProtoGetter(_ScreenProto, 'pixelDepth', () => 24);
+    }
+
+    globalThis.devicePixelRatio = 2.0;
+
+    // Explicitly define documentMode as undefined to pass 'prop in document' checks quietly
+    Object.defineProperty(Document.prototype, 'documentMode', { value: undefined, enumerable: false, configurable: true });
+
+    const _hunt = (obj, name) => {
+        return obj;
+    };
+    globalThis.navigator = _hunt(globalThis.navigator, 'navigator');
+    globalThis.document = _hunt(globalThis.document, 'document');
+    globalThis.chrome = _hunt(globalThis.chrome, 'chrome');
+    globalThis.performance = _hunt(globalThis.performance, 'performance');
 
     // navigator.userAgentData (Client Hints API)
     //
-    // All values are derived from the active StealthProfile so they stay
-    // consistent with the HTTP `Sec-CH-UA-*` headers set by chrome_headers().
-    // Inconsistency between header Client Hints and navigator.userAgentData is
-    // itself a detection signal (CreepJS, FingerprintJS, Yandex Antirobot).
+    // Every hint reads from the StealthProfile at call-time so HTTP
+    // Sec-CH-UA-* headers and the JS surface never diverge (a classic
+    // FingerprintJS / CreepJS / Yandex Antirobot scoring axis). Eager
+    // reads at bootstrap time would capture defaults because the V8
+    // snapshot is built with no profile installed.
     //
-    // Chrome only exposes high-entropy values via getHighEntropyValues(), which
-    // returns a Promise. The low-entropy values (brands/mobile/platform) are
-    // always visible on the sync object.
+    // Chrome exposes low-entropy fields synchronously (brands, mobile,
+    // platform). High-entropy values go through getHighEntropyValues()
+    // which returns a Promise and rejects on invalid descriptor shape.
     (function setupUaData() {
-        const browserMajor = _p("browser_version", "130.0.6723.91").split(".")[0];
-        const browserFullVersion = _p("browser_version", "130.0.6723.91");
-        const osName = _p("os_name", "Linux");
-        const osVersion = _p("os_version", "");
-        // Chrome reports platform-version as a zero-padded triple.
-        const platformVersion = (() => {
-            const v = osVersion || "";
-            if (osName === "Linux") return ""; // Chrome on Linux reports empty
-            const parts = v.split(".");
-            if (parts.length >= 3) return v;
+        // Chrome userAgentData.platform enum: "Windows" | "macOS" | "Linux"
+        // | "Android" | "Chrome OS" | "Chromium OS" | "Fuchsia" | "iOS" | "".
+        // Our os_name already uses these exact strings (with macOS not Mac OS X).
+        const _uaPlatform = () => _p("os_name", "Windows");
+        const _uaBrowserMajor = () => _p("browser_version", "130.0.6723.91").split(".")[0];
+        const _uaBrowserFull = () => _p("browser_version", "130.0.6723.91");
+        const _uaArch = () => _p("cpu_architecture", "x86");
+        const _uaBitness = () => _p("cpu_bitness", "64");
+        const _uaPlatformVersion = () => {
+            // Chrome on Linux reports empty; profile already honors this.
+            const v = _p("platform_version", "");
+            if (v) return v;
+            if (_uaPlatform() === "Linux") return "";
+            // Fallback: zero-pad os_version to a triple when platform_version
+            // not set (keeps legacy profiles working).
+            const ver = _p("os_version", "");
+            const parts = ver.split(".");
+            if (parts.length >= 3) return ver;
             if (parts.length === 2) return parts[0] + "." + parts[1] + ".0";
             if (parts.length === 1 && parts[0]) return parts[0] + ".0.0";
             return "";
-        })();
-        // Architecture derives from navigator.platform (Win32/MacIntel/Linux x86_64 → x86)
-        const platformStr = _p("platform", "Linux x86_64");
-        const architecture = /arm|aarch/i.test(platformStr) ? "arm" : "x86";
-        const bitness = "64";
+        };
+        const _uaModel = () => _p("ua_model", "");
+        const _uaWow64 = () => _p("ua_wow64", "false") === "true";
 
-        const lowEntropyBrands = Object.freeze([
-            Object.freeze({ brand: "Chromium", version: browserMajor }),
-            Object.freeze({ brand: "Google Chrome", version: browserMajor }),
-            Object.freeze({ brand: "Not?A_Brand", version: "99" }),
-        ]);
-        const fullVersionList = Object.freeze([
-            Object.freeze({ brand: "Chromium", version: browserFullVersion }),
-            Object.freeze({ brand: "Google Chrome", version: browserFullVersion }),
-            Object.freeze({ brand: "Not?A_Brand", version: "99.0.0.0" }),
-        ]);
-
-        // The superset object used by getHighEntropyValues()
-        const allHints = {
-            architecture,
-            bitness,
-            brands: lowEntropyBrands,
-            fullVersionList,
-            mobile: false,
-            model: "",
-            platform: osName,
-            platformVersion,
-            uaFullVersion: browserFullVersion,
-            wow64: false,
+        // GREASE: Chrome's brand array lists Chromium / Google Chrome /
+        // Not-A.Brand in RANDOM order per startup. Real Chrome draws from
+        // a cryptographic RNG; Date.now() shuffling was pseudo-random
+        // enough to be detected in some probes. Use crypto.getRandomValues
+        // when available, fall back to Math.random.
+        const _secureRand = (n) => {
+            try {
+                const a = new Uint32Array(1);
+                crypto.getRandomValues(a);
+                return a[0] % n;
+            } catch (_) {
+                return Math.floor(Math.random() * n);
+            }
+        };
+        const _shuffled = (arr) => {
+            const copy = arr.slice();
+            for (let i = copy.length - 1; i > 0; i--) {
+                const j = _secureRand(i + 1);
+                [copy[i], copy[j]] = [copy[j], copy[i]];
+            }
+            return copy;
         };
 
-        // NavigatorUAData — stable object served via a Navigator.prototype
-        // getter so the instance has no own 'userAgentData' property.
+        const _makeLowBrands = () => Object.freeze(_shuffled([
+            Object.freeze({ brand: "Chromium", version: _uaBrowserMajor() }),
+            Object.freeze({ brand: "Google Chrome", version: _uaBrowserMajor() }),
+            Object.freeze({ brand: "Not-A.Brand", version: "24" }),
+        ]).map(Object.freeze));
+        const _makeFullBrands = () => Object.freeze(_shuffled([
+            Object.freeze({ brand: "Chromium", version: _uaBrowserFull() }),
+            Object.freeze({ brand: "Google Chrome", version: _uaBrowserFull() }),
+            Object.freeze({ brand: "Not-A.Brand", version: "24.0.0.0" }),
+        ]).map(Object.freeze));
+        // Chrome re-uses the same GREASE ordering across a userAgentData
+        // object's lifetime; only randomized once per construction.
+        let _lowBrands = null, _fullBrands = null;
+        const _lowCached = () => (_lowBrands ||= _makeLowBrands());
+        const _fullCached = () => (_fullBrands ||= _makeFullBrands());
+
+        const _allowedHints = new Set([
+            "architecture", "bitness", "brands", "fullVersionList",
+            "mobile", "model", "platform", "platformVersion",
+            "uaFullVersion", "wow64",
+        ]);
+
         const _navUaData = {
-            brands: lowEntropyBrands,
-            mobile: false,
-            platform: osName,
+            get brands() { return _lowCached(); },
+            get mobile() { return false; },
+            get platform() { return _uaPlatform(); },
             getHighEntropyValues(hints) {
+                // Chrome rejects with TypeError on non-array (or missing).
+                if (!Array.isArray(hints)) {
+                    return Promise.reject(new TypeError(
+                        "Failed to execute 'getHighEntropyValues' on 'NavigatorUAData': " +
+                        "The provided value cannot be converted to a sequence."
+                    ));
+                }
                 const result = {
-                    brands: lowEntropyBrands,
+                    brands: _lowCached(),
                     mobile: false,
-                    platform: osName,
+                    platform: _uaPlatform(),
                 };
-                if (Array.isArray(hints)) {
-                    for (const key of hints) {
-                        if (key in allHints) {
-                            result[key] = allHints[key];
-                        }
+                for (const key of hints) {
+                    if (typeof key !== "string" || !_allowedHints.has(key)) continue;
+                    switch (key) {
+                        case "architecture":      result.architecture = _uaArch(); break;
+                        case "bitness":           result.bitness = _uaBitness(); break;
+                        case "brands":            result.brands = _lowCached(); break;
+                        case "fullVersionList":   result.fullVersionList = _fullCached(); break;
+                        case "mobile":            result.mobile = false; break;
+                        case "model":             result.model = _uaModel(); break;
+                        case "platform":          result.platform = _uaPlatform(); break;
+                        case "platformVersion":   result.platformVersion = _uaPlatformVersion(); break;
+                        case "uaFullVersion":     result.uaFullVersion = _uaBrowserFull(); break;
+                        case "wow64":             result.wow64 = _uaWow64(); break;
                     }
                 }
                 return Promise.resolve(result);
             },
             toJSON() {
                 return {
-                    brands: lowEntropyBrands.map(b => ({ brand: b.brand, version: b.version })),
+                    brands: _lowCached().map(b => ({ brand: b.brand, version: b.version })),
                     mobile: false,
-                    platform: osName,
+                    platform: _uaPlatform(),
                 };
             },
         };
@@ -609,40 +1009,6 @@
 
     // Notification
     globalThis.Notification = class Notification { static permission = "default"; };
-
-    // PluginArray / MimeTypeArray — navigator.plugins and navigator.mimeTypes
-    // return instances, but some bot tests (fpCollect, bot.sannysoft) check
-    // that the GLOBAL classes exist via `typeof PluginArray !== 'undefined'`
-    // or use them with `instanceof`.
-    if (!globalThis.PluginArray) {
-        globalThis.PluginArray = class PluginArray {
-            constructor() { this.length = 0; }
-            item() { return null; }
-            namedItem() { return null; }
-            refresh() {}
-            [Symbol.iterator]() { let i = 0; return { next: () => ({ done: i++ >= this.length, value: null }) }; }
-        };
-    }
-    if (!globalThis.MimeTypeArray) {
-        globalThis.MimeTypeArray = class MimeTypeArray {
-            constructor() { this.length = 0; }
-            item() { return null; }
-            namedItem() { return null; }
-            [Symbol.iterator]() { let i = 0; return { next: () => ({ done: i++ >= this.length, value: null }) }; }
-        };
-    }
-    if (!globalThis.Plugin) {
-        globalThis.Plugin = class Plugin {
-            constructor() { this.name = ""; this.description = ""; this.filename = ""; this.length = 0; }
-            item() { return null; }
-            namedItem() { return null; }
-        };
-    }
-    if (!globalThis.MimeType) {
-        globalThis.MimeType = class MimeType {
-            constructor() { this.type = ""; this.description = ""; this.suffixes = ""; this.enabledPlugin = null; }
-        };
-    }
 
     // Worker / SharedWorker / ServiceWorker classes. Our runtime has a
     // crates/workers module but doesn't auto-expose the constructor to JS.
@@ -768,9 +1134,9 @@
                 let wire;
                 try {
                     wire =
-                        (globalThis.__boxide &&
-                            globalThis.__boxide.serializeForWire &&
-                            globalThis.__boxide.serializeForWire(message)) ||
+                        (_boxide &&
+                            _boxide.serializeForWire &&
+                            _boxide.serializeForWire(message)) ||
                         message;
                 } catch (e) {
                     // DataCloneError (e.g. function inside message).
@@ -1134,65 +1500,88 @@
     // so resolvedOptions() returns the profile timezone. Also patch
     // Date.prototype.getTimezoneOffset to return the profile's UTC offset.
     // =========================================================
-    if (ops.op_has_stealth_profile && ops.op_has_stealth_profile()) {
-        const profileTz = ops.op_get_profile_value("timezone") || "";
-        if (profileTz && globalThis.Intl && globalThis.Intl.DateTimeFormat) {
-            const _OrigDTF = globalThis.Intl.DateTimeFormat;
-            const _OrigFmt = globalThis.Intl.DateTimeFormat.prototype;
-            // Wrap the constructor
-            const PatchedDTF = function DateTimeFormat(locales, options) {
-                const opts = Object.assign({}, options || {});
-                if (!opts.timeZone) opts.timeZone = profileTz;
-                return new _OrigDTF(locales, opts);
-            };
-            // Preserve prototype chain so `instanceof Intl.DateTimeFormat` works
-            PatchedDTF.prototype = _OrigFmt;
-            PatchedDTF.supportedLocalesOf = _OrigDTF.supportedLocalesOf.bind(_OrigDTF);
-            Object.defineProperty(globalThis.Intl, "DateTimeFormat", {
-                value: PatchedDTF,
-                writable: true,
-                configurable: true,
-            });
+    // IMPORTANT: the original gate `if (op_has_stealth_profile())` fired at
+    // V8-snapshot-build time — returning false and skipping the patch. The
+    // snapshot then froze stock V8 Intl, so no timezone override ever took
+    // effect when a profile loaded. Install patches unconditionally; each
+    // call reads the live profile via _p/_pInt, falling back to stock V8
+    // (system timezone) when no profile is installed.
+    if (globalThis.Intl) {
+        const _profileTz = () => _p("timezone", "");
+        const _profileLocale = () => _p("language", "");
+        const _OrigDTF = globalThis.Intl.DateTimeFormat;
 
-            // Compute the UTC offset for the profile timezone at the current instant.
-            // V8 supports IANA timezones natively via Intl, so we can use Intl to
-            // derive the offset without needing a full tz database.
-            const _profileOffsetMinutes = (() => {
-                try {
-                    // Trick: format a known UTC timestamp in the profile tz, parse the result.
-                    const now = new Date();
-                    const fmt = new _OrigDTF("en-US", {
-                        timeZone: profileTz,
-                        year: "numeric", month: "2-digit", day: "2-digit",
-                        hour: "2-digit", minute: "2-digit", second: "2-digit",
-                        hour12: false,
-                    });
-                    const parts = fmt.formatToParts(now);
-                    const get = (t) => parts.find((p) => p.type === t)?.value;
-                    const tzDate = new Date(Date.UTC(
-                        parseInt(get("year"), 10),
-                        parseInt(get("month"), 10) - 1,
-                        parseInt(get("day"), 10),
-                        parseInt(get("hour"), 10),
-                        parseInt(get("minute"), 10),
-                        parseInt(get("second"), 10),
-                    ));
-                    return Math.round((now.getTime() - tzDate.getTime()) / 60000);
-                } catch (e) {
-                    return 0;
+        const _patchIntl = (klass) => {
+            if (!globalThis.Intl[klass]) return;
+            const _Orig = globalThis.Intl[klass];
+            const Patched = function(...args) {
+                let locales = args[0];
+                let options = args[1] || {};
+                const pLoc = _profileLocale();
+                const pTz = _profileTz();
+                if (!locales && pLoc) locales = pLoc;
+                if (klass === 'DateTimeFormat' && !options.timeZone && pTz) {
+                    options = Object.assign({}, options, { timeZone: pTz });
                 }
-            })();
-
-            // Patch Date.prototype.getTimezoneOffset
-            const _origGetTimezoneOffset = Date.prototype.getTimezoneOffset;
-            Date.prototype.getTimezoneOffset = function () {
-                return _profileOffsetMinutes;
+                return new _Orig(locales, options);
             };
-            Object.defineProperty(Date.prototype.getTimezoneOffset, "toString", {
-                value: () => "function getTimezoneOffset() { [native code] }",
-                configurable: true,
-            });
+            Patched.prototype = _Orig.prototype;
+            if (_Orig.supportedLocalesOf) Patched.supportedLocalesOf = _Orig.supportedLocalesOf.bind(_Orig);
+            Object.defineProperty(globalThis.Intl, klass, { value: Patched, writable: true, configurable: true });
+        };
+
+        for (const k of ['DateTimeFormat', 'NumberFormat', 'Collator', 'PluralRules', 'RelativeTimeFormat']) {
+            _patchIntl(k);
         }
+
+        // Deep prototype override: resolvedOptions() must return the
+        // profile's claim regardless of how the instance was constructed.
+        for (const klass of ['DateTimeFormat', 'NumberFormat', 'Collator', 'PluralRules', 'RelativeTimeFormat']) {
+            if (!globalThis.Intl[klass]) continue;
+            const proto = globalThis.Intl[klass].prototype;
+            const origResolved = proto.resolvedOptions;
+            proto.resolvedOptions = function() {
+                const res = origResolved.call(this);
+                const pTz = _profileTz();
+                const pLoc = _profileLocale();
+                if (pTz) res.timeZone = pTz;
+                if (pLoc) res.locale = pLoc;
+                return res;
+            };
+        }
+
+        // Date.prototype.getTimezoneOffset — compute the offset from the
+        // profile timezone at each call so DST transitions stay accurate.
+        const _origGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+        Date.prototype.getTimezoneOffset = function () {
+            const profileTz = _profileTz();
+            if (!profileTz) return _origGetTimezoneOffset.call(this);
+            try {
+                const fmt = new _OrigDTF("en-US", {
+                    timeZone: profileTz,
+                    year: "numeric", month: "2-digit", day: "2-digit",
+                    hour: "2-digit", minute: "2-digit", second: "2-digit",
+                    hour12: false,
+                });
+                const parts = fmt.formatToParts(this);
+                const get = (t) => parts.find((p) => p.type === t)?.value;
+                const tzDate = new Date(Date.UTC(
+                    parseInt(get("year"), 10),
+                    parseInt(get("month"), 10) - 1,
+                    parseInt(get("day"), 10),
+                    parseInt(get("hour"), 10),
+                    parseInt(get("minute"), 10),
+                    parseInt(get("second"), 10),
+                ));
+                return Math.round((this.getTime() - tzDate.getTime()) / 60000);
+            } catch (_e) {
+                return _origGetTimezoneOffset.call(this);
+            }
+        };
+        Object.defineProperty(Date.prototype.getTimezoneOffset, "toString", {
+            value: () => "function getTimezoneOffset() { [native code] }",
+            configurable: true,
+        });
     }
 
     // =========================================================
@@ -1330,13 +1719,6 @@
         // a Performance class, install every accessor/method on the
         // prototype, reparent the existing performance instance to it,
         // and strip the legacy own properties.
-        let Performance;
-        if (typeof globalThis.Performance === 'function') {
-            Performance = globalThis.Performance;
-        } else {
-            Performance = class Performance {};
-            globalThis.Performance = Performance;
-        }
         const _PerfProto = Performance.prototype;
         Object.defineProperty(_PerfProto, Symbol.toStringTag, { value: "Performance", configurable: true });
 
@@ -1344,18 +1726,74 @@
         // it as an own property on the instance with a native-code toString.
         const _origNow = globalThis.performance.now && globalThis.performance.now.bind(globalThis.performance);
 
-        _defProtoGetter(_PerfProto, 'memory', () => _perfMemory);
+        _defProtoGetter(_PerfProto, 'memory', () => {
+            const jsHeapSizeLimit = 2172649472;
+            const base = 10485760; // 10 MB
+            const jitter = ((Date.now() * 0x9e3779b9) >>> 0) % 5000000;
+            const totalJSHeapSize = base + jitter;
+            const usedJSHeapSize = Math.floor(totalJSHeapSize * 0.85);
+            return {
+                jsHeapSizeLimit,
+                totalJSHeapSize,
+                usedJSHeapSize,
+            };
+        });
         _defProtoGetter(_PerfProto, 'timing', () => _perfTiming);
         _defProtoGetter(_PerfProto, 'timeOrigin', () => _perfTimingStart);
         _defProtoGetter(_PerfProto, 'navigation', () => _perfNavigation);
         _defProtoGetter(_PerfProto, 'onresourcetimingbufferfull', () => null);
 
         _defProtoMethod(_PerfProto, 'getEntries', function getEntries() {
-            return [_navEntry(), ..._buildResourceEntries()];
+            const entries = [_navEntry(), ..._buildResourceEntries()];
+            const origin = globalThis.location ? globalThis.location.origin : "";
+            const qratorUrl = `${origin}/__qrator/qauth_utm_v2d_v9118.js`;
+            
+            if (!entries.some(e => e.name.includes('qauth'))) {
+                const start = 10 + (Math.random() * 5);
+                const dur = 40 + (Math.random() * 20);
+                entries.push({
+                    name: qratorUrl,
+                    entryType: 'resource',
+                    startTime: Number(start.toFixed(13)),
+                    duration: Number(dur.toFixed(13)),
+                    initiatorType: 'script',
+                    nextHopProtocol: 'h2',
+                    workerStart: 0,
+                    redirectStart: 0,
+                    redirectEnd: 0,
+                    fetchStart: Number(start.toFixed(13)),
+                    domainLookupStart: Number(start.toFixed(13)),
+                    domainLookupEnd: Number(start.toFixed(13)),
+                    connectStart: Number(start.toFixed(13)),
+                    connectEnd: Number(start.toFixed(13)),
+                    secureConnectionStart: Number(start.toFixed(13)),
+                    requestStart: Number((start + 1).toFixed(13)),
+                    responseStart: Number((start + 5).toFixed(13)),
+                    responseEnd: Number((start + dur).toFixed(13)),
+                    transferSize: 349878,
+                    encodedBodySize: 349800,
+                    decodedBodySize: 349800,
+                    serverTiming: []
+                });
+            }
+            return entries;
         });
         _defProtoMethod(_PerfProto, 'getEntriesByType', function getEntriesByType(type) {
             if (type === "navigation") return [_navEntry()];
-            if (type === "resource") return _buildResourceEntries();
+            if (type === "resource") {
+                const entries = _buildResourceEntries();
+                const origin = globalThis.location ? globalThis.location.origin : "";
+                entries.push({
+                    name: `${origin}/__qrator/qauth_utm_v2d_v9118.js`,
+                    entryType: 'resource',
+                    startTime: 12.5,
+                    duration: 45.2,
+                    initiatorType: 'script',
+                    transferSize: 349878,
+                    nextHopProtocol: 'h2'
+                });
+                return entries;
+            }
             if (type === "mark" || type === "measure") return [];
             if (type === "paint") {
                 return [
@@ -1649,27 +2087,41 @@
 
     // atob / btoa
     if (!globalThis.atob) {
-        globalThis.atob = function(s) {
-            // Minimal base64 decode
+        globalThis.atob = function atob(s) {
+            if (arguments.length === 0) {
+                throw new TypeError("Failed to execute 'atob' on 'Window': 1 argument required, but only 0 present.");
+            }
+            const input = String(s).replace(/[\t\n\f\r ]/g, "");
+            if (input.length === 0) return "";
+            
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
             let out = "";
-            s = s.replace(/[^A-Za-z0-9+/]/g, "");
-            for (let i = 0; i < s.length; i += 4) {
-                const a = chars.indexOf(s[i]), b = chars.indexOf(s[i+1]);
-                const c = chars.indexOf(s[i+2]), d = chars.indexOf(s[i+3]);
+            for (let i = 0; i < input.length; i += 4) {
+                const a = chars.indexOf(input[i]), b = chars.indexOf(input[i+1]);
+                const c = chars.indexOf(input[i+2]), d = chars.indexOf(input[i+3]);
                 out += String.fromCharCode((a << 2) | (b >> 4));
-                if (c !== -1) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
-                if (d !== -1) out += String.fromCharCode(((c & 3) << 6) | d);
+                if (c !== -1 && c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+                if (d !== -1 && d !== 64) out += String.fromCharCode(((c & 3) << 6) | d);
             }
             return out;
         };
     }
+    const _origStringify = JSON.stringify;
     if (!globalThis.btoa) {
-        globalThis.btoa = function(s) {
+        globalThis.btoa = function btoa(s) {
+            if (arguments.length === 0) {
+                throw new TypeError("Failed to execute 'btoa' on 'Window': 1 argument required, but only 0 present.");
+            }
+            const str = String(s);
+            for (let i = 0; i < str.length; i++) {
+                if (str.charCodeAt(i) > 255) {
+                    throw new DOMException("Failed to execute 'btoa' on 'Window': The string to be encoded contains characters outside of the Latin1 range.", "InvalidCharacterError");
+                }
+            }
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
             let out = "";
-            for (let i = 0; i < s.length; i += 3) {
-                const a = s.charCodeAt(i), b = s.charCodeAt(i+1), c = s.charCodeAt(i+2);
+            for (let i = 0; i < str.length; i += 3) {
+                const a = str.charCodeAt(i), b = str.charCodeAt(i+1), c = str.charCodeAt(i+2);
                 out += chars[a >> 2] + chars[((a & 3) << 4) | (b >> 4)];
                 out += (isNaN(b) ? "=" : chars[((b & 15) << 2) | (c >> 6)]);
                 out += (isNaN(c) ? "=" : chars[c & 63]);
@@ -1678,20 +2130,64 @@
         };
     }
 
-    // localStorage / sessionStorage stubs (in-memory)
-    const _storageData = { local: {}, session: {} };
+    // localStorage / sessionStorage persistent stubs (backed by Rust DomState)
+    const LOCAL_STORAGE_QUOTA = 5242880; // 5 MB
+    
+    function getStorageAreaSize(type) {
+        const keys = ops.op_dom_storage_keys(type);
+        let size = 0;
+        for (const k of keys) {
+            const v = ops.op_dom_storage_get(type, k);
+            size += String(k).length + (v ? String(v).length : 0);
+        }
+        return size;
+    }
+
+    function setStorageItem(type, key, value) {
+        const valStr = String(value);
+        const newSize = String(key).length + valStr.length;
+        const oldVal = ops.op_dom_storage_get(type, key);
+        const oldSize = oldVal ? String(key).length + String(oldVal).length : 0;
+        
+        const currentSize = getStorageAreaSize(type);
+        if (currentSize - oldSize + newSize > LOCAL_STORAGE_QUOTA) {
+            throw new DOMException(
+                "Failed to execute 'setItem' on 'Storage': Setting the value of '" + key + "' exceeded the quota.",
+                'QuotaExceededError'
+            );
+        }
+        
+        ops.op_dom_storage_set(type, key, valStr);
+        return true;
+    }
+
     function makeStorage(type) {
-        return new Proxy(_storageData[type], {
+        return new Proxy({}, {
             get(target, key) {
-                if (key === "getItem") return (k) => target[k] ?? null;
-                if (key === "setItem") return (k, v) => { target[k] = String(v); };
-                if (key === "removeItem") return (k) => { delete target[k]; };
-                if (key === "clear") return () => { for (const k in target) delete target[k]; };
-                if (key === "key") return (i) => Object.keys(target)[i] ?? null;
-                if (key === "length") return Object.keys(target).length;
-                return target[key];
+                if (key === "getItem") return (k) => ops.op_dom_storage_get(type, String(k));
+                if (key === "setItem") return (k, v) => { setStorageItem(type, String(k), v); };
+                if (key === "removeItem") return (k) => { ops.op_dom_storage_remove(type, String(k)); };
+                if (key === "clear") return () => { ops.op_dom_storage_clear(type); };
+                if (key === "key") return (i) => ops.op_dom_storage_keys(type)[i] ?? null;
+                if (key === "length") return ops.op_dom_storage_keys(type).length;
+                
+                // Fallback to getting the item directly if it's not a method
+                return ops.op_dom_storage_get(type, String(key)) ?? undefined;
             },
-            set(target, key, value) { target[key] = String(value); return true; },
+            set(target, key, value) { return setStorageItem(type, String(key), value); },
+            deleteProperty(target, key) {
+                ops.op_dom_storage_remove(type, String(key));
+                return true;
+            },
+            ownKeys() {
+                return ops.op_dom_storage_keys(type);
+            },
+            getOwnPropertyDescriptor(target, key) {
+                const val = ops.op_dom_storage_get(type, String(key));
+                if (val !== null) {
+                    return { value: val, enumerable: true, configurable: true, writable: true };
+                }
+            }
         });
     }
     globalThis.localStorage = makeStorage("local");
@@ -1757,9 +2253,17 @@
     };
     globalThis.cancelIdleCallback = clearTimeout;
 
-    // getComputedStyle — reads inline style from actual element, falls back to CSS defaults
+    // getComputedStyle — reads inline style from actual element, falls back to CSS defaults.
+    // CAPTURE _getNodeId at bootstrap time: cleanup_bootstrap.js deletes
+    // __boxide before page scripts run, so per-call lookup degrades to
+    // nodeId=0 (same bug that broke event_stop_propagation). This was why
+    // every getComputedStyle() call returned the same root-element defaults
+    // regardless of which element was passed.
+    const _getNodeIdForCompStyle = (globalThis.__boxide && globalThis.__boxide._getNodeId)
+        ? globalThis.__boxide._getNodeId
+        : (() => 0);
     globalThis.getComputedStyle = function(element, pseudoElt) {
-        const nodeId = element && typeof element._getNodeId === "function" ? element._getNodeId() : 0;
+        const nodeId = _getNodeIdForCompStyle(element);
         return new Proxy({}, {
             get(target, prop) {
                 if (prop === "getPropertyValue") {
@@ -1834,7 +2338,19 @@
         static DONE = 4;
         open(method, url, async = true, user, password) {
             this._method = String(method || "GET").toUpperCase();
-            this._url = String(url || "");
+            let urlStr = String(url || "");
+            if (urlStr && !urlStr.startsWith('http') && !urlStr.startsWith('data:') && !urlStr.startsWith('blob:')) {
+                try {
+                    let base = globalThis.location ? globalThis.location.href : 'about:blank';
+                    if (base === 'about:blank' || base === 'javascript:;' || base === '') {
+                        try { base = globalThis.parent.location.href; } catch(e) {}
+                    }
+                    const old = urlStr;
+                    urlStr = new URL(urlStr, base).href;
+                } catch(e) {
+                }
+            }
+            this._url = urlStr;
             this._async = async !== false;
             this._headers = {};
             this._respHeaders = {};
@@ -2009,8 +2525,6 @@
     // --- history — prototype-backed ---
     const _historyStack = [{ state: null, title: "", url: globalThis.location?.href || "about:blank" }];
     let _historyIndex = 0;
-    class History {}
-    globalThis.History = History;
     const _HistoryProto = History.prototype;
     _defProtoGetter(_HistoryProto, 'length', () => _historyStack.length);
     _defProtoGetter(_HistoryProto, 'state', () => _historyStack[_historyIndex]?.state || null);
@@ -2228,11 +2742,11 @@
                 } else {
                     data = new Uint8Array();
                 }
-                try { Deno.core.ops.op_blob_register(u, data, contentType); } catch (e) {}
+                try { ops.op_blob_register(u, data, contentType); } catch (e) {}
                 return u;
             }
             static revokeObjectURL(url) {
-                try { Deno.core.ops.op_blob_revoke(url); } catch (e) {}
+                try { ops.op_blob_revoke(url); } catch (e) {}
             }
         };
     }
@@ -3049,46 +3563,9 @@
         }
     }
 
-    // ================================================================
-    // Permissions API — consistent Chrome-like responses
-    // ================================================================
-    {
-        // Override the basic stub with proper PermissionStatus objects
-        const _permissionDefaults = {
-            "geolocation": "prompt",
-            "notifications": "prompt",
-            "push": "prompt",
-            "midi": "prompt",
-            "camera": "prompt",
-            "microphone": "prompt",
-            "speaker": "prompt",
-            "clipboard-read": "prompt",
-            "clipboard-write": "granted",
-            "payment-handler": "prompt",
-            "persistent-storage": "prompt",
-            "background-sync": "granted",
-            "ambient-light-sensor": "prompt",
-            "accelerometer": "prompt",
-            "gyroscope": "prompt",
-            "magnetometer": "prompt",
-            "accessibility-events": "prompt",
-        };
-
-        if (navigator.permissions) {
-            navigator.permissions.query = function(desc) {
-                const state = _permissionDefaults[desc?.name] || "prompt";
-                const status = {
-                    state,
-                    name: desc?.name,
-                    onchange: null,
-                    addEventListener() {},
-                    removeEventListener() {},
-                };
-                Object.defineProperty(status, 'toString', { value: () => `[object PermissionStatus]` });
-                return Promise.resolve(status);
-            };
-        }
-    }
+    // Permissions API is defined at the top of this file (search for
+    // _PERMISSION_STATE_MAP). That implementation is the single source of
+    // truth — do not override navigator.permissions.query here.
 
     // ================================================================
     // Battery API — realistic values (already exists but enhance)
@@ -3175,27 +3652,23 @@
     // Anti-bot detectors check Function.prototype.toString() for polyfilled APIs.
     // Real Chrome returns "function X() { [native code] }" for built-in functions.
     // Wrap our polyfills so toString() returns the native format.
-    function _maskAsNative(obj, ...names) {
-        for (const name of names) {
-            const fn = obj[name];
-            if (typeof fn === 'function') {
-                const masked = fn;
-                Object.defineProperty(masked, 'toString', {
-                    value: () => `function ${name}() { [native code] }`,
-                    configurable: true,
-                });
-            }
-        }
-    }
 
     // Mask navigator methods
     _maskAsNative(navigator, 'javaEnabled', 'sendBeacon', 'getBattery');
+    _maskAsNative(PluginArray.prototype, 'item', 'namedItem', 'refresh');
+    _maskAsNative(MimeTypeArray.prototype, 'item', 'namedItem');
+    _maskAsNative(Plugin.prototype, 'item', 'namedItem');
     // Mask WebRTC
     _maskAsNative(globalThis.RTCPeerConnection.prototype, 'createOffer', 'createAnswer',
         'setLocalDescription', 'setRemoteDescription', 'addIceCandidate', 'close',
         'createDataChannel', 'getStats', 'getSenders', 'getReceivers', 'getTransceivers',
         'addTrack', 'removeTrack');
     _maskAsNative(globalThis.RTCPeerConnection, 'generateCertificate');
+    
+    // Mask document.write
+    if (globalThis.document) {
+        _maskAsNative(Object.getPrototypeOf(globalThis.document), 'write', 'writeln');
+    }
     // Mask MediaSource
     if (globalThis.MediaSource) _maskAsNative(globalThis.MediaSource, 'isTypeSupported');
     // Mask speechSynthesis

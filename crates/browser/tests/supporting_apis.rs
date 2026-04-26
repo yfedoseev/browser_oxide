@@ -5,6 +5,7 @@
 //! tests are the regression gate for Sprint 3 work.
 
 use browser::Page;
+use stealth;
 
 // ============================================================================
 // A1 — blob: URL fetch
@@ -12,8 +13,7 @@ use browser::Page;
 
 #[tokio::test]
 async fn fetch_blob_url_returns_text() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const blob = new Blob(['hello blob']);
                 const url = URL.createObjectURL(blob);
@@ -22,8 +22,7 @@ async fn fetch_blob_url_returns_text() {
                 document.getElementById('out').textContent =
                     resp.status + '|' + resp.ok + '|' + text;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .expect("page builds");
 
@@ -35,8 +34,7 @@ async fn fetch_blob_url_returns_text() {
 
 #[tokio::test]
 async fn fetch_blob_url_preserves_content_type() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const blob = new Blob(['x,y\n1,2'], { type: 'text/csv' });
                 const url = URL.createObjectURL(blob);
@@ -44,8 +42,7 @@ async fn fetch_blob_url_preserves_content_type() {
                 document.getElementById('out').textContent =
                     resp.headers.get('content-type') || 'none';
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("text/csv".to_string()));
@@ -55,8 +52,7 @@ async fn fetch_blob_url_preserves_content_type() {
 async fn fetch_blob_url_arraybuffer_preserves_bytes() {
     // Binary fidelity: a blob of raw non-UTF8 bytes should survive
     // round-trip through arrayBuffer() without TextEncoder corruption.
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 // 0x00 0xFF 0x7F 0x80 — includes null, high-bit bytes.
                 const bytes = new Uint8Array([0x00, 0xFF, 0x7F, 0x80]);
@@ -70,8 +66,7 @@ async fn fetch_blob_url_arraybuffer_preserves_bytes() {
                 document.getElementById('out').textContent =
                     view.byteLength + ':' + parts.join(',');
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("4:0,255,127,128".to_string()));
@@ -79,8 +74,7 @@ async fn fetch_blob_url_arraybuffer_preserves_bytes() {
 
 #[tokio::test]
 async fn fetch_unknown_blob_url_throws() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 try {
                     await fetch('blob:null/fake-nonexistent-uuid-1234');
@@ -89,8 +83,7 @@ async fn fetch_unknown_blob_url_throws() {
                     document.getElementById('out').textContent = 'threw:' + e.name;
                 }
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     // Network error → TypeError per Fetch spec.
@@ -107,11 +100,9 @@ async fn fetch_unknown_blob_url_throws() {
 
 #[tokio::test]
 async fn structured_clone_is_global_function() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             document.getElementById('out').textContent = typeof structuredClone;
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("function".to_string()));
@@ -119,8 +110,7 @@ async fn structured_clone_is_global_function() {
 
 #[tokio::test]
 async fn structured_clone_primitives_and_date() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             const d = new Date(1234567890000);
             const clone = structuredClone({
                 n: 42,
@@ -140,8 +130,7 @@ async fn structured_clone_primitives_and_date() {
             parts.push(clone.d !== d);
             parts.push(clone.big === 9007199254740993n);
             document.getElementById('out').textContent = parts.join(',');
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -152,8 +141,7 @@ async fn structured_clone_primitives_and_date() {
 
 #[tokio::test]
 async fn structured_clone_typed_array_survives() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             const src = new Uint8Array([1, 2, 3, 255]);
             const clone = structuredClone(src);
             const isUint8 = clone instanceof Uint8Array;
@@ -164,8 +152,7 @@ async fn structured_clone_typed_array_survives() {
             const independent = src[0] === 1;
             document.getElementById('out').textContent =
                 isUint8 + ',' + sameValues + ',' + independent;
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("true,true,true".to_string()));
@@ -173,8 +160,7 @@ async fn structured_clone_typed_array_survives() {
 
 #[tokio::test]
 async fn structured_clone_map_set_cycle() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             const m = new Map();
             m.set('a', 1);
             m.set('b', [1, 2, 3]);
@@ -198,8 +184,7 @@ async fn structured_clone_map_set_cycle() {
             // And NOT at the original.
             parts.push(clone.cyclic !== cyclic);
             document.getElementById('out').textContent = parts.join(',');
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -210,15 +195,13 @@ async fn structured_clone_map_set_cycle() {
 
 #[tokio::test]
 async fn structured_clone_regexp_preserves_source_and_flags() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             const r = /foo.*bar/gim;
             const clone = structuredClone(r);
             document.getElementById('out').textContent =
                 (clone instanceof RegExp) + ',' +
                 clone.source + ',' + clone.flags;
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     let out = page.text_of("#out").unwrap_or_default();
@@ -229,16 +212,14 @@ async fn structured_clone_regexp_preserves_source_and_flags() {
 
 #[tokio::test]
 async fn structured_clone_function_throws() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             try {
                 structuredClone({ fn: function() {} });
                 document.getElementById('out').textContent = 'no-throw';
             } catch (e) {
                 document.getElementById('out').textContent = 'threw:' + e.name;
             }
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     let out = page.text_of("#out").unwrap_or_default();
@@ -250,16 +231,14 @@ async fn structured_clone_function_throws() {
 
 #[tokio::test]
 async fn structured_clone_symbol_throws() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             try {
                 structuredClone(Symbol('nope'));
                 document.getElementById('out').textContent = 'no-throw';
             } catch (e) {
                 document.getElementById('out').textContent = 'threw:' + e.name;
             }
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     let out = page.text_of("#out").unwrap_or_default();
@@ -268,8 +247,7 @@ async fn structured_clone_symbol_throws() {
 
 #[tokio::test]
 async fn structured_clone_array_buffer_copy() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             const buf = new ArrayBuffer(8);
             new Uint8Array(buf).set([10, 20, 30, 40, 50, 60, 70, 80]);
             const clone = structuredClone(buf);
@@ -282,8 +260,7 @@ async fn structured_clone_array_buffer_copy() {
                 (clone instanceof ArrayBuffer) + ',' +
                 (clone !== buf) + ',' +
                 matches + ',' + independent;
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -298,14 +275,12 @@ async fn structured_clone_array_buffer_copy() {
 
 #[tokio::test]
 async fn streams_classes_exist() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             document.getElementById('out').textContent =
                 (typeof ReadableStream) + '/' +
                 (typeof WritableStream) + '/' +
                 (typeof TransformStream);
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -316,8 +291,7 @@ async fn streams_classes_exist() {
 
 #[tokio::test]
 async fn readable_stream_single_chunk_read() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const s = new ReadableStream({
                     start(c) {
@@ -332,8 +306,7 @@ async fn readable_stream_single_chunk_read() {
                     first.done + ':' + first.value + '|' +
                     second.done + ':' + (second.value === undefined);
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -344,8 +317,7 @@ async fn readable_stream_single_chunk_read() {
 
 #[tokio::test]
 async fn readable_stream_multi_chunk_pull() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 let n = 0;
                 const s = new ReadableStream({
@@ -364,8 +336,7 @@ async fn readable_stream_multi_chunk_pull() {
                 }
                 document.getElementById('out').textContent = chunks.join(',');
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -376,8 +347,7 @@ async fn readable_stream_multi_chunk_pull() {
 
 #[tokio::test]
 async fn response_body_is_readable_stream() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const blob = new Blob(['body-via-stream']);
                 const url = URL.createObjectURL(blob);
@@ -389,8 +359,7 @@ async fn response_body_is_readable_stream() {
                 document.getElementById('out').textContent =
                     isStream + '/' + decoder.decode(value) + '/' + done;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -401,8 +370,7 @@ async fn response_body_is_readable_stream() {
 
 #[tokio::test]
 async fn readable_stream_tee_branches_independently() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const s = new ReadableStream({
                     start(c) {
@@ -435,8 +403,7 @@ async fn readable_stream_tee_branches_independently() {
                 const [resA, resB] = await Promise.all([collectA(), collectB()]);
                 document.getElementById('out').textContent = resA + '|' + resB;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("A+B|A+B".to_string()));
@@ -444,8 +411,7 @@ async fn readable_stream_tee_branches_independently() {
 
 #[tokio::test]
 async fn writable_stream_accepts_writes() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const collected = [];
                 const ws = new WritableStream({
@@ -458,8 +424,7 @@ async fn writable_stream_accepts_writes() {
                 await w.close();
                 document.getElementById('out').textContent = collected.join(',');
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("x,y,CLOSED".to_string()));
@@ -467,8 +432,7 @@ async fn writable_stream_accepts_writes() {
 
 #[tokio::test]
 async fn transform_stream_pipes_through() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 // Source: emits 1, 2, 3.
                 const src = new ReadableStream({
@@ -488,8 +452,7 @@ async fn transform_stream_pipes_through() {
                 }
                 document.getElementById('out').textContent = vals.join(',');
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("2,4,6".to_string()));
@@ -504,8 +467,7 @@ async fn canvas_methods_are_own_properties_of_prototype() {
     // Real Chrome puts getContext/toDataURL/toBlob on
     // HTMLCanvasElement.prototype directly, not on Element.prototype.
     // A probe that reads the descriptors must see them as own props.
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             const proto = HTMLCanvasElement.prototype;
             const parts = [];
             for (const name of ['getContext', 'toDataURL', 'toBlob']) {
@@ -513,8 +475,7 @@ async fn canvas_methods_are_own_properties_of_prototype() {
                 parts.push(name + ':' + (d ? 'own' : 'inherited'));
             }
             document.getElementById('out').textContent = parts.join(',');
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -529,8 +490,7 @@ async fn canvas_get_context_illegal_invocation() {
     // receiver must throw `TypeError: Illegal invocation` — this is
     // the fingerprint-leak the old Element-prototype patch had: a
     // probe would see getContext accept any element.
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             const getContext = HTMLCanvasElement.prototype.getContext;
             const fake = {};
             try {
@@ -540,8 +500,7 @@ async fn canvas_get_context_illegal_invocation() {
                 document.getElementById('out').textContent =
                     e.name + '|' + (e.message.includes('Illegal invocation') ? 'ok' : e.message);
             }
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("TypeError|ok".to_string()));
@@ -549,8 +508,7 @@ async fn canvas_get_context_illegal_invocation() {
 
 #[tokio::test]
 async fn canvas_to_data_url_illegal_invocation() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             const toDataURL = HTMLCanvasElement.prototype.toDataURL;
             try {
                 toDataURL.call({ tagName: 'DIV' });
@@ -558,8 +516,7 @@ async fn canvas_to_data_url_illegal_invocation() {
             } catch (e) {
                 document.getElementById('out').textContent = e.name;
             }
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("TypeError".to_string()));
@@ -569,8 +526,7 @@ async fn canvas_to_data_url_illegal_invocation() {
 async fn canvas_methods_still_work_on_real_canvas() {
     // Regression: after the proxy move, the normal canvas-on-element
     // path must still work for HTML-parsed canvases.
-    let mut page = Page::from_html(
-        r#"<html><body>
+    let mut page = Page::from_html(r#"<html><body>
             <canvas id="c" width="50" height="50"></canvas>
             <div id="out"></div>
             <script>
@@ -582,8 +538,7 @@ async fn canvas_methods_still_work_on_real_canvas() {
                 document.getElementById('out').textContent =
                     (ctx !== null) + '/' + url.startsWith('data:image/png;base64,');
             </script>
-        </body></html>"#,
-    )
+        </body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("true/true".to_string()));
@@ -595,8 +550,7 @@ async fn canvas_methods_still_work_on_real_canvas() {
 
 #[tokio::test]
 async fn offscreen_canvas_main_thread_is_functional() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             const oc = new OffscreenCanvas(100, 50);
             const ctx = oc.getContext('2d');
             const ctxIsCtx = ctx !== null && typeof ctx.fillRect === 'function';
@@ -608,8 +562,7 @@ async fn offscreen_canvas_main_thread_is_functional() {
             const widthOk = m.width > 0;
             document.getElementById('out').textContent =
                 ctxIsCtx + '/' + widthOk;
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("true/true".to_string()));
@@ -617,8 +570,7 @@ async fn offscreen_canvas_main_thread_is_functional() {
 
 #[tokio::test]
 async fn offscreen_canvas_convert_to_blob_png() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const oc = new OffscreenCanvas(20, 20);
                 const ctx = oc.getContext('2d');
@@ -633,8 +585,7 @@ async fn offscreen_canvas_convert_to_blob_png() {
                 document.getElementById('out').textContent =
                     magic + '/' + blob.type + '/' + (bytes.byteLength > 30);
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -648,8 +599,7 @@ async fn offscreen_canvas_in_worker() {
     // Workers now run canvas_bootstrap too — `new OffscreenCanvas(w,h)
     // .getContext('2d')` should return a real CanvasRenderingContext2D
     // in the worker scope.
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const src = `
                     self.onmessage = () => {
@@ -676,8 +626,7 @@ async fn offscreen_canvas_in_worker() {
                 w.terminate();
                 document.getElementById('out').textContent = result;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     // Blue at (5,5) = (0, 0, 255, 255) from our skia-safe canvas.
@@ -696,8 +645,7 @@ async fn worker_post_message_typed_array_round_trip() {
     // Previously, JSON serialization would silently drop TypedArrays
     // in Worker.postMessage (receiver got `{}`). With the wire
     // serializer they survive round-trip with byte-exact content.
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const src = `
                     self.onmessage = (e) => {
@@ -720,8 +668,7 @@ async fn worker_post_message_typed_array_round_trip() {
                 document.getElementById('out').textContent =
                     result.isU8 + '|' + result.bytes;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -732,8 +679,7 @@ async fn worker_post_message_typed_array_round_trip() {
 
 #[tokio::test]
 async fn worker_post_message_arraybuffer_round_trip() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const src = `
                     self.onmessage = (e) => {
@@ -759,8 +705,7 @@ async fn worker_post_message_arraybuffer_round_trip() {
                     result.isAB + '|' + result.byteLen + '|' +
                     result.first + '|' + result.last;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -771,8 +716,7 @@ async fn worker_post_message_arraybuffer_round_trip() {
 
 #[tokio::test]
 async fn worker_post_message_map_set_date_survive() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const src = `
                     self.onmessage = (e) => {
@@ -802,8 +746,7 @@ async fn worker_post_message_map_set_date_survive() {
                 w.terminate();
                 document.getElementById('out').textContent = result;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -818,8 +761,7 @@ async fn worker_post_message_transferable_list_accepted() {
     // ArrayBuffers/views without throwing. (We don't actually detach
     // the source — that requires V8 internals — but the shape check
     // that fingerprint probes do for `postMessage(buf, [buf])` passes.)
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const src = `
                     self.onmessage = () => self.postMessage('received');
@@ -836,8 +778,7 @@ async fn worker_post_message_transferable_list_accepted() {
                 }
                 w.terminate();
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -848,8 +789,7 @@ async fn worker_post_message_transferable_list_accepted() {
 
 #[tokio::test]
 async fn worker_post_message_rejects_non_transferable() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const src = `self.onmessage = () => self.postMessage('x');`;
                 const url = URL.createObjectURL(new Blob([src]));
@@ -862,8 +802,7 @@ async fn worker_post_message_rejects_non_transferable() {
                 }
                 w.terminate();
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -878,8 +817,7 @@ async fn worker_post_message_rejects_non_transferable() {
 
 #[tokio::test]
 async fn module_worker_option_accepted() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 // Sanity: a module-type worker body with no imports
                 // should run the same way as a classic worker and be
@@ -898,8 +836,7 @@ async fn module_worker_option_accepted() {
                 w.terminate();
                 document.getElementById('out').textContent = result;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(
@@ -914,8 +851,7 @@ async fn module_worker_import_meta_url_available() {
     // Even if the URL value is our synthetic worker-oxide scheme, the
     // presence of import.meta (without a ReferenceError) proves the
     // body was loaded in module mode.
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const src = `
                     const hasImportMeta = typeof import.meta === 'object';
@@ -932,8 +868,7 @@ async fn module_worker_import_meta_url_available() {
                 w.terminate();
                 document.getElementById('out').textContent = result;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("module".to_string()));
@@ -945,8 +880,7 @@ async fn module_worker_import_meta_url_available() {
 
 #[tokio::test]
 async fn indexeddb_open_put_get_round_trip() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const req = indexedDB.open('test-db', 1);
                 req.onupgradeneeded = () => {
@@ -968,8 +902,7 @@ async fn indexeddb_open_put_get_round_trip() {
                 document.getElementById('out').textContent =
                     getReq.result.id + '/' + getReq.result.name;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("1/alpha".to_string()));
@@ -977,8 +910,7 @@ async fn indexeddb_open_put_get_round_trip() {
 
 #[tokio::test]
 async fn indexeddb_deep_clone_isolates_stored_values() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const req = indexedDB.open('isolation-db', 1);
                 req.onupgradeneeded = () => {
@@ -1004,8 +936,7 @@ async fn indexeddb_deep_clone_isolates_stored_values() {
                 document.getElementById('out').textContent =
                     stored + '/' + getReq2.result.nested.value;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("original/original".to_string()));
@@ -1013,8 +944,7 @@ async fn indexeddb_deep_clone_isolates_stored_values() {
 
 #[tokio::test]
 async fn indexeddb_key_range_query() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const req = indexedDB.open('range-db', 1);
                 req.onupgradeneeded = () => {
@@ -1032,8 +962,7 @@ async fn indexeddb_key_range_query() {
                 const ids = getAllReq.result.map((o) => o.i).join(',');
                 document.getElementById('out').textContent = ids;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("2,3,4".to_string()));
@@ -1041,8 +970,7 @@ async fn indexeddb_key_range_query() {
 
 #[tokio::test]
 async fn indexeddb_cursor_iterates_in_key_order() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const req = indexedDB.open('cursor-db', 1);
                 req.onupgradeneeded = () => {
@@ -1070,8 +998,7 @@ async fn indexeddb_cursor_iterates_in_key_order() {
                 });
                 document.getElementById('out').textContent = keys.join(',');
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("1,2,3".to_string()));
@@ -1079,8 +1006,7 @@ async fn indexeddb_cursor_iterates_in_key_order() {
 
 #[tokio::test]
 async fn indexeddb_version_upgrade_flow() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 // Open v1: create 'old' store.
                 const r1 = indexedDB.open('upgrade-db', 1);
@@ -1103,8 +1029,7 @@ async fn indexeddb_version_upgrade_flow() {
                 document.getElementById('out').textContent =
                     upgradeEvent.old + '->' + upgradeEvent.new_ + '/' + stores;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("1->2/new,old".to_string()));
@@ -1116,8 +1041,7 @@ async fn indexeddb_version_upgrade_flow() {
 
 #[tokio::test]
 async fn worker_import_scripts_from_blob_url() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const importSrc = `
                     self._imported_value = 123;
@@ -1141,8 +1065,7 @@ async fn worker_import_scripts_from_blob_url() {
                 document.getElementById('out').textContent =
                     result.got + '/' + result.imported;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("ping/123".to_string()));
@@ -1150,8 +1073,7 @@ async fn worker_import_scripts_from_blob_url() {
 
 #[tokio::test]
 async fn worker_import_scripts_from_data_url() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const src = btoa("self._data_imported = true;");
                 const dataURL = "data:application/javascript;base64," + src;
@@ -1169,8 +1091,7 @@ async fn worker_import_scripts_from_data_url() {
                 w.terminate();
                 document.getElementById('out').textContent = result;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("yes".to_string()));
@@ -1178,8 +1099,7 @@ async fn worker_import_scripts_from_data_url() {
 
 #[tokio::test]
 async fn worker_import_scripts_unknown_blob_throws() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const workerSrc = `
                     try {
@@ -1195,8 +1115,7 @@ async fn worker_import_scripts_unknown_blob_throws() {
                 w.terminate();
                 document.getElementById('out').textContent = msg;
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     let out = page.text_of("#out").unwrap_or_default();
@@ -1205,8 +1124,7 @@ async fn worker_import_scripts_unknown_blob_throws() {
 
 #[tokio::test]
 async fn blob_revoke_invalidates_url() {
-    let mut page = Page::from_html(
-        r#"<html><body><div id="out"></div><script>
+    let mut page = Page::from_html(r#"<html><body><div id="out"></div><script>
             (async () => {
                 const url = URL.createObjectURL(new Blob(['revoked']));
                 URL.revokeObjectURL(url);
@@ -1217,8 +1135,7 @@ async fn blob_revoke_invalidates_url() {
                     document.getElementById('out').textContent = 'error';
                 }
             })();
-        </script></body></html>"#,
-    )
+        </script></body></html>"#, None::<stealth::StealthProfile>)
     .await
     .unwrap();
     assert_eq!(page.text_of("#out"), Some("error".to_string()));

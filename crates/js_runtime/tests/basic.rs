@@ -10,14 +10,15 @@ fn create_test_runtime() -> BrowserJsRuntime {
 #[test]
 fn basic_js_execution() {
     let mut rt = create_test_runtime();
-    let result = rt.execute_script("1 + 2").unwrap();
+    let result = rt.execute_script("1 + 2", None).unwrap();
     assert_eq!(result, "3");
 }
 
 #[test]
 fn console_log_capture() {
     let mut rt = create_test_runtime();
-    rt.execute_script("console.log('hello from JS')").unwrap();
+    rt.execute_script("console.log('hello from JS')", None)
+        .unwrap();
     let output = rt.console_output();
     assert_eq!(output.len(), 1);
     assert_eq!(output[0].args[0], "hello from JS");
@@ -26,7 +27,7 @@ fn console_log_capture() {
 #[test]
 fn document_exists() {
     let mut rt = create_test_runtime();
-    let result = rt.execute_script("typeof document").unwrap();
+    let result = rt.execute_script("typeof document", None).unwrap();
     assert_eq!(result, "object");
 }
 
@@ -34,7 +35,7 @@ fn document_exists() {
 fn document_query_selector() {
     let mut rt = create_test_runtime();
     let result = rt
-        .execute_script("document.querySelector('#main').tagName")
+        .execute_script("document.querySelector('#main').tagName", None)
         .unwrap();
     assert_eq!(result, "DIV");
 }
@@ -43,7 +44,7 @@ fn document_query_selector() {
 fn document_get_element_by_id() {
     let mut rt = create_test_runtime();
     let result = rt
-        .execute_script("document.getElementById('main').className")
+        .execute_script("document.getElementById('main').className", None)
         .unwrap();
     assert_eq!(result, "container");
 }
@@ -52,7 +53,7 @@ fn document_get_element_by_id() {
 fn element_text_content() {
     let mut rt = create_test_runtime();
     let result = rt
-        .execute_script("document.querySelector('p').textContent")
+        .execute_script("document.querySelector('p').textContent", None)
         .unwrap();
     assert_eq!(result, "Hello world");
 }
@@ -61,7 +62,7 @@ fn element_text_content() {
 fn element_inner_html() {
     let mut rt = create_test_runtime();
     let result = rt
-        .execute_script("document.querySelector('#main').innerHTML")
+        .execute_script("document.querySelector('#main').innerHTML", None)
         .unwrap();
     assert!(
         result.contains("<p>"),
@@ -83,11 +84,12 @@ fn create_element_and_append() {
         div.setAttribute('id', 'new-span');
         document.querySelector('#main').appendChild(div);
     "#,
+        None,
     )
     .unwrap();
 
     let result = rt
-        .execute_script("document.querySelector('#new-span').tagName")
+        .execute_script("document.querySelector('#new-span').tagName", None)
         .unwrap();
     assert_eq!(result, "SPAN");
 }
@@ -99,11 +101,12 @@ fn set_text_content() {
         r#"
         document.querySelector('p').textContent = 'Modified!';
     "#,
+        None,
     )
     .unwrap();
 
     let result = rt
-        .execute_script("document.querySelector('p').textContent")
+        .execute_script("document.querySelector('p').textContent", None)
         .unwrap();
     assert_eq!(result, "Modified!");
 }
@@ -115,11 +118,12 @@ fn set_inner_html() {
         r#"
         document.querySelector('#main').innerHTML = '<span>New content</span>';
     "#,
+        None,
     )
     .unwrap();
 
     let result = rt
-        .execute_script("document.querySelector('#main span').textContent")
+        .execute_script("document.querySelector('#main span').textContent", None)
         .unwrap();
     assert_eq!(result, "New content");
 }
@@ -131,11 +135,15 @@ fn set_attribute() {
         r#"
         document.querySelector('#main').setAttribute('data-test', 'hello');
     "#,
+        None,
     )
     .unwrap();
 
     let result = rt
-        .execute_script("document.querySelector('#main').getAttribute('data-test')")
+        .execute_script(
+            "document.querySelector('#main').getAttribute('data-test')",
+            None,
+        )
         .unwrap();
     assert_eq!(result, "hello");
 }
@@ -148,11 +156,12 @@ fn class_list() {
         const el = document.querySelector('#main');
         el.classList.add('new-class');
     "#,
+        None,
     )
     .unwrap();
 
     let result = rt
-        .execute_script("document.querySelector('#main').className")
+        .execute_script("document.querySelector('#main').className", None)
         .unwrap();
     assert!(
         result.contains("new-class"),
@@ -168,39 +177,39 @@ fn class_list() {
 #[test]
 fn document_title() {
     let mut rt = create_test_runtime();
-    let result = rt.execute_script("document.title").unwrap();
+    let result = rt.execute_script("document.title", None).unwrap();
     assert_eq!(result, "Test");
 }
 
 #[test]
 fn document_has_focus() {
     let mut rt = create_test_runtime();
-    let result = rt.execute_script("document.hasFocus()").unwrap();
+    let result = rt.execute_script("document.hasFocus()", None).unwrap();
     assert_eq!(result, "true");
 }
 
 #[test]
 fn document_visibility_state() {
     let mut rt = create_test_runtime();
-    let result = rt.execute_script("document.visibilityState").unwrap();
+    let result = rt.execute_script("document.visibilityState", None).unwrap();
     assert_eq!(result, "visible");
 }
 
 #[test]
 fn window_self_reference() {
     let mut rt = create_test_runtime();
-    let result = rt.execute_script("window === globalThis").unwrap();
+    let result = rt.execute_script("window === globalThis", None).unwrap();
     assert_eq!(result, "true");
 }
 
 #[test]
 fn node_types_exist() {
     let mut rt = create_test_runtime();
-    let result = rt.execute_script("typeof Element").unwrap();
+    let result = rt.execute_script("typeof Element", None).unwrap();
     assert_eq!(result, "function");
-    let result = rt.execute_script("typeof Document").unwrap();
+    let result = rt.execute_script("typeof Document", None).unwrap();
     assert_eq!(result, "function");
-    let result = rt.execute_script("typeof Node").unwrap();
+    let result = rt.execute_script("typeof Node", None).unwrap();
     assert_eq!(result, "function");
 }
 
@@ -220,7 +229,7 @@ fn query_selector_all() {
     );
     let mut rt = BrowserJsRuntime::new(dom);
     let result = rt
-        .execute_script("document.querySelectorAll('li').length")
+        .execute_script("document.querySelectorAll('li').length", None)
         .unwrap();
     assert_eq!(result, "3");
 }
@@ -230,7 +239,7 @@ fn get_elements_by_tag_name() {
     let mut rt = create_test_runtime();
     // The test HTML has: html, head, title, body, div, p
     let result = rt
-        .execute_script("document.getElementsByTagName('div').length")
+        .execute_script("document.getElementsByTagName('div').length", None)
         .unwrap();
     assert_eq!(result, "1");
 }
@@ -243,17 +252,19 @@ fn stealth_profile_overrides_navigator() {
     let dom = html_parser::parse_html("<html><head></head><body></body></html>");
     let mut rt = BrowserJsRuntime::with_profile(dom, profile);
 
-    let ua = rt.execute_script("navigator.userAgent").unwrap();
+    let ua = rt.execute_script("navigator.userAgent", None).unwrap();
     assert!(
         ua.contains("Windows NT 10.0"),
         "UA should be Windows: {}",
         ua
     );
 
-    let platform = rt.execute_script("navigator.platform").unwrap();
+    let platform = rt.execute_script("navigator.platform", None).unwrap();
     assert_eq!(platform, "Win32");
 
-    let cores = rt.execute_script("navigator.hardwareConcurrency").unwrap();
+    let cores = rt
+        .execute_script("navigator.hardwareConcurrency", None)
+        .unwrap();
     assert_eq!(cores, "8");
 }
 
@@ -263,10 +274,10 @@ fn stealth_profile_overrides_screen() {
     let dom = html_parser::parse_html("<html><head></head><body></body></html>");
     let mut rt = BrowserJsRuntime::with_profile(dom, profile);
 
-    let w = rt.execute_script("screen.width").unwrap();
+    let w = rt.execute_script("screen.width", None).unwrap();
     assert_eq!(w, "1440"); // macOS profile = 1440
 
-    let dpr = rt.execute_script("devicePixelRatio").unwrap();
+    let dpr = rt.execute_script("devicePixelRatio", None).unwrap();
     assert_eq!(dpr, "2"); // macOS Retina = 2x
 }
 
@@ -276,17 +287,17 @@ fn stealth_profile_overrides_window_dims() {
     let dom = html_parser::parse_html("<html><head></head><body></body></html>");
     let mut rt = BrowserJsRuntime::with_profile(dom, profile);
 
-    let iw = rt.execute_script("window.innerWidth").unwrap();
+    let iw = rt.execute_script("window.innerWidth", None).unwrap();
     assert_eq!(iw, "1920");
 
-    let ih = rt.execute_script("window.innerHeight").unwrap();
+    let ih = rt.execute_script("window.innerHeight", None).unwrap();
     assert_eq!(ih, "969");
 }
 
 #[test]
 fn no_profile_uses_defaults() {
     let mut rt = create_test_runtime(); // no profile
-    let ua = rt.execute_script("navigator.userAgent").unwrap();
+    let ua = rt.execute_script("navigator.userAgent", None).unwrap();
     assert!(
         ua.contains("Chrome"),
         "Default UA should contain Chrome: {}",

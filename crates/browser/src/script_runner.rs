@@ -1,5 +1,6 @@
 use dom::node::{NodeData, NodeId};
 use dom::Dom;
+use tracing;
 
 /// Information about a <script> element found in the DOM.
 pub struct ScriptInfo {
@@ -13,6 +14,13 @@ pub struct ScriptInfo {
 pub fn find_scripts(dom: &Dom) -> Vec<ScriptInfo> {
     let mut scripts = Vec::new();
     collect_scripts(dom, NodeId::DOCUMENT, &mut scripts);
+    for (i, s) in scripts.iter().enumerate() {
+        if let Some(src) = &s.src {
+            tracing::debug!(index = i, src = %src, "Found external script");
+        } else {
+            tracing::debug!(index = i, code_len = s.code.len(), "Found inline script");
+        }
+    }
     scripts
 }
 
@@ -46,7 +54,7 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                         .attrs
                         .iter()
                         .find(|a| a.name.local == "src")
-                        .map(|a| a.value.clone());
+                        .map(|a| decode_html_entities(a.value.as_str()));
 
                     if src.is_some() {
                         // External script — store the URL for fetching
@@ -71,4 +79,12 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
             collect_scripts(dom, child_id, scripts);
         }
     }
+}
+
+fn decode_html_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
 }

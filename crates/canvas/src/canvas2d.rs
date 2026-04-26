@@ -1007,6 +1007,33 @@ impl Canvas2D {
         format!("data:image/png;base64,{}", b64)
     }
 
+    /// Encode with tiny invisible noise to break deterministic fingerprinting.
+    pub fn to_data_url_with_jitter(&self) -> String {
+        let mut pixels = self.get_image_data(0, 0, self.width, self.height);
+        if !pixels.is_empty() {
+            let mut rng = 0x9e3779b9u32;
+            for i in (0..pixels.len()).step_by(4) {
+                rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
+                if (rng % 100) < 5 {
+                    // Jitter RGB channels by +/- 1
+                    pixels[i] = pixels[i].wrapping_add((rng & 1) as u8);
+                    pixels[i+1] = pixels[i+1].wrapping_sub(((rng >> 1) & 1) as u8);
+                    pixels[i+2] = pixels[i+2].wrapping_add(((rng >> 2) & 1) as u8);
+                }
+            }
+        }
+        let mut buf = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut buf, self.width, self.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("PNG header write failed");
+            writer.write_image_data(&pixels).expect("PNG data write failed");
+        }
+        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &buf);
+        format!("data:image/png;base64,{}", b64)
+    }
+
     /// Encode the canvas as PNG bytes (non-premultiplied RGBA).
     pub fn to_png_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();

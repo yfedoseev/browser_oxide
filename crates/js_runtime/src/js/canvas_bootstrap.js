@@ -544,10 +544,10 @@
         #canvasId;
         #attrs;
         constructor(width = 300, height = 150) {
-            this.width = width;
-            this.height = height;
             this.#canvasId = ops.op_canvas_create(width, height);
             this.#attrs = { width: String(width), height: String(height) };
+            Object.defineProperty(this, 'width', { value: width, writable: true, enumerable: true, configurable: true });
+            Object.defineProperty(this, 'height', { value: height, writable: true, enumerable: true, configurable: true });
             // Element base properties — fpCollect and bot.sannysoft expect these.
             // Use defineProperty because Element.prototype (which we chain into
             // at the bottom of this file) has tagName/nodeName/etc. as getters
@@ -568,8 +568,12 @@
         // `canvas.setAttribute('width', 200)` before drawing.
         setAttribute(name, value) {
             this.#attrs[name] = String(value);
-            if (name === "width") { this.width = parseInt(value, 10) || this.width; }
-            if (name === "height") { this.height = parseInt(value, 10) || this.height; }
+            if (name === "width") {
+                Object.defineProperty(this, 'width', { value: parseInt(value, 10) || this.width, writable: true, enumerable: true, configurable: true });
+            }
+            if (name === "height") {
+                Object.defineProperty(this, 'height', { value: parseInt(value, 10) || this.height, writable: true, enumerable: true, configurable: true });
+            }
         }
         getAttribute(name) { return this.#attrs[name] !== undefined ? this.#attrs[name] : null; }
         removeAttribute(name) { delete this.#attrs[name]; }
@@ -844,4 +848,37 @@
     });
     // Install as the canonical global — overwrites the window_bootstrap stub.
     globalThis.OffscreenCanvas = RealOffscreenCanvas;
+
+    // Mask methods as native
+    if (typeof _maskAsNative === 'function') {
+        _maskAsNative(CanvasRenderingContext2D.prototype, 
+            'fillRect', 'strokeRect', 'clearRect', 'beginPath', 'moveTo', 'lineTo',
+            'fill', 'stroke', 'closePath', 'arc', 'arcTo', 'bezierCurveTo',
+            'quadraticCurveTo', 'rect', 'fillText', 'strokeText', 'measureText',
+            'save', 'restore', 'translate', 'rotate', 'scale', 'setTransform',
+            'resetTransform', 'getTransform', 'createLinearGradient', 
+            'createRadialGradient', 'createPattern', 'getImageData', 'putImageData',
+            'drawImage', 'isPointInPath', 'isPointInStroke');
+        
+        _maskAsNative(RealOffscreenCanvas.prototype, 'getContext', 'transferToImageBitmap', 'convertToBlob');
+        
+        if (_HTMLCanvasProto) {
+            _maskAsNative(_HTMLCanvasProto, 'getContext', 'toDataURL', 'toBlob');
+        }
+
+        if (globalThis.AudioContext) {
+            _maskAsNative(AudioContext.prototype, 'createOscillator', 'createDynamicsCompressor', 'close', 'suspend', 'resume');
+        }
+        if (globalThis.OfflineAudioContext) {
+            _maskAsNative(OfflineAudioContext.prototype, 'startRendering');
+        }
+        
+        // Also mask WebGL if available
+        if (globalThis.WebGLRenderingContext) {
+            _maskAsNative(globalThis.WebGLRenderingContext.prototype, 'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter');
+        }
+        if (globalThis.WebGL2RenderingContext) {
+            _maskAsNative(globalThis.WebGL2RenderingContext.prototype, 'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter');
+        }
+    }
 })(globalThis);

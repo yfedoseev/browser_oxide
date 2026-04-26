@@ -212,7 +212,10 @@ where
         }
 
         // Parse chunk size
-        let crlf_pos = raw.windows(2).position(|w| w == b"\r\n").unwrap();
+        let crlf_pos = match raw.windows(2).position(|w| w == b"\r\n") {
+            Some(pos) => pos,
+            None => return Err(NetError::Http("malformed chunked encoding: missing CRLF".into())),
+        };
         let size_str = std::str::from_utf8(&raw[..crlf_pos])
             .map_err(|e| NetError::Http(format!("invalid chunk size: {e}")))?;
         // Handle chunk extensions (size;ext=val)

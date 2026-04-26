@@ -263,6 +263,15 @@
     // --- EventTarget on Node.prototype ---
     const origNodeProto = globalThis.Node.prototype;
 
+    // CAPTURE the node-id helper at bootstrap load time. cleanup_bootstrap.js
+    // deletes __boxide from globalThis before page scripts run, so
+    // per-call lookups would fall back to `nodeId = 0` — collapsing every
+    // node's listeners into a single shared bucket (the bug that broke
+    // event_stop_propagation / event_no_bubble_when_not_set).
+    const _getNodeIdOrZero = (globalThis.__boxide && globalThis.__boxide._getNodeId)
+        ? globalThis.__boxide._getNodeId
+        : (() => 0);
+
     function _getListeners(nodeId, type) {
         let nodeMap = _listeners.get(nodeId);
         if (!nodeMap) { nodeMap = new Map(); _listeners.set(nodeId, nodeMap); }
@@ -273,7 +282,7 @@
 
     origNodeProto.addEventListener = function(type, callback, options) {
         if (typeof callback !== "function" && typeof callback !== "object") return;
-        const nodeId = typeof this._getNodeId === "function" ? this._getNodeId() : 0;
+        const nodeId = _getNodeIdOrZero(this);
         const capture = typeof options === "boolean" ? options : !!(options && options.capture);
         const once = typeof options === "object" && options ? !!options.once : false;
         const passive = typeof options === "object" && options ? !!options.passive : false;
@@ -284,7 +293,7 @@
     };
 
     origNodeProto.removeEventListener = function(type, callback, options) {
-        const nodeId = typeof this._getNodeId === "function" ? this._getNodeId() : 0;
+        const nodeId = _getNodeIdOrZero(this);
         const capture = typeof options === "boolean" ? options : !!(options && options.capture);
         const listeners = _getListeners(nodeId, type);
         const idx = listeners.findIndex(l => l.callback === callback && l.capture === capture);
@@ -293,7 +302,7 @@
 
     origNodeProto.dispatchEvent = function(event) {
         event.target = this;
-        const nodeId = typeof this._getNodeId === "function" ? this._getNodeId() : 0;
+        const nodeId = _getNodeIdOrZero(this);
 
         // Build propagation path (target → root)
         const path = [];
@@ -308,7 +317,7 @@
             for (let i = path.length - 1; i > 0; i--) {
                 event.currentTarget = path[i];
                 event.eventPhase = 1;
-                const nid = typeof path[i]._getNodeId === "function" ? path[i]._getNodeId() : 0;
+                const nid = _getNodeIdOrZero(path[i]);
                 _fireListeners(nid, event, true);
                 if (event._stopped) break;
             }
@@ -327,7 +336,7 @@
             for (let i = 1; i < path.length; i++) {
                 event.currentTarget = path[i];
                 event.eventPhase = 3;
-                const nid = typeof path[i]._getNodeId === "function" ? path[i]._getNodeId() : 0;
+                const nid = _getNodeIdOrZero(path[i]);
                 _fireListeners(nid, event, false);
                 if (event._stopped) break;
             }
@@ -358,16 +367,18 @@
     }
 
     // Also make globalThis (window) an EventTarget
-    globalThis.addEventListener = origNodeProto.addEventListener.bind({ _getNodeId: () => -999 });
-    globalThis.removeEventListener = origNodeProto.removeEventListener.bind({ _getNodeId: () => -999 });
-    globalThis.dispatchEvent = function(event) {
-        event.target = globalThis;
-        event.currentTarget = globalThis;
-        event.eventPhase = 2;
-        _fireListeners(-999, event, false);
-        event.eventPhase = 0;
-        event.currentTarget = null;
-        return !event.defaultPrevented;
+    const _winAddListener = origNodeProto.addEventListener;
+    const _winRemoveListener = origNodeProto.removeEventListener;
+    const _winDispatch = origNodeProto.dispatchEvent;
+
+    globalThis.addEventListener = function addEventListener(type, callback, options) {
+        _winAddListener.call(globalThis, type, callback, options);
+    };
+    globalThis.removeEventListener = function removeEventListener(type, callback, options) {
+        _winRemoveListener.call(globalThis, type, callback, options);
+    };
+    globalThis.dispatchEvent = function dispatchEvent(event) {
+        return _winDispatch.call(globalThis, event);
     };
 
     // Export all event classes

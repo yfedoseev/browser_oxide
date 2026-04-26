@@ -5,12 +5,14 @@ use dom::Dom;
 use event_loop::{BrowserEventLoop, IdleReason};
 use js_runtime::{runtime::BrowserRuntimeOptions, BrowserJsRuntime};
 use std::time::Duration;
+use stealth;
+use tracing;
 
 /// A browser page. Owns a DOM, JS runtime, and event loop.
 ///
 /// # Example
 /// ```rust,ignore
-/// let page = Page::from_html("<html><body><script>document.title = 'Hello'</script></body></html>").await?;
+/// let page = Page::from_html("<html><body><script>document.title = 'Hello'</script></body></html>", None::<stealth::StealthProfile>).await?;
 /// assert_eq!(page.title(), "Hello");
 /// ```
 pub struct Page {
@@ -29,16 +31,31 @@ impl Drop for Page {
 }
 
 impl Page {
+    /// Detect if the current page is an anti-bot challenge (Kasada, Akamai, etc.)
+    pub fn is_anti_bot_challenge(&mut self) -> bool {
+        let body = self.content();
+        body.contains("ips.js") || 
+        body.contains("kpsdk") || 
+        body.contains("_abck") || 
+        body.contains("bm_sz") ||
+        body.contains("perimeterx") ||
+        body.contains("human security") ||
+        body.contains("smartcaptcha") ||
+        body.contains("checkbox-captcha")
+    }
     /// Create a page from an HTML string. Parses HTML, executes inline scripts,
     /// and runs the event loop until idle (or 30s timeout).
-    pub async fn from_html(html: &str) -> Result<Self, deno_core::error::AnyError> {
-        Self::from_html_with_url(html, "about:blank").await
+    pub async fn from_html(
+        html: &str,
+        profile: Option<stealth::StealthProfile>,
+    ) -> Result<Self, deno_core::error::AnyError> {
+        Self::from_html_with_url(html, "about:blank", profile).await
     }
 
     /// Create a page quickly — parses HTML, sets up DOM + JS runtime, executes
     /// inline scripts, but does NOT drain the event loop. Useful for CDP
     /// navigation where the caller controls script execution via Runtime.evaluate.
-    pub async fn from_html_fast(html: &str, url: &str) -> Result<Self, deno_core::error::AnyError> {
+    pub async fn from_html_fast(html: &str, url: &str, profile: stealth::StealthProfile) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
         let scripts = script_runner::find_scripts(&dom);
         let stylesheet_entries = stylesheet_collector::find_stylesheets(&dom);
@@ -47,6 +64,7 @@ impl Page {
         let runtime = BrowserJsRuntime::with_options(
             dom,
             BrowserRuntimeOptions {
+                stealth_profile: Some(profile.clone()),
                 stylesheets,
                 ..Default::default()
             },
@@ -59,15 +77,20 @@ impl Page {
             .execute_script(&format!("location.href = '{}';", url_js))
             .ok();
 
-        // Execute inline scripts
+        // Share the HTTP client with JS fetch()
+        let client = net::HttpClient::new(&profile)
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
+
+        // Execute inline scripts (fast mode skips external scripts by default)
         for (i, script) in scripts.iter().enumerate() {
-            let name = format!("<script_{}>", i);
-            if let Err(e) = event_loop.execute_script(&script.code) {
-                eprintln!("Script error in {}: {}", name, e);
+            if script.src.is_some() { continue; }
+            if !script.code.is_empty() {
+                if let Err(e) = event_loop.execute_script(&script.code) {
+                    tracing::warn!(script_index = i, error = %e, "Script error in inline script");
+                }
             }
         }
-
-        // Skip event loop drain + iframe processing — caller handles this
 
         Ok(Self {
             event_loop,
@@ -107,7 +130,7 @@ impl Page {
                 continue;
             }
             if let Err(e) = self.event_loop.execute_script(&script.code) {
-                eprintln!("Script error in <script_{}>: {}", i, e);
+                tracing::warn!(script_index = i, error = %e, "Script error in inline script");
             }
         }
     }
@@ -116,6 +139,7 @@ impl Page {
     pub async fn from_html_with_url(
         html: &str,
         url: &str,
+        profile: Option<stealth::StealthProfile>,
     ) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
 
@@ -127,6 +151,7 @@ impl Page {
         let runtime = BrowserJsRuntime::with_options(
             dom,
             BrowserRuntimeOptions {
+                stealth_profile: profile.clone(),
                 stylesheets,
                 ..Default::default()
             },
@@ -139,24 +164,50 @@ impl Page {
             .execute_script(&format!("location.href = '{}';", url_js))
             .ok();
 
-        // Execute inline scripts in document order
+        // Share the HTTP client with JS fetch()
+        let p = profile.unwrap_or_else(stealth::presets::chrome_130_ru);
+        let client = net::HttpClient::new(&p)
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
+
+        // Execute scripts in document order
         for (i, script) in scripts.iter().enumerate() {
-            let name = format!("<script_{}>", i);
-            if let Err(e) = event_loop.execute_script(&script.code) {
-                // Log but don't fail — browsers continue after script errors
-                eprintln!("Script error in {}: {}", name, e);
+            if let Some(src) = &script.src {
+                if let Some(full_url) = Self::resolve_url(url, src) {
+                    match client.get_follow(&full_url, 10).await {
+                        Ok(resp) => {
+                            let code = resp.text();
+                            if let Err(e) = event_loop.execute_script(&code) {
+                                tracing::warn!(script_src = %src, error = %e, "Script error in external script");
+                            }
+                        }
+                        Err(e) => tracing::warn!(script_src = %src, error = %e, "Failed to fetch script"),
+                    }
+                }
+            } else if !script.code.is_empty() {
+                if let Err(e) = event_loop.execute_script(&script.code) {
+                    tracing::warn!(script_index = i, error = %e, "Script error in inline script");
+                }
             }
         }
 
+        // Set document.readyState = loading
+        event_loop.execute_script("globalThis.__documentReadyState = 'loading';").ok();
+
         // Fire DOMContentLoaded and load events — many scripts wait for these
         event_loop
-            .execute_script(
-                "document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));",
-            )
+            .execute_script("document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));")
             .ok();
+        
+        // After DOMContentLoaded, readyState = interactive
+        event_loop.execute_script("globalThis.__documentReadyState = 'interactive';").ok();
+
         event_loop
             .execute_script("window.dispatchEvent(new Event('load'));")
             .ok();
+
+        // After load, readyState = complete
+        event_loop.execute_script("globalThis.__documentReadyState = 'complete';").ok();
 
         // Run event loop until idle (max 30s)
         event_loop.run_until_idle(Duration::from_secs(30)).await?;
@@ -202,9 +253,9 @@ impl Page {
         };
         for info in &iframes {
             if let Some(srcdoc) = &info.srcdoc {
-                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc).await {
+                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &p).await {
                     Ok(child) => children.push(child),
-                    Err(e) => eprintln!("iframe srcdoc error: {e}"),
+                    Err(e) => tracing::warn!(error = %e, "iframe srcdoc error"),
                 }
             }
         }
@@ -354,38 +405,28 @@ impl Page {
         url: &str,
         profile: stealth::StealthProfile,
     ) -> Result<Self, deno_core::error::AnyError> {
-        let dom = html_parser::parse_html(html);
-        let scripts = script_runner::find_scripts(&dom);
-        let stylesheet_entries = stylesheet_collector::find_stylesheets(&dom);
-        let stylesheets = stylesheet_collector::resolve_inline_only(&stylesheet_entries);
-        let runtime = BrowserJsRuntime::with_options(
-            dom,
-            BrowserRuntimeOptions {
-                stealth_profile: Some(profile),
-                stylesheets,
-                ..Default::default()
-            },
-        );
-        let mut event_loop = BrowserEventLoop::new(runtime);
+        let client = net::HttpClient::new(&profile)
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        Self::build_page_with_scripts_and_init(html, url, &profile, &client, &[]).await
+    }
 
-        let url_js = url.replace('\\', "\\\\").replace('\'', "\\'");
-        event_loop
-            .execute_script(&format!("location.href = '{}';", url_js))
-            .ok();
-
-        for script in &scripts {
-            if let Err(e) = event_loop.execute_script(&script.code) {
-                eprintln!("Script error: {}", e);
-            }
+    pub fn consume_and_print_logs(&mut self) {
+        let logs = {
+            let runtime = self.event_loop.runtime_mut().inner();
+            let state = runtime.op_state();
+            let mut state = state.borrow_mut();
+            let dom_state = state.borrow_mut::<js_runtime::state::DomState>();
+            std::mem::take(&mut dom_state.console_output)
+        };
+        for log in logs {
+            let prefix = match log.level {
+                js_runtime::state::ConsoleLevel::Log => "[JS LOG]",
+                js_runtime::state::ConsoleLevel::Warn => "[JS WARN]",
+                js_runtime::state::ConsoleLevel::Error => "[JS ERROR]",
+                _ => "[JS INFO]",
+            };
+            println!("    {} {}", prefix, log.args.join(" "));
         }
-
-        event_loop.run_until_idle(Duration::from_secs(30)).await?;
-
-        Ok(Self {
-            event_loop,
-            url: url.to_string(),
-            children: Vec::new(),
-        })
     }
 
     /// Navigate to a URL using an HTTP client (real network request).
@@ -394,13 +435,14 @@ impl Page {
     pub async fn navigate_simple(
         url: &str,
         client: &net::HttpClient,
+        profile: stealth::StealthProfile,
     ) -> Result<Self, deno_core::error::AnyError> {
         let resp = client
             .get(url)
             .await
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         let html = resp.text();
-        Self::from_html_with_url(&html, url).await
+        Self::from_html_with_url(&html, url, Some(profile)).await
     }
 
     /// Navigate with a stealth profile.
@@ -411,11 +453,13 @@ impl Page {
         let client = net::HttpClient::new(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         let resp = client
-            .get(url)
+            .get_follow(url, 10)
             .await
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         let html = resp.text();
-        Self::with_profile(&html, url, profile).await
+        let _ = std::fs::write("oxide_dump/page_html.html", &html);
+        let resp_url = resp.url.clone();
+        Self::with_profile(&html, &resp_url, profile).await
     }
 
     /// Generic navigation entry point.
@@ -456,6 +500,11 @@ impl Page {
     /// and any future feature that wants to carry JS across navigations
     /// within a single frame (equivalent to Chromium's
     /// `Page.addScriptToEvaluateOnNewDocument`).
+    /// Like [`Page::navigate`], but installs caller-supplied init scripts on
+    /// every iteration's fresh runtime. Used by [`Page::navigate_humanized`]
+    /// and any future feature that wants to carry JS across navigations
+    /// within a single frame (equivalent to Chromium's
+    /// `Page.addScriptToEvaluateOnNewDocument`).
     pub async fn navigate_with_init(
         url: &str,
         profile: stealth::StealthProfile,
@@ -469,114 +518,506 @@ impl Page {
         // the V8 isolate hit the same cookie jar as the Rust driver.
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
 
-        let mut current_url = url.to_string();
         let iterations = max_iterations.max(1);
         let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
 
-        for iter in 0..iterations {
-            eprintln!("[navigate] iter={iter} url={current_url}");
+        tracing::debug!(url = %url, "navigate initial fetch");
+        let resp = client
+            .get_follow(url, 10)
+            .await
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        let html = resp.text();
+        let resp_url = resp.url.clone();
+        Self::navigate_loop_internal(html, resp_url, profile, client, iterations, 0, init_scripts, debug_nav).await
+    }
 
+    /// For tests: start a navigation loop with a provided HTML instead of
+    /// fetching from URL. Subsequent iterations (if any) will fetch from the URL.
+    pub async fn navigate_with_html(
+        html: &str,
+        url: &str,
+        profile: stealth::StealthProfile,
+        max_iterations: u8,
+    ) -> Result<Self, deno_core::error::AnyError> {
+        let client = net::HttpClient::new(&profile)
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
+
+        let iterations = max_iterations.max(1);
+        let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
+
+        // Iteration 0 uses provided HTML
+        Self::navigate_loop_internal(html.to_string(), url.to_string(), profile, client, iterations, 0, vec![], debug_nav).await
+    }
+
+    async fn navigate_loop_internal(
+        html: String,
+        resp_url: String,
+        profile: stealth::StealthProfile,
+        client: net::HttpClient,
+        iterations: u8,
+        start_iter: u8,
+        init_scripts: Vec<String>,
+        debug_nav: bool,
+    ) -> Result<Self, deno_core::error::AnyError> {
+        const PENDING_NAV_JS: &str = "(function(){\
+                const p = globalThis.__pendingNavigation;\
+                return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
+            })()";
+
+        let mut current_html = html;
+        let mut current_url = resp_url;
+
+        for iter in start_iter..iterations {
+            tracing::info!(iter = iter, url = %current_url, "navigation loop start");
             if debug_nav {
-                if let Ok(parsed) = url::Url::parse(&current_url) {
-                    let jar_cookies = client.cookies_for_url(&parsed).await.unwrap_or_default();
-                    if !jar_cookies.is_empty() {
-                        eprintln!("[navigate] pre-GET jar cookies: {jar_cookies}");
-                    }
-                }
+                eprintln!("[navigate] iter={} url={} html_len={}", iter, current_url, current_html.len());
             }
 
-            // get_follow handles 302/307 redirect loops generically —
-            // this is what flips ozon.ru from INTR to PASS.
-            let resp = client
-                .get_follow(&current_url, 10)
-                .await
-                .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
-            let html = resp.text();
-            let resp_url = resp.url.clone();
+            // Snapshot cookies for this URL before the page runs. If the jar
+            // gains new cookies during script execution (e.g. Kasada /tl
+            // response set a session cookie), we treat that as the
+            // "challenge-solved" signal and retry — Kasada's ips.js solves
+            // the PoW but never calls location.reload(), relying on the user
+            // to hit F5. This primitive is that F5.
+            let parsed_current = url::Url::parse(&current_url).ok();
+            let cookies_before: String = if let Some(p) = parsed_current.as_ref() {
+                client.cookies_for_url(p).await.unwrap_or_default()
+            } else {
+                String::new()
+            };
+            if debug_nav {
+                tracing::debug!(cookies = %cookies_before, "navigate jar cookies (before)");
+            }
 
             let mut page = Self::build_page_with_scripts_and_init(
-                &html,
-                &resp_url,
+                &current_html,
+                &current_url,
                 &profile,
                 &client,
                 &init_scripts,
             )
             .await?;
 
-            // Drain the event loop so setTimeout/Promise-based scripts can
-            // set __pendingNavigation if they want to re-navigate.
+            // Drain the event loop
             if let Err(e) = page
                 .event_loop()
                 .run_until_idle(Duration::from_secs(30))
                 .await
             {
-                eprintln!("[navigate] event loop error: {e}");
+                tracing::warn!(error = %e, "navigate event loop error");
             }
 
-            if debug_nav {
-                let js_cookies = page
-                    .event_loop()
-                    .execute_script("String(document.cookie || '')")
-                    .unwrap_or_default();
-                if !js_cookies.is_empty() && js_cookies != "undefined" {
-                    eprintln!("[navigate] post-drain JS cookies: {js_cookies}");
-                }
-                if let Ok(parsed) = url::Url::parse(&resp_url) {
-                    let jar_cookies = client.cookies_for_url(&parsed).await.unwrap_or_default();
-                    if !jar_cookies.is_empty() {
-                        eprintln!("[navigate] post-drain jar cookies: {jar_cookies}");
+            // Did a script request a re-navigation?
+            let mut pending_info = page
+                .event_loop()
+                .execute_script(PENDING_NAV_JS)
+                .unwrap_or_default();
+
+            if !pending_info.is_empty() {
+                tracing::info!(pending = %pending_info, "initial pending navigation found");
+            }
+
+            // Bounded poll for deferred navigation signals (auto-submitted forms,
+            // PoW completions, challenge-driven assigns). Replaces the previous
+            // fixed 2s wait. Checks every 200ms for up to 10s total; exits early
+            // on first hit.
+            if pending_info.is_empty() && page.is_anti_bot_challenge() {
+                tracing::info!("anti-bot challenge detected with no pending navigation, polling up to 10s...");
+                let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                while std::time::Instant::now() < deadline {
+                    let _ = page
+                        .event_loop()
+                        .run_until_idle(Duration::from_millis(200))
+                        .await;
+                    pending_info = page
+                        .event_loop()
+                        .execute_script(PENDING_NAV_JS)
+                        .unwrap_or_default();
+                    if !pending_info.is_empty() {
+                        tracing::info!(pending = %pending_info, "pending navigation found during poll");
+                        break;
                     }
                 }
             }
 
-            // Did a script request a re-navigation?
-            let pending_url = page
-                .event_loop()
-                .execute_script(
-                    "(function(){\
-                        const p = globalThis.__pendingNavigation;\
-                        return (p && p.url) ? String(p.url) : '';\
-                    })()",
-                )
-                .unwrap_or_default();
+            if pending_info.is_empty() {
+                // Post-settle cookie-delta retry: if the cookie jar gained new
+                // values during this iteration AND the page still looks like a
+                // challenge AND we have iterations left, retry the same URL
+                // once. Covers engines whose solver sets a session cookie and
+                // expects the NEXT top-level nav to carry it (Kasada; some
+                // Akamai variants). Universal primitive — no per-engine code.
+                if page.is_anti_bot_challenge() && iter + 1 < iterations {
+                    let cookies_after: String = if let Some(p) = parsed_current.as_ref() {
+                        client.cookies_for_url(p).await.unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    if debug_nav {
+                        eprintln!(
+                            "[navigate] iter={} cookies before={}b after={}b delta={}",
+                            iter,
+                            cookies_before.len(),
+                            cookies_after.len(),
+                            cookies_after != cookies_before
+                        );
+                    }
+                    if cookies_after != cookies_before && !cookies_after.is_empty() {
+                        if debug_nav {
+                            eprintln!("[navigate] iter={} POST-SETTLE RETRY firing for {}", iter, current_url);
+                        }
+                        tracing::info!(
+                            before_len = cookies_before.len(),
+                            after_len = cookies_after.len(),
+                            "cookie delta after challenge scripts — retrying"
+                        );
+
+                        // Option A: try an in-V8 refetch first. If a challenge
+                        // engine (Kasada/PerimeterX/etc.) patched window.fetch
+                        // during script execution to inject session headers
+                        // (x-kpsdk-ct and friends), those headers ride along
+                        // on this fetch — which a fresh Rust-side GET would
+                        // not carry. The page stays alive while we refetch so
+                        // the patched fetch state is preserved.
+                        let refetch_js = r#"
+                            (async () => {
+                                globalThis.__psrHtml = null;
+                                globalThis.__psrStatus = 0;
+                                globalThis.__psrErr = null;
+                                try {
+                                    const resp = await fetch(location.href, {
+                                        method: 'GET',
+                                        credentials: 'include',
+                                        headers: {
+                                            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                                        },
+                                    });
+                                    globalThis.__psrStatus = resp.status;
+                                    globalThis.__psrHtml = await resp.text();
+                                } catch (e) {
+                                    globalThis.__psrErr = String((e && e.message) || e);
+                                }
+                            })();
+                        "#;
+                        let _ = page
+                            .event_loop()
+                            .execute_and_run(refetch_js, Duration::from_secs(15))
+                            .await;
+                        let status_str = page
+                            .event_loop()
+                            .execute_script("String(globalThis.__psrStatus || 0)")
+                            .unwrap_or_default();
+                        let err_str = page
+                            .event_loop()
+                            .execute_script("String(globalThis.__psrErr || '')")
+                            .unwrap_or_default();
+                        let v8_html = page
+                            .event_loop()
+                            .execute_script("String(globalThis.__psrHtml || '')")
+                            .unwrap_or_default();
+                        if debug_nav {
+                            eprintln!(
+                                "[navigate] iter={} in-V8 refetch status={} err={} html_len={}",
+                                iter,
+                                status_str,
+                                err_str,
+                                v8_html.len()
+                            );
+                        }
+
+                        // Accept the V8-fetched body if it's larger than the
+                        // current challenge page AND doesn't re-trigger our
+                        // anti-bot content markers. Otherwise fall back to a
+                        // Rust-side GET (cookie-only flow — works for simpler
+                        // engines that upgrade on any authenticated request).
+                        let v8_html_is_real = !v8_html.is_empty()
+                            && v8_html.len() > current_html.len()
+                            && !v8_html.contains("/ips.js")
+                            && !v8_html.contains("/149e9513-")
+                            && !v8_html.contains("kpsdk")
+                            && !v8_html.contains("_abck")
+                            && !v8_html.contains("bm_sz");
+
+                        // Extract any challenge-engine session headers that
+                        // scripts collected during solves. For Kasada: the
+                        // last successful POST /tl response carried a fresh
+                        // x-kpsdk-ct that the retry GET must forward AS A
+                        // REQUEST HEADER (Hyper-Solutions' Go SDK docs it
+                        // explicitly). Cookies alone are not enough.
+                        let kpsdk_headers_js = r#"
+                            JSON.stringify((() => {
+                                const log = globalThis.__fetchLog || [];
+                                const out = {};
+                                for (const entry of log) {
+                                    const resp = entry.respHeaders || {};
+                                    for (const k of Object.keys(resp)) {
+                                        if (k.toLowerCase().startsWith('x-kpsdk')) {
+                                            out[k.toLowerCase()] = resp[k];
+                                        }
+                                    }
+                                    const req = entry.reqHeaders || {};
+                                    for (const k of Object.keys(req)) {
+                                        const lk = k.toLowerCase();
+                                        if (lk.startsWith('x-kpsdk') && !out[lk]) {
+                                            out[lk] = req[k];
+                                        }
+                                    }
+                                }
+                                return out;
+                            })())
+                        "#;
+                        let kpsdk_json = page
+                            .event_loop()
+                            .execute_script(kpsdk_headers_js)
+                            .unwrap_or_default();
+                        let kpsdk: std::collections::HashMap<String, String> =
+                            deno_core::serde_json::from_str(&kpsdk_json).unwrap_or_default();
+                        if debug_nav && !kpsdk.is_empty() {
+                            let keys: Vec<&str> = kpsdk.keys().map(|s| s.as_str()).collect();
+                            eprintln!("[navigate] iter={} harvested x-kpsdk-* headers: {:?}", iter, keys);
+                        }
+
+                        drop(page);
+                        if v8_html_is_real {
+                            if debug_nav {
+                                eprintln!(
+                                    "[navigate] iter={} USING V8-fetched body ({} bytes)",
+                                    iter,
+                                    v8_html.len()
+                                );
+                            }
+                            current_html = v8_html;
+                        } else {
+                            // Reload-style headers + harvested x-kpsdk-*
+                            // tokens on the retry GET.
+                            let mut reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
+                            for (k, v) in &kpsdk {
+                                reload_hdrs.push((k.clone(), v.clone()));
+                            }
+                            let resp = client
+                                .get_follow_exact_headers(&current_url, &reload_hdrs, 10)
+                                .await
+                                .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+                            current_html = resp.text();
+                            current_url = resp.url.clone();
+                        }
+                        continue;
+                    }
+                }
+                return Ok(page);
+            }
+
+            let p: deno_core::serde_json::Value = deno_core::serde_json::from_str(&pending_info).unwrap_or_default();
+            let pending_url = p["url"].as_str().unwrap_or_default();
+            let pending_method = p["method"].as_str().unwrap_or("GET").to_string();
+            let pending_body = p["body"].as_str().map(|s| s.to_string());
+            let kind = p["kind"].as_str().unwrap_or("unknown");
 
             if pending_url.is_empty() {
                 return Ok(page);
             }
 
-            eprintln!("[navigate] pending navigation -> {pending_url}");
+            // Resolve relative pending URLs
+            let next_url = Self::resolve_url(&current_url, pending_url)
+                .ok_or_else(|| deno_core::error::AnyError::msg("Failed to resolve pending URL"))?;
+            tracing::debug!(kind = kind, url = %next_url, method = %pending_method, "navigate pending navigation");
 
-            // Check if this is the LAST iteration: if so, return this
-            // page instead of dropping it and re-fetching. We return
-            // the pre-navigation page because the alternative (re-
-            // fetching via `get_follow` without JS execution) is a
-            // strict regression.
             if iter + 1 == iterations {
-                eprintln!(
-                    "[navigate] hit max_iterations={iterations}, returning current page"
-                );
+                tracing::warn!(max_iterations = iterations, "navigate hit max iterations, returning current page");
                 return Ok(page);
             }
 
-            // Not the last iteration: drop the current page's isolate
-            // BEFORE starting the next iter's build. V8 requires
-            // isolates to be dropped in reverse creation order, so we
-            // must release this one before the next `JsRuntime::new`
-            // creates a newer one — otherwise the next `Page` drop
-            // would panic with "OwnedIsolate instances must be dropped
-            // in the reverse order of creation".
+            // Harvest x-kpsdk-* headers from __fetchLog before dropping the
+            // page. The last successful POST /tl response carries a fresh
+            // x-kpsdk-ct that the retry GET must forward AS A REQUEST HEADER
+            // (per Hyper-Solutions' Go SDK). Cookies alone are not enough.
+            let harvested_kpsdk: std::collections::HashMap<String, String> = {
+                let js = r#"
+                    JSON.stringify((() => {
+                        const log = globalThis.__fetchLog || [];
+                        const out = {};
+                        for (const entry of log) {
+                            const resp = entry.respHeaders || {};
+                            for (const k of Object.keys(resp)) {
+                                if (k.toLowerCase().startsWith('x-kpsdk')) {
+                                    out[k.toLowerCase()] = resp[k];
+                                }
+                            }
+                            const req = entry.reqHeaders || {};
+                            for (const k of Object.keys(req)) {
+                                const lk = k.toLowerCase();
+                                if (lk.startsWith('x-kpsdk') && !out[lk]) {
+                                    out[lk] = req[k];
+                                }
+                            }
+                        }
+                        return out;
+                    })())
+                "#;
+                let j = page.event_loop().execute_script(js).unwrap_or_default();
+                deno_core::serde_json::from_str(&j).unwrap_or_default()
+            };
+            if debug_nav && !harvested_kpsdk.is_empty() {
+                let keys: Vec<&str> = harvested_kpsdk.keys().map(|s| s.as_str()).collect();
+                eprintln!(
+                    "[navigate] iter={} harvested x-kpsdk-* for retry: {:?}",
+                    iter, keys
+                );
+            }
+
+            // In-V8 refetch for same-origin reloads on challenge pages.
+            // If the page's own scripts triggered a reload-style navigation
+            // (location.href/reload/same-host assign) while challenge markers
+            // are still present, the server is likely gating on a token that
+            // only an engine-patched window.fetch injects (Kasada x-kpsdk-ct,
+            // PerimeterX, etc.). A fresh Rust-side GET bypasses that patch.
+            // Try the refetch through the live V8 fetch first; if the result
+            // still looks like a challenge, fall back to the normal Rust path.
+            let same_host_reload = pending_method == "GET"
+                && page.is_anti_bot_challenge()
+                && {
+                    let cur = url::Url::parse(&current_url).ok();
+                    let nxt = url::Url::parse(&next_url).ok();
+                    matches!(
+                        (cur, nxt),
+                        (Some(a), Some(b)) if a.host_str() == b.host_str()
+                    )
+                };
+            let v8_refetched: Option<String> = if same_host_reload {
+                let refetch_js = format!(
+                    r#"
+                    (async () => {{
+                        globalThis.__psrHtml = null;
+                        globalThis.__psrStatus = 0;
+                        globalThis.__psrErr = null;
+                        try {{
+                            const resp = await fetch({url_js}, {{
+                                method: 'GET',
+                                credentials: 'include',
+                                headers: {{
+                                    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                                }},
+                            }});
+                            globalThis.__psrStatus = resp.status;
+                            globalThis.__psrHtml = await resp.text();
+                        }} catch (e) {{
+                            globalThis.__psrErr = String((e && e.message) || e);
+                        }}
+                    }})();
+                    "#,
+                    url_js = deno_core::serde_json::to_string(&next_url).unwrap_or_else(|_| "''".to_string())
+                );
+                let _ = page
+                    .event_loop()
+                    .execute_and_run(&refetch_js, Duration::from_secs(15))
+                    .await;
+                let status = page
+                    .event_loop()
+                    .execute_script("String(globalThis.__psrStatus || 0)")
+                    .unwrap_or_default();
+                let err = page
+                    .event_loop()
+                    .execute_script("String(globalThis.__psrErr || '')")
+                    .unwrap_or_default();
+                let html = page
+                    .event_loop()
+                    .execute_script("String(globalThis.__psrHtml || '')")
+                    .unwrap_or_default();
+                if debug_nav {
+                    eprintln!(
+                        "[navigate] iter={} in-V8 refetch status={} err={} html_len={}",
+                        iter,
+                        status,
+                        err,
+                        html.len()
+                    );
+                }
+                let looks_real = !html.is_empty()
+                    && html.len() > current_html.len()
+                    && !html.contains("/ips.js")
+                    && !html.contains("/149e9513-")
+                    && !html.contains("kpsdk")
+                    && !html.contains("_abck")
+                    && !html.contains("bm_sz");
+                if looks_real {
+                    Some(html)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             drop(page);
-            current_url = pending_url;
+
+            if let Some(html) = v8_refetched {
+                if debug_nav {
+                    eprintln!(
+                        "[navigate] iter={} USING V8-fetched body ({} bytes)",
+                        iter,
+                        html.len()
+                    );
+                }
+                current_html = html;
+                // current_url unchanged (same origin reload)
+                continue;
+            }
+
+            if debug_nav {
+                eprintln!("[navigate] iter={} FETCH {} {}", iter, pending_method, next_url);
+            }
+
+            // Fetch the next page. For form POSTs we must send the form
+            // Content-Type or the server can't parse the body. For GETs that
+            // are same-origin reload-style navigations (location.href/reload
+            // assign from JS), use reload-semantic headers so engines can
+            // distinguish a solved-session reload from a fresh user nav.
+            let resp = if pending_method == "POST" {
+                let post_headers = vec![
+                    ("content-type".to_string(), "application/x-www-form-urlencoded".to_string()),
+                    ("origin".to_string(), {
+                        url::Url::parse(&current_url)
+                            .ok()
+                            .and_then(|u| u.origin().ascii_serialization().into())
+                            .unwrap_or_default()
+                    }),
+                    ("referer".to_string(), current_url.clone()),
+                ];
+                client
+                    .post_bytes_follow(&next_url, pending_body.as_deref().unwrap_or("").as_bytes(), &post_headers, 10)
+                    .await
+                    .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+            } else {
+                let same_origin = {
+                    let a = url::Url::parse(&current_url).ok();
+                    let b = url::Url::parse(&next_url).ok();
+                    matches!((a, b), (Some(u), Some(v)) if u.host_str() == v.host_str())
+                };
+                if same_origin {
+                    let mut reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
+                    for (k, v) in &harvested_kpsdk {
+                        reload_hdrs.push((k.clone(), v.clone()));
+                    }
+                    client
+                        .get_follow_exact_headers(&next_url, &reload_hdrs, 10)
+                        .await
+                        .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+                } else {
+                    client
+                        .get_follow(&next_url, 10)
+                        .await
+                        .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+                }
+            };
+            current_html = resp.text();
+            current_url = resp.url.clone();
         }
 
-        // Shouldn't be reachable (iterations >= 1 guaranteed), but fall
-        // back to a plain GET to keep the signature total.
-        let resp = client
-            .get_follow(url, 10)
-            .await
-            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
-        Self::build_page_with_scripts(&resp.text(), url, &profile, &client).await
+        // Fallback (should be reachable via the loop)
+        Err(deno_core::error::AnyError::msg("Navigation loop terminated without returning a page"))
     }
+
 
     /// [DEPRECATED] Legacy name — now a thin wrapper around [`Page::navigate`].
     ///
@@ -596,22 +1037,8 @@ impl Page {
     /// Build a page with external script fetching.
     /// Resolve a potentially-relative URL against a base URL.
     fn resolve_url(base: &str, relative: &str) -> Option<String> {
-        if relative.starts_with("http") {
-            Some(relative.to_string())
-        } else if relative.starts_with("//") {
-            Some(format!("https:{}", relative))
-        } else if relative.starts_with('/') {
-            url::Url::parse(base).ok().map(|u| {
-                format!(
-                    "{}://{}{}",
-                    u.scheme(),
-                    u.host_str().unwrap_or(""),
-                    relative
-                )
-            })
-        } else {
-            None
-        }
+        let base_url = url::Url::parse(base).ok()?;
+        base_url.join(relative).ok().map(|u| u.to_string())
     }
 
     async fn build_page_with_scripts(
@@ -657,7 +1084,7 @@ impl Page {
                                 }
                             }
                             _ => {
-                                eprintln!("Failed to fetch stylesheet: {}", full_url);
+                                tracing::warn!(url = %full_url, "Failed to fetch stylesheet");
                                 None
                             }
                         }
@@ -674,25 +1101,37 @@ impl Page {
                 let src = script.src.as_ref()?;
                 let full_url = Self::resolve_url(url, src)?;
                 let client = client.clone();
+                let profile = profile.clone();
                 Some(async move {
-                    match client.get(&full_url).await {
+                    let mut hdrs = net::headers::chrome_headers(&profile);
+                    hdrs.push(("referer".to_string(), url.to_string()));
+                    hdrs.push(("accept".to_string(), "*/*".to_string()));
+                    hdrs.push(("sec-fetch-dest".to_string(), "script".to_string()));
+                    hdrs.push(("sec-fetch-mode".to_string(), "no-cors".to_string()));
+                    hdrs.push(("sec-fetch-site".to_string(), "cross-site".to_string()));
+                    
+                    match client.get_follow_with_headers(&full_url, &hdrs, 5).await {
                         Ok(resp) if resp.ok() => {
                             let text = resp.text();
+                            if full_url.contains("qauth") || full_url.contains("ips.js") || full_url.contains("antibot") {
+                                let safe_name = full_url.replace("/", "_").replace(":", "_").replace("?", "_");
+                                let _ = std::fs::write(format!("oxide_dump/{}", safe_name), &text);
+                            }
                             if text.trim_start().starts_with("<!")
                                 || text.trim_start().starts_with("<html")
                             {
-                                eprintln!("Script fetch {} returned HTML, skipping", full_url);
+                                tracing::debug!(script_index = i, url = %full_url, "Script fetch returned HTML, skipping");
                                 None
                             } else {
                                 Some((i, text))
                             }
                         }
                         Ok(resp) => {
-                            eprintln!("Script fetch {} returned {}", full_url, resp.status);
+                            tracing::warn!(script_index = i, url = %full_url, status = resp.status, "Script fetch returned non-OK status");
                             None
                         }
                         Err(e) => {
-                            eprintln!("Script fetch {} failed: {}", full_url, e);
+                            tracing::warn!(script_index = i, url = %full_url, error = ?e, "Script fetch failed");
                             None
                         }
                     }
@@ -730,16 +1169,20 @@ impl Page {
 
         // Set location
         let url_js = url.replace('\\', "\\\\").replace('\'', "\\'");
-        event_loop
-            .execute_script(&format!("location.href = '{}';", url_js))
-            .ok();
+        if let Err(e) = event_loop.execute_script(&format!("location.href = '{}';", url_js)) {
+            tracing::error!(error = %e, "Failed to set location");
+        }
+        let loc = event_loop.execute_script("globalThis.location.href").unwrap_or_default();
+        tracing::debug!(location = %loc, "Location set");
+        
+        // Synchronize cookies from the net client so document.cookie is accurate
+        let _ = event_loop.execute_and_run("globalThis.__syncCookiesFromNet && globalThis.__syncCookiesFromNet();", Duration::from_secs(1)).await;
 
         // Install cookie-write instrumentation. Generic DevTools-style
         // debugging — lets us see what values scripts assign to
         // `document.cookie` during the page run.
         event_loop
-            .execute_script(
-                r#"window.__cookieWrites = [];
+            .execute_script(r#"Object.defineProperty(window, '__cookieWrites', { value: [], enumerable: false, configurable: true });
             (function() {
                 const proto = Document.prototype || (document && Object.getPrototypeOf(document));
                 if (!proto) return;
@@ -750,7 +1193,12 @@ impl Page {
                 Object.defineProperty(proto, 'cookie', {
                     configurable: true,
                     enumerable: desc.enumerable,
-                    get: function() { return origGet ? origGet.call(this) : ''; },
+                    get: function() { 
+                        if (globalThis.__scriptErrors) {
+                            globalThis.__scriptErrors.push('[INSTRUMENT] GET document.cookie');
+                        }
+                        return origGet ? origGet.call(this) : ''; 
+                    },
                     set: function(v) {
                         try {
                             if (window.__cookieWrites.length < 100) {
@@ -760,15 +1208,14 @@ impl Page {
                         return origSet.call(this, v);
                     },
                 });
-            })();"#,
-            )
+            })();"#)
             .ok();
 
         // Install error tracking + fetch/XHR logging BEFORE scripts run.
         // Generic request log, equivalent to DevTools' Network tab.
         event_loop
-            .execute_script(
-                r#"window.__scriptErrors = [];
+            .execute_script(r#"Object.defineProperty(window, '__scriptErrors', { value: [], enumerable: false, configurable: true });
+            Object.defineProperty(window, '__fetchLog', { value: [], enumerable: false, configurable: true });
             // Temporarily disable the stack filter so we can see the real
             // call sites when a TypeError fires inside a challenge VM.
             delete Error.prepareStackTrace;
@@ -778,14 +1225,69 @@ impl Page {
             window.addEventListener('unhandledrejection', function(e) {
                 window.__scriptErrors.push('REJECT:' + String(e.reason).substring(0,200));
             });
-            window.__fetchLog = [];
             const _origFetch = globalThis.fetch;
             globalThis.fetch = async function(input, init) {
+                if (!window.__fetchLog) window.__fetchLog = [];
                 const entry = { method: 'GET', url: '', hasBody: false };
+                let args = Array.from(arguments);
+
+                // Pre-check: reject non-fetch URL schemes BEFORE the logging
+                // try/catch below (which silently swallows). Real Chrome
+                // throws TypeError for fetch("ftp:"), fetch("file:"), etc.
+                // ips.js uses fetch("ftp:") as a browser-authenticity canary.
+                (() => {
+                    let pre = '';
+                    if (typeof args[0] === 'string') pre = args[0];
+                    else if (args[0] && typeof args[0].url === 'string') pre = args[0].url;
+                    else if (args[0] instanceof URL) pre = args[0].href;
+                    const m = pre && pre.match(/^([a-z][a-z0-9+.-]*):/i);
+                    if (m) {
+                        const sch = m[1].toLowerCase();
+                        if (!['http','https','data','blob','file','about'].includes(sch)) {
+                            throw new TypeError("Failed to fetch: URL scheme \"" + sch + "\" is not supported.");
+                        }
+                    }
+                })();
+
                 try {
-                    entry.url = String(typeof input === 'string' ? input : (input && input.url) || '').substring(0, 200);
-                    entry.method = (init && init.method) || 'GET';
-                    entry.hasBody = !!(init && init.body);
+                    let urlStr = '';
+                    let isRequest = false;
+                    if (typeof args[0] === 'string') {
+                        urlStr = args[0];
+                    } else if (args[0] && typeof args[0].url === 'string') {
+                        urlStr = args[0].url;
+                        isRequest = true;
+                    } else if (args[0] instanceof URL) {
+                        urlStr = args[0].href;
+                    }
+                    
+                    // Skip URL resolution if urlStr is already absolute
+                    // (has a scheme). This prevents our URL polyfill from
+                    // treating "ftp:" as a relative path.
+                    const _schemeMatch = urlStr ? urlStr.match(/^([a-z][a-z0-9+.-]*):/i) : null;
+                    const _scheme = _schemeMatch ? _schemeMatch[1].toLowerCase() : '';
+                    if (urlStr && !_scheme) {
+                        try {
+                            let base = globalThis.location ? globalThis.location.href : 'about:blank';
+                            if (base === 'about:blank' || base === 'javascript:;' || base === '') {
+                                try { base = globalThis.parent.location.href; } catch(e) {}
+                            }
+                            urlStr = new URL(urlStr, base).href;
+                            if (isRequest) {
+                                // Recreate Request with absolute URL. Preserve all properties from the original.
+                                args[0] = new Request(urlStr, args[0]);
+                            } else {
+                                args[0] = urlStr;
+                            }
+                        } catch(e) {
+                            if (globalThis.__scriptErrors) {
+                                globalThis.__scriptErrors.push('fetch url resolve error: ' + e.message);
+                            }
+                        }
+                    }
+                    entry.url = String(urlStr || '').substring(0, 200);
+                    entry.method = (init && init.method) || (isRequest && args[0].method) || 'GET';
+                    entry.hasBody = !!((init && init.body) || (isRequest && args[0].body));
                     // Capture request body for error reporter diagnosis.
                     if (init && init.body != null) {
                         try {
@@ -814,7 +1316,7 @@ impl Page {
                 } catch {}
                 window.__fetchLog.push(entry);
                 try {
-                    const resp = await _origFetch.apply(this, arguments);
+                    const resp = await _origFetch.apply(this, args);
                     entry.status = resp.status;
                     try {
                         const respHdrs = {};
@@ -832,17 +1334,18 @@ impl Page {
                     entry.error = String(e && e.message || e).substring(0, 200);
                     throw e;
                 }
-            };"#,
-            )
+            };"#)
             .ok();
 
-        // Execute scripts in document order using pre-fetched code
+        // Execute scripts in document order using pre-fetched code.
+        // Interleave with event loop ticks to allow for microtasks and
+        // macrotasks scheduled by one script to run before the next.
         for (i, script) in scripts.iter().enumerate() {
             let code = if script.src.is_some() {
                 match prefetched.get(&i) {
                     Some(code) => code.clone(),
                     None => {
-                        eprintln!("  [script_{}] NOT PREFETCHED (fetch failed), skipping", i);
+                        tracing::warn!(script_index = i, "Script not prefetched (fetch failed), skipping");
                         continue;
                     }
                 }
@@ -854,46 +1357,62 @@ impl Page {
                 continue;
             }
 
-            let name = format!("<script_{}>", i);
-            if let Err(e) = event_loop.execute_script(&code) {
-                eprintln!("  Script error in {}: {}", name, e);
+            let name = if let Some(src) = &script.src {
+                src.clone()
+            } else {
+                format!("<script_{}>", i)
+            };
+            if let Err(e) = event_loop.execute_script_with_name(&code, &name) {
+                tracing::warn!(script = %name, error = %e, "Script execution error");
             }
+
+            // Flush logs for this script
+            {
+                let logs = {
+                    let runtime = event_loop.runtime_mut().inner();
+                    let state = runtime.op_state();
+                    let mut state = state.borrow_mut();
+                    let dom_state = state.borrow_mut::<js_runtime::state::DomState>();
+                    std::mem::take(&mut dom_state.console_output)
+                };
+                for log in logs {
+                    let prefix = match log.level {
+                        js_runtime::state::ConsoleLevel::Log => "[JS LOG]",
+                        js_runtime::state::ConsoleLevel::Warn => "[JS WARN]",
+                        js_runtime::state::ConsoleLevel::Error => "[JS ERROR]",
+                        _ => "[JS INFO]",
+                    };
+                    tracing::debug!(level = prefix, message = %log.args.join(" "), "JS console output");
+                }
+            }
+
+            // Run loop for a short burst between scripts to flush tasks
+            let _ = event_loop.run_until_idle(Duration::from_millis(50)).await;
         }
 
-        // Install error tracking for challenge debugging
+        // Final cleanup — hides Deno and internal globals from user JS.
         event_loop
-            .execute_script(
-                r#"window.__errors = [];
-            window.onerror = function(msg, src, line, col, err) {
-                window.__errors.push('ERR:' + msg + ' at ' + (src||'?') + ':' + line);
-            };
-            window.addEventListener('unhandledrejection', function(e) {
-                window.__errors.push('REJECT:' + (e.reason||'').toString().substring(0,100));
-            });"#,
-            )
+            .execute_script(include_str!("../../js_runtime/src/js/cleanup_bootstrap.js"))
             .ok();
 
         // Fire DOMContentLoaded and load events via setTimeout so they execute
         // within the event loop (not synchronously during script setup).
         // This ensures async handlers can create Promises that the event loop tracks.
         event_loop
-            .execute_script(
-                r#"
+            .execute_script(r#"
             setTimeout(() => {
                 document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
                 window.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
                 window.dispatchEvent(new Event('load'));
             }, 0);
-        "#,
-            )
+        "#)
             .ok();
 
         // Scan for <meta http-equiv="refresh" content="N;url=..."> and
         // schedule a pending navigation. Generic navigation primitive —
         // the Rust driver loop sees __pendingNavigation and re-fetches.
         event_loop
-            .execute_script(
-                r#"
+            .execute_script(r#"
             (function() {
                 const metas = document.getElementsByTagName('meta');
                 for (let i = 0; i < metas.length; i++) {
@@ -914,14 +1433,13 @@ impl Page {
                     break;
                 }
             })();
-        "#,
-            )
+        "#)
             .ok();
 
         // Run event loop until idle. Script errors should NOT abort
         // navigation — log and continue, matching real browser behavior.
         if let Err(e) = event_loop.run_until_idle(Duration::from_secs(30)).await {
-            eprintln!("  [event loop] error during run: {}", e);
+            tracing::warn!(error = %e, "Event loop error during run");
         }
 
         // Log errors captured during script execution
@@ -929,7 +1447,7 @@ impl Page {
         {
             if errors != "[]" {
                 let trimmed: String = errors.chars().take(500).collect();
-                eprintln!("  Script errors: {trimmed}");
+                tracing::warn!(errors = %trimmed, "Script errors during page run");
             }
         }
 
@@ -941,11 +1459,11 @@ impl Page {
                 use deno_core::serde_json;
                 if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&cookie_writes) {
                     if let Some(arr) = arr.as_array() {
-                        eprintln!("  Cookie writes ({}):", arr.len());
+                        tracing::debug!(count = arr.len(), "Cookie writes");
                         for (i, w) in arr.iter().take(20).enumerate() {
                             if let Some(s) = w.as_str() {
                                 let trim: String = s.chars().take(140).collect();
-                                eprintln!("    [{i:2}] {trim}");
+                                tracing::debug!(index = i, value = %trim, "Cookie write");
                             }
                         }
                     }
@@ -959,19 +1477,24 @@ impl Page {
                 m: f.method,
                 u: f.url,
                 s: f.status,
-            })))"#,
-        ) {
+                e: f.error,
+            })))"#) {
             if fetches_json != "[]" {
                 use deno_core::serde_json;
                 if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&fetches_json) {
                     if let Some(arr) = arr.as_array() {
-                        eprintln!("  Page fetches ({}):", arr.len());
+                        tracing::debug!(count = arr.len(), "Page fetches");
                         for f in arr {
                             let m = f.get("m").and_then(|v| v.as_str()).unwrap_or("");
                             let u = f.get("u").and_then(|v| v.as_str()).unwrap_or("");
                             let s = f.get("s").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let e = f.get("e").and_then(|v| v.as_str()).unwrap_or("");
                             let u_trim: String = u.chars().take(100).collect();
-                            eprintln!("    {m:5} {s} {u_trim}");
+                            if s == 0 {
+                                tracing::warn!(method = m, status = s, url = %u_trim, error = e, "Page fetch failed");
+                            } else {
+                                tracing::debug!(method = m, status = s, url = %u_trim, "Page fetch");
+                            }
                         }
                     }
                 }
@@ -989,27 +1512,24 @@ impl Page {
         };
         for info in &iframes {
             if let Some(srcdoc) = &info.srcdoc {
-                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc).await {
+                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &profile).await {
                     Ok(child) => children.push(child),
-                    Err(e) => eprintln!("iframe srcdoc error: {e}"),
+                    Err(e) => tracing::warn!(error = %e, "iframe srcdoc error"),
                 }
             } else if let Some(src) = &info.src {
-                if src.starts_with("http") || src.starts_with("//") {
-                    let full_src = if src.starts_with("//") {
-                        format!("https:{}", src)
-                    } else {
-                        src.clone()
-                    };
-                    match iframe::ChildIframe::from_url(
-                        info.node_id,
-                        &full_src,
-                        client,
-                        Some(profile),
-                    )
-                    .await
-                    {
-                        Ok(child) => children.push(child),
-                        Err(e) => eprintln!("iframe src error for {}: {e}", full_src),
+                if !src.is_empty() {
+                    if let Some(full_src) = Self::resolve_url(url, src) {
+                        match iframe::ChildIframe::from_url(
+                            info.node_id,
+                            &full_src,
+                            client,
+                            Some(profile),
+                        )
+                        .await
+                        {
+                            Ok(child) => children.push(child),
+                            Err(e) => tracing::warn!(src = %full_src, error = %e, "iframe src error"),
+                        }
                     }
                 }
             }
@@ -1042,9 +1562,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_from_html_basic() {
-        let mut page = Page::from_html(
-            "<html><head><title>Test</title></head><body><p>Hello</p></body></html>",
-        )
+        let mut page = Page::from_html("<html><head><title>Test</title></head><body><p>Hello</p></body></html>", None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.title(), "Test");
@@ -1053,24 +1571,20 @@ mod tests {
 
     #[tokio::test]
     async fn page_script_execution() {
-        let mut page = Page::from_html(
-            "<html><head></head><body><div id='target'></div><script>document.getElementById('target').textContent = 'JS works!';</script></body></html>"
-        ).await.unwrap();
+        let mut page = Page::from_html("<html><head></head><body><div id='target'></div><script>document.getElementById('target').textContent = 'JS works!';</script></body></html>", None::<stealth::StealthProfile>).await.unwrap();
         assert_eq!(page.text_of("#target"), Some("JS works!".to_string()));
     }
 
     #[tokio::test]
     async fn page_script_creates_elements() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <script>
                     const p = document.createElement('p');
                     p.setAttribute('id', 'created');
                     p.textContent = 'Dynamic content';
                     document.body.appendChild(p);
                 </script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert!(page.has_element("#created"));
@@ -1082,14 +1596,12 @@ mod tests {
 
     #[tokio::test]
     async fn page_script_modifies_inner_html() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <div id="container"></div>
                 <script>
                     document.getElementById('container').innerHTML = '<span class="inner">Injected</span>';
                 </script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.text_of(".inner"), Some("Injected".to_string()));
@@ -1097,16 +1609,14 @@ mod tests {
 
     #[tokio::test]
     async fn page_with_timeout_script() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <div id="output">before</div>
                 <script>
                     setTimeout(() => {
                         document.getElementById('output').textContent = 'after';
                     }, 50);
                 </script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.text_of("#output"), Some("after".to_string()));
@@ -1114,7 +1624,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_evaluate() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page.evaluate("1 + 2").unwrap();
@@ -1123,7 +1633,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_navigator_exists() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page.evaluate("typeof navigator.userAgent").unwrap();
@@ -1132,7 +1642,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_document_has_focus() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page.evaluate("document.hasFocus()").unwrap();
@@ -1140,17 +1650,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn page_webdriver_undefined() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+    async fn page_webdriver_false() {
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page.evaluate("typeof navigator.webdriver").unwrap();
-        assert_eq!(result, "undefined");
+        assert_eq!(result, "boolean");
+        let val = page.evaluate("navigator.webdriver").unwrap();
+        assert_eq!(val, "false");
     }
 
     #[tokio::test]
     async fn page_window_dimensions() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let w = page.evaluate("window.innerWidth").unwrap();
@@ -1161,7 +1673,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_local_storage() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         page.evaluate("localStorage.setItem('key', 'value')")
@@ -1172,7 +1684,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_crypto_random() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>")
+        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let result = page
@@ -1183,16 +1695,14 @@ mod tests {
 
     #[tokio::test]
     async fn page_promise_then() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <div id="out">waiting</div>
                 <script>
                     Promise.resolve('done').then(v => {
                         document.getElementById('out').textContent = v;
                     });
                 </script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.text_of("#out"), Some("done".to_string()));
@@ -1200,14 +1710,12 @@ mod tests {
 
     #[tokio::test]
     async fn page_multiple_scripts() {
-        let mut page = Page::from_html(
-            r#"<html><head></head><body>
+        let mut page = Page::from_html(r#"<html><head></head><body>
                 <div id="out"></div>
                 <script>document.getElementById('out').textContent = 'A';</script>
                 <script>document.getElementById('out').textContent += 'B';</script>
                 <script>document.getElementById('out').textContent += 'C';</script>
-            </body></html>"#,
-        )
+            </body></html>"#, None::<stealth::StealthProfile>)
         .await
         .unwrap();
         assert_eq!(page.text_of("#out"), Some("ABC".to_string()));
@@ -1215,7 +1723,7 @@ mod tests {
 
     #[tokio::test]
     async fn page_take_dom() {
-        let page = Page::from_html("<html><head></head><body><p>test</p></body></html>")
+        let page = Page::from_html("<html><head></head><body><p>test</p></body></html>", None::<stealth::StealthProfile>)
             .await
             .unwrap();
         let dom = page.take_dom();
@@ -1231,7 +1739,7 @@ mod tests {
     async fn navigate_httpbin() {
         let profile = stealth::chrome_130_linux();
         let client = net::HttpClient::new(&profile).unwrap();
-        let mut page = Page::navigate_simple("https://httpbin.org/html", &client)
+        let mut page = Page::navigate_simple("https://httpbin.org/html", &client, stealth::presets::chrome_130_ru())
             .await
             .expect("navigate to httpbin failed");
         let title = page.title();
@@ -1250,7 +1758,7 @@ mod tests {
     async fn navigate_httpbin_user_agent() {
         let profile = stealth::chrome_130_windows();
         let client = net::HttpClient::new(&profile).unwrap();
-        let mut page = Page::navigate_simple("https://httpbin.org/user-agent", &client)
+        let mut page = Page::navigate_simple("https://httpbin.org/user-agent", &client, stealth::presets::chrome_130_ru())
             .await
             .expect("navigate to httpbin/user-agent failed");
         let text = page.text_content();
@@ -1266,7 +1774,7 @@ mod tests {
     async fn navigate_stealth_headers_check() {
         let profile = stealth::chrome_130_linux();
         let client = net::HttpClient::new(&profile).unwrap();
-        let mut page = Page::navigate_simple("https://httpbin.org/headers", &client)
+        let mut page = Page::navigate_simple("https://httpbin.org/headers", &client, stealth::presets::chrome_130_ru())
             .await
             .expect("navigate to httpbin/headers failed");
         let text = page.text_content();

@@ -38,6 +38,123 @@ pub fn chrome_headers(profile: &StealthProfile) -> Vec<(String, String)> {
     chrome_headers_impl(profile, false)
 }
 
+/// Build headers that match a JavaScript-initiated `location.reload()` /
+/// same-origin assign — NOT a fresh user navigation. Differences from
+/// `chrome_headers`:
+///   - `sec-fetch-site: same-origin` (was `none`)
+///   - `sec-fetch-user` is OMITTED (no user gesture)
+///   - `Referer: <current_url>` is added
+///
+/// Used on post-challenge retries where the challenge engine may be
+/// distinguishing fresh user navs from programmatic reloads.
+pub fn chrome_headers_reload(profile: &StealthProfile, referer: &str) -> Vec<(String, String)> {
+    let mut hdrs: Vec<(String, String)> = chrome_headers_impl(profile, false)
+        .into_iter()
+        .filter(|(k, _)| k != "sec-fetch-user")
+        .map(|(k, v)| {
+            if k == "sec-fetch-site" {
+                (k, "same-origin".to_string())
+            } else {
+                (k, v)
+            }
+        })
+        .collect();
+    hdrs.push(("referer".to_string(), referer.to_string()));
+    hdrs
+}
+
+/// Build headers that match a `window.fetch()` request from JS, NOT a
+/// document navigation. Chrome's fetch API and its nav requests send
+/// completely different header sets, and Kasada+friends use this
+/// distinction as a strong bot signal when a "fetch" request arrives
+/// carrying navigation headers.
+///
+/// Differences from navigation headers:
+///   - `accept: */*` (not text/html...)
+///   - NO `upgrade-insecure-requests`
+///   - `sec-fetch-dest: empty` (not `document`)
+///   - `sec-fetch-mode: cors` (default; caller can override via extra headers)
+///   - `sec-fetch-site`: `same-origin` when target and origin match, else `cross-site`
+///   - NO `sec-fetch-user`
+///   - `priority: u=1, i` (fetch is default-interactive but lower priority than nav)
+///   - Caller adds `origin` + `referer` separately (they depend on the current page).
+pub fn chrome_headers_fetch(
+    profile: &StealthProfile,
+    target_url: &str,
+    origin: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut headers = Vec::with_capacity(12);
+
+    headers.push(("user-agent".to_string(), profile.user_agent.clone()));
+    headers.push(("accept".to_string(), "*/*".to_string()));
+
+    let sec_ch_ua = build_sec_ch_ua(profile);
+    headers.push(("sec-ch-ua".to_string(), sec_ch_ua));
+    headers.push(("sec-ch-ua-mobile".to_string(), "?0".to_string()));
+    headers.push((
+        "sec-ch-ua-platform".to_string(),
+        format!("\"{}\"", profile.os_name),
+    ));
+
+    // Compute sec-fetch-site from target vs origin.
+    let site = match origin {
+        Some(origin) => {
+            let t = url::Url::parse(target_url).ok();
+            let o = url::Url::parse(origin).ok();
+            match (t, o) {
+                (Some(tu), Some(ou)) => {
+                    if tu.host_str() == ou.host_str() {
+                        "same-origin"
+                    } else if same_site(&tu, &ou) {
+                        "same-site"
+                    } else {
+                        "cross-site"
+                    }
+                }
+                _ => "cross-site",
+            }
+        }
+        None => "cross-site",
+    };
+    headers.push(("sec-fetch-site".to_string(), site.to_string()));
+    headers.push(("sec-fetch-mode".to_string(), "cors".to_string()));
+    headers.push(("sec-fetch-dest".to_string(), "empty".to_string()));
+
+    headers.push((
+        "accept-encoding".to_string(),
+        "gzip, deflate, br, zstd".to_string(),
+    ));
+    headers.push((
+        "accept-language".to_string(),
+        build_accept_language(&profile.languages),
+    ));
+    headers.push(("priority".to_string(), "u=1, i".to_string()));
+
+    // Origin + Referer — always set for same-site + cross-site fetches
+    if let Some(o) = origin {
+        headers.push(("origin".to_string(), o.to_string()));
+        headers.push(("referer".to_string(), format!("{}/", o.trim_end_matches('/'))));
+    }
+
+    headers
+}
+
+/// Heuristic same-site comparison: registered domain (eTLD+1) would be the
+/// correct implementation; as a proxy, compare the last two labels.
+fn same_site(a: &url::Url, b: &url::Url) -> bool {
+    fn tail2(u: &url::Url) -> Option<String> {
+        let host = u.host_str()?;
+        let mut parts: Vec<&str> = host.rsplit('.').collect();
+        if parts.len() < 2 {
+            return Some(host.to_string());
+        }
+        parts.truncate(2);
+        parts.reverse();
+        Some(parts.join("."))
+    }
+    tail2(a) == tail2(b)
+}
+
 /// Build headers for a request that should include the high-entropy
 /// Client Hints (sec-ch-ua-arch, -bitness, -full-version-list, -model,
 /// -platform-version, -wow64). Only applicable on a follow-up request

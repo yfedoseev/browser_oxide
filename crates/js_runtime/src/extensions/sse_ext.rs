@@ -62,7 +62,7 @@ pub async fn op_sse_connect(
 
     // Assign ID before spawning
     let id = {
-        let mut store = SSE_CONNECTIONS.lock().unwrap();
+        let mut store = SSE_CONNECTIONS.lock().unwrap_or_else(|e| e.into_inner());
         let id = store.next_id;
         store.next_id += 1;
         store
@@ -103,7 +103,7 @@ pub async fn op_sse_connect(
 #[serde]
 pub async fn op_sse_recv(#[smi] id: i32) -> Result<SseEvent, deno_core::error::AnyError> {
     let rx = {
-        let store = SSE_CONNECTIONS.lock().unwrap();
+        let store = SSE_CONNECTIONS.lock().unwrap_or_else(|e| e.into_inner());
         store.receivers.get(&id).cloned()
     };
     match rx {
@@ -131,7 +131,7 @@ pub async fn op_sse_recv(#[smi] id: i32) -> Result<SseEvent, deno_core::error::A
 /// Close an SSE connection.
 #[op2(fast)]
 pub fn op_sse_close(#[smi] id: i32) {
-    let mut store = SSE_CONNECTIONS.lock().unwrap();
+    let mut store = SSE_CONNECTIONS.lock().unwrap_or_else(|e| e.into_inner());
     store.receivers.remove(&id);
 }
 

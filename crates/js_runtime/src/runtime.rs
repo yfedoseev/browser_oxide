@@ -17,6 +17,8 @@ use deno_core::{JsRuntime, RuntimeOptions};
 use dom::Dom;
 use stealth::StealthProfile;
 
+use std::collections::HashMap;
+
 /// Options for creating a BrowserJsRuntime.
 pub struct BrowserRuntimeOptions {
     pub base_url: Option<url::Url>,
@@ -28,6 +30,10 @@ pub struct BrowserRuntimeOptions {
     /// uses this to carry fingerprint/capability extensions across
     /// navigations within a frame without baking them into the runtime.
     pub init_scripts: Vec<String>,
+    /// Persistent storage (localStorage / sessionStorage) carried across navigations.
+    pub storage: Option<HashMap<String, HashMap<String, String>>>,
+    /// Optional V8 snapshot to speed up startup.
+    pub startup_snapshot: Option<&'static [u8]>,
 }
 
 impl Default for BrowserRuntimeOptions {
@@ -37,6 +43,8 @@ impl Default for BrowserRuntimeOptions {
             stealth_profile: None,
             stylesheets: Vec::new(),
             init_scripts: Vec::new(),
+            storage: None,
+            startup_snapshot: None,
         }
     }
 }
@@ -45,6 +53,9 @@ impl Default for BrowserRuntimeOptions {
 pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
     let mut state = DomState::new(dom);
     state.stylesheets = options.stylesheets;
+    if let Some(storage) = options.storage {
+        state.storage = storage;
+    }
     if let Some(url) = options.base_url {
         state = state.with_base_url(url);
     }
@@ -77,6 +88,7 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
             worker_extension::init_ops(),
             audio_extension::init_ops(),
         ],
+        startup_snapshot: options.startup_snapshot,
         ..Default::default()
     });
 
@@ -90,75 +102,41 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
     runtime.op_state().borrow_mut().put(WebGLState::new());
     runtime.op_state().borrow_mut().put(SseState::new());
 
-    // Execute bootstrap JS (static strings)
-    runtime
-        .execute_script(
-            "<console_bootstrap>",
-            include_str!("js/console_bootstrap.js"),
-        )
-        .expect("console bootstrap failed");
+    // Execute bootstrap JS only if NOT starting from snapshot
+    if options.startup_snapshot.is_none() {
+        const BOOTSTRAP_JS: &str = concat!(
+            include_str!("js/console_bootstrap.js"), "\n",
+            include_str!("js/stealth_bootstrap.js"), "\n",
+            include_str!("js/interfaces_bootstrap.js"), "\n",
+            include_str!("js/instances_bootstrap.js"), "\n",
+            include_str!("js/fetch_bootstrap.js"), "\n",
+            include_str!("js/timer_bootstrap.js"), "\n",
+            include_str!("js/dom_bootstrap.js"), "\n",
+            include_str!("js/event_bootstrap.js"), "\n",
+            include_str!("js/canvas_bootstrap.js"), "\n",
+            include_str!("js/window_bootstrap.js"), "\n",
+            include_str!("js/streams_bootstrap.js"), "\n",
+            include_str!("js/structured_clone.js"), "\n",
+            include_str!("js/cleanup_bootstrap.js"),
+        );
 
-    runtime
-        .execute_script("<dom_bootstrap>", include_str!("js/dom_bootstrap.js"))
-        .expect("dom bootstrap failed");
+        runtime
+            .execute_script("<bootstrap>", BOOTSTRAP_JS)
+            .expect("bootstrap failed");
+    }
 
+    // Always run cleanup to hide internals, even when restoring from snapshot
     runtime
-        .execute_script("<timer_bootstrap>", include_str!("js/timer_bootstrap.js"))
-        .expect("timer bootstrap failed");
+        .execute_script("<cleanup>", include_str!("js/cleanup_bootstrap.js"))
+        .expect("cleanup failed");
 
-    runtime
-        .execute_script("<event_bootstrap>", include_str!("js/event_bootstrap.js"))
-        .expect("event bootstrap failed");
 
-    // fetch bootstrap must come before window bootstrap (which may reference fetch)
-    runtime
-        .execute_script("<fetch_bootstrap>", include_str!("js/fetch_bootstrap.js"))
-        .expect("fetch bootstrap failed");
-
-    runtime
-        .execute_script("<window_bootstrap>", include_str!("js/window_bootstrap.js"))
-        .expect("window bootstrap failed");
-
-    runtime
-        .execute_script("<canvas_bootstrap>", include_str!("js/canvas_bootstrap.js"))
-        .expect("canvas bootstrap failed");
-
-    runtime
-        .execute_script("<sse_bootstrap>", include_str!("js/sse_bootstrap.js"))
-        .expect("sse bootstrap failed");
-
-    runtime
-        .execute_script("<input_bootstrap>", include_str!("js/input_bootstrap.js"))
-        .expect("input bootstrap failed");
-
-    // Streams (ReadableStream/WritableStream/TransformStream) —
-    // installs real implementations over the minimal stubs from
-    // window_bootstrap. Must come AFTER window_bootstrap (which
-    // defines the stubs) so this script replaces them with
-    // `_browserOxideReal = true` versions.
-    runtime
-        .execute_script("<streams_bootstrap>", include_str!("js/streams_bootstrap.js"))
-        .expect("streams bootstrap failed");
-
-    // structuredClone must run after window_bootstrap (which installs
-    // Blob and DOMException) but can come after the other feature
-    // bootstraps — it only depends on DOMException and the global
-    // class names for the DataCloneError path.
-    runtime
-        .execute_script(
-            "<structured_clone>",
-            include_str!("js/structured_clone.js"),
-        )
-        .expect("structured_clone bootstrap failed");
-
-    // Run caller-provided init scripts after all built-in bootstraps.
+    // Run caller-provided init scripts after built-in cleanup.
     // These run in order before any <script> tags parsed from HTML.
-    // Errors are logged but do not abort runtime construction so a bad
-    // init script cannot brick the page.
     for (i, code) in options.init_scripts.iter().enumerate() {
         let name: &'static str = Box::leak(format!("<init_script_{i}>").into_boxed_str());
         if let Err(e) = runtime.execute_script(name, code.clone()) {
-            eprintln!("init script {i} failed: {e}");
+            tracing::warn!(script_index = i, error = %e, "init script failed");
         }
     }
 
@@ -171,7 +149,7 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
 /// DO get canvas (for `OffscreenCanvas`, which sites probe inside
 /// workers per the WHATWG spec), console, crypto, timers, fetch,
 /// and the worker-side ops.
-pub fn create_worker_runtime() -> JsRuntime {
+pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![
             console_extension::init_ops(),
@@ -191,6 +169,12 @@ pub fn create_worker_runtime() -> JsRuntime {
         .borrow_mut()
         .put(FetchState::new(None));
     runtime.op_state().borrow_mut().put(CanvasState::new());
+    
+    // Inject DomState even in workers (stubbed) to hold the stealth profile
+    // so op_has_stealth_profile() works in the worker isolate.
+    let mut dom_state = DomState::new(dom::Dom::new());
+    dom_state.stealth_profile = profile;
+    runtime.op_state().borrow_mut().put(dom_state);
 
     runtime
         .execute_script(
@@ -207,13 +191,6 @@ pub fn create_worker_runtime() -> JsRuntime {
         .execute_script("<fetch_bootstrap>", include_str!("js/fetch_bootstrap.js"))
         .expect("worker: fetch bootstrap failed");
 
-    runtime
-        .execute_script(
-            "<worker_bootstrap>",
-            include_str!("js/worker_bootstrap.js"),
-        )
-        .expect("worker: worker bootstrap failed");
-
     // structuredClone is useful inside workers too — worker code that
     // uses `postMessage` with complex values relies on it, and the
     // impl is self-contained (it gracefully handles the absence of
@@ -225,6 +202,13 @@ pub fn create_worker_runtime() -> JsRuntime {
         )
         .expect("worker: structured_clone bootstrap failed");
 
+    runtime
+        .execute_script(
+            "<worker_bootstrap>",
+            include_str!("js/worker_bootstrap.js"),
+        )
+        .expect("worker: worker bootstrap failed");
+
     // canvas_bootstrap installs CanvasRenderingContext2D and the real
     // OffscreenCanvas backed by canvas_ext ops. Safe in workers
     // because its DOM-patch blocks all gate on `globalThis.document?`
@@ -235,6 +219,11 @@ pub fn create_worker_runtime() -> JsRuntime {
             include_str!("js/canvas_bootstrap.js"),
         )
         .expect("worker: canvas bootstrap failed");
+
+    // Final cleanup in worker
+    runtime
+        .execute_script("<cleanup_bootstrap>", include_str!("js/cleanup_bootstrap.js"))
+        .expect("worker: cleanup bootstrap failed");
 
     runtime
 }

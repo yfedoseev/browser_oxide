@@ -5,18 +5,23 @@
 
 use browser::Page;
 use std::time::Duration;
+use stealth;
 
 fn html(body: &str) -> String {
     format!("<html><head></head><body>{}</body></html>", body)
 }
 
 async fn eval(js: &str) -> String {
-    let mut page = Page::from_html(&html("")).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     page.evaluate(js).unwrap()
 }
 
 async fn page_with(body: &str) -> Page {
-    Page::from_html(&html(body)).await.unwrap()
+    Page::from_html(&html(body), None::<stealth::StealthProfile>)
+        .await
+        .unwrap()
 }
 
 // ================================================================
@@ -962,4 +967,63 @@ async fn blob_exists() {
 async fn file_exists() {
     assert_eq!(eval("typeof File").await, "function");
     assert_eq!(eval("new File(['x'], 'test.txt').name").await, "test.txt");
+}
+
+// §6.6 item 9 — MediaDevices.enumerateDevices pre-permission behavior.
+// Must: (a) expose devices, (b) use WebIDL camelCase keys, (c) empty all
+// labels before camera/microphone permission is granted.
+#[tokio::test]
+async fn test_media_devices_pre_permission() {
+    let profile = stealth::presets::chrome_130_windows();
+    let expected_count = profile.media_devices.len();
+    let mut page = Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
+
+    let probe = r#"
+        (async () => {
+            const list = await navigator.mediaDevices.enumerateDevices();
+            globalThis.__mediaResult = JSON.stringify({
+                count: list.length,
+                // WebIDL shape: deviceId, groupId (camelCase).
+                keys0: list[0] ? Object.keys(list[0]).sort() : [],
+                labels: list.map(d => d.label),
+                kinds: list.map(d => d.kind).sort(),
+                hasDeviceIds: list.every(d => typeof d.deviceId === 'string' && d.deviceId.length > 0),
+                hasGroupIds: list.every(d => typeof d.groupId === 'string' && d.groupId.length > 0),
+                // Chrome exposes NO snake_case keys.
+                anySnakeCase: list.some(d => 'device_id' in d || 'group_id' in d),
+            });
+        })()
+    "#;
+    page.evaluate(probe).unwrap();
+    page.evaluate_async("void 0", Duration::from_millis(100))
+        .await
+        .ok();
+    let raw = page.evaluate("globalThis.__mediaResult").unwrap();
+    let obj: serde_json::Value = serde_json::from_str(&raw)
+        .unwrap_or_else(|_| panic!("media probe result was not JSON: {}", raw));
+
+    assert_eq!(obj["count"].as_u64().unwrap() as usize, expected_count);
+    assert_eq!(
+        obj["anySnakeCase"], false,
+        "snake_case leaks WebIDL mismatch"
+    );
+    assert_eq!(obj["hasDeviceIds"], true);
+    assert_eq!(obj["hasGroupIds"], true);
+    assert_eq!(
+        obj["keys0"].as_array().unwrap(),
+        &serde_json::json!(["deviceId", "groupId", "kind", "label"])
+            .as_array()
+            .unwrap()
+            .clone()
+    );
+    // All labels empty pre-permission — the core assertion.
+    for l in obj["labels"].as_array().unwrap() {
+        assert_eq!(
+            l.as_str().unwrap(),
+            "",
+            "pre-permission label leak is a classic automation tell"
+        );
+    }
 }

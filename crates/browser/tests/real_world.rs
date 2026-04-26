@@ -272,7 +272,7 @@ async fn http2_fingerprint() {
 async fn scrape_hacker_news() {
     let profile = stealth::chrome_130_linux();
     let client = net::HttpClient::new(&profile).unwrap();
-    let mut page = Page::navigate_simple("https://news.ycombinator.com", &client)
+    let mut page = Page::navigate_simple("https://news.ycombinator.com", &client, profile.clone())
         .await
         .expect("navigate to HN failed");
 
@@ -298,6 +298,7 @@ async fn scrape_wikipedia() {
     let mut page = Page::navigate_simple(
         "https://en.wikipedia.org/wiki/Rust_(programming_language)",
         &client,
+        profile.clone(),
     )
     .await
     .expect("navigate to Wikipedia failed");

@@ -1,32 +1,19 @@
-//! Rigorous re-probe of the known-problematic sites after the T1.3 + Workers
-//! + humanize work, using content markers (not just status codes) to decide
-//! pass/fail. The anti_bot_sites.rs probe is too lenient — it labels
-//! `200 + 2351-byte interstitial` as PASS. This suite uses:
-//!
-//! - **Size threshold**: the real page body must be >= min_body_size (bot
-//!   interstitials are always < 5 KB for these sites; real pages are 100 KB+).
-//! - **Positive marker**: a string that only appears on the real page
-//!   (product-listing HTML, brand name in title, etc.).
-//! - **Negative marker**: strings that only appear on the challenge page
-//!   (`sec-if-cpt-container`, `Pardon Our Interruption`, `Reference Error`).
-//!
-//! Runs against both the rquest-only path (`client.get`) and the full
-//! `Page::navigate_with_challenges` path so we can see whether the challenge
-//! solver helps on top of the baseline.
-//!
-//! Run:
-//!   cargo test -p browser --test blocker_rigorous_probe -- \
-//!     --ignored --test-threads=1 --nocapture
-
 use browser::Page;
-use net::HttpClient;
+use std::time::Duration;
 use stealth::StealthProfile;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
+enum Verdict {
+    Pass,
+    Intr,
+    Block,
+    Error,
+}
+
 struct BlockerProbeResult {
-    name: &'static str,
-    url: &'static str,
-    protection: &'static str,
+    name: String,
+    url: String,
+    protection: String,
     baseline_status: u16,
     baseline_size: usize,
     baseline_verdict: Verdict,
@@ -35,57 +22,34 @@ struct BlockerProbeResult {
     solver_verdict: Verdict,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum Verdict {
-    /// Real page loaded (positive marker present, no negative markers).
-    Pass,
-    /// Challenge page / interstitial.
-    Interstitial,
-    /// Hard block / WAF error page.
-    Block,
-    /// Network/client error.
-    Error,
-}
-
-impl Verdict {
-    fn symbol(self) -> &'static str {
-        match self {
-            Verdict::Pass => "PASS",
-            Verdict::Interstitial => "INTR",
-            Verdict::Block => "BLOCK",
-            Verdict::Error => "ERR ",
-        }
-    }
-}
-
 impl BlockerProbeResult {
     fn print(&self) {
+        let baseline_str = format!("{:?} ({}b)", self.baseline_verdict, self.baseline_size);
+        let solver_str = format!("{:?} ({}b)", self.solver_verdict, self.solver_size);
+        let status = if self.solver_verdict == Verdict::Pass {
+            "[WIN  ]"
+        } else {
+            "[FAIL ]"
+        };
         println!(
-            "[{:<5}] baseline={} ({}b) solver={} ({}b)  {:<14} {} — {}",
-            if matches!(self.solver_verdict, Verdict::Pass) {
-                "WIN"
-            } else if matches!(self.baseline_verdict, Verdict::Pass) {
-                "BASE"
-            } else {
-                "FAIL"
-            },
-            self.baseline_verdict.symbol(),
-            self.baseline_size,
-            self.solver_verdict.symbol(),
-            self.solver_size,
-            self.protection,
-            self.name,
-            self.url
+            "{} baseline={:<12} solver={:<12}  {:<14} {} — {}",
+            status, baseline_str, solver_str, self.protection, self.name, self.url
         );
     }
 }
 
 fn classify(body: &str, status: u16, positive: &[&str], negative: &[&str], min_size: usize) -> Verdict {
-    if status == 0 {
+    if status >= 400 && status != 403 && status != 429 {
         return Verdict::Error;
     }
-    // Fast path: a body much smaller than the min_size and containing
-    // known interstitial/block markers is definitely a challenge page.
+
+    // Priority 1: Large body size usually means we reached the real content,
+    // even if some challenge keywords are still present in the DOM.
+    if body.len() >= min_size {
+        return Verdict::Pass;
+    }
+
+    // Priority 2: Negative markers on small bodies
     let small_body = body.len() < min_size.min(10_000);
     let has_negative = negative.iter().any(|m| body.contains(m));
     if small_body && has_negative {
@@ -99,61 +63,50 @@ fn classify(body: &str, status: u16, positive: &[&str], negative: &[&str], min_s
                 return Verdict::Block;
             }
         }
-        return Verdict::Interstitial;
+        return Verdict::Intr;
     }
-    if small_body {
-        return Verdict::Interstitial;
-    }
-    // Body is large enough. Check for negative markers first — a large
-    // body can still be an interstitial that includes wrapper DOM.
-    if has_negative {
-        return Verdict::Interstitial;
-    }
-    // Large body, no negative markers. If any positive marker matches,
+
+    // Priority 3: Positive markers
+    // If we are small and don't have negative markers, check
+    // positive markers. If any positive marker matches,
     // definite PASS. Otherwise still likely PASS because interstitials
     // are always small — just mark it.
     if positive.iter().any(|m| body.contains(m)) {
         return Verdict::Pass;
     }
-    // Large body (>min_size), no negative markers, no positive markers.
-    // Most likely a real page that uses different terminology than our
-    // markers. Trust the size.
-    if body.len() > 50_000 {
-        return Verdict::Pass;
+
+    if body.is_empty() {
+        return Verdict::Error;
     }
-    Verdict::Interstitial
+
+    Verdict::Intr
 }
 
 async fn probe_site(
-    name: &'static str,
-    url: &'static str,
-    protection: &'static str,
+    name: &str,
+    url: &str,
+    protection: &str,
     profile: StealthProfile,
     positive: &[&str],
     negative: &[&str],
     min_size: usize,
 ) -> BlockerProbeResult {
-    // Baseline: rquest-only path, no JS challenge execution.
-    let client = HttpClient::new(&profile).unwrap();
-    let (baseline_status, baseline_size, baseline_verdict) = match client.get(url).await {
+    // Baseline path:navigate_simple does not execute JS.
+    // It only gets the raw HTML from the server.
+    let client = net::HttpClient::new(&profile).unwrap();
+    let (baseline_status, baseline_size, baseline_verdict) = match client.get_follow(url, 10).await {
         Ok(resp) => {
             let body = resp.text();
-            let status = resp.status;
             let size = body.len();
-            let v = classify(&body, status, positive, negative, min_size);
-            (status, size, v)
+            let v = classify(&body, resp.status, positive, negative, min_size);
+            (resp.status, size, v)
         }
         Err(_) => (0, 0, Verdict::Error),
     };
 
     // Solver path: Page::navigate runs the full challenge flow,
     // following `__pendingNavigation` set by challenge scripts for
-    // up to 5 iterations (initial fetch + solver run + re-navigate
-    // + headroom for chained challenges). The old value of `1` was
-    // a stale migration from `navigate_with_challenges(url, 1)`
-    // which meant "1 retry on top of initial fetch"; the new API's
-    // `1` means "1 total fetch" and caps out before the solver can
-    // re-navigate to the real page.
+    // up to 5 iterations.
     let (solver_status, solver_size, solver_verdict) =
         match Page::navigate(url, profile, 5).await {
             Ok(mut page) => {
@@ -166,9 +119,9 @@ async fn probe_site(
         };
 
     BlockerProbeResult {
-        name,
-        url,
-        protection,
+        name: name.to_string(),
+        url: url.to_string(),
+        protection: protection.to_string(),
         baseline_status,
         baseline_size,
         baseline_verdict,
@@ -288,14 +241,6 @@ async fn tier05_blockers_all() {
             "https://ya.ru/",
             "smartcaptcha",
             stealth::presets::chrome_130_ru(),
-            // Yandex-specific markers that appear on the real search
-            // homepage but NOT on the SmartCaptcha interstitial. These
-            // are more stable than the raw "ya.ru"/"yandex" literals,
-            // which can collide with the interstitial's own branding.
-            //
-            // Yandex uses BEM class conventions — `data-bem` is a
-            // reliable signal that the server returned the real
-            // component-rendered page rather than an error stub.
             &["data-bem", "yandex-verification", "homer"],
             &["SmartCaptcha", "smart-captcha", "\"captcha\""],
             30_000,

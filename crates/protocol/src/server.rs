@@ -11,6 +11,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
+use stealth;
 
 /// A running CDP server. Stops when dropped.
 pub struct CdpServer {
@@ -35,21 +36,39 @@ impl CdpServer {
         let (port_tx, port_rx) = std::sync::mpsc::channel();
 
         let thread = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("failed to build tokio runtime");
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tracing::error!("CdpServer: failed to build tokio runtime: {}", e);
+                    return;
+                }
+            };
             let local = tokio::task::LocalSet::new();
 
             local.block_on(&rt, async move {
-                let page = browser::Page::from_html(&html)
+                let page = match browser::Page::from_html(&html, None::<stealth::StealthProfile>)
                     .await
-                    .expect("failed to create page");
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::error!("CdpServer: failed to create page: {}", e);
+                        port_tx.send(0).ok();
+                        return;
+                    }
+                };
                 let page = Rc::new(RefCell::new(page));
 
-                let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
-                    .await
-                    .expect("failed to bind CDP port");
+                let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!("CdpServer: failed to bind CDP port: {}", e);
+                        port_tx.send(0).ok();
+                        return;
+                    }
+                };
                 let actual_port = listener.local_addr().unwrap().port();
                 port_tx.send(actual_port).ok();
 
@@ -63,6 +82,13 @@ impl CdpServer {
                 format!("server thread failed to start: {}", e),
             )) as Box<dyn std::error::Error + Send + Sync>
         })?;
+
+        if actual_port == 0 {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "server initialization failed",
+            )));
+        }
 
         Ok(Self {
             port: actual_port,
@@ -83,10 +109,16 @@ impl CdpServer {
         let (port_tx, port_rx) = std::sync::mpsc::channel();
 
         let thread = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("failed to build tokio runtime");
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tracing::error!("CdpServer: failed to build tokio runtime: {}", e);
+                    return;
+                }
+            };
             let local = tokio::task::LocalSet::new();
 
             local.block_on(&rt, async move {
@@ -95,7 +127,7 @@ impl CdpServer {
                 let client = match net::HttpClient::new(&profile) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("CdpServer: failed to create HTTP client: {}", e);
+                        tracing::error!("CdpServer: failed to create HTTP client: {}", e);
                         port_tx.send(0).ok();
                         return;
                     }
@@ -106,14 +138,14 @@ impl CdpServer {
                         match browser::Page::with_profile(&html, &url, profile).await {
                             Ok(p) => p,
                             Err(e) => {
-                                eprintln!("CdpServer: failed to create page for {}: {}", url, e);
+                                tracing::error!("CdpServer: failed to create page for {}: {}", url, e);
                                 port_tx.send(0).ok();
                                 return;
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("CdpServer: HTTP request failed for {}: {}", url, e);
+                        tracing::error!("CdpServer: HTTP request failed for {}: {}", url, e);
                         port_tx.send(0).ok();
                         return;
                     }
@@ -121,9 +153,14 @@ impl CdpServer {
                 let page = Rc::new(RefCell::new(page));
                 let http_client = Some(Rc::new(client));
 
-                let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
-                    .await
-                    .expect("failed to bind CDP port");
+                let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!("CdpServer: failed to bind CDP port: {}", e);
+                        port_tx.send(0).ok();
+                        return;
+                    }
+                };
                 let actual_port = listener.local_addr().unwrap().port();
                 port_tx.send(actual_port).ok();
 
@@ -166,10 +203,16 @@ impl CdpServer {
         let (port_tx, port_rx) = std::sync::mpsc::channel();
 
         let thread = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("failed to build tokio runtime");
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tracing::error!("CdpServer: failed to build tokio runtime: {}", e);
+                    return;
+                }
+            };
             let local = tokio::task::LocalSet::new();
 
             local.block_on(&rt, async move {
@@ -177,21 +220,33 @@ impl CdpServer {
                 let client = match net::HttpClient::new(&profile) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("CdpServer: failed to create HTTP client: {}", e);
+                        tracing::error!("CdpServer: failed to create HTTP client: {}", e);
                         port_tx.send(0).ok();
                         return;
                     }
                 };
 
-                let page = browser::Page::from_html("<html><body></body></html>")
+                let page = match browser::Page::from_html("<html><body></body></html>", None::<stealth::StealthProfile>)
                     .await
-                    .expect("failed to create empty page");
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::error!("CdpServer: failed to create empty page: {}", e);
+                        port_tx.send(0).ok();
+                        return;
+                    }
+                };
                 let page = Rc::new(RefCell::new(page));
                 let http_client = Some(Rc::new(client));
 
-                let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
-                    .await
-                    .expect("failed to bind CDP port");
+                let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!("CdpServer: failed to bind CDP port: {}", e);
+                        port_tx.send(0).ok();
+                        return;
+                    }
+                };
                 let actual_port = listener.local_addr().unwrap().port();
                 port_tx.send(actual_port).ok();
 
@@ -271,12 +326,12 @@ async fn accept_loop(
                 let client = http_client.clone();
                 tokio::task::spawn_local(async move {
                     if let Err(e) = handle_connection(stream, page, client).await {
-                        eprintln!("CDP connection from {} error: {}", addr, e);
+                        tracing::warn!("CDP connection from {} error: {}", addr, e);
                     }
                 });
             }
             Ok(Err(e)) => {
-                eprintln!("CDP accept error: {}", e);
+                tracing::warn!("CDP accept error: {}", e);
             }
             Err(_) => {
                 // Timeout — check shutdown flag again
@@ -540,14 +595,14 @@ mod tests {
 
         // Warm up
         rt.block_on(async {
-            let _ = browser::Page::from_html(html).await;
+            let _ = browser::Page::from_html(html, None::<stealth::StealthProfile>).await;
         });
 
         let mut times = Vec::new();
         for _ in 0..10 {
             rt.block_on(async {
                 let start = std::time::Instant::now();
-                let page = browser::Page::from_html_fast(html, "https://example.com").await.unwrap();
+                let page = browser::Page::from_html_fast(html, "https://example.com", stealth::presets::chrome_130_ru()).await.unwrap();
                 times.push(start.elapsed());
                 drop(page);
             });

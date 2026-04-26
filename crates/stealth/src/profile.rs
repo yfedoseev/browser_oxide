@@ -56,6 +56,30 @@ pub struct StealthProfile {
     pub languages: Vec<String>,
     pub timezone: String,
 
+    // === Client Hints high-entropy values ===
+    //
+    // Historically these were template constants inside window_bootstrap.js
+    // (architecture="x86", model="", platformVersion derived from os_version).
+    // That produced incorrect values on macOS/arm Apple Silicon and offered
+    // no way to claim 32-bit / wow64. Now profile-driven so HTTP Sec-CH-UA-*
+    // headers and navigator.userAgentData stay consistent. #[serde(default)]
+    // keeps old serialized profiles readable.
+    #[serde(default = "default_cpu_architecture")]
+    pub cpu_architecture: String, // "x86" | "arm"
+    #[serde(default = "default_cpu_bitness")]
+    pub cpu_bitness: String, // "64" | "32"
+    /// Chrome-style zero-padded triple, e.g. "15.0.0". Empty string on
+    /// Linux, matching real Chrome behavior.
+    #[serde(default)]
+    pub platform_version: String,
+    /// Device model (empty for desktop).
+    #[serde(default)]
+    pub ua_model: String,
+    /// True iff running 32-bit Chrome on 64-bit Windows. Rare; false for
+    /// every desktop preset we ship.
+    #[serde(default)]
+    pub ua_wow64: bool,
+
     // === Network ===
     /// rquest Impersonate variant (e.g., "chrome_130")
     pub tls_impersonate: String,
@@ -96,6 +120,14 @@ fn default_gpu_profile() -> GpuProfile {
     crate::gpu::nvidia_rtx_3060_windows()
 }
 
+fn default_cpu_architecture() -> String {
+    "x86".into()
+}
+
+fn default_cpu_bitness() -> String {
+    "64".into()
+}
+
 impl StealthProfile {
     /// Validate that all fields are internally consistent.
     pub fn validate(&self) -> Result<(), Vec<String>> {
@@ -111,20 +143,14 @@ impl StealthProfile {
 
         // Platform must match OS
         match self.os_name.as_str() {
-            "Windows" => {
-                if self.platform != "Win32" {
-                    errors.push(format!("Windows OS but platform is '{}'", self.platform));
-                }
+            "Windows" if self.platform != "Win32" => {
+                errors.push(format!("Windows OS but platform is '{}'", self.platform));
             }
-            "macOS" => {
-                if self.platform != "MacIntel" {
-                    errors.push(format!("macOS but platform is '{}'", self.platform));
-                }
+            "macOS" if self.platform != "MacIntel" => {
+                errors.push(format!("macOS but platform is '{}'", self.platform));
             }
-            "Linux" => {
-                if !self.platform.starts_with("Linux") {
-                    errors.push(format!("Linux OS but platform is '{}'", self.platform));
-                }
+            "Linux" if !self.platform.starts_with("Linux") => {
+                errors.push(format!("Linux OS but platform is '{}'", self.platform));
             }
             _ => {}
         }
@@ -174,6 +200,52 @@ impl StealthProfile {
             errors.push(format!(
                 "language '{}' not in languages {:?}",
                 self.language, self.languages
+            ));
+        }
+
+        // === Client Hints consistency ===
+        // Architecture enum
+        if !matches!(self.cpu_architecture.as_str(), "x86" | "arm") {
+            errors.push(format!(
+                "cpu_architecture must be 'x86' or 'arm' (got '{}')",
+                self.cpu_architecture
+            ));
+        }
+        // Bitness enum
+        if !matches!(self.cpu_bitness.as_str(), "64" | "32") {
+            errors.push(format!(
+                "cpu_bitness must be '64' or '32' (got '{}')",
+                self.cpu_bitness
+            ));
+        }
+        // wow64 only makes sense on 32-bit Windows Chrome
+        if self.ua_wow64 && (self.os_name != "Windows" || self.cpu_bitness != "32") {
+            errors.push(format!(
+                "ua_wow64=true requires os_name=Windows and cpu_bitness=32 (got {} / {})",
+                self.os_name, self.cpu_bitness
+            ));
+        }
+        // Chrome on Linux reports empty platform_version per real Chrome.
+        if self.os_name == "Linux" && !self.platform_version.is_empty() {
+            errors.push(format!(
+                "Chrome on Linux must report empty platform_version (got '{}')",
+                self.platform_version
+            ));
+        }
+        // Apple Silicon (arm) only on macOS
+        if self.cpu_architecture == "arm"
+            && !matches!(self.os_name.as_str(), "macOS" | "Android" | "ChromeOS")
+        {
+            errors.push(format!(
+                "cpu_architecture=arm only on macOS/Android/ChromeOS (got '{}')",
+                self.os_name
+            ));
+        }
+        // Desktop profiles shouldn't leak a ua_model
+        if !self.ua_model.is_empty() && self.max_touch_points == 0 {
+            errors.push(format!(
+                "ua_model='{}' on a desktop (max_touch_points=0) profile",
+                self.ua_model
             ));
         }
 

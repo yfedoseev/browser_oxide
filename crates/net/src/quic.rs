@@ -25,14 +25,16 @@ impl QuicClient {
         let mut transport = quinn::TransportConfig::default();
         transport.receive_window(VarInt::from_u32(15_728_640)); // 15MB
         transport.stream_receive_window(VarInt::from_u32(6_291_456)); // 6MB
-        transport.max_concurrent_bidi_streams(VarInt::from_u32(100));
-        transport.max_concurrent_uni_streams(VarInt::from_u32(100));
+        transport.max_concurrent_bidi_streams(VarInt::from_u32(1000));
+        transport.max_concurrent_uni_streams(VarInt::from_u32(1000));
         transport.max_idle_timeout(Some(
             quinn::IdleTimeout::try_from(Duration::from_secs(30))
                 .map_err(|e| NetError::Quic(e.to_string()))?,
         ));
-        transport.keep_alive_interval(Some(Duration::from_secs(15)));
-
+        transport.keep_alive_interval(Some(Duration::from_secs(10)));
+        // In quinn 0.11+, this is a field or method depending on the exact version. 
+        // We'll stick to the defaults if the method is missing or use the correct setter.
+        
         let mut client_config = quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)
                 .map_err(|e| NetError::Quic(e.to_string()))?,
