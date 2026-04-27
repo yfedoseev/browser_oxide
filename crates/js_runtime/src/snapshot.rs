@@ -1,6 +1,3 @@
-use std::sync::OnceLock;
-use deno_core::{RuntimeOptions, JsRuntimeForSnapshot};
-use dom::Dom;
 use crate::extensions::audio_ext::audio_extension;
 use crate::extensions::canvas_ext::{canvas_extension, CanvasState};
 use crate::extensions::console_ext::console_extension;
@@ -15,6 +12,9 @@ use crate::extensions::webgl_ext::{webgl_extension, WebGLState};
 use crate::extensions::websocket_ext::{websocket_extension, WebSocketState};
 use crate::extensions::worker_ext::worker_extension;
 use crate::state::DomState;
+use deno_core::{JsRuntimeForSnapshot, RuntimeOptions};
+use dom::Dom;
+use std::sync::OnceLock;
 
 static RUNTIME_SNAPSHOT: OnceLock<Box<[u8]>> = OnceLock::new();
 
@@ -22,7 +22,7 @@ static RUNTIME_SNAPSHOT: OnceLock<Box<[u8]>> = OnceLock::new();
 pub fn get_snapshot() -> &'static [u8] {
     RUNTIME_SNAPSHOT.get_or_init(|| {
         tracing::info!("Creating cold V8 snapshot");
-        
+
         let mut runtime = JsRuntimeForSnapshot::new(RuntimeOptions {
             extensions: vec![
                 console_extension::init_ops(),
@@ -59,17 +59,28 @@ pub fn get_snapshot() -> &'static [u8] {
 
         // Execute bootstrap JS
         const BOOTSTRAP_JS: &str = concat!(
-            include_str!("js/console_bootstrap.js"), "\n",
-            include_str!("js/stealth_bootstrap.js"), "\n",
-            include_str!("js/interfaces_bootstrap.js"), "\n",
-            include_str!("js/instances_bootstrap.js"), "\n",
-            include_str!("js/fetch_bootstrap.js"), "\n",
-            include_str!("js/timer_bootstrap.js"), "\n",
-            include_str!("js/dom_bootstrap.js"), "\n",
-            include_str!("js/event_bootstrap.js"), "\n",
-            include_str!("js/canvas_bootstrap.js"), "\n",
-            include_str!("js/window_bootstrap.js"), "\n",
-            include_str!("js/streams_bootstrap.js"), "\n",
+            include_str!("js/console_bootstrap.js"),
+            "\n",
+            include_str!("js/stealth_bootstrap.js"),
+            "\n",
+            include_str!("js/interfaces_bootstrap.js"),
+            "\n",
+            include_str!("js/instances_bootstrap.js"),
+            "\n",
+            include_str!("js/fetch_bootstrap.js"),
+            "\n",
+            include_str!("js/timer_bootstrap.js"),
+            "\n",
+            include_str!("js/dom_bootstrap.js"),
+            "\n",
+            include_str!("js/event_bootstrap.js"),
+            "\n",
+            include_str!("js/canvas_bootstrap.js"),
+            "\n",
+            include_str!("js/window_bootstrap.js"),
+            "\n",
+            include_str!("js/streams_bootstrap.js"),
+            "\n",
             include_str!("js/structured_clone.js"),
         );
 

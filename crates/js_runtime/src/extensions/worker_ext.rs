@@ -10,8 +10,9 @@
 //! spawned from it (Akamai's BMP v3 spawns workers via blob: URLs built from
 //! inline scripts).
 
-use deno_core::op2;
+use crate::extensions::stealth_ext::StealthState;
 use crate::state::DomState;
+use deno_core::op2;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -201,12 +202,15 @@ thread_local! {
 #[op2(fast)]
 #[smi]
 pub fn op_worker_spawn(
-    #[state] state: &mut DomState,
+    #[state] state: &DomState,
+    #[state] stealth: &StealthState,
     #[string] script: String,
     #[string] _name: String,
     is_module: bool,
 ) -> i32 {
-    let profile = state.stealth_profile.clone();
+    // Prefer StealthState.profile (always set from BrowserRuntimeOptions) over
+    // DomState.stealth_profile (historically always None in the main runtime).
+    let profile = stealth.profile.clone().or_else(|| state.stealth_profile.clone());
     let (to_worker_tx, to_worker_rx) = std::sync::mpsc::channel::<String>();
     let (to_parent_tx, to_parent_rx) = std::sync::mpsc::channel::<String>();
     let terminate = Arc::new(AtomicBool::new(false));
@@ -318,7 +322,10 @@ pub fn op_worker_spawn(
 
     if let Err(e) = thread_result {
         tracing::error!(worker_id = worker_id, error = %e, "worker thread spawn failed");
-        worker_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&worker_id);
+        worker_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&worker_id);
         return 0;
     }
 

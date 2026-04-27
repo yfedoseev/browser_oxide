@@ -38,11 +38,7 @@ pub fn rasterize_glyph(
 ) -> Option<GlyphBitmap> {
     let font = FontRef::from_index(face_data, face_index as usize)?;
     let mut context = ScaleContext::new();
-    let mut scaler = context
-        .builder(font)
-        .size(size_px)
-        .hint(true)
-        .build();
+    let mut scaler = context.builder(font).size(size_px).hint(true).build();
 
     let image = Render::new(&[
         // Try outline first — that's what text rendering wants for
@@ -75,15 +71,17 @@ mod tests {
         let id = db.query("Arial", 400, false).unwrap();
         let (data, idx) = db.face_data(id).unwrap();
         let run = shaper::shape(ch, data, idx, size_px);
-        assert!(!run.glyphs.is_empty(), "shaper produced no glyphs for {ch:?}");
+        assert!(
+            !run.glyphs.is_empty(),
+            "shaper produced no glyphs for {ch:?}"
+        );
         (run.glyphs[0].clone(), data, idx)
     }
 
     #[test]
     fn rasterizes_latin_glyph() {
         let (glyph, data, idx) = shape_single("A", 24.0);
-        let bitmap = rasterize_glyph(data, idx, glyph.glyph_id, 24.0)
-            .expect("A should rasterize");
+        let bitmap = rasterize_glyph(data, idx, glyph.glyph_id, 24.0).expect("A should rasterize");
         assert!(bitmap.width > 0 && bitmap.height > 0);
         // 24px Latin capital should be 12-30 px tall.
         assert!(

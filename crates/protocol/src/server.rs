@@ -9,9 +9,9 @@ use crate::types::*;
 use futures_util::{SinkExt, StreamExt};
 use std::cell::RefCell;
 use std::rc::Rc;
+use stealth;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
-use stealth;
 
 /// A running CDP server. Stops when dropped.
 pub struct CdpServer {
@@ -26,10 +26,7 @@ impl CdpServer {
     /// Spawns a dedicated thread with a single-threaded tokio runtime (required
     /// because `Page` is `!Send`). The HTML is used to create a fresh Page on
     /// that thread.
-    pub fn start(
-        html: &str,
-        port: u16,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn start(html: &str, port: u16) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let html = html.to_string();
         let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
@@ -49,16 +46,15 @@ impl CdpServer {
             let local = tokio::task::LocalSet::new();
 
             local.block_on(&rt, async move {
-                let page = match browser::Page::from_html(&html, None::<stealth::StealthProfile>)
-                    .await
-                {
-                    Ok(p) => p,
-                    Err(e) => {
-                        tracing::error!("CdpServer: failed to create page: {}", e);
-                        port_tx.send(0).ok();
-                        return;
-                    }
-                };
+                let page =
+                    match browser::Page::from_html(&html, None::<stealth::StealthProfile>).await {
+                        Ok(p) => p,
+                        Err(e) => {
+                            tracing::error!("CdpServer: failed to create page: {}", e);
+                            port_tx.send(0).ok();
+                            return;
+                        }
+                    };
                 let page = Rc::new(RefCell::new(page));
 
                 let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
@@ -138,7 +134,11 @@ impl CdpServer {
                         match browser::Page::with_profile(&html, &url, profile).await {
                             Ok(p) => p,
                             Err(e) => {
-                                tracing::error!("CdpServer: failed to create page for {}: {}", url, e);
+                                tracing::error!(
+                                    "CdpServer: failed to create page for {}: {}",
+                                    url,
+                                    e
+                                );
                                 port_tx.send(0).ok();
                                 return;
                             }
@@ -195,9 +195,7 @@ impl CdpServer {
     /// Unlike `start_with_url`, this doesn't fetch any URL upfront.
     /// The client sends `Page.navigate` via CDP to load pages, and the same
     /// server instance can navigate to multiple URLs without restarting.
-    pub fn start_navigable(
-        port: u16,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn start_navigable(port: u16) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
         let (port_tx, port_rx) = std::sync::mpsc::channel();
@@ -226,8 +224,11 @@ impl CdpServer {
                     }
                 };
 
-                let page = match browser::Page::from_html("<html><body></body></html>", None::<stealth::StealthProfile>)
-                    .await
+                let page = match browser::Page::from_html(
+                    "<html><body></body></html>",
+                    None::<stealth::StealthProfile>,
+                )
+                .await
                 {
                     Ok(p) => p,
                     Err(e) => {
@@ -276,9 +277,7 @@ impl CdpServer {
     }
 
     /// Start on port 0 (OS-assigned) — useful for tests.
-    pub fn start_ephemeral(
-        html: &str,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn start_ephemeral(html: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Self::start(html, 0)
     }
 
@@ -314,11 +313,8 @@ async fn accept_loop(
             break;
         }
 
-        let accept = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            listener.accept(),
-        )
-        .await;
+        let accept =
+            tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept()).await;
 
         match accept {
             Ok(Ok((stream, addr))) => {
@@ -388,7 +384,9 @@ async fn handle_connection(
                 let (response, events) = {
                     let mut page_ref = page.borrow_mut();
                     let client_ref = http_client.as_deref();
-                    session.handle_request(&mut *page_ref, &req, client_ref).await
+                    session
+                        .handle_request(&mut *page_ref, &req, client_ref)
+                        .await
                 };
 
                 // Handle pending navigation (Page.navigate).
@@ -426,10 +424,7 @@ async fn handle_connection(
 /// Fast path for Runtime.evaluate — extracts id+expression with string scanning
 /// instead of full JSON parse, evaluates directly, formats response manually.
 /// Returns None if the message isn't a simple Runtime.evaluate.
-fn fast_evaluate(
-    text: &str,
-    page: &Rc<RefCell<browser::Page>>,
-) -> Option<String> {
+fn fast_evaluate(text: &str, page: &Rc<RefCell<browser::Page>>) -> Option<String> {
     // Quick check: must contain Runtime.evaluate
     if !text.contains("Runtime.evaluate") {
         return None;
@@ -456,10 +451,8 @@ fn fast_evaluate(
         return None;
     }
     // Parse the JSON string value (handles escapes)
-    let expression: String = serde_json::from_str(
-        &after_trim[..find_json_string_end(after_trim)?],
-    )
-    .ok()?;
+    let expression: String =
+        serde_json::from_str(&after_trim[..find_json_string_end(after_trim)?]).ok()?;
 
     // Evaluate
     let mut page_ref = page.borrow_mut();
@@ -529,17 +522,15 @@ async fn handle_http(
     let ws_url = format!("ws://127.0.0.1:{}", addr.port());
 
     let body = match path {
-        "/json/version" => {
-            serde_json::json!({
-                "Browser": "browser_oxide/0.1.0",
-                "Protocol-Version": "1.3",
-                "User-Agent": "browser_oxide/0.1.0",
-                "V8-Version": "12.x",
-                "WebKit-Version": "0",
-                "webSocketDebuggerUrl": ws_url,
-            })
-            .to_string()
-        }
+        "/json/version" => serde_json::json!({
+            "Browser": "browser_oxide/0.1.0",
+            "Protocol-Version": "1.3",
+            "User-Agent": "browser_oxide/0.1.0",
+            "V8-Version": "12.x",
+            "WebKit-Version": "0",
+            "webSocketDebuggerUrl": ws_url,
+        })
+        .to_string(),
         "/json" | "/json/list" => {
             let (title, url) = {
                 let mut page_ref = page.borrow_mut();
@@ -580,8 +571,7 @@ mod tests {
 
     #[test]
     fn server_starts_and_stops() {
-        let server =
-            CdpServer::start_ephemeral("<html><body>Hello</body></html>").unwrap();
+        let server = CdpServer::start_ephemeral("<html><body>Hello</body></html>").unwrap();
         assert!(server.port() > 0);
         assert!(server.ws_url().contains("127.0.0.1"));
         drop(server);
@@ -602,7 +592,13 @@ mod tests {
         for _ in 0..10 {
             rt.block_on(async {
                 let start = std::time::Instant::now();
-                let page = browser::Page::from_html_fast(html, "https://example.com", stealth::presets::chrome_130_ru()).await.unwrap();
+                let page = browser::Page::from_html_fast(
+                    html,
+                    "https://example.com",
+                    stealth::presets::chrome_130_ru(),
+                )
+                .await
+                .unwrap();
                 times.push(start.elapsed());
                 drop(page);
             });
@@ -683,20 +679,35 @@ mod tests {
         let server = CdpServer::start_navigable(0).unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            let (ws, _) = tokio_tungstenite::connect_async(&server.ws_url()).await.unwrap();
+            let (ws, _) = tokio_tungstenite::connect_async(&server.ws_url())
+                .await
+                .unwrap();
             let (mut tx, mut rx) = ws.split();
             use futures_util::{SinkExt, StreamExt};
 
             // Enable Page
-            tx.send(Message::Text(r#"{"id":1,"method":"Page.enable","params":{}}"#.into())).await.unwrap();
+            tx.send(Message::Text(
+                r#"{"id":1,"method":"Page.enable","params":{}}"#.into(),
+            ))
+            .await
+            .unwrap();
             let _ = rx.next().await; // response
 
             // Enable Runtime
-            tx.send(Message::Text(r#"{"id":2,"method":"Runtime.enable","params":{}}"#.into())).await.unwrap();
+            tx.send(Message::Text(
+                r#"{"id":2,"method":"Runtime.enable","params":{}}"#.into(),
+            ))
+            .await
+            .unwrap();
             let _ = rx.next().await; // response
 
             // Navigate to example.com
-            tx.send(Message::Text(r#"{"id":3,"method":"Page.navigate","params":{"url":"https://example.com"}}"#.into())).await.unwrap();
+            tx.send(Message::Text(
+                r#"{"id":3,"method":"Page.navigate","params":{"url":"https://example.com"}}"#
+                    .into(),
+            ))
+            .await
+            .unwrap();
 
             // Read all messages until we get id:3 response
             loop {
@@ -711,11 +722,20 @@ mod tests {
             }
 
             // Evaluate document.title
-            tx.send(Message::Text(r#"{"id":4,"method":"Runtime.evaluate","params":{"expression":"document.title"}}"#.into())).await.unwrap();
+            tx.send(Message::Text(
+                r#"{"id":4,"method":"Runtime.evaluate","params":{"expression":"document.title"}}"#
+                    .into(),
+            ))
+            .await
+            .unwrap();
             let msg = rx.next().await.unwrap().unwrap();
             if let Message::Text(t) = msg {
                 println!("  title response: {}", t);
-                assert!(t.contains("Example Domain"), "Expected 'Example Domain' in: {}", t);
+                assert!(
+                    t.contains("Example Domain"),
+                    "Expected 'Example Domain' in: {}",
+                    t
+                );
             }
 
             tx.send(Message::Close(None)).await.ok();

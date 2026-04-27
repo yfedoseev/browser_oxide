@@ -1,18 +1,31 @@
 # browser_oxide — Next Steps Roadmap
 
-**Status as of 2026-04-10.** This document is the master "what's next"
-for browser_oxide beyond the current WB investigation. It captures the
-ambitious goal ("pass every major antibot system in 2026") plus an
-honest scoping, the work already shipped, the test infrastructure gaps
-that invalidated our prior "71/71 sites pass" claim, and a tiered
-execution plan. See also:
+**Status as of 2026-04-10** (cross-references refreshed 2026-04-26). This
+document is the master "what's next" for browser_oxide beyond the current
+WB investigation. It captures the ambitious goal ("pass every major antibot
+system in 2026") plus an honest scoping, the work already shipped, the test
+infrastructure gaps that invalidated our prior "71/71 sites pass" claim, and
+a tiered execution plan. See also:
 
-- `docs/ANTIBOT_RESEARCH_2026.md` — comprehensive 2026 antibot
-  landscape research archive (engine-by-engine, site-by-site,
-  difficulty matrix, structural advantages). Primary input for
-  this document's §4.3, §4.4, and §4.5.
+- **`docs/SOTA_ROADMAP_2026.md`** — *new (2026-04-26)*. Sequenced 3-phase
+  implementation plan for the 2026 SOTA gaps (WebGL execution via wgpu+
+  Lavapipe, audio realtime surface, WebAuthn/FedCM/SAB shims, Sigma-Lognormal
+  behavioral entropy, H2 golden-frame tests). Run in parallel with the
+  site-by-site queue below — the SOTA roadmap closes the *fingerprint
+  surface* gaps that block multiple sites at once; this doc sequences the
+  *site-specific* investigations.
+- `docs/GAPS.md` — P0–P33 fingerprint gaps catalogue. Updated 2026-04-26
+  with corrected §26/§27 status and new §33 (deferred QUIC fingerprint).
+- `docs/CAPABILITY_GAPS_2026.md` — earlier capability audit. Partially
+  superseded by SOTA_ROADMAP_2026.md (audio kernel done; OSMesa-only
+  WebGL replaced by cross-platform wgpu+Lavapipe). Tier 1 items T1.1
+  (skia-safe Canvas 2D), T1.2 (cosmic-text fonts), T1.5 (Worker plumbing)
+  still applicable as written.
+- `docs/ANTIBOT_RESEARCH_2026.md` — comprehensive 2026 antibot landscape
+  research archive (engine-by-engine, site-by-site, difficulty matrix,
+  structural advantages). Primary input for this document's §4.3, §4.4,
+  §4.5.
 - `docs/WILDBERRIES.md` — WBAAS reverse-engineering, ongoing.
-- `docs/GAPS.md` — P0/P1 fingerprint gaps, mostly unchanged.
 - `docs/STEALTH.md` — the stealth profile architecture.
 
 ---
@@ -398,12 +411,14 @@ what our first baseline run shows, but the rough bar:
 | pixelscan.net | "Consistent" | "Consistent" + low-risk |
 | rebrowser bot-detector | No "automation detected" | Score matches real Chrome |
 
-Note: GAPS.md already claims **18/18 stealth checks, higher than
-Chrome headless (16/18), Puppeteer+Stealth (14/18), Camoufox
-(13/18), Lightpanda (8/18)**. That baseline was measured against
-an internal harness, not against CreepJS trust score. **We don't
-know where we actually stand against CreepJS yet.** First baseline
-run will tell us.
+Note: an earlier version of GAPS.md claimed **18/18 stealth checks,
+higher than Chrome headless (16/18), Puppeteer+Stealth (14/18),
+Camoufox (13/18), Lightpanda (8/18)**. That baseline was measured
+against an internal harness, not against CreepJS trust score. **We
+don't know where we actually stand against CreepJS yet.** GAPS.md
+was rewritten 2026-04-26 to drop the unverified scoreboard until a
+reproducible IP-disclosed benchmark backs it up. First baseline run
+will tell us.
 
 #### Diversity test (fingerprint uniqueness across profiles)
 
@@ -845,13 +860,16 @@ recently-failed site within its cool-down window.
 
 ### Fingerprint gaps will be the common blocker
 
-GAPS.md §P0 items 1-7 (prototype integrity, error stack, audio,
-`performance.now()` precision, rAF timing, canvas fonts, WebGL
-extensions) are likely the same gaps that kill us on Kasada,
-DataDome, and WBAAS's page gate. Fixing them once probably unblocks
-a whole tier of sites at once. That's the case for building matrix
-infrastructure BEFORE chasing individual sites — we want to measure
-the impact of each gap fix across the whole portfolio.
+GAPS.md §P0 items 1–7 (prototype integrity, error stack, audio
+fingerprint params, `performance.now()` precision, rAF timing,
+canvas fonts, WebGL extensions) **plus the new §P-SOTA items 26–32**
+(WebGL execution, audio realtime, WebAuthn/FedCM/SAB, behavioral
+entropy, H2 golden test) are likely the same gaps that kill us on
+Kasada, DataDome, and WBAAS's page gate. Fixing them once probably
+unblocks a whole tier of sites at once. That's the case for building
+matrix infrastructure BEFORE chasing individual sites — we want to
+measure the impact of each gap fix across the whole portfolio. See
+`docs/SOTA_ROADMAP_2026.md` for the sequenced 3-phase plan.
 
 ### Behavioral ML is a separate subsystem
 

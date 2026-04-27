@@ -51,6 +51,7 @@ fn offline_audio_context_renders_via_rust_op() {
                     globalThis.__audio_sample_4999 = data[4999];
                 })();
                 "#,
+                None,
             )
             .unwrap();
 
@@ -63,7 +64,7 @@ fn offline_audio_context_renders_via_rust_op() {
             let fut = Box::pin(runtime.run_event_loop());
             let _ = tokio::time::timeout(Duration::from_millis(100), fut).await;
             let sum_str = runtime
-                .execute_script("String(globalThis.__audio_sum || 0)")
+                .execute_script("String(globalThis.__audio_sum || 0)", None)
                 .unwrap_or_default();
             if sum_str != "0" {
                 break;
@@ -71,23 +72,23 @@ fn offline_audio_context_renders_via_rust_op() {
         }
 
         let len: usize = runtime
-            .execute_script("String(globalThis.__audio_len || 0)")
+            .execute_script("String(globalThis.__audio_len || 0)", None)
             .unwrap_or_default()
             .parse()
             .unwrap_or(0);
         let sum: f64 = runtime
-            .execute_script("String(globalThis.__audio_sum || 0)")
+            .execute_script("String(globalThis.__audio_sum || 0)", None)
             .unwrap_or_default()
             .parse()
             .unwrap_or(0.0);
         let s0 = runtime
-            .execute_script("String(globalThis.__audio_sample_0)")
+            .execute_script("String(globalThis.__audio_sample_0)", None)
             .unwrap_or_default();
         let s4500 = runtime
-            .execute_script("String(globalThis.__audio_sample_4500)")
+            .execute_script("String(globalThis.__audio_sample_4500)", None)
             .unwrap_or_default();
         let s4999 = runtime
-            .execute_script("String(globalThis.__audio_sample_4999)")
+            .execute_script("String(globalThis.__audio_sample_4999)", None)
             .unwrap_or_default();
 
         println!("[audio] len={len}");

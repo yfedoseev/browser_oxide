@@ -20,7 +20,10 @@ impl PagePool {
 
     /// Acquire a page from the pool or create a new one.
     /// The page is sanitized (swapped to empty DOM) before being returned.
-    pub async fn acquire(&self, profile: Option<StealthProfile>) -> Result<Page, deno_core::error::AnyError> {
+    pub async fn acquire(
+        &self,
+        profile: Option<StealthProfile>,
+    ) -> Result<Page, deno_core::error::AnyError> {
         let mut pages = self.idle_pages.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(mut page) = pages.pop_front() {
             // Re-use existing page.
@@ -30,7 +33,7 @@ impl PagePool {
             page.reload_html("<html><head></head><body></body></html>", "about:blank");
             return Ok(page);
         }
-        
+
         // Create a new one if pool is empty
         Page::from_html("<html><head></head><body></body></html>", profile).await
     }

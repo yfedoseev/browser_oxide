@@ -2,13 +2,28 @@ use deno_core::op2;
 use stealth::StealthProfile;
 
 /// Stealth profile stored in OpState. Optional — if absent, defaults apply.
+///
+/// `cross_origin_isolated` is a per-document flag derived from response
+/// headers (COOP=same-origin AND COEP=require-corp|credentialless — see
+/// `net::headers::is_cross_origin_isolated`). It drives `self.crossOriginIsolated`
+/// and gates SAB postMessage transfer to workers (gap #30).
 pub struct StealthState {
     pub profile: Option<StealthProfile>,
+    pub cross_origin_isolated: bool,
 }
 
 impl StealthState {
     pub fn new(profile: Option<StealthProfile>) -> Self {
-        Self { profile }
+        Self {
+            profile,
+            cross_origin_isolated: false,
+        }
+    }
+    pub fn new_with_coi(profile: Option<StealthProfile>, cross_origin_isolated: bool) -> Self {
+        Self {
+            profile,
+            cross_origin_isolated,
+        }
     }
 }
 
@@ -32,6 +47,7 @@ pub fn op_get_profile_value(#[state] state: &StealthState, #[string] key: &str) 
             "screen_height" => p.screen_height.to_string(),
             "screen_avail_width" => p.screen_avail_width.to_string(),
             "screen_avail_height" => p.screen_avail_height.to_string(),
+            "screen_avail_top" => p.screen_avail_top.to_string(),
             "screen_color_depth" => p.screen_color_depth.to_string(),
             "device_pixel_ratio" => p.device_pixel_ratio.to_string(),
             "inner_width" => p.inner_width.to_string(),
@@ -72,6 +88,8 @@ pub fn op_get_profile_value(#[state] state: &StealthState, #[string] key: &str) 
             "platform_version" => p.platform_version.clone(),
             "ua_model" => p.ua_model.clone(),
             "ua_wow64" => p.ua_wow64.to_string(),
+            "has_platform_authenticator" => p.has_platform_authenticator.to_string(),
+            "conditional_mediation" => p.conditional_mediation.to_string(),
             _ => String::new(),
         },
         None => String::new(), // No profile = empty = use JS defaults
@@ -83,7 +101,18 @@ pub fn op_has_stealth_profile(#[state] state: &StealthState) -> bool {
     state.profile.is_some()
 }
 
+/// Returns whether the document is cross-origin-isolated. Drives
+/// `self.crossOriginIsolated` and gates SAB transfer (gap #30).
+#[op2(fast)]
+pub fn op_cross_origin_isolated(#[state] state: &StealthState) -> bool {
+    state.cross_origin_isolated
+}
+
 deno_core::extension!(
     stealth_extension,
-    ops = [op_get_profile_value, op_has_stealth_profile],
+    ops = [
+        op_get_profile_value,
+        op_has_stealth_profile,
+        op_cross_origin_isolated
+    ],
 );

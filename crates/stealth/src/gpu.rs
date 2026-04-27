@@ -57,7 +57,8 @@ pub fn nvidia_rtx_3060_windows() -> GpuProfile {
         version: "WebGL 1.0 (OpenGL ES 2.0 Chromium)".into(),
         shading_language_version: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)".into(),
         unmasked_vendor: "Google Inc. (NVIDIA)".into(),
-        unmasked_renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)".into(),
+        unmasked_renderer:
+            "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)".into(),
         extensions: vec![
             "ANGLE_instanced_arrays".into(),
             "EXT_blend_minmax".into(),
@@ -110,7 +111,8 @@ pub fn apple_m2_pro_macos() -> GpuProfile {
         version: "WebGL 1.0 (OpenGL ES 2.0 Chromium)".into(),
         shading_language_version: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)".into(),
         unmasked_vendor: "Google Inc. (Apple)".into(),
-        unmasked_renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)".into(),
+        unmasked_renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"
+            .into(),
         extensions: vec![
             "ANGLE_instanced_arrays".into(),
             "EXT_blend_minmax".into(),
@@ -163,7 +165,8 @@ pub fn intel_uhd_630_linux() -> GpuProfile {
         version: "WebGL 1.0 (OpenGL ES 2.0 Chromium)".into(),
         shading_language_version: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)".into(),
         unmasked_vendor: "Google Inc. (Intel)".into(),
-        unmasked_renderer: "ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)".into(),
+        unmasked_renderer: "ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)"
+            .into(),
         extensions: vec![
             "ANGLE_instanced_arrays".into(),
             "EXT_blend_minmax".into(),
@@ -215,26 +218,26 @@ fn common_params_desktop() -> Vec<(u32, serde_json::Value)> {
         // the WebGLRenderingContext wrapper merges them in at runtime.
 
         // Integer / size parameters
-        (0x0D33, json!(16384)),   // MAX_TEXTURE_SIZE
-        (0x851C, json!(16384)),   // MAX_CUBE_MAP_TEXTURE_SIZE
-        (0x84E8, json!(16384)),   // MAX_RENDERBUFFER_SIZE
-        (0x8073, json!(2048)),    // MAX_3D_TEXTURE_SIZE (WebGL2)
-        (0x8869, json!(16)),      // MAX_VERTEX_ATTRIBS
-        (0x8DFB, json!(1024)),    // MAX_VERTEX_UNIFORM_VECTORS
-        (0x8DFD, json!(15)),      // MAX_VARYING_VECTORS
-        (0x8DFC, json!(1024)),    // MAX_FRAGMENT_UNIFORM_VECTORS
-        (0x8872, json!(16)),      // MAX_TEXTURE_IMAGE_UNITS
-        (0x8B4D, json!(16)),      // MAX_VERTEX_TEXTURE_IMAGE_UNITS
-        (0x8B4C, json!(32)),      // MAX_COMBINED_TEXTURE_IMAGE_UNITS
+        (0x0D33, json!(16384)),          // MAX_TEXTURE_SIZE
+        (0x851C, json!(16384)),          // MAX_CUBE_MAP_TEXTURE_SIZE
+        (0x84E8, json!(16384)),          // MAX_RENDERBUFFER_SIZE
+        (0x8073, json!(2048)),           // MAX_3D_TEXTURE_SIZE (WebGL2)
+        (0x8869, json!(16)),             // MAX_VERTEX_ATTRIBS
+        (0x8DFB, json!(1024)),           // MAX_VERTEX_UNIFORM_VECTORS
+        (0x8DFD, json!(15)),             // MAX_VARYING_VECTORS
+        (0x8DFC, json!(1024)),           // MAX_FRAGMENT_UNIFORM_VECTORS
+        (0x8872, json!(16)),             // MAX_TEXTURE_IMAGE_UNITS
+        (0x8B4D, json!(16)),             // MAX_VERTEX_TEXTURE_IMAGE_UNITS
+        (0x8B4C, json!(32)),             // MAX_COMBINED_TEXTURE_IMAGE_UNITS
         (0x846D, json!([1.0, 8190.0])),  // ALIASED_POINT_SIZE_RANGE
         (0x846E, json!([1.0, 1.0])),     // ALIASED_LINE_WIDTH_RANGE
         (0x0D3A, json!([32767, 32767])), // MAX_VIEWPORT_DIMS
         // Depth/stencil
-        (0x0D56, json!(8)),       // DEPTH_BITS
-        (0x0D57, json!(8)),       // STENCIL_BITS
+        (0x0D56, json!(8)), // DEPTH_BITS
+        (0x0D57, json!(8)), // STENCIL_BITS
         // sRGB support
-        (0x80AA, json!(2)),       // SAMPLE_BUFFERS
-        (0x80A9, json!(4)),       // SAMPLES (MSAA)
+        (0x80AA, json!(2)), // SAMPLE_BUFFERS
+        (0x80A9, json!(4)), // SAMPLES (MSAA)
     ]
 }
 
@@ -285,7 +288,9 @@ mod tests {
     fn apple_profile_has_astc_extension() {
         let gpu = apple_m2_pro_macos();
         assert!(
-            gpu.extensions.iter().any(|e| e == "WEBGL_compressed_texture_astc"),
+            gpu.extensions
+                .iter()
+                .any(|e| e == "WEBGL_compressed_texture_astc"),
             "Apple GPU missing WEBGL_compressed_texture_astc"
         );
     }
@@ -294,7 +299,9 @@ mod tests {
     fn intel_profile_lacks_astc() {
         let gpu = intel_uhd_630_linux();
         assert!(
-            !gpu.extensions.iter().any(|e| e == "WEBGL_compressed_texture_astc"),
+            !gpu.extensions
+                .iter()
+                .any(|e| e == "WEBGL_compressed_texture_astc"),
             "Intel Linux shouldn't expose WEBGL_compressed_texture_astc"
         );
     }
@@ -308,12 +315,22 @@ mod tests {
     #[test]
     fn shader_precision_int_differs_from_float() {
         let gpu = nvidia_rtx_3060_windows();
-        let high_float = gpu.shader_precision.iter()
-            .find(|(_, p, _)| *p == 0x8DF2).unwrap().2;
-        let high_int = gpu.shader_precision.iter()
-            .find(|(_, p, _)| *p == 0x8DF5).unwrap().2;
-        assert_ne!(high_float, high_int,
-            "HIGH_FLOAT and HIGH_INT must have different values");
+        let high_float = gpu
+            .shader_precision
+            .iter()
+            .find(|(_, p, _)| *p == 0x8DF2)
+            .unwrap()
+            .2;
+        let high_int = gpu
+            .shader_precision
+            .iter()
+            .find(|(_, p, _)| *p == 0x8DF5)
+            .unwrap()
+            .2;
+        assert_ne!(
+            high_float, high_int,
+            "HIGH_FLOAT and HIGH_INT must have different values"
+        );
         assert_eq!(high_float, [127, 127, 23]);
         assert_eq!(high_int, [31, 30, 0]);
     }

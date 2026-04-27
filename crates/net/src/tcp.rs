@@ -136,10 +136,7 @@ pub async fn connect_default(host: &str, port: u16) -> Result<TcpStream, NetErro
 }
 
 /// Happy Eyeballs: try IPv6 first, start IPv4 after a delay.
-async fn happy_eyeballs(
-    ipv6: &[SocketAddr],
-    ipv4: &[SocketAddr],
-) -> Result<TcpStream, NetError> {
+async fn happy_eyeballs(ipv6: &[SocketAddr], ipv4: &[SocketAddr]) -> Result<TcpStream, NetError> {
     // If only one family is available, just try that
     if ipv6.is_empty() {
         return try_addrs(ipv4).await;
@@ -209,7 +206,12 @@ mod tests {
 
     #[tokio::test]
     async fn connect_invalid_host() {
-        let result = connect("this.host.does.not.exist.example", 443, Duration::from_secs(2)).await;
+        let result = connect(
+            "this.host.does.not.exist.example",
+            443,
+            Duration::from_secs(2),
+        )
+        .await;
         assert!(result.is_err());
     }
 }

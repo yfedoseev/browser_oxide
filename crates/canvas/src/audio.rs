@@ -748,7 +748,10 @@ mod tests {
 
         // Samples must cover a reasonable dynamic range (not silent).
         let peak: f32 = fp.data.iter().copied().fold(0.0, |a, b| a.max(b.abs()));
-        assert!(peak > 0.05, "440 Hz triangle should have audible peak, got {peak}");
+        assert!(
+            peak > 0.05,
+            "440 Hz triangle should have audible peak, got {peak}"
+        );
         // And must not clip the ±1.5 range.
         assert!(peak < 1.5, "440 Hz peak out of range: {peak}");
 

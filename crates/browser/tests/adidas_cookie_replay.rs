@@ -57,11 +57,7 @@ async fn adidas_cookie_replay() {
     let baseline = client.get("https://www.adidas.com/us").await;
     match &baseline {
         Ok(r) => {
-            println!(
-                "[baseline] status={} body={} bytes",
-                r.status,
-                r.body.len()
-            );
+            println!("[baseline] status={} body={} bytes", r.status, r.body.len());
         }
         Err(e) => println!("[baseline] ERROR: {e}"),
     }
@@ -99,9 +95,7 @@ async fn adidas_cookie_replay() {
             println!("[w/cookies] real={has_real} blocked={has_block}");
 
             if has_real && r.status == 200 {
-                println!(
-                    "VERDICT: cookies are portable → gate is fingerprint/sensor state."
-                );
+                println!("VERDICT: cookies are portable → gate is fingerprint/sensor state.");
                 println!("         Tier 1 (skia-safe, fonts, audio, workers) is the right path.");
             } else {
                 println!(

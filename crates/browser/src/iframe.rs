@@ -90,7 +90,12 @@ impl ChildIframe {
         let html = resp.text();
         // Skip if response looks like non-HTML (binary, error page)
         if html.trim().is_empty() {
-            return Self::from_srcdoc(node_id, "<html><body></body></html>", stealth_profile.unwrap()).await;
+            return Self::from_srcdoc(
+                node_id,
+                "<html><body></body></html>",
+                stealth_profile.unwrap(),
+            )
+            .await;
         }
 
         let dom = html_parser::parse_html(&html);

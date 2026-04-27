@@ -13,9 +13,12 @@ fn html(body: &str) -> String {
 
 #[tokio::test]
 async fn child_list_append() {
-    let mut page = Page::from_html(&html(r#"<div id="target"></div>"#), None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html(
+        &html(r#"<div id="target"></div>"#),
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate(
         r#"
         globalThis.records = [];
@@ -54,9 +57,12 @@ async fn child_list_append() {
 
 #[tokio::test]
 async fn child_list_remove() {
-    let mut page = Page::from_html(&html(r#"<div id="target"><span id="child"></span></div>"#), None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html(
+        &html(r#"<div id="target"><span id="child"></span></div>"#),
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate(
         r#"
         globalThis.records = [];
@@ -84,9 +90,12 @@ async fn child_list_remove() {
 
 #[tokio::test]
 async fn attributes_mutation() {
-    let mut page = Page::from_html(&html(r#"<div id="target"></div>"#), None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html(
+        &html(r#"<div id="target"></div>"#),
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate(
         r#"
         globalThis.records = [];
@@ -119,9 +128,12 @@ async fn attributes_mutation() {
 
 #[tokio::test]
 async fn disconnect_stops_callbacks() {
-    let mut page = Page::from_html(&html(r#"<div id="target"></div>"#), None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html(
+        &html(r#"<div id="target"></div>"#),
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate(
         r#"
         globalThis.count = 0;
@@ -151,9 +163,12 @@ async fn disconnect_stops_callbacks() {
 
 #[tokio::test]
 async fn take_records() {
-    let mut page = Page::from_html(&html(r#"<div id="target"></div>"#), None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html(
+        &html(r#"<div id="target"></div>"#),
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate(
         r#"
         globalThis.observer = new MutationObserver(() => {});

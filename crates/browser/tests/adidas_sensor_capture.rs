@@ -18,18 +18,13 @@
 #[tokio::test]
 #[ignore]
 async fn adidas_sensor_capture() {
-    let dir = std::env::var("BOXIDE_DUMP_POST_DIR")
-        .unwrap_or_else(|_| "/tmp/oxide-sensor".to_string());
+    let dir =
+        std::env::var("BOXIDE_DUMP_POST_DIR").unwrap_or_else(|_| "/tmp/oxide-sensor".to_string());
     std::env::set_var("BOXIDE_DUMP_POST_DIR", &dir);
     let _ = std::fs::remove_dir_all(&dir);
 
     let profile = stealth::chrome_130_macos();
-    let page = browser::Page::navigate(
-        "https://www.adidas.com/us",
-        profile,
-        1,
-    )
-    .await;
+    let page = browser::Page::navigate("https://www.adidas.com/us", profile, 1).await;
 
     match page {
         Ok(_) => println!("[oxide] navigate returned Ok"),
@@ -41,11 +36,7 @@ async fn adidas_sensor_capture() {
         let mut bodies: Vec<_> = entries
             .filter_map(|e| e.ok())
             .map(|e| e.path())
-            .filter(|p| {
-                p.extension()
-                    .map(|x| x == "body")
-                    .unwrap_or(false)
-            })
+            .filter(|p| p.extension().map(|x| x == "body").unwrap_or(false))
             .collect();
         bodies.sort();
         println!("[oxide] captured {} POST bodies in {dir}", bodies.len());

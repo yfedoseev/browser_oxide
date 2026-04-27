@@ -15,7 +15,7 @@ fn drive_runtime(code: &str, wait_ms: u64) -> String {
     let local = tokio::task::LocalSet::new();
     local.block_on(&rt, async move {
         let mut runtime = BrowserJsRuntime::new(dom);
-        runtime.execute_script(code).unwrap();
+        runtime.execute_script(code, None).unwrap();
         // Drive the event loop with a bounded timeout, allowing setInterval
         // polling (Worker uses 5 ms poll) time to deliver the reply.
         let deadline = std::time::Instant::now() + Duration::from_millis(wait_ms);
@@ -29,7 +29,7 @@ fn drive_runtime(code: &str, wait_ms: u64) -> String {
             let _ = tokio::time::timeout(tick, fut).await;
             // Check if we got an answer yet.
             if let Ok(val) =
-                runtime.execute_script("document.querySelector('#out').textContent || ''")
+                runtime.execute_script("document.querySelector('#out').textContent || ''", None)
             {
                 if !val.is_empty() {
                     return val;
@@ -37,7 +37,7 @@ fn drive_runtime(code: &str, wait_ms: u64) -> String {
             }
         }
         runtime
-            .execute_script("document.querySelector('#out').textContent || ''")
+            .execute_script("document.querySelector('#out').textContent || ''", None)
             .unwrap_or_default()
     })
 }

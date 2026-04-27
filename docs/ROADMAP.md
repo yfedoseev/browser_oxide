@@ -1,5 +1,22 @@
 # browser_oxide Roadmap — SOTA 2026
 
+> **Status note (2026-04-26):** This document is the *original build roadmap*
+> covering Phases 1–7 (CSS → DOM → V8 → Canvas → Stealth → Layout → CDP →
+> Hardening). Most of it is shipped or in progress. For the **2026 stealth
+> SOTA work** (closing the render-stack, behavioral, and protocol-validation
+> gaps that separate us from Camoufox/CloakBrowser), see:
+>
+> - **`docs/SOTA_ROADMAP_2026.md`** — sequenced 3-phase implementation plan
+>   (JS shims → render stack → behavioral entropy)
+> - **`docs/GAPS.md`** — gap catalogue P0–P33 with current status
+> - **`docs/CAPABILITY_GAPS_2026.md`** — earlier capability audit (partially
+>   superseded by SOTA_ROADMAP_2026.md)
+> - **`docs/NEXT_STEPS.md`** — site-by-site execution queue
+>
+> The phase-by-phase roadmap below remains the reference for the underlying
+> engine architecture. New SOTA work plugs into the existing crate structure
+> rather than creating new phases.
+
 ## Phase 1: Foundation (CSS + DOM + HTML Parsing)
 
 **Goal**: Parse HTML → mutable DOM with Shadow DOM → query with CSS selectors → compute styles.

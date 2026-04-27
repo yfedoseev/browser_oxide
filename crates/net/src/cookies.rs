@@ -1,16 +1,17 @@
 //! Simple cookie jar for persisting cookies across requests.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use url::Url;
 
 /// A simple cookie jar that stores cookies per domain.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CookieJar {
     /// Cookies keyed by domain → (name → Cookie)
     cookies: HashMap<String, HashMap<String, Cookie>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Cookie {
     name: String,
     value: String,
@@ -73,6 +74,32 @@ impl CookieJar {
         } else {
             Some(pairs.join("; "))
         }
+    }
+
+    /// Persist the jar to a JSON file. Atomic via tempfile + rename.
+    /// Used to accumulate Kasada (and other) trust across pipeline runs:
+    /// once /tl issues us a session, we keep tkrm_alpekz_*, AKA_A2 etc.
+    /// for subsequent runs which lifts our reputation score.
+    pub fn save_to_file(&self, path: &std::path::Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string(self).map_err(std::io::Error::other)?;
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    }
+
+    /// Load a jar from a JSON file. Returns an empty jar if the file
+    /// doesn't exist (first-run case). Returns an error only if the
+    /// file exists but is malformed.
+    pub fn load_from_file(path: &std::path::Path) -> std::io::Result<Self> {
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let bytes = std::fs::read(path)?;
+        serde_json::from_slice(&bytes).map_err(std::io::Error::other)
     }
 }
 
@@ -168,13 +195,7 @@ mod tests {
     fn multiple_cookies() {
         let mut jar = CookieJar::new();
         let url = Url::parse("https://example.com/").unwrap();
-        jar.set_cookies(
-            &url,
-            &[
-                "a=1".to_string(),
-                "b=2".to_string(),
-            ],
-        );
+        jar.set_cookies(&url, &["a=1".to_string(), "b=2".to_string()]);
 
         let cookies = jar.cookies_for(&url).unwrap();
         assert!(cookies.contains("a=1"));

@@ -1,17 +1,19 @@
 use browser::Page;
-use stealth::presets;
 use std::time::Duration;
+use stealth::presets;
 
 #[tokio::test]
 #[ignore] // Requires internet
 async fn probe_sannysoft_bot_detection() {
     let profile = presets::chrome_130_ru();
     // navigate() uses the full loop with 5 iterations, including __pendingNavigation follow
-    let mut page = Page::navigate("https://bot.sannysoft.com", profile, 5).await.unwrap();
-    
+    let mut page = Page::navigate("https://bot.sannysoft.com", profile, 5)
+        .await
+        .unwrap();
+
     // Wait for the page to finish all its async checks
     tokio::time::sleep(Duration::from_secs(15)).await;
-    
+
     let result: Result<String, _> = page.evaluate(r#"
         (function() {
             const results = {};
@@ -41,13 +43,18 @@ async fn probe_sannysoft_bot_detection() {
             return JSON.stringify(results);
         })()
     "#);
-    
+
     match result {
         Ok(json) => println!("Sannysoft Results: {}", json),
         Err(e) => {
             let html: String = page.evaluate("document.body.innerHTML").unwrap_or_default();
-            let errors: String = page.evaluate("JSON.stringify(window.__errors || [])").unwrap_or_default();
-            println!("Sannysoft extraction failed: {}. Captured Errors: {}. Body HTML: {}", e, errors, html);
+            let errors: String = page
+                .evaluate("JSON.stringify(window.__errors || [])")
+                .unwrap_or_default();
+            println!(
+                "Sannysoft extraction failed: {}. Captured Errors: {}. Body HTML: {}",
+                e, errors, html
+            );
         }
     }
 }
@@ -57,12 +64,16 @@ async fn probe_sannysoft_bot_detection() {
 async fn probe_creepjs_score() {
     let profile = presets::chrome_130_ru();
     // CreepJS is heavy and takes time to compute
-    let mut page = Page::with_profile("", "https://abrahamjuliot.github.io/creepjs/", profile).await.unwrap();
-    
+    let mut page = Page::with_profile("", "https://abrahamjuliot.github.io/creepjs/", profile)
+        .await
+        .unwrap();
+
     println!("Waiting for CreepJS to finish (30s)...");
     tokio::time::sleep(Duration::from_secs(30)).await;
-    
-    let result: String = page.evaluate(r#"
+
+    let result: String = page
+        .evaluate(
+            r#"
         (function() {
             const results = {};
             try {
@@ -81,8 +92,10 @@ async fn probe_creepjs_score() {
             }
             return JSON.stringify(results);
         })()
-    "#).unwrap();
-    
+    "#,
+        )
+        .unwrap();
+
     println!("CreepJS Results: {}", result);
 }
 
@@ -90,11 +103,15 @@ async fn probe_creepjs_score() {
 #[ignore] // Requires internet
 async fn probe_browser_scan() {
     let profile = presets::chrome_130_ru();
-    let mut page = Page::with_profile("", "https://www.browserscan.net/bot-detection", profile).await.unwrap();
-    
+    let mut page = Page::with_profile("", "https://www.browserscan.net/bot-detection", profile)
+        .await
+        .unwrap();
+
     tokio::time::sleep(Duration::from_secs(10)).await;
-    
-    let result: String = page.evaluate(r#"
+
+    let result: String = page
+        .evaluate(
+            r#"
         (function() {
             const results = {};
             // Look for bot detection indicators
@@ -106,7 +123,9 @@ async fn probe_browser_scan() {
             });
             return JSON.stringify(results);
         })()
-    "#).unwrap();
-    
+    "#,
+        )
+        .unwrap();
+
     println!("BrowserScan Results: {}", result);
 }

@@ -22,8 +22,14 @@ async fn wildberries_full_solver_trace() {
     println!("\n=== STAGE 1: initial GET ===");
     let resp1 = client.get(url).await.unwrap();
     println!("status={} body={}b", resp1.status, resp1.body.len());
-    println!("x-wbaas-token header: {:?}", resp1.headers.get("x-wbaas-token"));
-    println!("status-no-id header: {:?}", resp1.headers.get("status-no-id"));
+    println!(
+        "x-wbaas-token header: {:?}",
+        resp1.headers.get("x-wbaas-token")
+    );
+    println!(
+        "status-no-id header: {:?}",
+        resp1.headers.get("status-no-id")
+    );
     println!("set-cookies: {}", resp1.set_cookies.len());
     for c in &resp1.set_cookies {
         let trim: String = c.chars().take(120).collect();
@@ -36,8 +42,7 @@ async fn wildberries_full_solver_trace() {
     }
 
     println!("\n=== STAGE 2: run the solver via Page::navigate_with_challenges ===");
-    let page_result =
-        browser::Page::navigate(url, stealth::presets::chrome_130_ru(), 1).await;
+    let page_result = browser::Page::navigate(url, stealth::presets::chrome_130_ru(), 1).await;
     match page_result {
         Ok(mut page) => {
             let body = page.content();
@@ -65,7 +70,11 @@ async fn wildberries_full_solver_trace() {
     // OnceLock. If we create a new HttpClient and call get, it uses its own
     // jar, not the one Page's client used. Verify this is indeed the case.
     let resp2 = client2.get(url).await.unwrap();
-    println!("2nd GET from fresh client: status={} body={}b", resp2.status, resp2.body.len());
+    println!(
+        "2nd GET from fresh client: status={} body={}b",
+        resp2.status,
+        resp2.body.len()
+    );
     println!("jar after 2nd GET:");
     let cookies4 = client2.cookies_for_url(&parsed).await.unwrap_or_default();
     for kv in cookies4.split("; ").take(12) {

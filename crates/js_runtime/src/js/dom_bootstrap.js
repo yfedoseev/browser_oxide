@@ -45,6 +45,21 @@
         return node;
     }
 
+    // Tracks base URLs (query-stripped) of scripts currently being sync-fetched.
+    // Guards against re-entrant fetch loops: e.g. Yandex Metrika's bootstrap IIFE
+    // inserts a new <script src="tag.js?timestamp"> while tag.js is still being
+    // evaluated. Without this guard the fetch recurses infinitely.
+    const _syncFetchInFlight = new Set();
+
+    // Tracks nesting depth of sync eval chains. Each _onNodeInserted call that
+    // fetches+evals a script increments this. Scripts beyond MAX nesting are
+    // degraded to async — prevents C++ stack overflow when deeply-nested
+    // third-party SDKs load more scripts during their own synchronous eval
+    // (each pending eval adds a large V8 interpreter frame to the C stack;
+    // 6-9 levels can overflow an 8 MB Rust thread stack).
+    let _syncEvalDepth = 0;
+    const _MAX_SYNC_EVAL_DEPTH = 4;
+
     function _onNodeInserted(child, sync = true) {
         if (!child) return;
 
@@ -81,7 +96,41 @@
             }
 
             if (sync) {
-                console.log(`[DOM] sync fetching script: ${fullUrl}`);
+                // Strip query params for in-flight dedup: scripts that reload themselves
+                // with a cache-busting timestamp (e.g. Yandex Metrika tag.js?<timestamp>)
+                // share the same base URL and would recurse infinitely without this guard.
+                const baseUrl = fullUrl.split('?')[0];
+                if (_syncFetchInFlight.has(baseUrl)) {
+                    // Re-entrant same-URL fetch — fire load event and bail to break the cycle.
+                    if (scriptEl.onload) scriptEl.onload(new Event('load'));
+                    scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
+                    return;
+                }
+                // Depth guard: if sync evals are already nested beyond the safe limit,
+                // degrade to async. This prevents C++ stack overflow from chains like
+                // tag.js → pixel.js → tracker.js → … where each level blocks the V8
+                // thread inside op_net_fetch_sync while its eval frame stays on stack.
+                if (_syncEvalDepth >= _MAX_SYNC_EVAL_DEPTH) {
+                    console.log(`[DOM] sync eval depth limit (${_MAX_SYNC_EVAL_DEPTH}) — falling back to async: ${fullUrl}`);
+                    (async () => {
+                        try {
+                            const resp = await globalThis.fetch(fullUrl);
+                            if (resp.ok) {
+                                const code = await resp.text();
+                                try { (0, eval)(code); } catch(_) {}
+                                if (scriptEl.onload) scriptEl.onload(new Event('load'));
+                                scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
+                            }
+                        } catch(_) {
+                            if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
+                            scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                        }
+                    })();
+                    return;
+                }
+                _syncFetchInFlight.add(baseUrl);
+                _syncEvalDepth++;
+                console.log(`[DOM] sync fetching script (depth ${_syncEvalDepth}): ${fullUrl}`);
                 try {
                     const code = ops.op_net_fetch_sync(fullUrl, globalThis.location?.href || "");
                     if (code) {
@@ -105,6 +154,9 @@
                     console.log(`[DOM] sync fetch OP error for ${fullUrl}: ${e.message}`);
                     if (scriptEl.onerror) scriptEl.onerror(new Event('error'));
                     scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('error'));
+                } finally {
+                    _syncFetchInFlight.delete(baseUrl);
+                    _syncEvalDepth--;
                 }
             } else {
                 console.log(`[DOM] async fetching script: ${fullUrl}`);
@@ -782,6 +834,9 @@
                 body: finalBody,
                 kind: 'assign'
             };
+            // Signal the Rust event loop to short-circuit run_until_idle —
+            // see crates/js_runtime/src/extensions/nav_ext.rs.
+            try { ops.op_set_pending_nav(); } catch (_) {}
         }
         requestSubmit(submitter) {
             this.submit();
@@ -1734,7 +1789,7 @@
     // before page scripts run. Callers must CAPTURE the helper during
     // their own bootstrap execution, not look it up per-call.
     Object.defineProperty(globalThis, '__boxide', {
-        value: Object.freeze({ _getNodeId }),
+        value: { _getNodeId },
         enumerable: false,
         configurable: true,
         writable: false,

@@ -122,8 +122,7 @@ pub fn chrome_connector() -> Result<SslConnector, NetError> {
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
     // Load Mozilla root certificates into the certificate store
-    let mut cert_store =
-        X509StoreBuilder::new().map_err(|e| NetError::Tls(e.to_string()))?;
+    let mut cert_store = X509StoreBuilder::new().map_err(|e| NetError::Tls(e.to_string()))?;
 
     // Also load system default CA paths for cross-signed/intermediate certs
     cert_store
@@ -209,7 +208,11 @@ mod tests {
     #[test]
     fn connector_builds_successfully() {
         let connector = chrome_connector();
-        assert!(connector.is_ok(), "Failed to build Chrome TLS connector: {:?}", connector.err());
+        assert!(
+            connector.is_ok(),
+            "Failed to build Chrome TLS connector: {:?}",
+            connector.err()
+        );
     }
 
     #[test]

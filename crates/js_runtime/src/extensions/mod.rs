@@ -6,6 +6,8 @@ pub mod dom_ext;
 pub mod fetch_ext;
 pub mod input_ext;
 pub mod layout_ext;
+pub mod nav_ext;
+pub mod perf_ext;
 pub mod sse_ext;
 pub mod stealth_ext;
 pub mod timer_ext;

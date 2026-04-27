@@ -1,5 +1,15 @@
 # browser_oxide — Capability Gap Audit, April 2026
 
+**Status (updated 2026-04-26):** Partially superseded by [`SOTA_ROADMAP_2026.md`](SOTA_ROADMAP_2026.md). Specifically:
+
+- **§T1.3 (Audio Blink port) — DONE.** `crates/canvas/src/audio.rs:1–818` is bit-accurate to Blink at ~3.6 ppm. The remaining audio work (realtime AudioContext, Analyser FFT, Biquad response, per-`audio_seed` jitter) is tracked in SOTA_ROADMAP_2026.md Phase 2.2 and [`GAPS.md`](GAPS.md) §27.
+- **§T1.4 (Finish WebGL via OSMesa) — SUPERSEDED.** OSMesa is Linux-only and the project supports macOS Darwin. Replacement plan: `wgpu` 29.x + Lavapipe (cross-platform Vulkan SwAdapter). See SOTA_ROADMAP_2026.md Phase 2.1 and [`GAPS.md`](GAPS.md) §26. The existing `webgl_render.rs` glow code is a reusable scaffold; the JS-shim wiring (`canvas_bootstrap.js:339–397` calls no ops) and cross-platform native context are the actual blockers.
+- **§T1.1 (skia-safe Canvas 2D), §T1.2 (cosmic-text font stack), §T1.5 (Worker plumbing), Tier 2/3 items — STILL APPLICABLE** as written. Schedule them around the Phase 1–3 work in SOTA_ROADMAP_2026.md.
+
+The original document continues unchanged below for reference.
+
+---
+
 **Purpose.** Rank the native-library integrations needed to close the remaining
 fingerprint gaps between browser_oxide and Chrome 130, for the legitimate
 defensive-research goal of passing every major antibot engine in 2026. This
@@ -24,13 +34,15 @@ computes incorrectly.
 Two concrete mistakes surfaced while grounding the document in real source.
 Both are tiny fixes and should land before any large integration work.
 
-1. **`crates/canvas/src/audio.rs:159`** — our `AudioParams::default` uses
+1. ~~**`crates/canvas/src/audio.rs:159`** — our `AudioParams::default` uses
    `length: 44100` (1 second), but CreepJS and the common "audio-fp" probe
    (FingerprintJS, Castle, pixelscan) use `OfflineAudioContext(1, 5000, 44100)`
    and sample indices 4500–4600 for their hash
    (ref: `creepjs/src/audio/index.ts`). Running our compressor on 44100 samples
    instead of 5000 produces wrong buffer contents at the indices that actually
-   get hashed. Change the default to `length: 5000`.
+   get hashed. Change the default to `length: 5000`.~~ **FIXED 2026-04-26 audit:**
+   `crates/canvas/src/audio.rs:74` sets `length: 5000`; test
+   `correct_length_5000` (line 704) guards it.
 
 2. **`crates/canvas/src/canvas2d.rs:99`** — `Gradient::Radial::to_shader` drops
    `x0,y0,r0` on the floor and passes `(x1,y1)` twice to `RadialGradient::new`.

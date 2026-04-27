@@ -38,7 +38,13 @@ impl BlockerProbeResult {
     }
 }
 
-fn classify(body: &str, status: u16, positive: &[&str], negative: &[&str], min_size: usize) -> Verdict {
+fn classify(
+    body: &str,
+    status: u16,
+    positive: &[&str],
+    negative: &[&str],
+    min_size: usize,
+) -> Verdict {
     if status >= 400 && status != 403 && status != 429 {
         return Verdict::Error;
     }
@@ -94,7 +100,8 @@ async fn probe_site(
     // Baseline path:navigate_simple does not execute JS.
     // It only gets the raw HTML from the server.
     let client = net::HttpClient::new(&profile).unwrap();
-    let (baseline_status, baseline_size, baseline_verdict) = match client.get_follow(url, 10).await {
+    let (baseline_status, baseline_size, baseline_verdict) = match client.get_follow(url, 10).await
+    {
         Ok(resp) => {
             let body = resp.text();
             let size = body.len();
@@ -107,16 +114,15 @@ async fn probe_site(
     // Solver path: Page::navigate runs the full challenge flow,
     // following `__pendingNavigation` set by challenge scripts for
     // up to 5 iterations.
-    let (solver_status, solver_size, solver_verdict) =
-        match Page::navigate(url, profile, 5).await {
-            Ok(mut page) => {
-                let body = page.content();
-                let size = body.len();
-                let v = classify(&body, 200, positive, negative, min_size);
-                (200, size, v)
-            }
-            Err(_) => (0, 0, Verdict::Error),
-        };
+    let (solver_status, solver_size, solver_verdict) = match Page::navigate(url, profile, 5).await {
+        Ok(mut page) => {
+            let body = page.content();
+            let size = body.len();
+            let v = classify(&body, 200, positive, negative, min_size);
+            (200, size, v)
+        }
+        Err(_) => (0, 0, Verdict::Error),
+    };
 
     BlockerProbeResult {
         name: name.to_string(),
@@ -143,7 +149,12 @@ async fn tier05_blockers_all() {
             "https://www.adidas.com/us",
             "akamai-bmp-v3",
             stealth::chrome_130_macos(),
-            &["adidas-us", "product-card", "utag_data", "Sneakers and Activewear"],
+            &[
+                "adidas-us",
+                "product-card",
+                "utag_data",
+                "Sneakers and Activewear",
+            ],
             &[
                 "sec-if-cpt-container",
                 "Pardon Our Interruption",

@@ -48,6 +48,13 @@ pub fn chrome_headers(profile: &StealthProfile) -> Vec<(String, String)> {
 /// Used on post-challenge retries where the challenge engine may be
 /// distinguishing fresh user navs from programmatic reloads.
 pub fn chrome_headers_reload(profile: &StealthProfile, referer: &str) -> Vec<(String, String)> {
+    // Real Chrome on a same-origin reload sends ONLY low-entropy CH
+    // unless the previous response advertised `Accept-CH`. Sending
+    // high-entropy hints unconditionally is a bot signal — verified
+    // 2026-04-27 by httpbin.org/headers comparison: real Chrome 147
+    // never sends sec-ch-ua-arch/bitness/full-version-list/etc on
+    // first visits OR same-origin reloads (only after the server
+    // has explicitly opted in via Accept-CH).
     let mut hdrs: Vec<(String, String)> = chrome_headers_impl(profile, false)
         .into_iter()
         .filter(|(k, _)| k != "sec-fetch-user")
@@ -133,7 +140,10 @@ pub fn chrome_headers_fetch(
     // Origin + Referer — always set for same-site + cross-site fetches
     if let Some(o) = origin {
         headers.push(("origin".to_string(), o.to_string()));
-        headers.push(("referer".to_string(), format!("{}/", o.trim_end_matches('/'))));
+        headers.push((
+            "referer".to_string(),
+            format!("{}/", o.trim_end_matches('/')),
+        ));
     }
 
     headers
@@ -293,21 +303,19 @@ fn chrome_platform_version(os_name: &str, os_version: &str) -> String {
 
 /// Build the `Sec-CH-UA-Full-Version-List` header value.
 ///
-/// **Chrome 146 live capture** from the developer's machine:
+/// **Chrome 147 live capture** (httpbin.org/headers via playwright,
+/// 2026-04-27): real Chrome 147 only sends this header AFTER an
+/// `Accept-CH` advertisement. When sent, the format is:
 /// ```text
-/// "Chromium";v="146.0.0.0", "Not-A.Brand";v="24.0.0.0", "Google Chrome";v="146.0.0.0"
+/// "Google Chrome";v="147.0.7727.117", "Not.A/Brand";v="8.0.0.0", "Chromium";v="147.0.7727.117"
 /// ```
-/// Note the brand triple's order: `Chromium`, then `Not-A.Brand` in
-/// the **middle**, then `Google Chrome`. The "Not" brand rotates
-/// format across Chrome versions (was `Not?A_Brand` in Chrome 120-ish,
-/// `Not/A)Brand` earlier, now `Not-A.Brand` in 146). We track the
-/// current format; the brand ordering and version v=24 are also
-/// from the live capture.
+/// Order: `Google Chrome`, `Not.A/Brand` middle, `Chromium`. The "Not"
+/// brand format and version rotates per Chrome major release — Chrome 147
+/// uses `Not.A/Brand` v="8" (was `Not-A.Brand` v="24" in Chrome 130-146).
+/// Brand strings here MUST match `build_sec_ch_ua` exactly.
 fn build_sec_ch_ua_full_version_list(profile: &StealthProfile) -> String {
     let v = &profile.browser_version;
-    format!(
-        "\"Chromium\";v=\"{v}\", \"Not-A.Brand\";v=\"24.0.0.0\", \"Google Chrome\";v=\"{v}\""
-    )
+    format!("\"Google Chrome\";v=\"{v}\", \"Not.A/Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"{v}\"")
 }
 
 /// Build the sec-ch-ua header value from the browser version.
@@ -320,14 +328,18 @@ fn build_sec_ch_ua_full_version_list(profile: &StealthProfile) -> String {
 /// version numbers drop the `.0.0.0` suffix. `Not-A.Brand` in the
 /// middle, not the end.
 fn build_sec_ch_ua(profile: &StealthProfile) -> String {
-    let major_version = profile
-        .browser_version
-        .split('.')
-        .next()
-        .unwrap_or("146");
+    let major_version = profile.browser_version.split('.').next().unwrap_or("147");
 
+    // Real Chrome 147 sec-ch-ua (verified via playwright on 2026-04-27):
+    //   "Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"
+    // Brand order is [Google Chrome, Not.A/Brand, Chromium] (NOT
+    // alphabetical and NOT what the W3C spec implies). The "Not."-style
+    // dummy brand changes per Chrome version — we hardcode the v=8 / dot-slash
+    // form that matches Chrome 147+. Earlier Chrome (130 era) used
+    // "Not-A.Brand";v="24" with brands ordered [Chromium, Not-A.Brand, Google Chrome]
+    // — that's what we used to emit, but it's a tell on modern Chrome.
     format!(
-        "\"Chromium\";v=\"{v}\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"{v}\"",
+        "\"Google Chrome\";v=\"{v}\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"{v}\"",
         v = major_version
     )
 }
@@ -352,6 +364,112 @@ fn build_accept_language(languages: &[String]) -> String {
     }
 
     parts.join(",")
+}
+
+// ================================================================
+// Cross-origin isolation — COOP / COEP response-header parsing
+// ----------------------------------------------------------------
+// Anti-bot vendors (Kasada 2024+) probe `self.crossOriginIsolated` and
+// `typeof SharedArrayBuffer`. The browser sets `crossOriginIsolated = true`
+// only when both Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy
+// response headers are present with restrictive values:
+//   COOP: same-origin
+//   COEP: require-corp | credentialless
+//
+// See web.dev/articles/coop-coep and gap #30 in docs/GAPS.md.
+// ================================================================
+
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoopValue {
+    UnsafeNone,
+    SameOriginAllowPopups,
+    SameOrigin,
+    NoopenerAllowPopups,
+    RestrictProperties,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoepValue {
+    UnsafeNone,
+    RequireCorp,
+    Credentialless,
+}
+
+/// Parsed COOP+COEP for a document response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DocumentPolicy {
+    pub coop: CoopValue,
+    pub coep: CoepValue,
+}
+
+impl Default for DocumentPolicy {
+    fn default() -> Self {
+        Self {
+            coop: CoopValue::UnsafeNone,
+            coep: CoepValue::UnsafeNone,
+        }
+    }
+}
+
+/// Case-insensitive lookup of a single header value in a HashMap.
+fn lookup_header<'a>(headers: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
+    let lower = name.to_ascii_lowercase();
+    headers
+        .iter()
+        .find(|(k, _)| k.to_ascii_lowercase() == lower)
+        .map(|(_, v)| v.as_str())
+}
+
+/// Extract the bare value token from a header value, stripping any
+/// `;directive=value` suffixes (e.g. `report-to=`) and surrounding quotes.
+fn bare_value(raw: &str) -> &str {
+    let head = raw.split(';').next().unwrap_or(raw).trim();
+    head.trim_matches('"')
+}
+
+fn parse_coop(raw: &str) -> CoopValue {
+    match bare_value(raw).to_ascii_lowercase().as_str() {
+        "same-origin" => CoopValue::SameOrigin,
+        "same-origin-allow-popups" => CoopValue::SameOriginAllowPopups,
+        "noopener-allow-popups" => CoopValue::NoopenerAllowPopups,
+        "restrict-properties" => CoopValue::RestrictProperties,
+        _ => CoopValue::UnsafeNone,
+    }
+}
+
+fn parse_coep(raw: &str) -> CoepValue {
+    match bare_value(raw).to_ascii_lowercase().as_str() {
+        "require-corp" => CoepValue::RequireCorp,
+        "credentialless" => CoepValue::Credentialless,
+        _ => CoepValue::UnsafeNone,
+    }
+}
+
+/// Parse Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy from a
+/// response's headers. Missing headers default to `unsafe-none`.
+pub fn parse_document_policy(headers: &HashMap<String, String>) -> DocumentPolicy {
+    DocumentPolicy {
+        coop: lookup_header(headers, "cross-origin-opener-policy")
+            .map(parse_coop)
+            .unwrap_or(CoopValue::UnsafeNone),
+        coep: lookup_header(headers, "cross-origin-embedder-policy")
+            .map(parse_coep)
+            .unwrap_or(CoepValue::UnsafeNone),
+    }
+}
+
+/// True iff the document satisfies cross-origin isolation requirements.
+/// Per [web.dev/articles/coop-coep], COI requires:
+///   COOP = same-origin
+///   COEP = require-corp OR credentialless
+pub fn is_cross_origin_isolated(policy: &DocumentPolicy) -> bool {
+    matches!(policy.coop, CoopValue::SameOrigin)
+        && matches!(
+            policy.coep,
+            CoepValue::RequireCorp | CoepValue::Credentialless
+        )
 }
 
 #[cfg(test)]
@@ -444,22 +562,21 @@ mod tests {
 
     #[test]
     fn sec_ch_ua_full_version_list_has_chrome_version() {
-        // Chrome 146 live capture format:
-        //   "Chromium";v="<ver>", "Not-A.Brand";v="24.0.0.0", "Google Chrome";v="<ver>"
-        // The "Not" brand rotates across Chrome versions (was
-        // `Not?A_Brand` in earlier ones); we track the current one.
+        // Chrome 147+ live capture format:
+        //   "Google Chrome";v="<ver>", "Not.A/Brand";v="8.0.0.0", "Chromium";v="<ver>"
+        // The "Not" brand name rotates across major releases (was `Not-A.Brand`
+        // v="24" in Chrome 130-146; changed to `Not.A/Brand` v="8" in Chrome 147+).
         let profile = stealth::chrome_130_linux();
         let value = build_sec_ch_ua_full_version_list(&profile);
         assert!(value.contains("Google Chrome"));
         assert!(value.contains(&profile.browser_version));
-        assert!(value.contains("Not-A.Brand"));
-        // Brand order: Chromium first, Not-A.Brand in the middle,
-        // Google Chrome last.
-        let chromium_idx = value.find("Chromium").unwrap();
-        let not_idx = value.find("Not-A.Brand").unwrap();
+        assert!(value.contains("Not.A/Brand"));
+        // Brand order: Google Chrome first, Not.A/Brand middle, Chromium last.
         let google_idx = value.find("Google Chrome").unwrap();
-        assert!(chromium_idx < not_idx);
-        assert!(not_idx < google_idx);
+        let not_idx = value.find("Not.A/Brand").unwrap();
+        let chromium_idx = value.find("Chromium").unwrap();
+        assert!(google_idx < not_idx);
+        assert!(not_idx < chromium_idx);
     }
 
     #[test]
@@ -479,6 +596,84 @@ mod tests {
         assert_eq!(cpu_arch_for("Linux x86_64"), "x86");
     }
 
+    // ============================================================
+    // COOP / COEP / cross-origin isolation tests (gap #30)
+    // ============================================================
+
+    #[test]
+    fn coi_default_when_headers_absent() {
+        let headers: HashMap<String, String> = HashMap::new();
+        let policy = parse_document_policy(&headers);
+        assert_eq!(policy.coop, CoopValue::UnsafeNone);
+        assert_eq!(policy.coep, CoepValue::UnsafeNone);
+        assert!(!is_cross_origin_isolated(&policy));
+    }
+
+    #[test]
+    fn coi_true_with_same_origin_and_require_corp() {
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert("cross-origin-opener-policy".into(), "same-origin".into());
+        headers.insert("cross-origin-embedder-policy".into(), "require-corp".into());
+        let policy = parse_document_policy(&headers);
+        assert!(is_cross_origin_isolated(&policy));
+    }
+
+    #[test]
+    fn coi_true_with_same_origin_and_credentialless() {
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert("cross-origin-opener-policy".into(), "same-origin".into());
+        headers.insert(
+            "cross-origin-embedder-policy".into(),
+            "credentialless".into(),
+        );
+        let policy = parse_document_policy(&headers);
+        assert!(is_cross_origin_isolated(&policy));
+    }
+
+    #[test]
+    fn coi_false_with_only_coop() {
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert("cross-origin-opener-policy".into(), "same-origin".into());
+        let policy = parse_document_policy(&headers);
+        assert!(!is_cross_origin_isolated(&policy));
+    }
+
+    #[test]
+    fn coi_false_with_same_origin_allow_popups() {
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(
+            "cross-origin-opener-policy".into(),
+            "same-origin-allow-popups".into(),
+        );
+        headers.insert("cross-origin-embedder-policy".into(), "require-corp".into());
+        let policy = parse_document_policy(&headers);
+        // same-origin-allow-popups does NOT qualify per spec.
+        assert!(!is_cross_origin_isolated(&policy));
+    }
+
+    #[test]
+    fn coi_parser_strips_directives_and_quotes() {
+        // "same-origin"; report-to=foo  --> CoopValue::SameOrigin
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(
+            "cross-origin-opener-policy".into(),
+            "\"same-origin\"; report-to=\"foo\"".into(),
+        );
+        headers.insert("cross-origin-embedder-policy".into(), "require-corp".into());
+        let policy = parse_document_policy(&headers);
+        assert_eq!(policy.coop, CoopValue::SameOrigin);
+        assert!(is_cross_origin_isolated(&policy));
+    }
+
+    #[test]
+    fn coi_case_insensitive_header_lookup() {
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert("Cross-Origin-Opener-Policy".into(), "same-origin".into());
+        headers.insert("Cross-Origin-Embedder-Policy".into(), "require-corp".into());
+        let policy = parse_document_policy(&headers);
+        assert!(is_cross_origin_isolated(&policy));
+    }
+
     #[test]
     fn client_hints_match_profile_version() {
         // Invariant: the sec-ch-ua value and the sec-ch-ua-full-version-list value
@@ -487,7 +682,12 @@ mod tests {
         // Accept-CH variant because that's the one that carries both values.
         let profile = stealth::chrome_130_windows();
         let headers = chrome_headers_with_accept_ch(&profile);
-        let sec_ch_ua = headers.iter().find(|(k, _)| k == "sec-ch-ua").unwrap().1.clone();
+        let sec_ch_ua = headers
+            .iter()
+            .find(|(k, _)| k == "sec-ch-ua")
+            .unwrap()
+            .1
+            .clone();
         let fvl = headers
             .iter()
             .find(|(k, _)| k == "sec-ch-ua-full-version-list")

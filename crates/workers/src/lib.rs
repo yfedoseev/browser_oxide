@@ -36,10 +36,11 @@ impl WebWorker {
             };
             globalThis.onmessage = null;
         "#,
+            None,
         )?;
 
         // Execute the worker script
-        runtime.execute_script(script)?;
+        runtime.execute_script(script, None)?;
 
         Ok(Self {
             runtime,
@@ -55,10 +56,13 @@ impl WebWorker {
             return Ok(());
         }
         let json = serde_json::to_string(&data).unwrap_or_default();
-        self.runtime.execute_script(&format!(
-            r#"if (typeof onmessage === 'function') {{ onmessage({{ data: JSON.parse('{}') }}); }}"#,
-            json.replace('\\', "\\\\").replace('\'', "\\'")
-        ))?;
+        self.runtime.execute_script(
+            &format!(
+                r#"if (typeof onmessage === 'function') {{ onmessage({{ data: JSON.parse('{}') }}); }}"#,
+                json.replace('\\', "\\\\").replace('\'', "\\'")
+            ),
+            None,
+        )?;
         Ok(())
     }
 
@@ -66,7 +70,7 @@ impl WebWorker {
     pub fn collect_messages(&mut self) -> Result<Vec<Value>, deno_core::error::AnyError> {
         let result = self
             .runtime
-            .execute_script(r#"JSON.stringify(globalThis._workerMessages.splice(0))"#)?;
+            .execute_script(r#"JSON.stringify(globalThis._workerMessages.splice(0))"#, None)?;
         let messages: Vec<String> = serde_json::from_str(&result).unwrap_or_default();
         Ok(messages
             .into_iter()

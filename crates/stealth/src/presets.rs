@@ -38,21 +38,22 @@ fn default_media_devices(seed: &str) -> Vec<MediaDeviceInfo> {
 /// Chrome 130 on Windows 10.
 pub fn chrome_130_windows() -> StealthProfile {
     StealthProfile {
-        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
-        browser_version: "130.0.6723.91".into(),
+        browser_version: "147.0.7727.117".into(),
         os_name: "Windows".into(),
         os_version: "10.0".into(),
         platform: "Win32".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
 
         screen_width: 1920,
         screen_height: 1080,
         screen_avail_width: 1920,
         screen_avail_height: 1040,
+        screen_avail_top: 0,
         screen_color_depth: 24,
         device_pixel_ratio: 1.0,
         cpu_cores: 8,
@@ -84,6 +85,10 @@ pub fn chrome_130_windows() -> StealthProfile {
         canvas_seed: 0x1234567890abcdef,
         audio_seed: 0xfedcba0987654321,
 
+        has_platform_authenticator: true,
+        conditional_mediation: true,
+        allow_http3: false,
+
         prefers_color_scheme: "light".into(),
         pointer_type: "fine".into(),
         hover_capability: "hover".into(),
@@ -99,24 +104,37 @@ pub fn chrome_130_windows() -> StealthProfile {
     }
 }
 
-/// Chrome 130 on macOS 15.
+/// Chrome 147 on macOS 15. (UA bumped 2026-04-27 — anti-bot vendors flag old Chrome
+/// versions. Real Chrome shipped 147 in mid-Apr 2026 per playwright's bundled chromium.
+/// TLS impersonation is still chrome_130 — verified byte-identical to Chrome 147 via
+/// tls.peet.ws JA4/Akamai-FP comparison (chrome_130 BoringSSL config tracks current).
+///
+/// **CRITICAL**: navigator.userAgent reports `Chrome/147.0.0.0` (FROZEN minor versions
+/// per Chrome's User-Agent reduction since March 2023 / Chrome 110+). The full version
+/// `147.0.7727.117` is ONLY exposed via sec-ch-ua-full-version-list. Sending the full
+/// version in the UA string is a 100% reliable bot signal — verified 2026-04-27 by
+/// comparing httpbin.org/headers from playwright vs our pipeline.)
 pub fn chrome_130_macos() -> StealthProfile {
     StealthProfile {
-        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
-        browser_version: "130.0.6723.91".into(),
+        // browser_version stores the FULL version — used by sec-ch-ua-full-version-list
+        // and by build_sec_ch_ua's major-version split. The UA string above uses
+        // the reduced 147.0.0.0 form per Chrome's UA-reduction policy.
+        browser_version: "147.0.7727.117".into(),
         os_name: "macOS".into(),
         os_version: "15.2".into(),
         platform: "MacIntel".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        app_version: "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
 
         screen_width: 1440,
         screen_height: 900,
         screen_avail_width: 1440,
         screen_avail_height: 875,
+        screen_avail_top: 25,
         screen_color_depth: 30,
         device_pixel_ratio: 2.0,
         cpu_cores: 10,
@@ -148,6 +166,10 @@ pub fn chrome_130_macos() -> StealthProfile {
         canvas_seed: 0xabcdef1234567890,
         audio_seed: 0x0987654321fedcba,
 
+        has_platform_authenticator: true,
+        conditional_mediation: true,
+        allow_http3: false,
+
         prefers_color_scheme: "light".into(),
         pointer_type: "fine".into(),
         hover_capability: "hover".into(),
@@ -166,21 +188,22 @@ pub fn chrome_130_macos() -> StealthProfile {
 /// Chrome 130 on Linux.
 pub fn chrome_130_linux() -> StealthProfile {
     StealthProfile {
-        user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
-        browser_version: "130.0.6723.91".into(),
+        browser_version: "147.0.7727.117".into(),
         os_name: "Linux".into(),
         os_version: "6.1".into(),
         platform: "Linux x86_64".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        app_version: "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
 
         screen_width: 1920,
         screen_height: 1080,
         screen_avail_width: 1920,
         screen_avail_height: 1053,
+        screen_avail_top: 0,
         screen_color_depth: 24,
         device_pixel_ratio: 1.0,
         cpu_cores: 8,
@@ -212,6 +235,11 @@ pub fn chrome_130_linux() -> StealthProfile {
         canvas_seed: 0x1111222233334444,
         audio_seed: 0x5555666677778888,
 
+        // Linux desktop has no platform authenticator (no Touch ID / Windows Hello).
+        has_platform_authenticator: false,
+        conditional_mediation: true,
+        allow_http3: false,
+
         prefers_color_scheme: "light".into(),
         pointer_type: "fine".into(),
         hover_capability: "hover".into(),
@@ -230,18 +258,19 @@ pub fn chrome_130_linux() -> StealthProfile {
 /// Chrome 130 on Windows — Russian locale (Moscow).
 pub fn chrome_130_ru() -> StealthProfile {
     StealthProfile {
-        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
-        browser_version: "130.0.6723.91".into(),
+        browser_version: "147.0.7727.117".into(),
         os_name: "Windows".into(),
         os_version: "10.0".into(),
         platform: "Win32".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         screen_width: 1920, screen_height: 1080,
         screen_avail_width: 1920, screen_avail_height: 1040,
+        screen_avail_top: 0,
         screen_color_depth: 24, device_pixel_ratio: 1.0,
         cpu_cores: 8, device_memory: 8, max_touch_points: 0,
         webgl_vendor: "Google Inc. (NVIDIA)".into(),
@@ -259,6 +288,7 @@ pub fn chrome_130_ru() -> StealthProfile {
         connection_rtt: 100, connection_downlink: 8.0,
         pdf_viewer_enabled: true, plugins_count: 5, mime_types_count: 2,
         canvas_seed: 0xaaaa_bbbb_cccc_dddd, audio_seed: 0xdddd_cccc_bbbb_aaaa,
+        has_platform_authenticator: true, conditional_mediation: true, allow_http3: false,
         prefers_color_scheme: "light".into(),
         pointer_type: "fine".into(), hover_capability: "hover".into(),
         inner_width: 1920, inner_height: 969,
@@ -272,18 +302,19 @@ pub fn chrome_130_ru() -> StealthProfile {
 /// Chrome 130 on Windows — Chinese locale (Shanghai).
 pub fn chrome_130_cn() -> StealthProfile {
     StealthProfile {
-        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
-        browser_version: "130.0.6723.91".into(),
+        browser_version: "147.0.7727.117".into(),
         os_name: "Windows".into(),
         os_version: "10.0".into(),
         platform: "Win32".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36".into(),
+        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         screen_width: 1920, screen_height: 1080,
         screen_avail_width: 1920, screen_avail_height: 1040,
+        screen_avail_top: 0,
         screen_color_depth: 24, device_pixel_ratio: 1.25,
         cpu_cores: 12, device_memory: 16, max_touch_points: 0,
         webgl_vendor: "Google Inc. (NVIDIA)".into(),
@@ -301,6 +332,7 @@ pub fn chrome_130_cn() -> StealthProfile {
         connection_rtt: 150, connection_downlink: 6.0,
         pdf_viewer_enabled: true, plugins_count: 5, mime_types_count: 2,
         canvas_seed: 0x1122_3344_5566_7788, audio_seed: 0x8877_6655_4433_2211,
+        has_platform_authenticator: true, conditional_mediation: true, allow_http3: false,
         prefers_color_scheme: "light".into(),
         pointer_type: "fine".into(), hover_capability: "hover".into(),
         inner_width: 1920, inner_height: 969,
@@ -372,6 +404,29 @@ mod tests {
     }
 
     #[test]
+    fn http3_disabled_by_default_on_all_presets() {
+        // Gap #33: vanilla quinn-proto emits randomized transport_parameters
+        // per handshake; advertising h3 is worse than not speaking it. All
+        // shipped presets must default allow_http3 to false until we
+        // vendor-fork quinn with a Chrome-fixed-order patch.
+        for profile in [
+            chrome_130_windows(),
+            chrome_130_macos(),
+            chrome_130_linux(),
+            chrome_130_ru(),
+            chrome_130_cn(),
+            chrome_130_de(),
+            chrome_130_jp(),
+        ] {
+            assert!(
+                !profile.allow_http3,
+                "Profile {} has allow_http3=true; gap #33 forbids this",
+                profile.user_agent
+            );
+        }
+    }
+
+    #[test]
     fn chrome_130_macos_validates() {
         let profile = chrome_130_macos();
         assert!(profile.validate().is_ok(), "{:?}", profile.validate());
@@ -418,7 +473,10 @@ mod tests {
     #[test]
     fn ua_contains_version() {
         let profile = chrome_130_windows();
-        assert!(profile.user_agent.contains("130.0.6723.91"));
+        // Chrome UA-reduction freezes minor versions to 0; only major is in the UA string.
+        // Full version lives in browser_version for sec-ch-ua-full-version-list.
+        assert!(profile.user_agent.contains("147.0.0.0"));
+        assert_eq!(profile.browser_version, "147.0.7727.117");
     }
 
     #[test]

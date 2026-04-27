@@ -558,9 +558,12 @@ async fn kasada_poc_canadagoose_dump_body() {
 async fn text_encoder_strict_iife_nested() {
     // Reproduce the Kasada solver's exact pattern: strict-mode IIFE with
     // nested function using `new TextEncoder().encode(...)`.
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = browser::Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     let r = page
         .evaluate(
             r#"(function(){
@@ -588,9 +591,12 @@ async fn text_encoder_strict_iife_nested() {
 async fn kasada_text_encoder_exact_snippet() {
     // Extract the exact snippet from the solver around `new TextEncoder()`
     // and run it in isolation to see if it reproduces.
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = browser::Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     let snippet = r#"(function(){
         "use strict";
         try {
@@ -641,9 +647,12 @@ async fn kasada_error_unfiltered_stack() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = browser::Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     let r = page
         .evaluate(&wrapped)
         .unwrap_or_else(|e| format!("OUTER: {e}"));
@@ -691,9 +700,12 @@ async fn kasada_function_probe_hunt_full() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = browser::Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     let r = page
         .evaluate(&wrapped)
         .unwrap_or_else(|e| format!("OUTER: {e}"));
@@ -774,9 +786,12 @@ async fn kasada_function_probe_hunt() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = browser::Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     let r = page
         .evaluate(&wrapped)
         .unwrap_or_else(|e| format!("OUTER: {e}"));
@@ -829,9 +844,12 @@ async fn kasada_solver_minimal_load() {
         }})()"#,
         solver_code
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = browser::Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     let r = page
         .evaluate(&wrapped)
         .unwrap_or_else(|e| format!("OUTER: {e}"));
@@ -842,9 +860,12 @@ async fn kasada_solver_minimal_load() {
 #[ignore]
 async fn text_encoder_sanity() {
     // Isolation test: does TextEncoder work in our runtime at all?
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = browser::Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     let r1 = page.evaluate("typeof TextEncoder").unwrap_or_default();
     let r2 = page
         .evaluate("typeof globalThis.TextEncoder")
@@ -925,8 +946,7 @@ async fn kasada_poc_canadagoose_full_browser() {
     // fetches the /ips.js or similar and executes it.
     println!("\n=== Kasada POC: canadagoose.com full browser ===\n");
     let profile = stealth::chrome_130_windows();
-    match browser::Page::navigate("https://www.canadagoose.com/", profile, 2).await
-    {
+    match browser::Page::navigate("https://www.canadagoose.com/", profile, 2).await {
         Ok(mut page) => {
             let title = page.title();
             let url = page.url().to_string();
@@ -1068,9 +1088,12 @@ async fn adidas_prototype_patch_hunt() {
         }})()"#,
         sensor
     );
-    let mut page = browser::Page::from_html("<!DOCTYPE html><html><body></body></html>", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = browser::Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     let r = page
         .evaluate(&wrapped)
         .unwrap_or_else(|e| format!("OUTER: {e}"));
@@ -1780,8 +1803,14 @@ async fn yandex_sso_install_post_dump() {
     let body = push.text();
 
     // Extract form params by regex: it.host + retpath + container
-    let host = extract_str(&body, r#""host":""#, r#"""#).unwrap_or_default().replace(r"\u002F", "/").replace(r"\/", "/");
-    let retpath = extract_str(&body, r#""retpath":""#, r#"""#).unwrap_or_default().replace(r"\u002F", "/").replace(r"\/", "/");
+    let host = extract_str(&body, r#""host":""#, r#"""#)
+        .unwrap_or_default()
+        .replace(r"\u002F", "/")
+        .replace(r"\/", "/");
+    let retpath = extract_str(&body, r#""retpath":""#, r#"""#)
+        .unwrap_or_default()
+        .replace(r"\u002F", "/")
+        .replace(r"\/", "/");
     let container = extract_str(&body, r#"element2.value = '"#, "'").unwrap_or_default();
 
     println!("install host:  {host}");
@@ -1790,16 +1819,23 @@ async fn yandex_sso_install_post_dump() {
 
     // Step 2: POST sso.ya.ru/install
     let form_body = {
-        let params = [("retpath", retpath.as_str()), ("container", container.as_str())];
+        let params = [
+            ("retpath", retpath.as_str()),
+            ("container", container.as_str()),
+        ];
         let mut s = String::new();
         for (i, (k, v)) in params.iter().enumerate() {
-            if i > 0 { s.push('&'); }
+            if i > 0 {
+                s.push('&');
+            }
             s.push_str(k);
             s.push('=');
             // minimal urlencode: just percent-encode non-alphanum
             for b in v.bytes() {
                 match b {
-                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => s.push(b as char),
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                        s.push(b as char)
+                    }
                     _ => s.push_str(&format!("%{:02X}", b)),
                 }
             }
@@ -1807,8 +1843,14 @@ async fn yandex_sso_install_post_dump() {
         s
     };
     let hdrs = vec![
-        ("content-type".to_string(), "application/x-www-form-urlencoded".to_string()),
-        ("origin".to_string(), "https://sso.passport.yandex.ru".to_string()),
+        (
+            "content-type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        ),
+        (
+            "origin".to_string(),
+            "https://sso.passport.yandex.ru".to_string(),
+        ),
         ("referer".to_string(), push.url.clone()),
     ];
     println!("\n=== STEP 2: POST {host} ===");
@@ -1826,7 +1868,10 @@ async fn yandex_sso_install_post_dump() {
     for (k, v) in &hs {
         println!("  {k}: {}", &v[..v.len().min(200)]);
     }
-    println!("---set-cookies ({} entries)---", install_resp.set_cookies.len());
+    println!(
+        "---set-cookies ({} entries)---",
+        install_resp.set_cookies.len()
+    );
     for c in &install_resp.set_cookies {
         println!("  set-cookie: {}", &c[..c.len().min(200)]);
     }
@@ -1841,7 +1886,7 @@ async fn yandex_sso_install_post_dump() {
 fn extract_str<'a>(hay: &'a str, start: &str, end: &str) -> Option<String> {
     let i = hay.find(start)? + start.len();
     let j = hay[i..].find(end)?;
-    Some(hay[i..i+j].to_string())
+    Some(hay[i..i + j].to_string())
 }
 
 #[tokio::test]
@@ -1897,7 +1942,9 @@ async fn yandex_sso_form_submit_diagnostic() {
     println!("is_real_content:   {is_real}");
 
     // Is our HTMLFormElement.prototype.submit still the one we installed?
-    let submit_probe = page.evaluate(r#"
+    let submit_probe = page
+        .evaluate(
+            r#"
         (() => {
             const proto = globalThis.HTMLFormElement?.prototype;
             const s = proto?.submit;
@@ -1909,11 +1956,15 @@ async fn yandex_sso_form_submit_diagnostic() {
                 mentions_pendingNavigation: src.includes('__pendingNavigation'),
             });
         })()
-    "#).unwrap_or_default();
+    "#,
+        )
+        .unwrap_or_default();
     println!("HTMLFormElement.submit probe: {submit_probe}");
 
     // Enumerate forms
-    let forms_probe = page.evaluate(r#"
+    let forms_probe = page
+        .evaluate(
+            r#"
         (() => {
             const list = [];
             const forms = document.getElementsByTagName('form');
@@ -1930,15 +1981,25 @@ async fn yandex_sso_form_submit_diagnostic() {
             }
             return JSON.stringify(list);
         })()
-    "#).unwrap_or_default();
-    println!("document.forms ({}): {}", content.matches("<form").count(), forms_probe);
+    "#,
+        )
+        .unwrap_or_default();
+    println!(
+        "document.forms ({}): {}",
+        content.matches("<form").count(),
+        forms_probe
+    );
 
     // Pending nav
-    let pending = page.evaluate("JSON.stringify(globalThis.__pendingNavigation || null)").unwrap_or_default();
+    let pending = page
+        .evaluate("JSON.stringify(globalThis.__pendingNavigation || null)")
+        .unwrap_or_default();
     println!("__pendingNavigation: {pending}");
 
     // Fetch log (tail)
-    let fl = page.evaluate("JSON.stringify(window.__fetchLog || [])").unwrap_or_default();
+    let fl = page
+        .evaluate("JSON.stringify(window.__fetchLog || [])")
+        .unwrap_or_default();
     if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&fl) {
         println!("__fetchLog ({} entries):", arr.len());
         for (i, e) in arr.iter().enumerate().take(15) {
@@ -1952,7 +2013,9 @@ async fn yandex_sso_form_submit_diagnostic() {
     }
 
     // Script errors
-    let errs = page.evaluate("JSON.stringify(window.__scriptErrors || [])").unwrap_or_default();
+    let errs = page
+        .evaluate("JSON.stringify(window.__scriptErrors || [])")
+        .unwrap_or_default();
     println!("__scriptErrors: {}", &errs[..errs.len().min(1200)]);
 
     // Does createElement('form') return an instance with our submit method?
@@ -2043,9 +2106,15 @@ async fn kasada_ftp_scheme_via_navigate() {
         "https://www.canadagoose.com/",
         profile,
         1,
-    ).await.unwrap();
-    let _ = page.evaluate_async("", std::time::Duration::from_secs(3)).await;
-    let result = page.evaluate("JSON.stringify(globalThis.__tests || {})").unwrap_or_default();
+    )
+    .await
+    .unwrap();
+    let _ = page
+        .evaluate_async("", std::time::Duration::from_secs(3))
+        .await;
+    let result = page
+        .evaluate("JSON.stringify(globalThis.__tests || {})")
+        .unwrap_or_default();
     println!("navigate+wrapper fetch(ftp:) test: {result}");
 }
 
@@ -2102,7 +2171,9 @@ async fn kasada_ftp_url_behavior_probe() {
             await tryFetch('/ftp:');
         })();
     "#, std::time::Duration::from_secs(10)).await;
-    let fetch_results = page.evaluate("JSON.stringify(globalThis.__fetchTests || {})").unwrap_or_default();
+    let fetch_results = page
+        .evaluate("JSON.stringify(globalThis.__fetchTests || {})")
+        .unwrap_or_default();
     println!("fetch() behavior probe: {fetch_results}");
 
     // What does real Chrome do? Per WHATWG URL spec:
@@ -2299,22 +2370,46 @@ async fn kasada_ips_deep_instrumentation() {
     // Run ips.js and let it churn for 60 seconds — user observed browsers
     // "wait like JS check and some delay" before the real page loads.
     let _ = page.evaluate(&solver_code);
-    let _ = page.evaluate_async("", std::time::Duration::from_secs(60)).await;
+    let _ = page
+        .evaluate_async("", std::time::Duration::from_secs(60))
+        .await;
 
     // Collect trace.
-    let kpsdk_in_headers = page.evaluate("JSON.stringify(globalThis.__TRACE.kpsdkHeaders || {})").unwrap_or_default();
-    println!("=== x-kpsdk-* headers seen via Headers.set/append: {}", kpsdk_in_headers);
+    let kpsdk_in_headers = page
+        .evaluate("JSON.stringify(globalThis.__TRACE.kpsdkHeaders || {})")
+        .unwrap_or_default();
+    println!(
+        "=== x-kpsdk-* headers seen via Headers.set/append: {}",
+        kpsdk_in_headers
+    );
 
-    let events = page.evaluate("JSON.stringify((globalThis.__TRACE.events || []).slice(0, 30))").unwrap_or_default();
-    println!("=== events dispatched: {}", &events[..events.len().min(1500)]);
+    let events = page
+        .evaluate("JSON.stringify((globalThis.__TRACE.events || []).slice(0, 30))")
+        .unwrap_or_default();
+    println!(
+        "=== events dispatched: {}",
+        &events[..events.len().min(1500)]
+    );
 
-    let listeners = page.evaluate("JSON.stringify(globalThis.__TRACE.listeners || [])").unwrap_or_default();
-    println!("=== listeners registered: {}", &listeners[..listeners.len().min(1500)]);
+    let listeners = page
+        .evaluate("JSON.stringify(globalThis.__TRACE.listeners || [])")
+        .unwrap_or_default();
+    println!(
+        "=== listeners registered: {}",
+        &listeners[..listeners.len().min(1500)]
+    );
 
-    let beacons = page.evaluate("JSON.stringify(globalThis.__TRACE.beacons || [])").unwrap_or_default();
-    println!("=== sendBeacon calls: {}", &beacons[..beacons.len().min(800)]);
+    let beacons = page
+        .evaluate("JSON.stringify(globalThis.__TRACE.beacons || [])")
+        .unwrap_or_default();
+    println!(
+        "=== sendBeacon calls: {}",
+        &beacons[..beacons.len().min(800)]
+    );
 
-    let xhr_req = page.evaluate("JSON.stringify(globalThis.__TRACE.xhrReq || [])").unwrap_or_default();
+    let xhr_req = page
+        .evaluate("JSON.stringify(globalThis.__TRACE.xhrReq || [])")
+        .unwrap_or_default();
     println!("=== XHR calls: {}", &xhr_req[..xhr_req.len().min(1000)]);
 
     let fetch_req = page.evaluate(r#"JSON.stringify((globalThis.__TRACE.fetchReq || []).map(r => {
@@ -2324,12 +2419,23 @@ async fn kasada_ips_deep_instrumentation() {
         }
         return {url: r.url, kpsdk: kp};
     }))"#).unwrap_or_default();
-    println!("=== fetch calls (x-kpsdk-* only): {}", &fetch_req[..fetch_req.len().min(2000)]);
+    println!(
+        "=== fetch calls (x-kpsdk-* only): {}",
+        &fetch_req[..fetch_req.len().min(2000)]
+    );
 
-    let defines = page.evaluate("JSON.stringify((globalThis.__TRACE.defines || []).slice(0, 20))").unwrap_or_default();
-    println!("=== defineProperty with token-looking values ({} entries): {}", defines.len(), &defines[..defines.len().min(1500)]);
+    let defines = page
+        .evaluate("JSON.stringify((globalThis.__TRACE.defines || []).slice(0, 20))")
+        .unwrap_or_default();
+    println!(
+        "=== defineProperty with token-looking values ({} entries): {}",
+        defines.len(),
+        &defines[..defines.len().min(1500)]
+    );
 
-    let fn_cnt = page.evaluate("String((globalThis.__TRACE.funcs || []).length)").unwrap_or_default();
+    let fn_cnt = page
+        .evaluate("String((globalThis.__TRACE.funcs || []).length)")
+        .unwrap_or_default();
     let fn_tokens = page.evaluate(r#"
         JSON.stringify((() => {
             const list = globalThis.__TRACE.funcs || [];
@@ -2345,7 +2451,11 @@ async fn kasada_ips_deep_instrumentation() {
             return matches;
         })())
     "#).unwrap_or_default();
-    println!("=== Function bodies (of {}): {}", fn_cnt, &fn_tokens[..fn_tokens.len().min(3000)]);
+    println!(
+        "=== Function bodies (of {}): {}",
+        fn_cnt,
+        &fn_tokens[..fn_tokens.len().min(3000)]
+    );
 
     // Search KPSDK for any newly-added keys after running ips.js.
     let kpsdk_final = page.evaluate(r#"
@@ -2366,7 +2476,9 @@ async fn kasada_ips_deep_instrumentation() {
     println!("=== window.KPSDK after ips.js run: {}", kpsdk_final);
 
     // Dump the last 20 funcs verbatim for offline inspection
-    let _ = page.evaluate(r#"globalThis.__TRACE_DUMP = JSON.stringify((globalThis.__TRACE.funcs || []).slice(-50))"#);
+    let _ = page.evaluate(
+        r#"globalThis.__TRACE_DUMP = JSON.stringify((globalThis.__TRACE.funcs || []).slice(-50))"#,
+    );
     if let Ok(dump) = page.evaluate("globalThis.__TRACE_DUMP") {
         let _ = std::fs::write("/tmp/kasada_trace_funcs.json", dump);
         println!("wrote /tmp/kasada_trace_funcs.json");
@@ -2380,10 +2492,12 @@ async fn kasada_canadagoose_subpath_diagnostic() {
     // treats "/" as always-challenge and subpages as real content.
     println!("\n=== Kasada canadagoose subpath test ===");
     let profile = stealth::chrome_130_windows();
-    for url in ["https://www.canadagoose.com/us/en/home-page",
-                "https://www.canadagoose.com/us/en/shop/all",
-                "https://www.canadagoose.com/us/en",
-                "https://www.canadagoose.com/us/en/shop/men-outerwear-parkas"] {
+    for url in [
+        "https://www.canadagoose.com/us/en/home-page",
+        "https://www.canadagoose.com/us/en/shop/all",
+        "https://www.canadagoose.com/us/en",
+        "https://www.canadagoose.com/us/en/shop/men-outerwear-parkas",
+    ] {
         match browser::Page::navigate(url, profile.clone(), 5).await {
             Ok(mut p) => {
                 let c = p.content();
@@ -2392,7 +2506,12 @@ async fn kasada_canadagoose_subpath_diagnostic() {
                 let has_real = c.contains("Canada Goose") && !is_challenge;
                 println!("  {url}");
                 println!("    final_url: {url_final}");
-                println!("    content_len: {}, challenge: {}, real: {}", c.len(), is_challenge, has_real);
+                println!(
+                    "    content_len: {}, challenge: {}, real: {}",
+                    c.len(),
+                    is_challenge,
+                    has_real
+                );
             }
             Err(e) => println!("  {url} failed: {e}"),
         }
@@ -2411,7 +2530,10 @@ async fn kasada_canadagoose_raw_with_cookies_test() {
     let client = net::HttpClient::new(&profile).unwrap();
 
     println!("\nStep 1: initial GET");
-    let r1 = client.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    let r1 = client
+        .get_follow("https://www.canadagoose.com/", 10)
+        .await
+        .unwrap();
     println!("  status={} body={}b", r1.status, r1.body.len());
     println!("  set-cookies ({}):", r1.set_cookies.len());
     for c in &r1.set_cookies {
@@ -2419,23 +2541,35 @@ async fn kasada_canadagoose_raw_with_cookies_test() {
     }
 
     println!("\nStep 2: immediate re-GET (same connection pool, cookies from jar)");
-    let r2 = client.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    let r2 = client
+        .get_follow("https://www.canadagoose.com/", 10)
+        .await
+        .unwrap();
     println!("  status={} body={}b", r2.status, r2.body.len());
 
     println!("\nStep 3: GET with reload-style headers + Referer");
     let reload_hdrs = net::headers::chrome_headers_reload(&profile, "https://www.canadagoose.com/");
-    let r3 = client.get_follow_exact_headers("https://www.canadagoose.com/", &reload_hdrs, 10).await.unwrap();
+    let r3 = client
+        .get_follow_exact_headers("https://www.canadagoose.com/", &reload_hdrs, 10)
+        .await
+        .unwrap();
     println!("  status={} body={}b", r3.status, r3.body.len());
 
     println!("\nStep 4: Wait 3s, then GET (timing test)");
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-    let r4 = client.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    let r4 = client
+        .get_follow("https://www.canadagoose.com/", 10)
+        .await
+        .unwrap();
     println!("  status={} body={}b", r4.status, r4.body.len());
 
     println!("\nStep 5: GET with NO cookies (fresh client - new jar)");
     let profile2 = stealth::chrome_130_windows();
     let client2 = net::HttpClient::new(&profile2).unwrap();
-    let r5 = client2.get_follow("https://www.canadagoose.com/", 10).await.unwrap();
+    let r5 = client2
+        .get_follow("https://www.canadagoose.com/", 10)
+        .await
+        .unwrap();
     println!("  status={} body={}b", r5.status, r5.body.len());
 }
 
@@ -2461,14 +2595,18 @@ async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
     println!("final url:        {}", page.url());
     let content = page.content();
     println!("final content len: {} bytes", content.len());
-    let is_challenge = content.contains("/ips.js") || content.contains("/149e9513-") || content.contains("KPSDK");
+    let is_challenge =
+        content.contains("/ips.js") || content.contains("/149e9513-") || content.contains("KPSDK");
     let is_real = content.contains("Canada Goose") && !is_challenge;
     println!("is_challenge:     {is_challenge}");
     println!("is_real_content:  {is_real}");
 
     // document.cookie from V8's perspective
     let doc_cookie = page.evaluate("document.cookie").unwrap_or_default();
-    println!("document.cookie:  {}", &doc_cookie[..doc_cookie.len().min(800)]);
+    println!(
+        "document.cookie:  {}",
+        &doc_cookie[..doc_cookie.len().min(800)]
+    );
 
     // Pending nav (usually cleared by cleanup_bootstrap, but try)
     let pending = page
@@ -2477,7 +2615,9 @@ async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
     println!("__pendingNavigation: {pending}");
 
     // What did scripts write to document.cookie?
-    let cw = page.evaluate("JSON.stringify(window.__cookieWrites || [])").unwrap_or_default();
+    let cw = page
+        .evaluate("JSON.stringify(window.__cookieWrites || [])")
+        .unwrap_or_default();
     println!("__cookieWrites ({} entries):", cw.matches(',').count() + 1);
     println!("  {}", &cw[..cw.len().min(2000)]);
 
@@ -2498,7 +2638,10 @@ async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
             return { req: [...reqKeys], resp: [...respKeys], reqVals, respVals };
         })())
     "#).unwrap_or_default();
-    println!("All x-kpsdk-* headers in __fetchLog: {}", &all_kpsdk[..all_kpsdk.len().min(2000)]);
+    println!(
+        "All x-kpsdk-* headers in __fetchLog: {}",
+        &all_kpsdk[..all_kpsdk.len().min(2000)]
+    );
 
     // Full fetch log from the JS side (URL, method, status, req/resp headers)
     let fl = page
@@ -2532,11 +2675,16 @@ async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
             }
         }
     } else {
-        println!("(could not parse __fetchLog JSON; raw first 500: {})", &fl[..fl.len().min(500)]);
+        println!(
+            "(could not parse __fetchLog JSON; raw first 500: {})",
+            &fl[..fl.len().min(500)]
+        );
     }
 
     // Script errors
-    let errs = page.evaluate("JSON.stringify(window.__scriptErrors || [])").unwrap_or_default();
+    let errs = page
+        .evaluate("JSON.stringify(window.__scriptErrors || [])")
+        .unwrap_or_default();
     println!("__scriptErrors: {}", &errs[..errs.len().min(800)]);
 
     // location.reload / href behavior — check if pending nav was ever triggered

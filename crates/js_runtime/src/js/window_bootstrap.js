@@ -342,7 +342,121 @@
     globalThis.Permissions = Permissions;
     const _navPermissions = Object.create(Permissions.prototype);
 
-    const _navCredentials = {};
+    // ================================================================
+    // WebAuthn + FedCM (detection-shape only)
+    // ----------------------------------------------------------------
+    // Anti-bot vendors (DataDome 2025+, Kasada 2024+) probe:
+    //   typeof window.PublicKeyCredential
+    //   PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+    //   PublicKeyCredential.isConditionalMediationAvailable()
+    //   PublicKeyCredential.getClientCapabilities()  (Chrome 133+)
+    //   navigator.credentials.create({publicKey:...}) — must reject as
+    //     NotAllowedError after a realistic delay (not synchronous TypeError)
+    //   navigator.credentials.get({identity:...}) — FedCM branch
+    //   typeof IdentityCredential, typeof IdentityProvider
+    // No real authenticator is implemented — this is a shape stub. Profile
+    // fields has_platform_authenticator and conditional_mediation drive the
+    // resolved values. See docs/SOTA_ROADMAP_2026.md §1.1.
+    // ================================================================
+
+    class AuthenticatorResponse {}
+    Object.defineProperty(AuthenticatorResponse.prototype, Symbol.toStringTag,
+        { value: "AuthenticatorResponse", configurable: true });
+    class AuthenticatorAttestationResponse extends AuthenticatorResponse {}
+    Object.defineProperty(AuthenticatorAttestationResponse.prototype, Symbol.toStringTag,
+        { value: "AuthenticatorAttestationResponse", configurable: true });
+    class AuthenticatorAssertionResponse extends AuthenticatorResponse {}
+    Object.defineProperty(AuthenticatorAssertionResponse.prototype, Symbol.toStringTag,
+        { value: "AuthenticatorAssertionResponse", configurable: true });
+    globalThis.AuthenticatorResponse = AuthenticatorResponse;
+    globalThis.AuthenticatorAttestationResponse = AuthenticatorAttestationResponse;
+    globalThis.AuthenticatorAssertionResponse = AuthenticatorAssertionResponse;
+
+    class PublicKeyCredential {
+        constructor() { throw new TypeError("Illegal constructor"); }
+    }
+    Object.defineProperty(PublicKeyCredential.prototype, Symbol.toStringTag,
+        { value: "PublicKeyCredential", configurable: true });
+    PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = function () {
+        return Promise.resolve(_p("has_platform_authenticator", "false") === "true");
+    };
+    PublicKeyCredential.isConditionalMediationAvailable = function () {
+        return Promise.resolve(_p("conditional_mediation", "true") === "true");
+    };
+    // Chrome 133+ surface — see web.dev/articles/webauthn-client-capabilities.
+    PublicKeyCredential.getClientCapabilities = function () {
+        const uvpa = _p("has_platform_authenticator", "false") === "true";
+        return Promise.resolve({
+            conditionalCreate: false,
+            conditionalGet: true,
+            hybridTransport: true,
+            passkeyPlatformAuthenticator: uvpa,
+            userVerifyingPlatformAuthenticator: uvpa,
+            relatedOrigins: true,
+            signalAllAcceptedCredentials: true,
+            signalCurrentUserDetails: true,
+            signalUnknownCredential: true,
+        });
+    };
+    globalThis.PublicKeyCredential = PublicKeyCredential;
+
+    class IdentityCredential {
+        constructor() { throw new TypeError("Illegal constructor"); }
+    }
+    Object.defineProperty(IdentityCredential.prototype, Symbol.toStringTag,
+        { value: "IdentityCredential", configurable: true });
+    globalThis.IdentityCredential = IdentityCredential;
+
+    class IdentityProvider {}
+    IdentityProvider.getUserInfo = function () {
+        return Promise.reject(new DOMException("Not allowed", "NotAllowedError"));
+    };
+    globalThis.IdentityProvider = IdentityProvider;
+
+    function _fedcmGet(_identity) {
+        // No real IdP wiring. Reject the way Chrome does after the user dismisses
+        // (NotAllowedError) — anti-bot probes only assert reject-shape + delay.
+        return new Promise((_, rej) => setTimeout(() =>
+            rej(new DOMException("User declined or no eligible accounts.",
+                "NotAllowedError")), 200));
+    }
+
+    class CredentialsContainer {}
+    Object.defineProperty(CredentialsContainer.prototype, Symbol.toStringTag,
+        { value: "CredentialsContainer", configurable: true });
+    CredentialsContainer.prototype.create = function (opts) {
+        if (!opts || typeof opts !== "object") {
+            return Promise.reject(new TypeError(
+                "Failed to execute 'create' on 'CredentialsContainer': 1 argument required."));
+        }
+        if (opts.publicKey) {
+            // Realistic ~120 ms delay then NotAllowedError — matches Chrome with no UV.
+            return new Promise((_, rej) => setTimeout(() =>
+                rej(new DOMException(
+                    "The operation either timed out or was not allowed; see https://www.w3.org/TR/webauthn-2/#sctn-privacy-considerations-client.",
+                    "NotAllowedError")), 120));
+        }
+        return Promise.resolve(null);
+    };
+    CredentialsContainer.prototype.get = function (opts) {
+        if (opts && opts.identity) return _fedcmGet(opts.identity);
+        if (opts && opts.publicKey) {
+            return new Promise((_, rej) => setTimeout(() =>
+                rej(new DOMException(
+                    "The operation either timed out or was not allowed; see https://www.w3.org/TR/webauthn-2/#sctn-privacy-considerations-client.",
+                    "NotAllowedError")), 120));
+        }
+        return Promise.resolve(null);
+    };
+    CredentialsContainer.prototype.store = function () { return Promise.resolve(undefined); };
+    CredentialsContainer.prototype.preventSilentAccess = function () { return Promise.resolve(undefined); };
+    globalThis.CredentialsContainer = CredentialsContainer;
+    const _navCredentials = Object.create(CredentialsContainer.prototype);
+
+    _maskAsNative(PublicKeyCredential, 'isUserVerifyingPlatformAuthenticatorAvailable',
+        'isConditionalMediationAvailable', 'getClientCapabilities');
+    _maskAsNative(IdentityProvider, 'getUserInfo');
+    _maskAsNative(CredentialsContainer.prototype, 'create', 'get', 'store', 'preventSilentAccess');
 
     class Bluetooth {}
     Object.defineProperty(Bluetooth.prototype, Symbol.toStringTag, {
@@ -359,8 +473,65 @@
     const _navUsb = {};
     const _navSerial = {};
     const _navHid = {};
-    const _navKeyboard = {};
     const _navLocks = {};
+
+    // navigator.keyboard — Keyboard API (probed by CreepJS + DataDome).
+    // Real Chrome exposes a Keyboard instance with getLayoutMap() returning a
+    // KeyboardLayoutMap: a Map<string, string> of physical key code → character.
+    // An empty {} or missing getLayoutMap is an immediate lie signal.
+    const _qwertyLayout = new Map([
+        ['Backquote', '`'], ['Digit1', '1'], ['Digit2', '2'], ['Digit3', '3'],
+        ['Digit4', '4'], ['Digit5', '5'], ['Digit6', '6'], ['Digit7', '7'],
+        ['Digit8', '8'], ['Digit9', '9'], ['Digit0', '0'], ['Minus', '-'],
+        ['Equal', '='],
+        ['KeyQ', 'q'], ['KeyW', 'w'], ['KeyE', 'e'], ['KeyR', 'r'], ['KeyT', 't'],
+        ['KeyY', 'y'], ['KeyU', 'u'], ['KeyI', 'i'], ['KeyO', 'o'], ['KeyP', 'p'],
+        ['BracketLeft', '['], ['BracketRight', ']'], ['Backslash', '\\'],
+        ['KeyA', 'a'], ['KeyS', 's'], ['KeyD', 'd'], ['KeyF', 'f'], ['KeyG', 'g'],
+        ['KeyH', 'h'], ['KeyJ', 'j'], ['KeyK', 'k'], ['KeyL', 'l'],
+        ['Semicolon', ';'], ['Quote', "'"],
+        ['KeyZ', 'z'], ['KeyX', 'x'], ['KeyC', 'c'], ['KeyV', 'v'], ['KeyB', 'b'],
+        ['KeyN', 'n'], ['KeyM', 'm'],
+        ['Comma', ','], ['Period', '.'], ['Slash', '/'],
+        ['Space', ' '],
+        ['F1', 'F1'], ['F2', 'F2'], ['F3', 'F3'], ['F4', 'F4'],
+        ['F5', 'F5'], ['F6', 'F6'], ['F7', 'F7'], ['F8', 'F8'],
+        ['F9', 'F9'], ['F10', 'F10'], ['F11', 'F11'], ['F12', 'F12'],
+        ['Numpad0', '0'], ['Numpad1', '1'], ['Numpad2', '2'], ['Numpad3', '3'],
+        ['Numpad4', '4'], ['Numpad5', '5'], ['Numpad6', '6'], ['Numpad7', '7'],
+        ['Numpad8', '8'], ['Numpad9', '9'],
+        ['NumpadAdd', '+'], ['NumpadSubtract', '-'], ['NumpadMultiply', '*'],
+        ['NumpadDivide', '/'], ['NumpadDecimal', '.'],
+    ]);
+
+    class KeyboardLayoutMap {
+        constructor(map) { this._m = map; }
+        get size() { return this._m.size; }
+        get(key) { return this._m.get(key); }
+        has(key) { return this._m.has(key); }
+        entries() { return this._m.entries(); }
+        keys() { return this._m.keys(); }
+        values() { return this._m.values(); }
+        forEach(cb, thisArg) { return this._m.forEach(cb, thisArg); }
+        [Symbol.iterator]() { return this._m[Symbol.iterator](); }
+    }
+    Object.defineProperty(KeyboardLayoutMap.prototype, Symbol.toStringTag, {
+        value: 'KeyboardLayoutMap', configurable: true,
+    });
+    globalThis.KeyboardLayoutMap = KeyboardLayoutMap;
+
+    class Keyboard extends EventTarget {
+        getLayoutMap() {
+            return Promise.resolve(new KeyboardLayoutMap(_qwertyLayout));
+        }
+        lock(keyCodes) { return Promise.resolve(); }
+        unlock() {}
+    }
+    Object.defineProperty(Keyboard.prototype, Symbol.toStringTag, {
+        value: 'Keyboard', configurable: true,
+    });
+    globalThis.Keyboard = Keyboard;
+    const _navKeyboard = new Keyboard();
 
     class StorageManager {}
     Object.defineProperty(StorageManager.prototype, Symbol.toStringTag, {
@@ -543,7 +714,59 @@
     _defNavMethod('registerProtocolHandler', function registerProtocolHandler(scheme, url) {});
     _defNavMethod('unregisterProtocolHandler', function unregisterProtocolHandler(scheme, url) {});
     _defNavMethod('requestMediaKeySystemAccess', function requestMediaKeySystemAccess(keySystem, configs) {
-        return Promise.reject(new DOMException("Not supported", "NotSupportedError"));
+        // org.w3.clearkey is required by the W3C EME spec on all platforms.
+        // com.widevine.alpha is available on Windows and macOS (not Linux desktop).
+        // com.microsoft.playready is Windows-only.
+        // Returning NotSupportedError unconditionally is a bot signal probed by
+        // Kasada and Akamai BMP.
+        const _ks = String(keySystem);
+        const _os = _p("os_name", "Windows");
+        const _isWin = _os === "Windows";
+        const _isMac = _os === "macOS";
+
+        const _supported = (
+            _ks === 'org.w3.clearkey' ||
+            (_ks === 'com.widevine.alpha' && (_isWin || _isMac)) ||
+            (_ks === 'com.microsoft.playready' && _isWin)
+        );
+
+        if (!_supported) {
+            return Promise.reject(new DOMException(
+                "Failed to execute 'requestMediaKeySystemAccess' on 'Navigator': " +
+                "Requested configuration is not supported.",
+                "NotSupportedError"
+            ));
+        }
+
+        // Build a minimal MediaKeySystemAccess object.
+        // Real Chrome exposes: keySystem (string), getConfiguration() (object),
+        // createMediaKeys() (Promise<MediaKeys>).
+        const _access = {
+            keySystem: _ks,
+            getConfiguration: function getConfiguration() {
+                return configs && configs.length ? Object.assign({}, configs[0]) : {};
+            },
+            createMediaKeys: function createMediaKeys() {
+                // Return a minimal MediaKeys stub; sufficient for capability probes.
+                const _mk = {
+                    createSession: function createSession() {
+                        return {
+                            sessionId: '', expiration: NaN, closed: Promise.resolve(),
+                            keyStatuses: new Map(),
+                            addEventListener: function() {}, removeEventListener: function() {},
+                            generateRequest: function() { return Promise.resolve(); },
+                            load: function() { return Promise.resolve(false); },
+                            update: function() { return Promise.resolve(); },
+                            close: function() { return Promise.resolve(); },
+                            remove: function() { return Promise.resolve(); },
+                        };
+                    },
+                    setServerCertificate: function() { return Promise.resolve(false); },
+                };
+                return Promise.resolve(_mk);
+            },
+        };
+        return Promise.resolve(_access);
     });
     _defNavMethod('canShare', function canShare(data) { return false; });
     _defNavMethod('share', function share(data) {
@@ -613,23 +836,35 @@
         _defProtoGetter(_LocProto, prop, getter, setter);
     }
 
+    // Signal the Rust event loop that a navigation is pending. Without this,
+    // `run_until_idle(30s)` runs to its full ceiling before the retry GET
+    // fires — too late for Kasada's 5-second tolerance window. With it,
+    // run_until_idle returns within ~150ms (just enough microtask tail to
+    // let in-flight fetch().then(setCookie) land in the jar). See
+    // crates/js_runtime/src/extensions/nav_ext.rs.
+    const _signalNav = () => { try { ops.op_set_pending_nav(); } catch (_) {} };
+
     _defLoc('href', () => _locationData.href, (v) => {
         try { Deno.core.print('[BOOTSTRAP] SETTING LOCATION HREF TO ' + v + '\n'); } catch(e) {}
         _parseLocationUrl(v);
         globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _signalNav();
     });
     _defLoc('origin', () => _locationData.origin);
     _defLoc('protocol', () => _locationData.protocol, (v) => {
         _parseLocationUrl(v + "//" + _locationData.host + _locationData.pathname);
         globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _signalNav();
     });
     _defLoc('host', () => _locationData.host, (v) => {
         _parseLocationUrl(_locationData.protocol + "//" + v + _locationData.pathname);
         globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _signalNav();
     });
     _defLoc('hostname', () => _locationData.hostname, (v) => {
         _parseLocationUrl(_locationData.protocol + "//" + v + (_locationData.port ? ":" + _locationData.port : "") + _locationData.pathname);
         globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _signalNav();
     });
     _defLoc('port', () => _locationData.port);
     _defLoc('pathname', () => _locationData.pathname);
@@ -643,13 +878,16 @@
     _defProtoMethod(_LocProto, 'assign', (url) => {
         _parseLocationUrl(url);
         globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _signalNav();
     });
     _defProtoMethod(_LocProto, 'replace', (url) => {
         _parseLocationUrl(url);
         globalThis.__pendingNavigation = { url: _locationData.href, kind: "replace" };
+        _signalNav();
     });
     _defProtoMethod(_LocProto, 'reload', () => {
         globalThis.__pendingNavigation = { url: _locationData.href, kind: "reload" };
+        _signalNav();
     });
     _defProtoMethod(_LocProto, 'toString', function() { return this.href; });
     _LocProto[Symbol.toPrimitive] = function() { return this.href; };
@@ -691,7 +929,7 @@
     _defProtoGetter(_ScreenProto, 'availWidth', () => _pInt("screen_avail_width", 1920));
     _defProtoGetter(_ScreenProto, 'availHeight', () => _pInt("screen_avail_height", 1040));
     _defProtoGetter(_ScreenProto, 'availLeft', () => 0);
-    _defProtoGetter(_ScreenProto, 'availTop', () => 0);
+    _defProtoGetter(_ScreenProto, 'availTop', () => _pInt("screen_avail_top", 0));
     _defProtoGetter(_ScreenProto, 'colorDepth', () => _pInt("screen_color_depth", 24));
     _defProtoGetter(_ScreenProto, 'pixelDepth', () => 24);
     _defProtoGetter(_ScreenProto, 'orientation', () => _screenOrientation);
@@ -702,7 +940,15 @@
 
     // Misc globals anti-bot checks for
     globalThis.isSecureContext = true;
-    globalThis.crossOriginIsolated = false;
+    // crossOriginIsolated must reflect actual COOP+COEP state from the
+    // response headers — see crates/net/src/headers.rs and gap #30.
+    // Backed by an op so it's true iff the runtime was constructed with
+    // BrowserRuntimeOptions { cross_origin_isolated: true, .. }.
+    Object.defineProperty(globalThis, 'crossOriginIsolated', {
+        get: () => ops.op_cross_origin_isolated(),
+        configurable: true,
+        enumerable: true,
+    });
     globalThis.origin = "null";
     // Window metrics must resolve LAZILY — bootstrap runs at V8-snapshot
     // build time with no profile installed; eager values get baked as
@@ -775,10 +1021,12 @@
         value: function toString() { return 'function csi() { [native code] }'; },
         configurable: true,
     });
+    Object.defineProperty(_chromeCsi, _nativeTag, { value: 'csi', configurable: true });
     Object.defineProperty(_chromeLoadTimes, 'toString', {
         value: function toString() { return 'function loadTimes() { [native code] }'; },
         configurable: true,
     });
+    Object.defineProperty(_chromeLoadTimes, _nativeTag, { value: 'loadTimes', configurable: true });
     // chrome.webstore — legacy API (pre-2018). Modern Chrome still exposes
     // the object on the top-frame; its methods throw off-webstore. Probes
     // assert: typeof chrome.webstore === 'object', install is a function,
@@ -794,6 +1042,7 @@
         value: function toString() { return 'function install() { [native code] }'; },
         configurable: true,
     });
+    Object.defineProperty(_webstoreInstall, _nativeTag, { value: 'install', configurable: true });
     const _makeListenerHandle = () => ({
         addListener() {},
         removeListener() {},
@@ -862,7 +1111,7 @@
     if (globalThis.Screen) {
         const _ScreenProto = Screen.prototype;
         _defProtoGetter(_ScreenProto, 'availLeft', () => 0);
-        _defProtoGetter(_ScreenProto, 'availTop', () => 0);
+        _defProtoGetter(_ScreenProto, 'availTop', () => _pInt("screen_avail_top", 0));
         _defProtoGetter(_ScreenProto, 'colorDepth', () => 24);
         _defProtoGetter(_ScreenProto, 'pixelDepth', () => 24);
     }
@@ -1073,7 +1322,7 @@
                 this._pollTimer = setInterval(() => {
                     if (!self._id) return;
                     const deserializer =
-                        globalThis.__boxide && globalThis.__boxide.deserializeFromWire;
+                        _boxide && _boxide.deserializeFromWire;
                     for (let i = 0; i < 32; i++) {
                         const raw = _wops.op_worker_poll_from_worker(self._id);
                         if (!raw) return;
@@ -1582,6 +1831,7 @@
             value: () => "function getTimezoneOffset() { [native code] }",
             configurable: true,
         });
+        Object.defineProperty(Date.prototype.getTimezoneOffset, _nativeTag, { value: 'getTimezoneOffset', configurable: true });
     }
 
     // =========================================================
@@ -2023,6 +2273,7 @@
                 value: function toString() { return 'function TextEncoder() { [native code] }'; },
                 configurable: true,
             });
+            Object.defineProperty(TextEncoder, _nativeTag, { value: 'TextEncoder', configurable: true });
             Object.defineProperty(TextEncoder, 'name', { value: 'TextEncoder', configurable: true });
         } catch {}
     }
@@ -2081,6 +2332,7 @@
                 value: function toString() { return 'function TextDecoder() { [native code] }'; },
                 configurable: true,
             });
+            Object.defineProperty(TextDecoder, _nativeTag, { value: 'TextDecoder', configurable: true });
             Object.defineProperty(TextDecoder, 'name', { value: 'TextDecoder', configurable: true });
         } catch {}
     }
@@ -3655,6 +3907,7 @@
 
     // Mask navigator methods
     _maskAsNative(navigator, 'javaEnabled', 'sendBeacon', 'getBattery');
+    if (navigator.keyboard) _maskAsNative(navigator.keyboard, 'getLayoutMap', 'lock', 'unlock');
     _maskAsNative(PluginArray.prototype, 'item', 'namedItem', 'refresh');
     _maskAsNative(MimeTypeArray.prototype, 'item', 'namedItem');
     _maskAsNative(Plugin.prototype, 'item', 'namedItem');
@@ -3713,19 +3966,22 @@
     };
 
     // ================================================================
-    // P0 FIX: performance.now() quantization to 100µs — on prototype.
-    // Chrome 130+ restricts precision. Full nanosecond = detectable.
-    // Installed on Performance.prototype (not the instance) so the
-    // descriptor probe returns undefined on the instance.
+    // performance.now() — humanized via op_perf_now_humanized (gap #31a).
+    //
+    // Real Chrome 130 quantizes to 100 µs but with hardware/scheduler jitter
+    // around the step. A perfect 100 µs grid (Math.round * 10 / 10) gives
+    // `set(diffs).size === 1` for hot loops — Kasada/DataDome flag this.
+    //
+    // The op applies LogNormal(μ=ln 8 µs, σ=0.4) jitter clamped [0,35] µs
+    // plus rare exponential spike. Installed on Performance.prototype so the
+    // own-descriptor probe still returns undefined on the instance.
+    // See docs/SOTA_ROADMAP_2026.md §1.3.
     // ================================================================
     if (typeof globalThis.Performance === 'function' && globalThis.performance) {
         const _PProto = globalThis.Performance.prototype;
-        const _origPerfNow = _PProto.now;
-        if (typeof _origPerfNow === 'function') {
-            _defProtoMethod(_PProto, 'now', function now() {
-                return Math.round(_origPerfNow.call(globalThis.performance) * 10) / 10;
-            });
-        }
+        _defProtoMethod(_PProto, 'now', function now() {
+            return ops.op_perf_now_humanized();
+        });
     }
 
     // ================================================================
@@ -3784,10 +4040,9 @@
     // navigator.scheduling is already defined on Navigator.prototype above
     // with isInputPending() — no need to re-install on the instance.
 
-    // crossOriginIsolated
-    if (globalThis.crossOriginIsolated === undefined) {
-        globalThis.crossOriginIsolated = false;
-    }
+    // crossOriginIsolated is now installed as an op-backed getter near the
+    // top of window_bootstrap.js (search for op_cross_origin_isolated).
+    // No fallback needed — defineProperty above runs before any user JS.
 
     // fetch(), Headers, Request, Response are now provided by fetch_bootstrap.js
     // (wired to real net::HttpClient via op_fetch)

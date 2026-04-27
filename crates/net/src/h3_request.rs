@@ -4,8 +4,8 @@ use crate::error::NetError;
 use crate::headers;
 use crate::Response;
 use bytes::Buf;
-use stealth::profile::StealthProfile;
 use std::collections::HashMap;
+use stealth::profile::StealthProfile;
 
 use crate::Method;
 

@@ -33,6 +33,8 @@ pub struct StealthProfile {
     pub screen_height: u32,
     pub screen_avail_width: u32,
     pub screen_avail_height: u32,
+    /// Pixels from the top of the screen that are not available (e.g. macOS menu bar = 25).
+    pub screen_avail_top: u32,
     pub screen_color_depth: u32,
     pub device_pixel_ratio: f64,
     pub cpu_cores: u8,
@@ -96,6 +98,31 @@ pub struct StealthProfile {
     pub canvas_seed: u64,
     pub audio_seed: u64,
 
+    // === WebAuthn / FedCM probe shape ===
+    //
+    // Anti-bot vendors call PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+    // and isConditionalMediationAvailable(). True on modern Mac/Windows desktop (Touch ID,
+    // Windows Hello, Passkeys), false on Linux desktop. These drive the JS shim's
+    // resolved-promise values; no real authenticator is implemented.
+    #[serde(default)]
+    pub has_platform_authenticator: bool,
+    #[serde(default = "default_true")]
+    pub conditional_mediation: bool,
+
+    // === HTTP/3 / QUIC ===
+    //
+    // Disabled by default (gap #33). `quinn-proto 0.11` emits transport
+    // parameters in a *random* shuffled order with a *random* GREASE TP
+    // per handshake — distinguishable from Chrome's deterministic ordering.
+    // Until we vendor-fork quinn-proto with a Chrome-fixed-order patch
+    // (deferred per docs/SOTA_ROADMAP_2026.md §1 / GAPS.md §33),
+    // advertising `h3` is a *worse* fingerprint than not speaking it at all.
+    //
+    // Set to `true` only on profiles where you have a working Chrome-
+    // matched QUIC stack (e.g., a forked quinn-proto). Default `false`.
+    #[serde(default)]
+    pub allow_http3: bool,
+
     // === Media features ===
     pub prefers_color_scheme: String,
     pub pointer_type: String,
@@ -128,16 +155,29 @@ fn default_cpu_bitness() -> String {
     "64".into()
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl StealthProfile {
     /// Validate that all fields are internally consistent.
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        // UA must contain browser name and version
-        if !self.user_agent.contains(&self.browser_version) {
+        // UA must contain the major version. Chrome's UA-reduction policy (since Chrome 110)
+        // freezes the UA string at `<Major>.0.0.0` while browser_version holds the full
+        // version (e.g. "147.0.7727.117") for use in sec-ch-ua-full-version-list.
+        let ua_major: String = self
+            .browser_version
+            .split('.')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        let reduced_ua_version = format!("{}.0.0.0", ua_major);
+        if !self.user_agent.contains(&reduced_ua_version) {
             errors.push(format!(
-                "UA '{}' doesn't contain browser version '{}'",
-                self.user_agent, self.browser_version
+                "UA '{}' doesn't contain reduced major version '{}'",
+                self.user_agent, reduced_ua_version
             ));
         }
 

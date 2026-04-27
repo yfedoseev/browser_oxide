@@ -28,9 +28,8 @@ async fn adidas_sensor_api_probes() {
     println!("[vm] loaded {vm_path} ({} bytes)", vm.len());
 
     // Build a page with the normal bootstrap (Worker, Blob, URL, navigator, …).
-    let dom = html_parser::parse_html(
-        "<html><head></head><body><div id=\"out\"></div></body></html>",
-    );
+    let dom =
+        html_parser::parse_html("<html><head></head><body><div id=\"out\"></div></body></html>");
     let mut evloop = BrowserEventLoop::new(BrowserJsRuntime::with_profile(
         dom,
         stealth::chrome_130_macos(),
@@ -355,9 +354,7 @@ async fn adidas_sensor_api_probes() {
     // drain, the sensor VM is doing deferred extraction in a Promise or
     // setTimeout callback.
     let sync_fill = evloop
-        .execute_script(
-            "String((globalThis.__methodProbes['Ctx2D.fillText'] || {count:0}).count)",
-        )
+        .execute_script("String((globalThis.__methodProbes['Ctx2D.fillText'] || {count:0}).count)")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
@@ -371,9 +368,7 @@ async fn adidas_sensor_api_probes() {
     println!("[sync-counts] Ctx2D.fillText={sync_fill}, Ctx2D.getImageData={sync_getImageData}");
     let _ = evloop.run_until_idle(Duration::from_secs(10)).await;
     let post_fill = evloop
-        .execute_script(
-            "String((globalThis.__methodProbes['Ctx2D.fillText'] || {count:0}).count)",
-        )
+        .execute_script("String((globalThis.__methodProbes['Ctx2D.fillText'] || {count:0}).count)")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
@@ -547,9 +542,7 @@ async fn adidas_sensor_api_probes() {
     // string entries but join misbehaves — possibly a realm/prototype issue).
     println!("[call-log]");
     let len: usize = evloop
-        .execute_script(
-            "(Array.isArray(globalThis.__callLog) ? globalThis.__callLog.length : 0)",
-        )
+        .execute_script("(Array.isArray(globalThis.__callLog) ? globalThis.__callLog.length : 0)")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);

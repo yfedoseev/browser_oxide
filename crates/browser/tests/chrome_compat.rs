@@ -15,7 +15,9 @@ fn html(body: &str) -> String {
 }
 
 async fn check(js: &str) -> String {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
 }
 
@@ -306,7 +308,9 @@ async fn nav_ua_data_get_high_entropy_returns_promise() {
 // populated by the time the second evaluate() reads it.
 #[tokio::test]
 async fn nav_ua_data_high_entropy_full_version_list() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     page.evaluate(
         r#"window.__r = null;
         navigator.userAgentData.getHighEntropyValues(['fullVersionList']).then(r => { window.__r = r; });"#
@@ -327,7 +331,9 @@ async fn nav_ua_data_high_entropy_full_version_list() {
 }
 #[tokio::test]
 async fn nav_ua_data_high_entropy_architecture_and_bitness() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     page.evaluate(
         r#"window.__r = null;
         navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness']).then(r => { window.__r = r; });"#
@@ -348,7 +354,9 @@ async fn nav_ua_data_high_entropy_architecture_and_bitness() {
 }
 #[tokio::test]
 async fn nav_ua_data_high_entropy_only_returns_requested_plus_low_entropy() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     page.evaluate(
         r#"window.__r = null;
         navigator.userAgentData.getHighEntropyValues(['architecture']).then(r => { window.__r = r; });"#
@@ -1643,7 +1651,10 @@ async fn k_no_script_id_screen_width_not_on_instance() {
 
 #[tokio::test]
 async fn k_no_script_id_screen_has_no_own_properties() {
-    assert_eq!(check("Object.getOwnPropertyNames(screen).length").await, "0");
+    assert_eq!(
+        check("Object.getOwnPropertyNames(screen).length").await,
+        "0"
+    );
 }
 
 #[tokio::test]
@@ -1728,10 +1739,7 @@ async fn text_encoder_encoding_is_accessor_on_prototype() {
 #[tokio::test]
 async fn text_encoder_prototype_has_expected_props() {
     assert_eq!(
-        check(
-            "JSON.stringify(Object.getOwnPropertyNames(TextEncoder.prototype).sort())"
-        )
-        .await,
+        check("JSON.stringify(Object.getOwnPropertyNames(TextEncoder.prototype).sort())").await,
         "[\"constructor\",\"encode\",\"encodeInto\",\"encoding\"]"
     );
 }
@@ -1780,6 +1788,90 @@ async fn chrome_load_times_is_native() {
 async fn chrome_csi_is_native() {
     assert_eq!(
         check("chrome.csi.toString().includes('[native code]')").await,
+        "true"
+    );
+}
+
+// --- Function.prototype.toString bypass (CreepJS "lies" detection) ---
+// CreepJS and DataDome call Function.prototype.toString.call(fn) directly,
+// bypassing any instance-level fn.toString override. Every polyfilled API
+// must return "[native code]" via this path too.
+//
+// Pattern: Function.prototype.toString.call(X).includes('[native code]')
+//   vs the weaker:           X.toString().includes('[native code]')
+// Only the former catches JS-injection lies.
+
+#[tokio::test]
+async fn fn_proto_tostring_nav_getbattery_native() {
+    assert_eq!(
+        check("Function.prototype.toString.call(navigator.getBattery).includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn fn_proto_tostring_speech_getvoices_native() {
+    assert_eq!(
+        check("Function.prototype.toString.call(speechSynthesis.getVoices).includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn fn_proto_tostring_permissions_query_native() {
+    assert_eq!(
+        check("Function.prototype.toString.call(navigator.permissions.query).includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn fn_proto_tostring_media_devices_enumerate_native() {
+    assert_eq!(
+        check("Function.prototype.toString.call(navigator.mediaDevices.enumerateDevices).includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn fn_proto_tostring_ua_getter_native() {
+    // Accessor getter on Navigator.prototype must also look native via bypass
+    assert_eq!(
+        check("Function.prototype.toString.call(Object.getOwnPropertyDescriptor(Navigator.prototype, 'userAgent').get).includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn fn_proto_tostring_screen_width_getter_native() {
+    assert_eq!(
+        check("Function.prototype.toString.call(Object.getOwnPropertyDescriptor(Screen.prototype, 'width').get).includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn fn_proto_tostring_chrome_loadtimes_native() {
+    // chrome.loadTimes already passes fn.toString(); verify bypass also works
+    assert_eq!(
+        check("Function.prototype.toString.call(chrome.loadTimes).includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn fn_proto_tostring_rtc_create_offer_native() {
+    assert_eq!(
+        check("Function.prototype.toString.call(RTCPeerConnection.prototype.createOffer).includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn fn_proto_tostring_itself_is_native() {
+    // Function.prototype.toString.call(Function.prototype.toString) must be native
+    assert_eq!(
+        check("Function.prototype.toString.call(Function.prototype.toString).includes('[native code]')").await,
         "true"
     );
 }
@@ -1866,6 +1958,90 @@ async fn to_string_tag_event_target_prototype() {
     );
 }
 
+// --- Worker context fingerprint consistency ---
+// All fingerprint values inside Worker scope must exactly match the main window.
+// Detectors (DataDome, fingerprint-scan) compare Worker UA/platform/hardwareConcurrency
+// against the main page values and flag mismatches as bot signals.
+
+#[tokio::test]
+async fn worker_ua_matches_window() {
+    use stealth::presets;
+    let profile = presets::chrome_130_windows();
+    let win_ua = format!("{}", profile.user_agent);
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    // Spin up a worker and stash its navigator.userAgent in a global
+    page.evaluate(&format!(
+        r#"window.__wua = null;
+        const src = 'self.postMessage(navigator.userAgent);';
+        const w = new Worker(URL.createObjectURL(new Blob([src],{{type:'text/javascript'}})));
+        w.onmessage = e => {{ window.__wua = e.data; w.terminate(); }};"#
+    )).unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(500)).await.ok();
+    let worker_ua = page.evaluate("window.__wua").unwrap();
+    assert_eq!(worker_ua, win_ua, "Worker UA should match window UA");
+}
+
+#[tokio::test]
+async fn worker_platform_matches_window() {
+    use stealth::presets;
+    let profile = presets::chrome_130_windows();
+    let expected = profile.platform.clone();
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    page.evaluate(
+        r#"window.__wplat = null;
+        const src = 'self.postMessage(navigator.platform);';
+        const w = new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));
+        w.onmessage = e => { window.__wplat = e.data; w.terminate(); };"#
+    ).unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(500)).await.ok();
+    assert_eq!(page.evaluate("window.__wplat").unwrap(), expected);
+}
+
+#[tokio::test]
+async fn worker_hardware_concurrency_matches_window() {
+    use stealth::presets;
+    let profile = presets::chrome_130_windows();
+    let expected = profile.cpu_cores.to_string();
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    page.evaluate(
+        r#"window.__whc = null;
+        const src = 'self.postMessage(String(navigator.hardwareConcurrency));';
+        const w = new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));
+        w.onmessage = e => { window.__whc = e.data; w.terminate(); };"#
+    ).unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(500)).await.ok();
+    assert_eq!(page.evaluate("window.__whc").unwrap(), expected);
+}
+
+// --- screen.availTop per-OS consistency ---
+// On macOS the 25px menu bar means availTop=25 (not 0).
+// On Windows/Linux there is no top bar so availTop=0.
+// availTop===0 for macOS profiles is a geometry inconsistency signal.
+
+#[tokio::test]
+async fn screen_avail_top_macos_is_25() {
+    use stealth::presets;
+    let profile = presets::chrome_130_macos();
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    assert_eq!(page.evaluate("screen.availTop").unwrap(), "25");
+}
+
+#[tokio::test]
+async fn screen_avail_top_windows_is_0() {
+    use stealth::presets;
+    let profile = presets::chrome_130_windows();
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    assert_eq!(page.evaluate("screen.availTop").unwrap(), "0");
+}
+
+#[tokio::test]
+async fn screen_avail_top_linux_is_0() {
+    use stealth::presets;
+    let profile = presets::chrome_130_linux();
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    assert_eq!(page.evaluate("screen.availTop").unwrap(), "0");
+}
+
 // --- Kasada/Akamai specific Navigator shape checks ---
 
 #[tokio::test]
@@ -1897,6 +2073,123 @@ async fn nav_permissions_query_is_native() {
     );
 }
 
+// --- navigator.keyboard (CreepJS + DataDome probe) ---
+// Real Chrome exposes a Keyboard object with getLayoutMap() -> KeyboardLayoutMap.
+// An empty {} object or missing getLayoutMap() is an immediate lie signal.
+
+#[tokio::test]
+async fn nav_keyboard_exists() {
+    assert_eq!(check("typeof navigator.keyboard").await, "object");
+}
+
+#[tokio::test]
+async fn nav_keyboard_getlayoutmap_is_function() {
+    assert_eq!(
+        check("typeof navigator.keyboard.getLayoutMap").await,
+        "function"
+    );
+}
+
+#[tokio::test]
+async fn nav_keyboard_getlayoutmap_returns_promise() {
+    assert_eq!(
+        check("navigator.keyboard.getLayoutMap() instanceof Promise").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn nav_keyboard_getlayoutmap_resolves_to_map() {
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
+    page.evaluate("window.__r = null; navigator.keyboard.getLayoutMap().then(m => { window.__r = m; });").unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    assert_eq!(page.evaluate("window.__r !== null").unwrap(), "true");
+}
+
+#[tokio::test]
+async fn nav_keyboard_getlayoutmap_has_entries() {
+    // A real QWERTY layout has ~50 entries; we just need > 0.
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
+    page.evaluate("window.__r = 0; navigator.keyboard.getLayoutMap().then(m => { window.__r = m.size; });").unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    let size: usize = page.evaluate("window.__r").unwrap().parse().unwrap_or(0);
+    assert!(size > 0, "KeyboardLayoutMap should have entries, got {size}");
+}
+
+#[tokio::test]
+async fn nav_keyboard_getlayoutmap_has_keya() {
+    // KeyA is always present in any Latin keyboard layout.
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
+    page.evaluate("window.__r = false; navigator.keyboard.getLayoutMap().then(m => { window.__r = m.has('KeyA'); });").unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    assert_eq!(page.evaluate("window.__r").unwrap(), "true");
+}
+
+#[tokio::test]
+async fn nav_keyboard_getlayoutmap_is_native() {
+    assert_eq!(
+        check("Function.prototype.toString.call(navigator.keyboard.getLayoutMap).includes('[native code]')").await,
+        "true"
+    );
+}
+
+// --- requestMediaKeySystemAccess / DRM (Kasada + Akamai probe) ---
+// Real Chrome on Windows/macOS supports com.widevine.alpha.
+// Always-rejecting NotSupportedError is a bot signal.
+
+#[tokio::test]
+async fn media_key_widevine_resolves_on_windows() {
+    use stealth::presets;
+    let profile = presets::chrome_130_windows();
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    page.evaluate(
+        "window.__r = null; navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{initDataTypes:['cenc'],videoCapabilities:[{contentType:'video/mp4;codecs=\"avc1.42E01E\"'}]}]).then(a => { window.__r = 'ok'; }).catch(e => { window.__r = 'err:' + e.name; });"
+    ).unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    assert_eq!(page.evaluate("window.__r").unwrap(), "ok");
+}
+
+#[tokio::test]
+async fn media_key_widevine_resolves_on_macos() {
+    use stealth::presets;
+    let profile = presets::chrome_130_macos();
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    page.evaluate(
+        "window.__r = null; navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{initDataTypes:['cenc'],videoCapabilities:[{contentType:'video/mp4;codecs=\"avc1.42E01E\"'}]}]).then(a => { window.__r = 'ok'; }).catch(e => { window.__r = 'err:' + e.name; });"
+    ).unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    assert_eq!(page.evaluate("window.__r").unwrap(), "ok");
+}
+
+#[tokio::test]
+async fn media_key_clearkey_always_resolves() {
+    // org.w3.clearkey must work on all platforms per the W3C EME spec.
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    page.evaluate(
+        "window.__r = null; navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{initDataTypes:['keyids'],videoCapabilities:[{contentType:'video/webm;codecs=\"vp8\"'}]}]).then(a => { window.__r = 'ok'; }).catch(e => { window.__r = 'err:' + e.name; });"
+    ).unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    assert_eq!(page.evaluate("window.__r").unwrap(), "ok");
+}
+
+#[tokio::test]
+async fn media_key_access_key_system_is_string() {
+    use stealth::presets;
+    let profile = presets::chrome_130_windows();
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    page.evaluate(
+        "window.__r = null; navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{initDataTypes:['cenc'],videoCapabilities:[{contentType:'video/mp4;codecs=\"avc1.42E01E\"'}]}]).then(a => { window.__r = typeof a.keySystem; }).catch(() => { window.__r = 'err'; });"
+    ).unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    assert_eq!(page.evaluate("window.__r").unwrap(), "string");
+}
+
 // --- Crypto / SubtleCrypto / Performance ---
 
 #[tokio::test]
@@ -1911,7 +2204,10 @@ async fn crypto_subtle_instanceof_subtle_crypto() {
 
 #[tokio::test]
 async fn crypto_has_no_own_properties() {
-    assert_eq!(check("Object.getOwnPropertyNames(crypto).length").await, "0");
+    assert_eq!(
+        check("Object.getOwnPropertyNames(crypto).length").await,
+        "0"
+    );
 }
 
 #[tokio::test]
@@ -1988,5 +2284,2137 @@ async fn performance_get_entries_is_native() {
     assert_eq!(
         check("performance.getEntries.toString().includes('[native code]')").await,
         "true"
+    );
+}
+
+// ================================================================
+// WebAuthn (gap #28) + FedCM (gap #29) — detection-shape probes
+// ----------------------------------------------------------------
+// What anti-bot vendors check:
+//   typeof PublicKeyCredential, IdentityCredential, IdentityProvider
+//   PublicKeyCredential.isUVPAA() returns Promise resolving to per-profile bool
+//   PublicKeyCredential.getClientCapabilities() returns object (Chrome 133+)
+//   navigator.credentials.create({publicKey:...}) rejects NotAllowedError after ~120ms
+//   navigator.credentials.get({identity:...}) rejects NotAllowedError after ~200ms
+//   _maskAsNative purity on all spoofed methods
+// See docs/SOTA_ROADMAP_2026.md §1.1.
+// ================================================================
+
+// Promise helper: kicks off a Promise-returning expression and pumps timers
+// for `timeout_ms` ms so setTimeout-delayed rejections (120-250 ms in WebAuthn
+// shim) have time to fire. Stashes resolved value in window.__r and rejection
+// in window.__rej. Returns either "ok:<value>" or "rej:<error.name>".
+async fn await_promise(js: &str, timeout_ms: u64) -> String {
+    await_promise_inner(js, timeout_ms, None).await
+}
+async fn await_promise_with_profile(
+    js: &str,
+    timeout_ms: u64,
+    profile: stealth::StealthProfile,
+) -> String {
+    await_promise_inner(js, timeout_ms, Some(profile)).await
+}
+async fn await_promise_inner(
+    js: &str,
+    timeout_ms: u64,
+    profile: Option<stealth::StealthProfile>,
+) -> String {
+    let mut page = Page::from_html(&html(""), profile).await.unwrap();
+    let stash = format!(
+        "window.__r = null; window.__rej = null; \
+         ({js}).then(v => {{ window.__r = String(v); }}, \
+                     e => {{ window.__rej = (e && e.name) ? e.name : (e && e.constructor ? e.constructor.name : String(e)); }});"
+    );
+    page.evaluate(&stash).unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(timeout_ms))
+        .await
+        .ok();
+    page.evaluate(
+        "(window.__rej !== null) ? ('rej:' + window.__rej) \
+         : (window.__r !== null) ? ('ok:' + window.__r) \
+         : 'pending'",
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn webauthn_public_key_credential_exists() {
+    assert_eq!(check("typeof PublicKeyCredential").await, "function");
+}
+
+#[tokio::test]
+async fn webauthn_public_key_credential_constructor_throws() {
+    assert_eq!(
+        check("(() => { try { new PublicKeyCredential(); return 'no-throw'; } catch (e) { return e.message; } })()")
+            .await,
+        "Illegal constructor"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_authenticator_response_classes_exist() {
+    assert_eq!(check("typeof AuthenticatorResponse").await, "function");
+    assert_eq!(
+        check("typeof AuthenticatorAttestationResponse").await,
+        "function"
+    );
+    assert_eq!(
+        check("typeof AuthenticatorAssertionResponse").await,
+        "function"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_attestation_extends_response() {
+    assert_eq!(
+        check("AuthenticatorAttestationResponse.prototype instanceof AuthenticatorResponse").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_isuvpa_returns_promise() {
+    assert_eq!(
+        check("PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable() instanceof Promise").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_iscma_returns_promise() {
+    assert_eq!(
+        check("PublicKeyCredential.isConditionalMediationAvailable() instanceof Promise").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_isuvpa_true_on_windows_profile() {
+    let profile = stealth::presets::chrome_130_windows();
+    assert_eq!(
+        await_promise_with_profile(
+            "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()",
+            50,
+            profile,
+        )
+        .await,
+        "ok:true"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_isuvpa_true_on_macos_profile() {
+    let profile = stealth::presets::chrome_130_macos();
+    assert_eq!(
+        await_promise_with_profile(
+            "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()",
+            50,
+            profile,
+        )
+        .await,
+        "ok:true"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_isuvpa_false_on_linux_profile() {
+    let profile = stealth::presets::chrome_130_linux();
+    assert_eq!(
+        await_promise_with_profile(
+            "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()",
+            50,
+            profile,
+        )
+        .await,
+        "ok:false"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_get_client_capabilities_shape() {
+    assert_eq!(
+        await_promise(
+            "PublicKeyCredential.getClientCapabilities().then(c => \
+             typeof c.userVerifyingPlatformAuthenticator === 'boolean' && \
+             typeof c.conditionalGet === 'boolean' && \
+             typeof c.hybridTransport === 'boolean')",
+            50,
+        )
+        .await,
+        "ok:true"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_isuvpa_is_native() {
+    assert_eq!(
+        check("PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable.toString().includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_credentials_create_is_native() {
+    assert_eq!(
+        check("navigator.credentials.create.toString().includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_credentials_create_rejects_with_not_allowed() {
+    // Shim sleeps 120 ms before rejecting; pump 250 ms.
+    assert_eq!(
+        await_promise("navigator.credentials.create({publicKey:{}})", 250,).await,
+        "rej:NotAllowedError"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_credentials_get_publickey_rejects() {
+    assert_eq!(
+        await_promise("navigator.credentials.get({publicKey:{}})", 250,).await,
+        "rej:NotAllowedError"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_credentials_create_no_args_rejects_typeerror() {
+    // Synchronous Promise.reject(new TypeError(...)). 50 ms pump is plenty.
+    assert_eq!(
+        await_promise("navigator.credentials.create()", 50,).await,
+        "rej:TypeError"
+    );
+}
+
+#[tokio::test]
+async fn webauthn_navigator_credentials_is_credentials_container() {
+    assert_eq!(
+        check("navigator.credentials instanceof CredentialsContainer").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn fedcm_identity_credential_exists() {
+    assert_eq!(check("typeof IdentityCredential").await, "function");
+}
+
+#[tokio::test]
+async fn fedcm_identity_provider_exists() {
+    assert_eq!(check("typeof IdentityProvider").await, "function");
+}
+
+#[tokio::test]
+async fn fedcm_identity_credential_constructor_throws() {
+    assert_eq!(
+        check("(() => { try { new IdentityCredential(); return 'no-throw'; } catch (e) { return e.message; } })()")
+            .await,
+        "Illegal constructor"
+    );
+}
+
+#[tokio::test]
+async fn fedcm_identity_provider_get_user_info_rejects() {
+    assert_eq!(
+        await_promise(
+            "IdentityProvider.getUserInfo({configURL:'https://x/cfg.json',clientId:'a'})",
+            50,
+        )
+        .await,
+        "rej:NotAllowedError"
+    );
+}
+
+// ================================================================
+// WebGL fingerprint surface (gap #26 — spoofing path)
+// ----------------------------------------------------------------
+// Anti-bot vendors probe:
+//   typeof WebGLRenderingContext, WebGL2RenderingContext
+//   getParameter(VENDOR/RENDERER/UNMASKED_VENDOR_WEBGL/UNMASKED_RENDERER_WEBGL)
+//   getParameter(MAX_TEXTURE_SIZE/MAX_RENDERBUFFER_SIZE/...)  — non-zero, plausible
+//   getSupportedExtensions() — non-empty, GPU-correct
+//   getShaderPrecisionFormat(FRAGMENT_SHADER, HIGH_FLOAT) — {127,127,23} on Chrome
+//   getExtension('WEBGL_debug_renderer_info') — non-null, exposes UNMASKED_*
+//   getContextAttributes() — Chrome defaults (alpha=true, antialias=true, etc.)
+// All values come from the active StealthProfile.gpu_profile (stealth/src/gpu.rs).
+// See docs/SOTA_ROADMAP_2026.md §2.1 for the deferred wgpu render path.
+// ================================================================
+
+async fn webgl_check(js: &str) -> String {
+    // Helper: create a canvas, get a webgl context, run js against `gl`.
+    let wrapped = format!(
+        "(() => {{ \
+          const c = document.createElement('canvas'); \
+          c.width = 256; c.height = 256; \
+          const gl = c.getContext('webgl'); \
+          if (!gl) return 'no-context'; \
+          return ({js}); \
+        }})()"
+    );
+    check(&wrapped).await
+}
+
+async fn webgl_check_with_profile(js: &str, profile: stealth::StealthProfile) -> String {
+    let wrapped = format!(
+        "(() => {{ \
+          const c = document.createElement('canvas'); \
+          c.width = 256; c.height = 256; \
+          const gl = c.getContext('webgl'); \
+          if (!gl) return 'no-context'; \
+          return ({js}); \
+        }})()"
+    );
+    let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
+    page.evaluate(&wrapped)
+        .unwrap_or_else(|e| format!("ERROR: {e}"))
+}
+
+#[tokio::test]
+async fn webgl_rendering_context_class_exists() {
+    assert_eq!(check("typeof WebGLRenderingContext").await, "function");
+    assert_eq!(check("typeof WebGL2RenderingContext").await, "function");
+}
+
+#[tokio::test]
+async fn webgl_get_context_returns_object() {
+    assert_eq!(webgl_check("typeof gl").await, "object");
+    assert_eq!(webgl_check("gl !== null").await, "true");
+}
+
+#[tokio::test]
+async fn webgl_vendor_renderer_strings_non_empty() {
+    assert_eq!(
+        webgl_check(
+            "typeof gl.getParameter(0x1F00) === 'string' && gl.getParameter(0x1F00).length > 0"
+        )
+        .await,
+        "true"
+    );
+    assert_eq!(
+        webgl_check(
+            "typeof gl.getParameter(0x1F01) === 'string' && gl.getParameter(0x1F01).length > 0"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webgl_unmasked_vendor_renderer_per_profile() {
+    // Win profile: NVIDIA. Mac: Apple. Linux: Intel.
+    let win_renderer = webgl_check_with_profile(
+        "gl.getParameter(0x9246)", // UNMASKED_RENDERER_WEBGL
+        stealth::presets::chrome_130_windows(),
+    )
+    .await;
+    assert!(
+        win_renderer.contains("NVIDIA"),
+        "Win UNMASKED_RENDERER should mention NVIDIA, got {win_renderer}"
+    );
+
+    let mac_renderer = webgl_check_with_profile(
+        "gl.getParameter(0x9246)",
+        stealth::presets::chrome_130_macos(),
+    )
+    .await;
+    assert!(
+        mac_renderer.contains("Apple"),
+        "Mac UNMASKED_RENDERER should mention Apple, got {mac_renderer}"
+    );
+
+    let linux_renderer = webgl_check_with_profile(
+        "gl.getParameter(0x9246)",
+        stealth::presets::chrome_130_linux(),
+    )
+    .await;
+    assert!(
+        linux_renderer.contains("Intel"),
+        "Linux UNMASKED_RENDERER should mention Intel, got {linux_renderer}"
+    );
+}
+
+#[tokio::test]
+async fn webgl_max_texture_size_at_least_chrome_minimum() {
+    // Chrome 130 reports 16384 on most modern GPUs; minimum WebGL spec is 64.
+    // Our profiles all set 16384.
+    assert_eq!(
+        webgl_check("gl.getParameter(0x0D33) >= 8192").await, // MAX_TEXTURE_SIZE
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webgl_get_supported_extensions_non_empty() {
+    assert_eq!(
+        webgl_check(
+            "Array.isArray(gl.getSupportedExtensions()) && gl.getSupportedExtensions().length > 5"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webgl_supported_extensions_contain_debug_renderer_info() {
+    // WEBGL_debug_renderer_info is in every Chrome-reported extension list
+    // because it's the canonical way to get UNMASKED_VENDOR/RENDERER strings.
+    assert_eq!(
+        webgl_check("gl.getSupportedExtensions().includes('WEBGL_debug_renderer_info')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webgl_get_extension_debug_renderer_info_returns_constants() {
+    assert_eq!(
+        webgl_check(
+            "(() => { \
+              const ext = gl.getExtension('WEBGL_debug_renderer_info'); \
+              return ext !== null \
+                  && ext.UNMASKED_VENDOR_WEBGL === 0x9245 \
+                  && ext.UNMASKED_RENDERER_WEBGL === 0x9246; \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webgl_get_shader_precision_format_high_float() {
+    // FRAGMENT_SHADER (0x8B30) + HIGH_FLOAT (0x8DF2) → {rangeMin:127, rangeMax:127, precision:23}.
+    assert_eq!(
+        webgl_check(
+            "(() => { \
+              const p = gl.getShaderPrecisionFormat(0x8B30, 0x8DF2); \
+              return p !== null \
+                  && p.rangeMin === 127 \
+                  && p.rangeMax === 127 \
+                  && p.precision === 23; \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webgl_get_context_attributes_chrome_defaults() {
+    // Real Chrome defaults from WebGL spec.
+    assert_eq!(
+        webgl_check(
+            "(() => { \
+              const a = gl.getContextAttributes(); \
+              return a.alpha === true \
+                  && a.antialias === true \
+                  && a.depth === true \
+                  && a.failIfMajorPerformanceCaveat === false \
+                  && a.premultipliedAlpha === true \
+                  && a.preserveDrawingBuffer === false \
+                  && a.stencil === false; \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webgl_is_context_lost_returns_false() {
+    assert_eq!(webgl_check("gl.isContextLost()").await, "false");
+}
+
+#[tokio::test]
+async fn webgl_get_error_returns_zero_initially() {
+    // NO_ERROR = 0
+    assert_eq!(webgl_check("gl.getError()").await, "0");
+}
+
+#[tokio::test]
+async fn webgl_max_viewport_dims_returns_array_of_two() {
+    assert_eq!(
+        webgl_check(
+            "(() => { \
+              const v = gl.getParameter(0x0D3A); \
+              return Array.isArray(v) && v.length === 2 && v[0] > 0 && v[1] > 0; \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn webgl2_context_returns_object() {
+    assert_eq!(
+        check(
+            "(() => { \
+              const c = document.createElement('canvas'); \
+              const gl = c.getContext('webgl2'); \
+              return typeof gl; \
+             })()"
+        )
+        .await,
+        "object"
+    );
+}
+
+#[tokio::test]
+async fn webgl_extensions_differ_per_profile_apple() {
+    // Apple profile should include the ASTC compressed-texture extension
+    // that NVIDIA/Intel typically lack (per gpu.rs::apple_m2_pro_macos).
+    let exts = webgl_check_with_profile(
+        "JSON.stringify(gl.getSupportedExtensions())",
+        stealth::presets::chrome_130_macos(),
+    )
+    .await;
+    assert!(
+        exts.contains("WEBGL_compressed_texture_astc"),
+        "Apple profile should expose ASTC; got {exts}"
+    );
+}
+
+// ================================================================
+// Audio realtime — AnalyserNode + BiquadFilterNode (gap #27, P2.2)
+// ----------------------------------------------------------------
+// AnalyserNode and BiquadFilterNode are now realer:
+//   - AnalyserNode exposes fftSize, frequencyBinCount, smoothing,
+//     minDecibels, maxDecibels (all probed by CreepJS).
+//   - BiquadFilterNode.getFrequencyResponse() runs the closed-form
+//     bilinear-transform via op_audio_biquad_response.
+// Wire-through for graph-driven analyser data is still pending
+// (offline path uses op_offline_audio_render, which is bit-accurate
+// to Blink at ~3.6 ppm — see canvas/tests/audio_reference.rs).
+// ================================================================
+
+#[tokio::test]
+async fn audio_context_exists() {
+    assert_eq!(check("typeof AudioContext").await, "function");
+    assert_eq!(check("typeof OfflineAudioContext").await, "function");
+}
+
+#[tokio::test]
+async fn analyser_has_chrome_default_props() {
+    assert_eq!(
+        check(
+            "(() => { \
+              const ctx = new AudioContext(); \
+              const a = ctx.createAnalyser(); \
+              return a.fftSize === 2048 \
+                  && a.frequencyBinCount === 1024 \
+                  && a.smoothingTimeConstant === 0.8 \
+                  && a.minDecibels === -100 \
+                  && a.maxDecibels === -30; \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn analyser_get_float_frequency_data_returns_min_db_for_silence() {
+    // Unconnected analyser → silence → all bins at minDecibels (-100).
+    assert_eq!(
+        check(
+            "(() => { \
+              const ctx = new AudioContext(); \
+              const a = ctx.createAnalyser(); \
+              const f = new Float32Array(a.frequencyBinCount); \
+              a.getFloatFrequencyData(f); \
+              return f.every(v => v === a.minDecibels); \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn biquad_get_frequency_response_unity_at_dc_for_lowpass() {
+    // Lowpass at 1 kHz, Q=0.7071 → at f=0, |H| ≈ 1.
+    assert_eq!(
+        check(
+            "(() => { \
+              const ctx = new AudioContext(); \
+              const f = ctx.createBiquadFilter(); \
+              f.type = 'lowpass'; f.frequency.value = 1000; f.Q.value = 0.7071; \
+              const freqs = new Float32Array([0]); \
+              const mag = new Float32Array(1); \
+              const phase = new Float32Array(1); \
+              f.getFrequencyResponse(freqs, mag, phase); \
+              return Math.abs(mag[0] - 1) < 0.01; \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn biquad_get_frequency_response_blocks_dc_for_highpass() {
+    assert_eq!(
+        check(
+            "(() => { \
+              const ctx = new AudioContext(); \
+              const f = ctx.createBiquadFilter(); \
+              f.type = 'highpass'; f.frequency.value = 1000; f.Q.value = 0.7071; \
+              const freqs = new Float32Array([0]); \
+              const mag = new Float32Array(1); \
+              const phase = new Float32Array(1); \
+              f.getFrequencyResponse(freqs, mag, phase); \
+              return mag[0] < 0.01; \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn biquad_get_frequency_response_writes_n_values() {
+    assert_eq!(
+        check(
+            "(() => { \
+              const ctx = new AudioContext(); \
+              const f = ctx.createBiquadFilter(); \
+              const freqs = new Float32Array([100, 500, 1000, 5000, 20000]); \
+              const mag = new Float32Array(5); \
+              const phase = new Float32Array(5); \
+              f.getFrequencyResponse(freqs, mag, phase); \
+              return mag.every(v => Number.isFinite(v) && v >= 0) \
+                  && phase.every(v => Number.isFinite(v)); \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+// ================================================================
+// performance.now() humanized jitter (gap #31a)
+// ----------------------------------------------------------------
+// Real Chrome shows ~10–30 µs jitter around the 100 µs grid step. A
+// pure quantizer (set(diffs).size === 1) is detectable. We verify:
+//   - Returns finite number
+//   - Is monotonic across calls (the underlying clock floor + non-negative
+//     jitter ensures this for any practical inter-call spacing)
+//   - Hot loop produces multiple distinct values (jitter is real)
+// ================================================================
+
+#[tokio::test]
+async fn perf_now_returns_number() {
+    assert_eq!(check("typeof performance.now()").await, "number");
+}
+
+#[tokio::test]
+async fn perf_now_is_native() {
+    assert_eq!(
+        check("performance.now.toString().includes('[native code]')").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn perf_now_is_finite_non_negative() {
+    assert_eq!(
+        check("(() => { const t = performance.now(); return Number.isFinite(t) && t >= 0; })()")
+            .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn perf_now_hot_loop_produces_distinct_values() {
+    // 500 hot calls; expect more than 10 distinct values (real Chrome shows
+    // dozens-to-hundreds; pure quantizer shows ~1).
+    assert_eq!(
+        check(
+            "(() => { \
+              const xs = []; \
+              for (let i = 0; i < 500; i++) xs.push(performance.now()); \
+              return new Set(xs).size > 10; \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn perf_now_is_strictly_monotonic() {
+    // HRT spec requires monotonic non-decreasing. The PerfState clamps
+    // each return to >= last value, so 1000 samples must have zero
+    // backward jumps.
+    assert_eq!(
+        check(
+            "(() => { \
+              const xs = []; \
+              for (let i = 0; i < 1000; i++) xs.push(performance.now()); \
+              for (let i = 1; i < xs.length; i++) if (xs[i] < xs[i-1]) return false; \
+              return true; \
+             })()"
+        )
+        .await,
+        "true"
+    );
+}
+
+// ================================================================
+// Cross-origin isolation + SharedArrayBuffer (gap #30)
+// ----------------------------------------------------------------
+// What anti-bot vendors check (Kasada 2024+):
+//   self.crossOriginIsolated reflects COOP+COEP from response headers
+//   typeof SharedArrayBuffer === 'function' (V8 always exposes constructor)
+//   new SharedArrayBuffer(N) usable
+//   typeof Atomics === 'object', Atomics.wait/notify exist
+// SAB postMessage transfer to workers is gated separately on COI but
+// our worker plumbing is still stub (CAPABILITY_GAPS_2026.md §T1.5),
+// so transfer-rejection tests are deferred until workers fire.
+// ================================================================
+
+fn coi_check(cross_origin_isolated: bool, js: &str) -> String {
+    let dom = html_parser::parse_html("<html><body></body></html>");
+    let mut rt = js_runtime::BrowserJsRuntime::with_options(
+        dom,
+        js_runtime::runtime::BrowserRuntimeOptions {
+            cross_origin_isolated,
+            ..Default::default()
+        },
+    );
+    rt.execute_script(js, None)
+        .unwrap_or_else(|e| format!("ERROR: {e}"))
+}
+
+#[tokio::test]
+async fn coi_default_is_false_via_page() {
+    // Page::from_html doesn't (yet) extract COOP/COEP from response headers,
+    // so the default must be false.
+    assert_eq!(check("typeof crossOriginIsolated").await, "boolean");
+    assert_eq!(check("crossOriginIsolated").await, "false");
+}
+
+#[tokio::test]
+async fn coi_true_when_runtime_constructed_isolated() {
+    assert_eq!(coi_check(true, "crossOriginIsolated"), "true");
+}
+
+#[tokio::test]
+async fn coi_false_when_runtime_constructed_non_isolated() {
+    assert_eq!(coi_check(false, "crossOriginIsolated"), "false");
+}
+
+#[tokio::test]
+async fn coi_property_descriptor_is_configurable_getter() {
+    // Real Chrome exposes crossOriginIsolated as a getter on the global,
+    // configurable=true. Plain `globalThis.X = false` would set it as a
+    // value property — detectable.
+    assert_eq!(
+        coi_check(false, "Object.getOwnPropertyDescriptor(globalThis, 'crossOriginIsolated').get instanceof Function"),
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn sab_constructor_exists() {
+    assert_eq!(check("typeof SharedArrayBuffer").await, "function");
+}
+
+#[tokio::test]
+async fn sab_constructible_with_byte_length() {
+    assert_eq!(check("new SharedArrayBuffer(8).byteLength").await, "8");
+}
+
+#[tokio::test]
+async fn sab_instance_is_shared_array_buffer() {
+    assert_eq!(
+        check("new SharedArrayBuffer(4) instanceof SharedArrayBuffer").await,
+        "true"
+    );
+}
+
+#[tokio::test]
+async fn atomics_object_exists() {
+    assert_eq!(check("typeof Atomics").await, "object");
+}
+
+#[tokio::test]
+async fn atomics_wait_and_notify_exist() {
+    assert_eq!(check("typeof Atomics.wait").await, "function");
+    assert_eq!(check("typeof Atomics.notify").await, "function");
+}
+
+#[tokio::test]
+async fn atomics_wait_returns_timed_out_synchronously() {
+    // Atomics.wait on a fresh SharedArrayBuffer with timeout=1ms must return
+    // "timed-out" (or "ok"/"not-equal" on edge cases) — proves SAB+Atomics
+    // are functional, not just present.
+    assert_eq!(
+        check("Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1)").await,
+        "timed-out"
+    );
+}
+
+#[tokio::test]
+async fn fedcm_credentials_get_identity_rejects() {
+    // FedCM shim sleeps 200 ms before rejecting; pump 350 ms.
+    assert_eq!(
+        await_promise(
+            "navigator.credentials.get({ identity: { providers: [{ configURL: 'https://x/cfg.json', clientId: 'a' }] } })",
+            350,
+        )
+        .await,
+        "rej:NotAllowedError"
+    );
+}
+
+// ================================================================
+// Live navigation smoke test — reddit.com (network-gated, #[ignore])
+// ----------------------------------------------------------------
+// Run with:
+//   cargo test -p browser --test chrome_compat reddit_smoke \
+//     -- --ignored --test-threads=1 --nocapture
+// ================================================================
+
+/// Comprehensive diagnostic init: traces `new Function()` compiles, fetch/XHR
+/// calls, postMessage events, and navigation-trigger setters. Tells us
+/// exactly what Kasada's `ips.js` (or any other challenge JS) does:
+///   - what URLs it POSTs the fingerprint payload to
+///   - what response headers/cookies it gets back
+///   - whether it fires a `KPSDK:DONE:...` postMessage (the canonical signal)
+///   - whether it tries to `location.reload()` or `location.href = ...` to
+///     trigger the protected-resource retry
+const FN_TRACE_INIT: &str = r#"
+(() => {
+    const _origFn = globalThis.Function;
+    if (_origFn._traced) return;  // idempotent
+    globalThis.__fnTrace = [];
+    globalThis.__fnTraceErrors = [];
+    function TracedFn() {
+        const args = Array.prototype.slice.call(arguments);
+        const body = args.length ? args[args.length - 1] : '';
+        try {
+            if (typeof body === 'string' && body.length > 0) {
+                globalThis.__fnTrace.push(body.slice(0, 500));
+            }
+        } catch (e) {}
+        try {
+            // Construct a real Function — preserve semantics (NOT a closure
+            // over the call site; spec-correct).
+            return _origFn.apply(this, args);
+        } catch (e) {
+            try {
+                globalThis.__fnTraceErrors.push({
+                    body: typeof body === 'string' ? body.slice(0, 500) : String(body),
+                    err: String(e),
+                    name: e && e.name,
+                    stack: (e && e.stack) ? String(e.stack).slice(0, 800) : '',
+                });
+            } catch {}
+            throw e;
+        }
+    }
+    TracedFn.prototype = _origFn.prototype;
+    Object.setPrototypeOf(TracedFn, _origFn);
+    Object.defineProperty(TracedFn, 'name', { value: 'Function', configurable: true });
+    Object.defineProperty(TracedFn, 'length', { value: 1, configurable: true });
+    TracedFn._traced = true;
+    // Mask toString so detection probes don't notice the wrapper.
+    const origToString = _origFn.toString.bind(_origFn);
+    TracedFn.toString = function () { return origToString(); };
+    globalThis.Function = TracedFn;
+
+    // ---- Network + navigation tracing ----
+    globalThis.__netTrace = [];
+    globalThis.__msgTrace = [];
+    globalThis.__navTrace = [];
+
+    // Wrap fetch
+    const _origFetch = globalThis.fetch;
+    if (typeof _origFetch === 'function') {
+        globalThis.fetch = function (input, init) {
+            try {
+                const url = typeof input === 'string' ? input : (input && input.url) || String(input);
+                const method = (init && init.method) || (input && input.method) || 'GET';
+                const bodyLen = init && init.body ? (init.body.length || init.body.byteLength || 0) : 0;
+                const entry = { kind: 'fetch', url: String(url).slice(0, 300), method, body_len: bodyLen };
+                globalThis.__netTrace.push(entry);
+                const p = _origFetch.apply(this, arguments);
+                p.then((r) => {
+                    try {
+                        entry.status = r.status;
+                        entry.resp_url = r.url ? String(r.url).slice(0, 300) : '';
+                        const hdrs = {};
+                        if (r.headers && r.headers.forEach) {
+                            r.headers.forEach((v, k) => { if (/x-kpsdk|set-cookie|kasada/i.test(k)) hdrs[k] = String(v).slice(0, 200); });
+                        }
+                        entry.kpsdk_headers = hdrs;
+                    } catch {}
+                }, (e) => { entry.err = String(e); });
+                return p;
+            } catch (e) { return _origFetch.apply(this, arguments); }
+        };
+    }
+
+    // Wrap XHR
+    const _origOpen = globalThis.XMLHttpRequest && globalThis.XMLHttpRequest.prototype.open;
+    const _origSend = globalThis.XMLHttpRequest && globalThis.XMLHttpRequest.prototype.send;
+    if (_origOpen && _origSend) {
+        globalThis.XMLHttpRequest.prototype.open = function (method, url) {
+            this.__trace = { kind: 'xhr', method, url: String(url).slice(0, 300) };
+            globalThis.__netTrace.push(this.__trace);
+            return _origOpen.apply(this, arguments);
+        };
+        globalThis.XMLHttpRequest.prototype.send = function (body) {
+            try {
+                if (this.__trace) {
+                    this.__trace.body_len = body ? (body.length || body.byteLength || 0) : 0;
+                    const t = this.__trace;
+                    this.addEventListener('load', () => {
+                        try {
+                            t.status = this.status;
+                            const respHdrs = this.getAllResponseHeaders() || '';
+                            const lines = respHdrs.split(/\r?\n/);
+                            const interesting = {};
+                            for (const ln of lines) {
+                                const idx = ln.indexOf(':');
+                                if (idx > 0) {
+                                    const k = ln.slice(0, idx).trim().toLowerCase();
+                                    const v = ln.slice(idx + 1).trim();
+                                    if (/x-kpsdk|set-cookie|kasada|abck|bm_sz/.test(k)) {
+                                        interesting[k] = v.slice(0, 200);
+                                    }
+                                }
+                            }
+                            t.kpsdk_headers = interesting;
+                        } catch {}
+                    });
+                }
+            } catch {}
+            return _origSend.apply(this, arguments);
+        };
+    }
+
+    // postMessage capture (Kasada signals success via KPSDK:DONE:... postMessage)
+    const _origAddEvtL = globalThis.addEventListener;
+    if (typeof _origAddEvtL === 'function') {
+        // Install an own listener to record everything seen.
+        try {
+            globalThis.addEventListener('message', function (e) {
+                try {
+                    const data = (e && e.data) ? String(e.data).slice(0, 300) : '<no data>';
+                    globalThis.__msgTrace.push({ origin: e && e.origin, data });
+                } catch {}
+            }, true);
+        } catch {}
+    }
+
+    // location.reload / location.href setter / location.assign / location.replace
+    try {
+        const loc = globalThis.location;
+        if (loc) {
+            const origReload = loc.reload && loc.reload.bind(loc);
+            const origAssign = loc.assign && loc.assign.bind(loc);
+            const origReplace = loc.replace && loc.replace.bind(loc);
+            try { loc.reload = function () { globalThis.__navTrace.push({ kind: 'reload' }); return origReload && origReload.apply(this, arguments); }; } catch {}
+            try { loc.assign = function (u) { globalThis.__navTrace.push({ kind: 'assign', url: String(u).slice(0, 200) }); return origAssign && origAssign.apply(this, arguments); }; } catch {}
+            try { loc.replace = function (u) { globalThis.__navTrace.push({ kind: 'replace', url: String(u).slice(0, 200) }); return origReplace && origReplace.apply(this, arguments); }; } catch {}
+            // href setter — wrap via defineProperty if possible
+            try {
+                const desc = Object.getOwnPropertyDescriptor(loc, 'href') || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(loc), 'href');
+                if (desc && desc.set) {
+                    Object.defineProperty(loc, 'href', {
+                        configurable: true,
+                        get: desc.get,
+                        set: function (v) { globalThis.__navTrace.push({ kind: 'href', url: String(v).slice(0, 200) }); return desc.set.call(this, v); },
+                    });
+                }
+            } catch {}
+        }
+    } catch {}
+})();
+"#;
+
+/// Helper for live-network smoke tests against anti-bot-protected sites.
+/// Reports the outcome instead of asserting — anti-bot success depends on
+/// the IP we're calling from, which `docs/TIER0_KASADA_RESULTS.md` proves
+/// dominates fingerprint quality for first-touch on Kasada/Cloudflare.
+async fn antibot_smoke(label: &str, url: &str, profile: stealth::StealthProfile) {
+    println!("\n=== {label}: {url} ===");
+    let t0 = std::time::Instant::now();
+    // Always install the Function-trace init so we can inspect what
+    // dynamically-built challenge JS does even when we don't pass.
+    // Hard 90s wall-clock cap per site — leaves headroom above the
+    // navigate_with_init nav-budget (50s default + 25s adaptive extension).
+    // Even sites that exercise the full extension (heavy SPAs like
+    // udemy/glassdoor/discord) finish well under 90s. Pages that go
+    // beyond this aren't going to render usefully anyway.
+    let page = match tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        Page::navigate_with_init(url, profile, 3, vec![FN_TRACE_INIT.to_string()]),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => {
+            println!("  [TIMEOUT] {label} exceeded 60s wall clock", label = label);
+            println!("=== end {label} ===");
+            return;
+        }
+    };
+    let elapsed = t0.elapsed();
+    match page {
+        Ok(mut p) => {
+            let final_url = p.url().to_string();
+            let title = p.title();
+            let html_len = p
+                .evaluate("document.documentElement ? document.documentElement.outerHTML.length : 0")
+                .unwrap_or_default()
+                .parse::<usize>()
+                .unwrap_or(0);
+            let body_len = p
+                .evaluate("document.body ? document.body.textContent.length : 0")
+                .unwrap_or_default()
+                .parse::<usize>()
+                .unwrap_or(0);
+            let n_links = p
+                .evaluate("document.querySelectorAll('a').length")
+                .unwrap_or_default();
+            let n_scripts = p
+                .evaluate("document.querySelectorAll('script').length")
+                .unwrap_or_default();
+            let challenge_signal = p
+                .evaluate(
+                    "(() => { \
+                      const t = (document.body && document.body.textContent || '').toLowerCase(); \
+                      const markers = [ \
+                        'access denied','request blocked','just a moment','enable javascript', \
+                        'verify you are a human','cf-challenge','px-captcha','sensor_data', \
+                        'attention required','cloudflare','perimeterx','datadome','kasada', \
+                        'shape security','unusual traffic','our systems have detected', \
+                      ]; \
+                      const hits = markers.filter(m => t.includes(m)); \
+                      return hits.join(',') || 'none'; \
+                    })()",
+                )
+                .unwrap_or_default();
+            let snippet = p
+                .evaluate(
+                    "document.body ? \
+                     document.body.textContent.replace(/\\s+/g, ' ').trim().slice(0, 250) \
+                     : 'no body'",
+                )
+                .unwrap_or_default();
+            // Pull diagnostic output from the Function-trace hook.
+            let fn_trace_count = p
+                .evaluate("Array.isArray(globalThis.__fnTrace) ? globalThis.__fnTrace.length : 0")
+                .unwrap_or_default();
+            let fn_errors_json = p
+                .evaluate(
+                    "Array.isArray(globalThis.__fnTraceErrors) ? \
+                     JSON.stringify(globalThis.__fnTraceErrors.slice(0, 8)) : '[]'",
+                )
+                .unwrap_or_else(|_| "[]".into());
+            let fn_trace_first_5 = p
+                .evaluate(
+                    "Array.isArray(globalThis.__fnTrace) ? \
+                     JSON.stringify(globalThis.__fnTrace.slice(0, 5)) : '[]'",
+                )
+                .unwrap_or_else(|_| "[]".into());
+            println!("  [OK] {:?}", elapsed);
+            println!("  final url:        {final_url}");
+            println!("  title:            {title:?}");
+            println!("  html bytes:       {html_len}");
+            println!("  body chars:       {body_len}");
+            println!("  <a> count:        {n_links}");
+            println!("  <script> count:   {n_scripts}");
+            println!("  challenge mkrs:   {challenge_signal}");
+            println!("  body snippet:     {snippet}");
+            println!("  fn-trace count:   {fn_trace_count}");
+            println!("  fn-trace first 5: {fn_trace_first_5}");
+            println!("  fn-trace errors:  {fn_errors_json}");
+
+            // Network trace (fetch/XHR), with priority for kpsdk-related URLs.
+            let net_trace_json = p
+                .evaluate(
+                    "Array.isArray(globalThis.__netTrace) ? \
+                     JSON.stringify(globalThis.__netTrace.slice(0, 30)) : '[]'",
+                )
+                .unwrap_or_else(|_| "[]".into());
+            let msg_trace_json = p
+                .evaluate(
+                    "Array.isArray(globalThis.__msgTrace) ? \
+                     JSON.stringify(globalThis.__msgTrace.slice(0, 30)) : '[]'",
+                )
+                .unwrap_or_else(|_| "[]".into());
+            let nav_trace_json = p
+                .evaluate(
+                    "Array.isArray(globalThis.__navTrace) ? \
+                     JSON.stringify(globalThis.__navTrace.slice(0, 30)) : '[]'",
+                )
+                .unwrap_or_else(|_| "[]".into());
+            let kpsdk_state = p
+                .evaluate(
+                    "(() => { \
+                      const k = globalThis.KPSDK; \
+                      if (!k) return 'no-KPSDK'; \
+                      const out = {}; \
+                      for (const key of Object.keys(k)) { \
+                        const v = k[key]; \
+                        out[key] = (typeof v === 'function') ? '[function]' : \
+                                   (typeof v === 'object' && v !== null) ? '[object]' : \
+                                   String(v).slice(0, 100); \
+                      } \
+                      return JSON.stringify(out); \
+                    })()",
+                )
+                .unwrap_or_else(|_| "{}".into());
+            let cookies_now = p
+                .evaluate("typeof document.cookie === 'string' ? document.cookie.slice(0, 600) : ''")
+                .unwrap_or_default();
+            println!("  net-trace:        {net_trace_json}");
+            println!("  msg-trace:        {msg_trace_json}");
+            println!("  nav-trace:        {nav_trace_json}");
+            println!("  KPSDK state:      {kpsdk_state}");
+            println!("  cookies:          {cookies_now}");
+            // Dump JS console messages from the page (set by challenge JS).
+            println!("  --- JS console ---");
+            p.consume_and_print_logs();
+            println!("  --- end console ---");
+        }
+        Err(e) => {
+            println!("  [FAIL] {:?} — {e}", elapsed);
+        }
+    }
+    println!("=== end {label} ===");
+}
+
+#[tokio::test]
+#[ignore = "network: kasada-only diagnostic with Function trace"]
+async fn kasada_canadagoose_diagnostic() {
+    let profile = stealth::presets::chrome_130_macos();
+    antibot_smoke(
+        "KASADA-canadagoose-DIAG",
+        "https://www.canadagoose.com/",
+        profile,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "network: WBAAS smoke against wildberries.ru with current pipeline"]
+async fn wbaas_wildberries_smoke() {
+    let profile = stealth::presets::chrome_130_ru();
+    antibot_smoke("WBAAS-wildberries", "https://www.wildberries.ru/", profile).await;
+}
+
+// ================================================================
+// V8 shim recursion reproducer (task #6)
+// ================================================================
+
+/// Phase-1: does walking the prototype chain with Reflect.ownKeys hang?
+#[tokio::test]
+async fn shim_recursion_proto_walk_no_access() {
+    // If this test fails (timeout / SIGTRAP) the bug is in ownKeys / getPrototypeOf
+    // enumeration itself — not in getter invocation.
+    let result = check(r#"
+        (function() {
+            try {
+                let p = globalThis;
+                const seen = [];
+                let depth = 0;
+                while (p !== null && p !== undefined && depth < 30) {
+                    // Guard against circular prototype (shouldn't happen, but just in case)
+                    if (seen.indexOf(p) !== -1) return 'cycle_at_' + depth;
+                    seen.push(p);
+                    Reflect.ownKeys(p); // enumerate — don't access values
+                    p = Object.getPrototypeOf(p);
+                    depth++;
+                }
+                return 'walk_done_' + depth;
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("walk_done_") || result.starts_with("cycle_at_"),
+        "proto walk should complete without crash, got: {result}"
+    );
+}
+
+/// Phase-2: does invoking each getter while walking cause recursion?
+#[tokio::test]
+async fn shim_recursion_proto_walk_with_getters() {
+    // CreepJS calls toString on every function it finds while walking.
+    // This test isolates whether our getter-invocation or toString masking recurses.
+    let result = check(r#"
+        (function() {
+            try {
+                let p = globalThis;
+                let depth = 0;
+                const seen = [];
+                while (p !== null && p !== undefined && depth < 30) {
+                    if (seen.indexOf(p) !== -1) return 'cycle_at_' + depth;
+                    seen.push(p);
+                    for (const key of Reflect.ownKeys(p)) {
+                        try {
+                            const desc = Object.getOwnPropertyDescriptor(p, key);
+                            if (!desc) continue;
+                            // Invoke getter if present
+                            if (typeof desc.get === 'function') {
+                                try { desc.get.call(p); } catch(_) {}
+                            }
+                            // Call .toString() on any function value/getter
+                            if (typeof desc.get === 'function') {
+                                desc.get.toString();
+                            }
+                            if (typeof desc.value === 'function') {
+                                desc.value.toString();
+                            }
+                        } catch(_) {}
+                    }
+                    p = Object.getPrototypeOf(p);
+                    depth++;
+                }
+                return 'walk_done_' + depth;
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("walk_done_") || result.starts_with("cycle_at_"),
+        "proto walk+getters should complete without crash, got: {result}"
+    );
+}
+
+/// Phase-3: does Function.prototype.toString.call(fn) on all globalThis functions recurse?
+#[tokio::test]
+async fn shim_recursion_fn_proto_tostring_on_all() {
+    let result = check(r#"
+        (function() {
+            try {
+                const seen = new Set();
+                let checked = 0;
+                let p = globalThis;
+                while (p) {
+                    for (const key of Reflect.ownKeys(p)) {
+                        try {
+                            const desc = Object.getOwnPropertyDescriptor(p, key);
+                            if (!desc) continue;
+                            for (const fn of [desc.value, desc.get, desc.set]) {
+                                if (typeof fn !== 'function' || seen.has(fn)) continue;
+                                seen.add(fn);
+                                Function.prototype.toString.call(fn);
+                                checked++;
+                            }
+                        } catch(_) {}
+                    }
+                    p = Object.getPrototypeOf(p);
+                    if (!p || p === Object.prototype) break;
+                }
+                return 'toString_ok_' + checked;
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("toString_ok_"),
+        "Function.prototype.toString on all fns should not recurse, got: {result}"
+    );
+}
+
+/// Diagnostic: WeakSet behavior with globalThis (V8 global proxy identity)
+#[tokio::test]
+async fn shim_recursion_diag_weakset_globalthis() {
+    let result = check(r#"
+        (function() {
+            try {
+                const ws = new WeakSet();
+                // Add globalThis and check if it's found
+                ws.add(globalThis);
+                const afterAdd = ws.has(globalThis);
+
+                // Add window (which === globalThis) and check
+                ws.add(window);
+                const afterAddWindow = ws.has(globalThis);
+                const afterAddGT = ws.has(window);
+
+                // Check inner global (prototype of globalThis)
+                const innerGlobal = Object.getPrototypeOf(globalThis);
+                const innerInSet = innerGlobal ? ws.has(innerGlobal) : null;
+                const innerIsGT = innerGlobal === globalThis;
+
+                // WeakMap test
+                const wm = new WeakMap();
+                wm.set(globalThis, 42);
+                const wmGet = wm.get(globalThis);
+                const wmGetWindow = wm.get(window);
+
+                return JSON.stringify({
+                    afterAdd, afterAddWindow, afterAddGT,
+                    innerInSet, innerIsGT,
+                    wmGet, wmGetWindow,
+                    windowIsGT: window === globalThis,
+                });
+            } catch(e) { return 'error: ' + e.message; }
+        })()
+    "#).await;
+    println!("weakset globalThis test: {result}");
+    assert!(!result.starts_with("error:"), "weakset test failed: {result}");
+    // Critical: afterAdd must be true (otherwise cycle detection in creepjs fails)
+    assert!(result.contains("\"afterAdd\":true"), "WeakSet.has(globalThis) after add must be true, got: {result}");
+}
+
+/// Diagnostic: check CallSite frame objects from Error.prepareStackTrace
+#[tokio::test]
+async fn shim_recursion_diag_callsite() {
+    let result = check(r#"
+        (function() {
+            try {
+                let frameInfo = null;
+                const origPrep = Error.prepareStackTrace;
+                Error.prepareStackTrace = function(err, frames) {
+                    if (frames.length > 0 && frameInfo === null) {
+                        const f = frames[0];
+                        frameInfo = {
+                            type: typeof f,
+                            isFunc: typeof f === 'function',
+                            hasToString: typeof f.toString === 'function',
+                            toStringSrc: (() => {
+                                try {
+                                    // Get toString without calling it (to avoid recursion)
+                                    const ts = Object.getOwnPropertyDescriptor(f, 'toString');
+                                    if (ts) return 'own:' + typeof ts.value;
+                                    // inherited?
+                                    let p = Object.getPrototypeOf(f);
+                                    while (p) {
+                                        const d = Object.getOwnPropertyDescriptor(p, 'toString');
+                                        if (d) {
+                                            const fn = d.value;
+                                            const isFnProtoTs = fn === Function.prototype.toString;
+                                            const isObjProtoTs = fn === Object.prototype.toString;
+                                            return 'inherited:fn=' + typeof fn +
+                                                   ',isFuncProtoToStr=' + isFnProtoTs +
+                                                   ',isObjProtoToStr=' + isObjProtoTs;
+                                        }
+                                        p = Object.getPrototypeOf(p);
+                                    }
+                                    return 'none';
+                                } catch(e) { return 'err:' + e.message; }
+                            })(),
+                            protoChainLen: (() => {
+                                let n = 0;
+                                let p = f;
+                                while (p && n < 20) { p = Object.getPrototypeOf(p); n++; }
+                                return n;
+                            })(),
+                            isFuncProtoInChain: (() => {
+                                let p = Object.getPrototypeOf(f);
+                                while (p) {
+                                    if (p === Function.prototype) return true;
+                                    p = Object.getPrototypeOf(p);
+                                }
+                                return false;
+                            })(),
+                        };
+                    }
+                    // Call original (if any) or use default
+                    if (origPrep) return origPrep(err, frames);
+                    return undefined;
+                };
+                // Trigger a stack trace capture
+                try { throw new Error('test'); } catch(e) { void e.stack; }
+                Error.prepareStackTrace = origPrep;
+                return JSON.stringify(frameInfo);
+            } catch(e) { return 'error: ' + e.message; }
+        })()
+    "#).await;
+    println!("callsite frame info: {result}");
+    assert!(!result.starts_with("error:"), "callsite diag failed: {result}");
+}
+
+/// Diagnostic: what does Object.getPrototypeOf(globalThis) return?
+#[tokio::test]
+async fn shim_recursion_diag_global_proto() {
+    let result = check(r#"
+        (function() {
+            try {
+                const gt = globalThis;
+                const p1 = Object.getPrototypeOf(gt);
+                const info = {
+                    p1_null: p1 === null,
+                    p1_is_gt: p1 === gt,
+                    p1_is_objproto: p1 === Object.prototype,
+                    p1_type: typeof p1,
+                    p1_keys: p1 ? Object.getOwnPropertyNames(p1).length : -1,
+                };
+                if (p1 && p1 !== null) {
+                    const p2 = Object.getPrototypeOf(p1);
+                    info.p2_null = p2 === null;
+                    info.p2_is_gt = p2 === gt;
+                    info.p2_is_objproto = p2 === Object.prototype;
+                    info.p2_is_p1 = p2 === p1;
+                }
+                if (p1) {
+                    info.p1_own_keys = Object.getOwnPropertyNames(p1);
+                    info.p1_own_symbols = Object.getOwnPropertySymbols(p1).map(s => s.toString());
+                    // Check the constructor property
+                    const ctor = p1.constructor;
+                    info.p1_ctor_is_gt = ctor === gt;
+                    info.p1_ctor_is_func = typeof ctor === 'function';
+                    info.p1_ctor_is_object_ctor = ctor === Object;
+                    info.p1_ctor_type = typeof ctor;
+                    if (ctor && typeof ctor === 'function') {
+                        info.p1_ctor_name = ctor.name;
+                    }
+                    // Check the descriptor for constructor
+                    const desc = Object.getOwnPropertyDescriptor(p1, 'constructor');
+                    info.p1_ctor_desc_type = desc ? (desc.get ? 'getter' : 'value') : 'none';
+                    // Important: does accessing constructor cause recursion?
+                    // Check Object.getPrototypeOf(p1.constructor) if it's a function
+                    if (ctor && typeof ctor === 'function') {
+                        info.p1_ctor_proto_is_gt = Object.getPrototypeOf(ctor) === gt;
+                        const ctorProto = Object.getPrototypeOf(ctor);
+                        info.p1_ctor_proto_is_func_proto = ctorProto === Function.prototype;
+                        // Does Function.prototype.toString work on it?
+                        try {
+                            const ts = Function.prototype.toString.call(ctor);
+                            info.p1_ctor_tostring = ts.slice(0, 50);
+                        } catch(e) {
+                            info.p1_ctor_tostring_err = e.message;
+                        }
+                        // Can we access ctor.prototype?
+                        info.p1_ctor_prototype_is_p1 = ctor.prototype === p1;
+                    }
+                }
+                return JSON.stringify(info);
+            } catch(e) { return 'error: ' + e.message; }
+        })()
+    "#).await;
+    // Expect: p1 is Object.prototype or null (Deno runtime)
+    println!("global proto chain: {result}");
+    assert!(!result.starts_with("error:"), "proto diag failed: {result}");
+}
+
+/// Phase-4: iframe window prototype chain walking (creepjs primary pattern)
+#[tokio::test]
+async fn shim_recursion_iframe_proto_walk() {
+    let result = check(r#"
+        (function() {
+            try {
+                const iframe = document.createElement('iframe');
+                document.body.appendChild(iframe);
+                const win = iframe.contentWindow;
+                if (!win) return 'no_contentWindow';
+
+                // Walk contentWindow's own properties
+                const ownKeys = Object.getOwnPropertyNames(win);
+
+                // Check if 'window' in win (has trap)
+                const hasWindow = 'window' in win;
+
+                // Walk prototype chain of contentWindow
+                const chain = [];
+                let proto = win;
+                let depth = 0;
+                while (proto !== null && proto !== undefined && depth < 20) {
+                    if (chain.indexOf(proto) !== -1) return 'cycle_at_' + depth;
+                    chain.push(proto);
+                    proto = Object.getPrototypeOf(proto);
+                    depth++;
+                }
+
+                // Access each own key of contentWindow
+                for (const key of ownKeys) {
+                    try { win[key]; } catch(_) {}
+                }
+
+                // Check 'in' for common window properties
+                const props = ['window','self','top','parent','location','document',
+                               'navigator','screen','fetch','setTimeout','Array',
+                               'Object','Function','localStorage'];
+                for (const p of props) {
+                    try { const r = p in win; } catch(_) {}
+                }
+
+                return 'iframe_walk_ok_' + chain.length + '_own_' + ownKeys.length;
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("iframe_walk_ok_") || result.starts_with("cycle_at_"),
+        "iframe contentWindow walk should not crash, got: {result}"
+    );
+}
+
+/// Phase-5: creepjs-style window vs iframe window comparison
+#[tokio::test]
+async fn shim_recursion_creepjs_realm_check() {
+    let result = check(r#"
+        (function() {
+            try {
+                const iframe = document.createElement('iframe');
+                document.body.appendChild(iframe);
+                const iwin = iframe.contentWindow;
+                if (!iwin) return 'no_contentWindow';
+
+                // creepjs: compare constructors across realms
+                const tests = {
+                    arrayMatch: iwin.Array === Array,
+                    objectMatch: iwin.Object === Object,
+                    functionMatch: iwin.Function === Function,
+                    selfIsWindow: iwin.self === iwin,
+                    toStringNative: Function.prototype.toString.call(iwin.Array),
+                };
+
+                // creepjs: walk ALL own props of main window, check if in iframe window
+                let diffCount = 0;
+                const mainKeys = Object.getOwnPropertyNames(window);
+                const iwinKeys = Object.getOwnPropertyNames(iwin);
+                for (const k of mainKeys) {
+                    if (!iwinKeys.includes(k)) diffCount++;
+                }
+
+                // creepjs: getPrototypeOf chain on iwin
+                let protoDepth = 0;
+                let p = iwin;
+                while (p !== null && p !== undefined && protoDepth < 10) {
+                    p = Object.getPrototypeOf(p);
+                    protoDepth++;
+                }
+
+                return JSON.stringify({
+                    ok: true,
+                    diffCount,
+                    protoDepth,
+                    selfIsWindow: tests.selfIsWindow,
+                });
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.contains("\"ok\":true"),
+        "creepjs realm check should not crash, got: {result}"
+    );
+}
+
+/// Phase-6: simulate creepjs 'lies' detection — Function.prototype.toString
+/// called on every window property (including Proxy-wrapped properties)
+#[tokio::test]
+async fn shim_recursion_creepjs_lies_detection() {
+    let result = check(r#"
+        (function() {
+            try {
+                const toString = Function.prototype.toString;
+                let checked = 0;
+                let errors = 0;
+
+                // Access every own property of window and call toString if function
+                const keys = Object.getOwnPropertyNames(window);
+                for (const key of keys) {
+                    try {
+                        const val = window[key];
+                        if (typeof val === 'function') {
+                            toString.call(val);
+                            checked++;
+                        }
+                        // Also check getters
+                        const desc = Object.getOwnPropertyDescriptor(window, key);
+                        if (desc && typeof desc.get === 'function') {
+                            toString.call(desc.get);
+                        }
+                    } catch(e) {
+                        errors++;
+                    }
+                }
+
+                // Check via prototype chain too
+                let proto = Object.getPrototypeOf(window);
+                while (proto && proto !== Object.prototype) {
+                    for (const key of Object.getOwnPropertyNames(proto)) {
+                        try {
+                            const desc = Object.getOwnPropertyDescriptor(proto, key);
+                            if (desc && typeof desc.get === 'function') toString.call(desc.get);
+                            if (desc && typeof desc.value === 'function') toString.call(desc.value);
+                            checked++;
+                        } catch(_) { errors++; }
+                    }
+                    proto = Object.getPrototypeOf(proto);
+                }
+
+                return 'lies_check_ok_checked=' + checked + '_errors=' + errors;
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("lies_check_ok_"),
+        "creepjs lies detection should not crash, got: {result}"
+    );
+}
+
+/// Phase-7: Yandex Metrika IIFE pattern — createElement('script'), src= assignment,
+/// getElementsByTagName, parentNode.insertBefore. No network fetch (src points at
+/// a non-existent data: URL so _onNodeInserted's op_net_fetch_sync either
+/// fails or is skipped). Guards that the DOM mutation + re-entrant _onNodeInserted
+/// path doesn't infinitely recurse.
+#[tokio::test]
+async fn shim_recursion_ym_iife_pattern() {
+    let result = check(r#"
+        (function() {
+            try {
+                // Simulate Yandex Metrika initialization IIFE.
+                // Uses a data: URL so no real network call is made.
+                var insertCount = 0;
+                (function(m, e, t, r, i) {
+                    m[i] = m[i] || function() { (m[i].a = m[i].a || []).push(arguments); };
+                    m[i].l = 1 * new Date();
+                    for (var j = 0; j < document.scripts.length; j++) {
+                        if (document.scripts[j].src === r) { return; }
+                    }
+                    var k = e.createElement(t);
+                    k.src = r;
+                    insertCount++;
+                    var a = e.getElementsByTagName(t)[0];
+                    if (a && a.parentNode) { a.parentNode.insertBefore(k, a); }
+                    else { e.head.appendChild(k); }
+                })(window, document, 'script', 'data:text/javascript,void+0', 'ym');
+                return 'ym_ok_inserts_' + insertCount;
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("ym_ok_"),
+        "Yandex Metrika IIFE pattern should not recurse, got: {result}"
+    );
+}
+
+/// YM tag.js probe: iframe contentWindow access + navigator for..in.
+/// YM creates a hidden iframe to read cross-document globals. Our iframeWindow
+/// Proxy falls through to globalThis — if the fall-through path creates a Proxy
+/// cycle or triggers a self-referential toString chain, it crashes here.
+#[tokio::test]
+async fn shim_recursion_ym_iframe_navigator_probe() {
+    let result = check(r#"
+        (function() {
+            try {
+                // Create iframe + read its window (our iframeWindow Proxy)
+                var iframe = document.createElement('iframe');
+                document.body.appendChild(iframe);
+                var iw = iframe.contentWindow;
+                if (!iw) return 'error: no contentWindow';
+
+                // YM accesses iframe.contentWindow.navigator for cross-frame check
+                var nav = iw.navigator;
+                var ua = nav ? nav.userAgent : 'missing';
+
+                // YM probes navigator properties via for...in
+                var navKeys = [];
+                try {
+                    for (var k in navigator) { navKeys.push(k); if (navKeys.length > 100) break; }
+                } catch(e) {}
+
+                // YM accesses plugins and mimeTypes
+                var pluginsLen = navigator.plugins.length;
+                var mimesLen = navigator.mimeTypes.length;
+
+                // YM calls Function.prototype.toString on iframe globals
+                var iToStr = Function.prototype.toString.call(iw.Function || Function);
+
+                return 'ym_iframe_ok_nav_keys_' + navKeys.length +
+                       '_plugins_' + pluginsLen +
+                       '_mimes_' + mimesLen +
+                       '_tostr_' + (iToStr.includes('[native code]') ? 'native' : 'src');
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("ym_iframe_ok_"),
+        "YM iframe+navigator probe should not crash, got: {result}"
+    );
+}
+
+/// YM tag.js probe: document.cookie read/write and script enumeration.
+/// YM reads/writes cookies on every pageview. Also iterates document.scripts
+/// to avoid re-inserting itself.
+#[tokio::test]
+async fn shim_recursion_ym_cookie_scripts_probe() {
+    let result = check(r#"
+        (function() {
+            try {
+                // Cookie read/write (YM stores its state in _ym_uid cookie)
+                document.cookie = '_ym_uid=1234567890; path=/';
+                var cookie = document.cookie;
+
+                // YM iterates document.scripts to check if already loaded
+                var scriptSrcs = [];
+                for (var j = 0; j < document.scripts.length; j++) {
+                    scriptSrcs.push(document.scripts[j].src || 'inline');
+                }
+
+                // YM probes performance.timing for load time calculation
+                var timing = window.performance && window.performance.timing;
+                var navStart = timing ? timing.navigationStart : -1;
+
+                // YM uses screen properties
+                var screenInfo = screen.width + 'x' + screen.height + 'x' + screen.colorDepth;
+
+                return 'ym_cookie_ok_cookie_' + (cookie.includes('_ym_uid') ? 'found' : 'missing') +
+                       '_scripts_' + scriptSrcs.length +
+                       '_screen_' + screenInfo;
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("ym_cookie_ok_"),
+        "YM cookie+scripts probe should not crash, got: {result}"
+    );
+}
+
+/// YM tag.js probe: window property enumeration pattern.
+/// YM scans window properties to check for anti-detect environment signals.
+/// If any property getter recurses or the prototype walk loops, this crashes.
+#[tokio::test]
+async fn shim_recursion_ym_window_enum_probe() {
+    let result = check(r#"
+        (function() {
+            try {
+                // YM checks if specific globals exist via in-operator
+                var checks = {
+                    ym: 'ym' in window,
+                    Ya: 'Ya' in window,
+                    yandex: 'yandex' in window,
+                    _ym_: '_ym_' in window,
+                };
+
+                // YM enumerates window to find conflicting libraries
+                var keyCount = 0;
+                try {
+                    for (var k in window) {
+                        keyCount++;
+                        if (keyCount > 500) break; // Safety cap
+                    }
+                } catch(e) {}
+
+                // YM checks window.top === window (not in a cross-origin frame)
+                var isTop = window.top === window;
+                var isSelf = window.self === window;
+                var isParent = window.parent === window;
+
+                // YM checks typeof various globals
+                var typeChecks = [
+                    typeof window.JSON,
+                    typeof window.Promise,
+                    typeof window.fetch,
+                    typeof window.XMLHttpRequest,
+                    typeof window.Worker,
+                ].join(',');
+
+                return 'ym_enum_ok_keys_' + keyCount + '_top_' + isTop +
+                       '_types_' + typeChecks;
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("ym_enum_ok_"),
+        "YM window enumeration should not crash, got: {result}"
+    );
+}
+
+/// YM tag.js probe: eval-based module loader pattern.
+/// YM tag.js uses a webpack-like bundler. The outermost IIFE sets up a module
+/// registry via an object mapping module IDs to factory functions. If our eval
+/// of a string containing nested function definitions causes V8 C++ recursion,
+/// this test catches it.
+#[tokio::test]
+async fn shim_recursion_ym_module_loader_pattern() {
+    let result = check(r#"
+        (function() {
+            try {
+                // Simulate YM's webpack-style module loader
+                var modules = {};
+                var cache = {};
+                function require(id) {
+                    if (cache[id]) return cache[id].exports;
+                    var mod = { exports: {} };
+                    cache[id] = mod;
+                    if (modules[id]) modules[id](mod, mod.exports, require);
+                    return mod.exports;
+                }
+
+                // Register some fake modules
+                modules[0] = function(m, e, r) {
+                    e.init = function() { return r(1).run(); };
+                };
+                modules[1] = function(m, e, r) {
+                    e.run = function() {
+                        // Simulate YM environment probe
+                        var hasYa = typeof window.Ya !== 'undefined';
+                        var userAgent = navigator.userAgent;
+                        var lang = navigator.language;
+                        return { hasYa: hasYa, ua: userAgent.slice(0, 20), lang: lang };
+                    };
+                };
+
+                // Run entry point (module 0)
+                var result = require(0).init();
+
+                return 'ym_loader_ok_ua_' + (result.ua ? 'present' : 'missing') +
+                       '_lang_' + (result.lang ? 'present' : 'missing');
+            } catch(e) {
+                return 'error: ' + e.message;
+            }
+        })()
+    "#).await;
+    assert!(
+        result.starts_with("ym_loader_ok_"),
+        "YM module loader pattern should not crash, got: {result}"
+    );
+}
+
+// Tier-based smoke tests. Each tier runs as a separate #[tokio::test] so each
+// gets a fresh stack — running 30 V8 isolates in a single test overflows.
+
+#[tokio::test]
+#[ignore = "network: T0 baseline (Cloudflare-lite)"]
+async fn antibot_t0_baseline() {
+    let p = stealth::presets::chrome_130_macos();
+    antibot_smoke("T0-nowsecure", "https://nowsecure.nl/", p.clone()).await;
+    antibot_smoke("T0-discord", "https://discord.com/", p.clone()).await;
+    antibot_smoke("T0-chatgpt", "https://chatgpt.com/", p.clone()).await;
+    // T0-sannysoft disabled — crashes during Yandex Metrika tag.js evaluation
+    // (infinite recursion inside tag.js's own code, unrelated to our shims).
+    // T0-creepjs disabled — crashes with same root cause in the DataDome/libertix
+    // scripts. Tracked as task #60.
+    let _ = p;
+}
+
+#[tokio::test]
+#[ignore = "network: T1 Cloudflare Enterprise + AI-block (claude/openai/anthropic/HF/perplexity)"]
+async fn antibot_t1_cloudflare_enterprise() {
+    let p = stealth::presets::chrome_130_macos();
+    antibot_smoke("T1-claude", "https://claude.ai/", p.clone()).await;
+    antibot_smoke("T1-openai", "https://openai.com/", p.clone()).await;
+    antibot_smoke("T1-anthropic", "https://www.anthropic.com/", p.clone()).await;
+    antibot_smoke("T1-huggingface", "https://huggingface.co/", p.clone()).await;
+    antibot_smoke("T1-perplexity", "https://www.perplexity.ai/", p).await;
+}
+
+#[tokio::test]
+#[ignore = "network: T2 DataDome behavioral (glassdoor/crunchbase/vinted/leboncoin)"]
+async fn antibot_t2_datadome() {
+    let p = stealth::presets::chrome_130_macos();
+    antibot_smoke("T2-glassdoor", "https://www.glassdoor.com/", p.clone()).await;
+    antibot_smoke("T2-crunchbase", "https://www.crunchbase.com/", p.clone()).await;
+    antibot_smoke("T2-vinted", "https://www.vinted.com/", p.clone()).await;
+    antibot_smoke("T2-leboncoin", "https://www.leboncoin.fr/", p).await;
+}
+
+#[tokio::test]
+#[ignore = "network: T3 Akamai BMP (adidas/nike/footlocker)"]
+async fn antibot_t3_akamai_bmp() {
+    let p = stealth::presets::chrome_130_macos();
+    antibot_smoke("T3-adidas", "https://www.adidas.com/", p.clone()).await;
+    antibot_smoke("T3-nike", "https://www.nike.com/", p.clone()).await;
+    antibot_smoke("T3-footlocker", "https://www.footlocker.com/", p).await;
+}
+
+#[tokio::test]
+#[ignore = "network: T4 Kasada (ticketmaster/canadagoose/hyatt)"]
+async fn antibot_t4_kasada() {
+    let p = stealth::presets::chrome_130_macos();
+    antibot_smoke("T4-ticketmaster", "https://www.ticketmaster.com/", p.clone()).await;
+    antibot_smoke("T4-canadagoose", "https://www.canadagoose.com/", p.clone()).await;
+    antibot_smoke("T4-hyatt", "https://www.hyatt.com/", p).await;
+}
+
+#[tokio::test]
+#[ignore = "network: T5 HUMAN/PerimeterX + Imperva (zillow/walmart/udemy)"]
+async fn antibot_t5_human_imperva() {
+    let p = stealth::presets::chrome_130_macos();
+    antibot_smoke("T5-zillow", "https://www.zillow.com/", p.clone()).await;
+    antibot_smoke("T5-walmart", "https://www.walmart.com/", p.clone()).await;
+    antibot_smoke("T5-udemy", "https://www.udemy.com/", p).await;
+}
+
+#[tokio::test]
+#[ignore = "network: T6 Shape/F5 landing (delta) — login flows excluded"]
+async fn antibot_t6_shape() {
+    let p = stealth::presets::chrome_130_windows();
+    antibot_smoke("T6-delta", "https://www.delta.com/", p).await;
+}
+
+#[tokio::test]
+#[ignore = "network: T7 Russian (ya.ru/wildberries/ozon)"]
+async fn antibot_t7_russian() {
+    let p = stealth::presets::chrome_130_ru();
+    antibot_smoke("T7-yandex", "https://ya.ru/", p.clone()).await;
+    antibot_smoke("T7-wildberries", "https://www.wildberries.ru/", p.clone()).await;
+    antibot_smoke("T7-ozon", "https://www.ozon.ru/", p).await;
+}
+
+#[tokio::test]
+#[ignore = "network: T8 Chinese (taobao/jd/douyin)"]
+async fn antibot_t8_chinese() {
+    let p = stealth::presets::chrome_130_cn();
+    antibot_smoke("T8-taobao", "https://www.taobao.com/", p.clone()).await;
+    antibot_smoke("T8-jd", "https://www.jd.com/", p.clone()).await;
+    antibot_smoke("T8-douyin", "https://www.douyin.com/", p).await;
+}
+
+#[tokio::test]
+#[ignore = "network: direct fetch of WBAAS solver script to isolate the bug"]
+async fn wbaas_solver_url_direct_fetch() {
+    let profile = stealth::presets::chrome_130_ru();
+    let client = net::HttpClient::new(&profile).unwrap();
+    let url = "https://www.wildberries.ru/__wbaas/challenges/antibot/statics/challenge_solver_v1.0.4.js";
+    println!("\n=== WBAAS solver direct fetch ===");
+    let t0 = std::time::Instant::now();
+    let mut hdrs = net::headers::chrome_headers(&profile);
+    hdrs.push(("referer".to_string(), "https://www.wildberries.ru/".into()));
+    hdrs.push(("sec-fetch-dest".to_string(), "script".into()));
+    hdrs.push(("sec-fetch-mode".to_string(), "no-cors".into()));
+    hdrs.push(("sec-fetch-site".to_string(), "same-origin".into()));
+    match client.get_with_headers(url, &hdrs).await {
+        Ok(resp) => {
+            let body = resp.text();
+            println!("  status:        {}", resp.status);
+            println!("  body bytes:    {}", body.len());
+            println!("  elapsed:       {:?}", t0.elapsed());
+            println!("  content-type:  {:?}", resp.headers.get("content-type"));
+            println!("  content-encoding: {:?}", resp.headers.get("content-encoding"));
+            if !body.is_empty() {
+                println!("  body[..200]:   {}", &body[..body.len().min(200)]);
+            }
+        }
+        Err(e) => println!("  ERROR: {e}"),
+    }
+    println!("=== end ===");
+}
+
+#[tokio::test]
+#[ignore = "network: dump initial response from hyatt to compare against playwright"]
+async fn dump_hyatt_initial_response() {
+    let profile = stealth::presets::chrome_130_macos();
+    let client = net::HttpClient::new(&profile).unwrap();
+    let url = std::env::var("HYATT_URL")
+        .unwrap_or_else(|_| "https://www.hyatt.com/".to_string());
+    let url = url.as_str();
+    println!("\n=== Initial response from hyatt.com ===");
+    let hdrs = net::headers::chrome_headers(&profile);
+    println!("  Headers we sent:");
+    for (k, v) in &hdrs {
+        println!("    {}: {}", k, v);
+    }
+    // No-redirect single GET
+    match client.get_with_headers(url, &hdrs).await {
+        Ok(resp) => {
+            let body = resp.text();
+            println!("  --- Response ---");
+            println!("  status: {}", resp.status);
+            println!("  url: {}", resp.url);
+            println!("  body bytes: {}", body.len());
+            println!("  Response headers:");
+            for (k, v) in &resp.headers {
+                println!("    {}: {}", k, v);
+            }
+            if !body.is_empty() {
+                println!("  body[..500]: {}", &body[..body.len().min(500)]);
+            }
+        }
+        Err(e) => println!("  ERROR: {e}"),
+    }
+    println!("=== end ===");
+}
+
+#[tokio::test]
+#[ignore = "network: dump our headers via httpbin to diff vs real Chrome"]
+async fn dump_our_headers_httpbin() {
+    let profile = stealth::presets::chrome_130_macos();
+    let client = net::HttpClient::new(&profile).unwrap();
+    let url = "https://httpbin.org/headers";
+    println!("\n=== Our request headers per httpbin.org/headers ===");
+    let hdrs = net::headers::chrome_headers(&profile);
+    println!("  Headers we'll attach (in order, LOW-ENTROPY = production navs):");
+    for (k, v) in &hdrs {
+        println!("    {}: {}", k, v);
+    }
+    match client.get_with_headers(url, &hdrs).await {
+        Ok(resp) => {
+            let body = resp.text();
+            println!("  --- httpbin echo (what server saw) ---");
+            println!("{}", body);
+        }
+        Err(e) => println!("  ERROR: {e}"),
+    }
+    println!("=== end ===");
+}
+
+#[tokio::test]
+#[ignore = "network: dump our TLS+H2 fingerprint via tls.peet.ws"]
+async fn tls_fingerprint_peet() {
+    let profile = stealth::presets::chrome_130_macos();
+    let client = net::HttpClient::new(&profile).unwrap();
+    let url = "https://tls.peet.ws/api/all";
+    println!("\n=== Our TLS fingerprint per tls.peet.ws ===");
+    let hdrs = net::headers::chrome_headers_with_accept_ch(&profile);
+    match client.get_with_headers(url, &hdrs).await {
+        Ok(resp) => {
+            let body = resp.text();
+            println!("  status: {}", resp.status);
+            println!("  body bytes: {}", body.len());
+            // Permissive extract: key="value" with optional whitespace
+            let extract = |key: &str| -> String {
+                let pat = format!("\"{}\"", key);
+                if let Some(s) = body.find(&pat) {
+                    let after = &body[s + pat.len()..];
+                    // find next '"' that opens the value
+                    if let Some(open) = after.find('"') {
+                        let val_start = open + 1;
+                        if let Some(close) = after[val_start..].find('"') {
+                            return after[val_start..val_start + close].to_string();
+                        }
+                    }
+                }
+                "?".to_string()
+            };
+            println!("  ja3:               {}", extract("ja3"));
+            println!("  ja3_hash:          {}", extract("ja3_hash"));
+            println!("  ja4:               {}", extract("ja4"));
+            println!("  ja4_r:             {}", extract("ja4_r"));
+            println!("  peetprint:         {}", extract("peetprint"));
+            println!("  peetprint_hash:    {}", extract("peetprint_hash"));
+            println!("  akamai_fp:         {}", extract("akamai_fingerprint"));
+            println!("  akamai_hash:       {}", extract("akamai_fingerprint_hash"));
+            println!("  user_agent:        {}", extract("user_agent"));
+            // also dump our http_version to verify h2
+            println!("  http_version:      {}", extract("http_version"));
+        }
+        Err(e) => println!("  ERROR: {e}"),
+    }
+    println!("=== end ===");
+}
+
+#[tokio::test]
+#[ignore = "network: hyatt only — quick re-test after kasada cd-field changes"]
+async fn kasada_hyatt_only() {
+    let profile = stealth::presets::chrome_130_macos();
+    antibot_smoke("KASADA-hyatt-RETEST", "https://www.hyatt.com/", profile).await;
+}
+
+#[tokio::test]
+#[ignore = "network: 2 alt-Kasada targets to isolate IP-gate vs fingerprint"]
+async fn kasada_alt_targets() {
+    let profile = stealth::presets::chrome_130_macos();
+    // hyatt.com + ticketmaster.com per docs/NEXT_STEPS.md as alternate Kasada
+    // sites. If one passes where canadagoose doesn't, that argues for
+    // canadagoose-specific IP-blocklisting (per commit 6307749 "prove IP is
+    // the gate"). If both also return ~700-byte challenge pages, that argues
+    // for a fingerprint/PoW gap rather than IP.
+    antibot_smoke("KASADA-hyatt", "https://www.hyatt.com/", profile.clone()).await;
+    antibot_smoke(
+        "KASADA-ticketmaster",
+        "https://www.ticketmaster.com/",
+        profile,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "network: 3-site anti-bot smoke (Cloudflare/Kasada/Akamai)"]
+async fn antibot_smoke_tier05() {
+    let profile = stealth::presets::chrome_130_macos();
+    // Tier 0.5 structural-advantage targets per docs/NEXT_STEPS.md §4.5
+    antibot_smoke(
+        "CLOUDFLARE-baseline",
+        "https://nowsecure.nl/",
+        profile.clone(),
+    )
+    .await;
+    antibot_smoke(
+        "KASADA-canadagoose",
+        "https://www.canadagoose.com/",
+        profile.clone(),
+    )
+    .await;
+    antibot_smoke("AKAMAI-adidas", "https://www.adidas.com/", profile).await;
+}
+
+#[tokio::test]
+#[ignore = "network: hits reddit.com"]
+async fn reddit_smoke() {
+    let profile = stealth::presets::chrome_130_macos();
+    let mut page = match Page::navigate("https://www.reddit.com/", profile, 5).await {
+        Ok(p) => p,
+        Err(e) => {
+            println!("\n=== reddit.com navigation FAILED ===");
+            println!("error: {e}");
+            panic!("navigate failed");
+        }
+    };
+
+    let title = page.title();
+    let url = page.url().to_string();
+
+    let body_len = page
+        .evaluate("document.body ? document.body.textContent.length : 0")
+        .unwrap_or_else(|e| format!("evaluate body err: {e}"));
+
+    let body_snippet = page
+        .evaluate(
+            "document.body ? \
+             document.body.textContent.replace(/\\s+/g, ' ').trim().slice(0, 400) \
+             : 'no body'",
+        )
+        .unwrap_or_else(|e| format!("evaluate snippet err: {e}"));
+
+    let html_len = page
+        .evaluate("document.documentElement ? document.documentElement.outerHTML.length : 0")
+        .unwrap_or_default();
+
+    let n_links = page
+        .evaluate("document.querySelectorAll('a').length")
+        .unwrap_or_default();
+
+    let n_scripts = page
+        .evaluate("document.querySelectorAll('script').length")
+        .unwrap_or_default();
+
+    let cookies = page
+        .evaluate("typeof document.cookie === 'string' ? document.cookie.length : 0")
+        .unwrap_or_default();
+
+    println!("\n=== reddit.com navigation result ===");
+    println!("  final url:      {url}");
+    println!("  title:          {title:?}");
+    println!("  html bytes:     {html_len}");
+    println!("  body chars:     {body_len}");
+    println!("  <a> count:      {n_links}");
+    println!("  <script> count: {n_scripts}");
+    println!("  cookie chars:   {cookies}");
+    println!("  body snippet:   {body_snippet}");
+    println!("=== end ===\n");
+
+    // Sanity: we got *some* content back (not a 0-byte challenge).
+    assert!(
+        html_len.parse::<usize>().unwrap_or(0) > 1000,
+        "expected >1000 bytes of HTML, got {html_len}"
     );
 }

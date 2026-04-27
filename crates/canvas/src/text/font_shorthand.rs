@@ -278,7 +278,11 @@ mod tests {
     #[test]
     fn parses_point_size_converted_to_px() {
         let p = ParsedFont::parse("12pt Arial").unwrap();
-        assert!((p.size_px - 16.0).abs() < 0.01, "12pt → 16px, got {}", p.size_px);
+        assert!(
+            (p.size_px - 16.0).abs() < 0.01,
+            "12pt → 16px, got {}",
+            p.size_px
+        );
     }
 
     #[test]

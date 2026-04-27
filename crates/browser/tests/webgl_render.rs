@@ -13,8 +13,9 @@ fn html(body: &str) -> String {
 
 #[tokio::test]
 async fn webgl_clear_color_red() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <canvas id="c" width="100" height="100"></canvas>
         <script>
             const gl = document.getElementById('c').getContext('webgl');
@@ -28,7 +29,9 @@ async fn webgl_clear_color_red() {
             globalThis.a = pixels[3];
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
     assert_eq!(page.evaluate("r").unwrap(), "255", "red channel");
@@ -39,8 +42,9 @@ async fn webgl_clear_color_red() {
 
 #[tokio::test]
 async fn webgl_clear_color_blue() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <canvas id="c" width="50" height="50"></canvas>
         <script>
             const gl = document.getElementById('c').getContext('webgl');
@@ -52,7 +56,9 @@ async fn webgl_clear_color_blue() {
             globalThis.b = pixels[2];
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
     assert_eq!(page.evaluate("r").unwrap(), "0");
@@ -61,8 +67,9 @@ async fn webgl_clear_color_blue() {
 
 #[tokio::test]
 async fn webgl_to_data_url_has_content() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <canvas id="c" width="100" height="100"></canvas>
         <script>
             const gl = document.getElementById('c').getContext('webgl');
@@ -71,7 +78,9 @@ async fn webgl_to_data_url_has_content() {
             globalThis.url = document.getElementById('c').toDataURL();
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
     let url = page.evaluate("url").unwrap();
@@ -85,8 +94,9 @@ async fn webgl_to_data_url_has_content() {
 
 #[tokio::test]
 async fn webgl_constants_exist() {
-    let mut page = Page::from_html(&html(
-        r#"
+    let mut page = Page::from_html(
+        &html(
+            r#"
         <canvas id="c"></canvas>
         <script>
             const gl = document.getElementById('c').getContext('webgl');
@@ -96,7 +106,9 @@ async fn webgl_constants_exist() {
             globalThis.hasUB = gl.UNSIGNED_BYTE === 0x1401;
         </script>
     "#,
-    ), None::<stealth::StealthProfile>)
+        ),
+        None::<stealth::StealthProfile>,
+    )
     .await
     .unwrap();
     assert_eq!(page.evaluate("hasCBB").unwrap(), "true");

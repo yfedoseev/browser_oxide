@@ -1,11 +1,11 @@
 use browser::Page;
-use stealth::presets::chrome_130_ru;
 use std::time::Duration;
+use stealth::presets::chrome_130_ru;
 
 #[tokio::test]
 async fn test_local_storage_persistence_across_navigation() {
     let profile = chrome_130_ru();
-    
+
     // Iteration 0: Set a value in localStorage and trigger a reload
     let html_0 = r#"
         <html>
@@ -22,19 +22,23 @@ async fn test_local_storage_persistence_across_navigation() {
 
     // Use Page::navigate-like logic manually to verify persistence
     // (Navigate with 2 iterations)
-    let mut page = Page::navigate_with_html(html_0, "https://example.com/", profile, 2).await.unwrap();
-    
+    let mut page = Page::navigate_with_html(html_0, "https://example.com/", profile, 2)
+        .await
+        .unwrap();
+
     // If persistence works, the second iteration (which we can simulate by
     // checking what's in the final page's storage) should have the values.
-    
-    let result = page.evaluate("localStorage.getItem('gate_passed') + ':' + localStorage.persistent_token").unwrap();
+
+    let result = page
+        .evaluate("localStorage.getItem('gate_passed') + ':' + localStorage.persistent_token")
+        .unwrap();
     assert_eq!(result, "true:xyz-123");
 }
 
 #[tokio::test]
 async fn test_session_storage_persistence_across_navigation() {
     let profile = chrome_130_ru();
-    
+
     let html_0 = r#"
         <html>
         <body>
@@ -46,8 +50,12 @@ async fn test_session_storage_persistence_across_navigation() {
         </html>
     "#;
 
-    let mut page = Page::navigate_with_html(html_0, "https://example.com/", profile, 2).await.unwrap();
-    
-    let result = page.evaluate("sessionStorage.getItem('session_id')").unwrap();
+    let mut page = Page::navigate_with_html(html_0, "https://example.com/", profile, 2)
+        .await
+        .unwrap();
+
+    let result = page
+        .evaluate("sessionStorage.getItem('session_id')")
+        .unwrap();
     assert_eq!(result, "sess-999");
 }

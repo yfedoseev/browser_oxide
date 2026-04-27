@@ -12,7 +12,7 @@
 //! machines and matches the StealthProfile's nominal Chrome-on-X
 //! behaviour rather than the developer's laptop.
 
-use fontdb::{Database, Family, ID, Query, Stretch, Style, Weight};
+use fontdb::{Database, Family, Query, Stretch, Style, Weight, ID};
 use std::sync::OnceLock;
 
 pub struct FontDatabase {
@@ -29,20 +29,17 @@ pub struct FontDatabase {
 /// Noto Sans Regular handles Cyrillic / Greek / extended Latin
 /// coverage so measurements of Russian / Greek strings don't fall off
 /// the Liberation glyph set.
-const LIBERATION_SANS_REGULAR: &[u8] =
-    include_bytes!("../../fonts/LiberationSans-Regular.ttf");
+const LIBERATION_SANS_REGULAR: &[u8] = include_bytes!("../../fonts/LiberationSans-Regular.ttf");
 const LIBERATION_SANS_BOLD: &[u8] = include_bytes!("../../fonts/LiberationSans-Bold.ttf");
 const LIBERATION_SANS_ITALIC: &[u8] = include_bytes!("../../fonts/LiberationSans-Italic.ttf");
 const LIBERATION_SANS_BOLD_ITALIC: &[u8] =
     include_bytes!("../../fonts/LiberationSans-BoldItalic.ttf");
-const LIBERATION_SERIF_REGULAR: &[u8] =
-    include_bytes!("../../fonts/LiberationSerif-Regular.ttf");
+const LIBERATION_SERIF_REGULAR: &[u8] = include_bytes!("../../fonts/LiberationSerif-Regular.ttf");
 const LIBERATION_SERIF_BOLD: &[u8] = include_bytes!("../../fonts/LiberationSerif-Bold.ttf");
 const LIBERATION_SERIF_ITALIC: &[u8] = include_bytes!("../../fonts/LiberationSerif-Italic.ttf");
 const LIBERATION_SERIF_BOLD_ITALIC: &[u8] =
     include_bytes!("../../fonts/LiberationSerif-BoldItalic.ttf");
-const LIBERATION_MONO_REGULAR: &[u8] =
-    include_bytes!("../../fonts/LiberationMono-Regular.ttf");
+const LIBERATION_MONO_REGULAR: &[u8] = include_bytes!("../../fonts/LiberationMono-Regular.ttf");
 const LIBERATION_MONO_BOLD: &[u8] = include_bytes!("../../fonts/LiberationMono-Bold.ttf");
 const LIBERATION_MONO_ITALIC: &[u8] = include_bytes!("../../fonts/LiberationMono-Italic.ttf");
 const LIBERATION_MONO_BOLD_ITALIC: &[u8] =
@@ -166,18 +163,11 @@ fn resolve_family(name: &str) -> Vec<Family<'_>> {
         "cursive" => vec![Family::Cursive],
         "fantasy" => vec![Family::Fantasy],
         // Chrome substitution table for families we don't bundle.
-        "arial" | "helvetica" | "helvetica neue" => vec![
-            Family::Name("Liberation Sans"),
-            Family::SansSerif,
-        ],
-        "times" | "times new roman" => vec![
-            Family::Name("Liberation Serif"),
-            Family::Serif,
-        ],
-        "courier" | "courier new" => vec![
-            Family::Name("Liberation Mono"),
-            Family::Monospace,
-        ],
+        "arial" | "helvetica" | "helvetica neue" => {
+            vec![Family::Name("Liberation Sans"), Family::SansSerif]
+        }
+        "times" | "times new roman" => vec![Family::Name("Liberation Serif"), Family::Serif],
+        "courier" | "courier new" => vec![Family::Name("Liberation Mono"), Family::Monospace],
         _ => vec![Family::Name(name), Family::SansSerif],
     }
 }
@@ -240,7 +230,11 @@ mod tests {
         let db = FontDatabase::get();
         let id = db.query("Arial", 400, false).unwrap();
         let (bytes, _idx) = db.face_data(id).expect("bundled face has binary source");
-        assert!(bytes.len() > 1000, "face bytes suspiciously small: {}", bytes.len());
+        assert!(
+            bytes.len() > 1000,
+            "face bytes suspiciously small: {}",
+            bytes.len()
+        );
         // TTF magic is either 0x00010000 (TrueType) or "OTTO" (CFF).
         assert!(
             matches!(&bytes[0..4], b"\x00\x01\x00\x00" | b"OTTO" | b"true"),

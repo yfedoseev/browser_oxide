@@ -6,9 +6,7 @@
 
 use bytes::Bytes;
 use http2::client::{Builder, Connection, SendRequest};
-use http2::frame::{
-    PseudoId, PseudoOrder, SettingId, SettingsOrder, StreamDependency, StreamId,
-};
+use http2::frame::{PseudoId, PseudoOrder, SettingId, SettingsOrder, StreamDependency, StreamId};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::NetError;
@@ -39,9 +37,7 @@ const INITIAL_CONNECTION_WINDOW_SIZE: u32 = 15_728_640; // 15 MB (WINDOW_UPDATE)
 ///
 /// The connection must be driven by spawning it onto a tokio task.
 /// The sender is used to send requests.
-pub async fn handshake<T>(
-    io: T,
-) -> Result<(SendRequest<Bytes>, Connection<T, Bytes>), NetError>
+pub async fn handshake<T>(io: T) -> Result<(SendRequest<Bytes>, Connection<T, Bytes>), NetError>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
@@ -101,9 +97,7 @@ pub async fn send_get(
 
     // In HTTP/2, :authority is derived from the URI automatically.
     // Do NOT add an explicit `host` header — some servers (nginx) reject it.
-    let mut request = http::Request::builder()
-        .method(http::Method::GET)
-        .uri(uri);
+    let mut request = http::Request::builder().method(http::Method::GET).uri(uri);
 
     for (name, value) in headers {
         request = request.header(name.as_str(), value.as_str());
@@ -202,10 +196,7 @@ mod tests {
             .unwrap();
 
         // Verify ALPN negotiated h2
-        assert_eq!(
-            crate::tls::negotiated_alpn(&tls),
-            Some(b"h2".as_slice())
-        );
+        assert_eq!(crate::tls::negotiated_alpn(&tls), Some(b"h2".as_slice()));
 
         let (mut sender, conn) = handshake(tls).await.unwrap();
         tokio::spawn(async move {
@@ -214,14 +205,9 @@ mod tests {
             }
         });
 
-        let (parts, body) = send_get(
-            &mut sender,
-            "https://httpbin.org/get",
-            "httpbin.org",
-            &[],
-        )
-        .await
-        .unwrap();
+        let (parts, body) = send_get(&mut sender, "https://httpbin.org/get", "httpbin.org", &[])
+            .await
+            .unwrap();
 
         assert_eq!(parts.status, 200);
         assert!(!body.is_empty());

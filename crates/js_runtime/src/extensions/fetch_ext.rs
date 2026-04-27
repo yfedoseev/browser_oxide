@@ -1,8 +1,25 @@
 use deno_core::op2;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use url::Url;
+
+/// Per-page sync-fetch chain ceiling. Without this, sites like
+/// delta.com and taobao.com cascade nested document.write(<script src>)
+/// + setTimeout-driven JSONP polls indefinitely, holding the V8 worker
+/// thread for minutes and starving tokio of yield points.
+///
+/// 30 is comfortable: any anti-bot vendor's solver chain fits in
+/// <10 sync fetches, leaving headroom for legitimate inline scripts.
+const MAX_SYNC_FETCH_PER_PAGE: usize = 30;
+static SYNC_FETCH_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Reset the per-page sync-fetch counter. Called by Page::navigate_with_init
+/// at the start of each navigation iteration.
+pub fn reset_sync_fetch_count() {
+    SYNC_FETCH_COUNT.store(0, Ordering::Relaxed);
+}
 
 /// HTTP client state stored in OpState.
 pub struct FetchState {
@@ -177,17 +194,37 @@ pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
 #[op2]
 #[string]
 pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> String {
+    // Per-page chain ceiling — see MAX_SYNC_FETCH_PER_PAGE.
+    let n = SYNC_FETCH_COUNT.fetch_add(1, Ordering::Relaxed);
+    if n >= MAX_SYNC_FETCH_PER_PAGE {
+        eprintln!(
+            "[op_net_fetch_sync] CHAIN LIMIT ({}) exceeded — returning empty for {}",
+            MAX_SYNC_FETCH_PER_PAGE, url
+        );
+        return String::new();
+    }
+
     tracing::debug!("[op_net_fetch_sync] fetching {}", url);
 
-    // 1. Get a client instance
-    let client = if let Some(c) = FETCH_CLIENT.get() {
-        c.clone()
-    } else {
-        let profile = stealth::presets::chrome_130_ru();
-        match net::HttpClient::new(&profile) {
-            Ok(c) => c,
-            Err(_) => return String::new(),
-        }
+    // 1. Get a client instance.
+    //
+    // NOTE: we deliberately build a FRESH client here rather than reuse
+    // FETCH_CLIENT. Reason: the V8 op runs on the main tokio runtime's
+    // thread (synchronous from JS's perspective). It then std::thread::spawn
+    // a new tokio runtime to do the await. If we used the shared
+    // FETCH_CLIENT, its pooled HTTP/2 connections — whose reader/writer
+    // tasks live on the MAIN runtime — would deadlock because the main
+    // runtime is blocked waiting for this op to return. A fresh client
+    // with its own connection pool fully owned by the spawned runtime
+    // sidesteps the deadlock. We DO read the profile from FETCH_CLIENT
+    // so cookies + stealth settings are consistent.
+    let profile = FETCH_CLIENT
+        .get()
+        .map(|c| c.profile().clone())
+        .unwrap_or_else(stealth::presets::chrome_130_ru);
+    let client = match net::HttpClient::new(&profile) {
+        Ok(c) => c,
+        Err(_) => return String::new(),
     };
 
     // 2. Build browser-native headers for a script fetch
@@ -210,24 +247,47 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
             .build()
         {
             Ok(rt) => rt,
-            Err(_) => return String::new(),
+            Err(e) => {
+                eprintln!("[op_net_fetch_sync] runtime build error: {e}");
+                return String::new();
+            }
         };
         rt.block_on(async move {
-            match tokio::time::timeout(std::time::Duration::from_secs(10), client.get_with_headers(&url_clone, &extra_headers)).await {
-                Ok(Ok(resp)) => resp.text(),
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                client.get_with_headers(&url_clone, &extra_headers),
+            )
+            .await
+            {
+                Ok(Ok(resp)) => {
+                    let body = resp.text();
+                    if body.is_empty() {
+                        eprintln!(
+                            "[op_net_fetch_sync] empty body for {} (status={})",
+                            url_clone, resp.status
+                        );
+                    }
+                    body
+                }
                 Ok(Err(e)) => {
-                    tracing::debug!("[op_net_fetch_sync] FAILED fetch {}: {}", url_clone, e);
+                    eprintln!("[op_net_fetch_sync] FAILED fetch {}: {}", url_clone, e);
                     String::new()
                 }
                 Err(_) => {
-                    tracing::debug!("[op_net_fetch_sync] TIMEOUT fetching {}", url_clone);
+                    eprintln!("[op_net_fetch_sync] TIMEOUT fetching {}", url_clone);
                     String::new()
                 }
             }
         })
-    }).join().unwrap_or_default();
+    })
+    .join()
+    .unwrap_or_default();
 
-    tracing::debug!("[op_net_fetch_sync] fetched {} bytes from {}", result.len(), url);
+    eprintln!(
+        "[op_net_fetch_sync] fetched {} bytes from {}",
+        result.len(),
+        url
+    );
     result
 }
 

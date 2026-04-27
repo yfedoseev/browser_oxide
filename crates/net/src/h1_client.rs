@@ -98,7 +98,9 @@ where
             .await
             .map_err(|e| NetError::Http(format!("read error: {e}")))?;
         if n == 0 {
-            return Err(NetError::Http("connection closed before headers".to_string()));
+            return Err(NetError::Http(
+                "connection closed before headers".to_string(),
+            ));
         }
         buf.extend_from_slice(&tmp[..n]);
 
@@ -187,10 +189,7 @@ where
     Ok(body)
 }
 
-async fn read_chunked_body<S>(
-    stream: &mut S,
-    initial: &[u8],
-) -> Result<Vec<u8>, NetError>
+async fn read_chunked_body<S>(stream: &mut S, initial: &[u8]) -> Result<Vec<u8>, NetError>
 where
     S: AsyncReadExt + Unpin,
 {
@@ -214,7 +213,11 @@ where
         // Parse chunk size
         let crlf_pos = match raw.windows(2).position(|w| w == b"\r\n") {
             Some(pos) => pos,
-            None => return Err(NetError::Http("malformed chunked encoding: missing CRLF".into())),
+            None => {
+                return Err(NetError::Http(
+                    "malformed chunked encoding: missing CRLF".into(),
+                ))
+            }
         };
         let size_str = std::str::from_utf8(&raw[..crlf_pos])
             .map_err(|e| NetError::Http(format!("invalid chunk size: {e}")))?;
@@ -254,10 +257,7 @@ fn contains_crlf(buf: &[u8]) -> bool {
     buf.windows(2).any(|w| w == b"\r\n")
 }
 
-async fn read_until_close<S>(
-    stream: &mut S,
-    initial: &[u8],
-) -> Result<Vec<u8>, NetError>
+async fn read_until_close<S>(stream: &mut S, initial: &[u8]) -> Result<Vec<u8>, NetError>
 where
     S: AsyncReadExt + Unpin,
 {

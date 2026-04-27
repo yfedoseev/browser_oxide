@@ -20,8 +20,148 @@
 //   3. Any site code calling `structuredClone()` directly.
 
 ((globalThis) => {
+    // Wire serialization (serializeForWire / deserializeFromWire) must always
+    // be registered for Worker.postMessage to survive the JSON thread-hop.
+    // These are independent of whether structuredClone is natively present.
+    // The structuredClone polyfill guard is applied separately below.
+
+    const TAG = "__boxsc";
+
+    function _b64encodeBytes(u8) {
+        let bin = "";
+        for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+        return (typeof globalThis.btoa === "function"
+            ? globalThis.btoa(bin)
+            : bin);
+    }
+
+    function _b64decodeToUint8(str) {
+        const bin =
+            typeof globalThis.atob === "function"
+                ? globalThis.atob(str)
+                : str;
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
+    }
+
+    function _serializeForWire(value, seen) {
+        if (value === null) return null;
+        const t = typeof value;
+        if (t === "undefined") return { [TAG]: "undefined" };
+        if (t === "bigint") return { [TAG]: "bigint", v: value.toString() };
+        if (t === "number" || t === "string" || t === "boolean") return value;
+        if (t === "function" || t === "symbol") {
+            const err = new Error(t + " values cannot be transferred via postMessage");
+            err.name = "DataCloneError";
+            throw err;
+        }
+        seen = seen || new WeakMap();
+        if (seen.has(value)) return null;
+        if (value instanceof Date) {
+            return { [TAG]: "Date", v: value.getTime() };
+        }
+        if (value instanceof RegExp) {
+            return { [TAG]: "RegExp", source: value.source, flags: value.flags };
+        }
+        if (value instanceof ArrayBuffer) {
+            const u8 = new Uint8Array(value);
+            return { [TAG]: "ArrayBuffer", b: _b64encodeBytes(u8) };
+        }
+        if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+            const u8 = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+            return { [TAG]: "TypedArray", ctor: value.constructor.name, b: _b64encodeBytes(u8) };
+        }
+        if (value instanceof DataView) {
+            const u8 = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+            return { [TAG]: "DataView", b: _b64encodeBytes(u8) };
+        }
+        if (value instanceof Map) {
+            seen.set(value, true);
+            const entries = [];
+            for (const [k, v] of value) {
+                entries.push([_serializeForWire(k, seen), _serializeForWire(v, seen)]);
+            }
+            return { [TAG]: "Map", entries };
+        }
+        if (value instanceof Set) {
+            seen.set(value, true);
+            const items = [];
+            for (const v of value) items.push(_serializeForWire(v, seen));
+            return { [TAG]: "Set", items };
+        }
+        if (Array.isArray(value)) {
+            seen.set(value, true);
+            const out = new Array(value.length);
+            for (let i = 0; i < value.length; i++) out[i] = _serializeForWire(value[i], seen);
+            return out;
+        }
+        seen.set(value, true);
+        const out = {};
+        for (const key of Object.keys(value)) out[key] = _serializeForWire(value[key], seen);
+        return out;
+    }
+
+    function _deserializeFromWire(value) {
+        if (value === null) return null;
+        const t = typeof value;
+        if (t === "number" || t === "string" || t === "boolean") return value;
+        if (t !== "object") return value;
+        if (Array.isArray(value)) {
+            const out = new Array(value.length);
+            for (let i = 0; i < value.length; i++) out[i] = _deserializeFromWire(value[i]);
+            return out;
+        }
+        const tag = value[TAG];
+        if (tag) {
+            switch (tag) {
+                case "undefined": return undefined;
+                case "bigint": return BigInt(value.v);
+                case "Date": return new Date(value.v);
+                case "RegExp": return new RegExp(value.source, value.flags);
+                case "ArrayBuffer": {
+                    const u8 = _b64decodeToUint8(value.b);
+                    const ab = new ArrayBuffer(u8.byteLength);
+                    new Uint8Array(ab).set(u8);
+                    return ab;
+                }
+                case "TypedArray": {
+                    const u8 = _b64decodeToUint8(value.b);
+                    const ab = new ArrayBuffer(u8.byteLength);
+                    new Uint8Array(ab).set(u8);
+                    const Ctor = globalThis[value.ctor] || Uint8Array;
+                    try { return new Ctor(ab); } catch (_) { return new Uint8Array(ab); }
+                }
+                case "DataView": {
+                    const u8 = _b64decodeToUint8(value.b);
+                    const ab = new ArrayBuffer(u8.byteLength);
+                    new Uint8Array(ab).set(u8);
+                    return new DataView(ab);
+                }
+                case "Map": {
+                    const m = new Map();
+                    for (const [k, v] of value.entries) m.set(_deserializeFromWire(k), _deserializeFromWire(v));
+                    return m;
+                }
+                case "Set": {
+                    const s = new Set();
+                    for (const v of value.items) s.add(_deserializeFromWire(v));
+                    return s;
+                }
+                default: break;
+            }
+        }
+        const out = {};
+        for (const key of Object.keys(value)) out[key] = _deserializeFromWire(value[key]);
+        return out;
+    }
+
+    if (!globalThis.__boxide) globalThis.__boxide = {};
+    globalThis.__boxide.serializeForWire = _serializeForWire;
+    globalThis.__boxide.deserializeFromWire = _deserializeFromWire;
+
+    // structuredClone polyfill — only install if V8 doesn't provide it natively.
     if (typeof globalThis.structuredClone === "function") {
-        // Already installed — don't double-install across re-parses.
         return;
     }
 
@@ -195,204 +335,4 @@
         return clone(value, new WeakMap());
     };
 
-    // ----------------------------------------------------------------
-    // Wire-format serialization (for Worker.postMessage / MessagePort).
-    //
-    // Plain JSON cannot represent ArrayBuffer / TypedArray / Date /
-    // Map / Set, so we walk the value first and replace each non-
-    // representable node with a tagged marker object of the form
-    //   { __boxsc: '<kind>', ... }
-    // The receiver walks the parsed JSON and rebuilds the original
-    // types from the markers. Combined with JSON.stringify/parse at
-    // the transport boundary, this preserves binary payloads across
-    // thread hops — which is what Worker.postMessage needs for
-    // realistic fingerprint-probe behaviour.
-    //
-    // The markers are prefixed with `__boxsc` (browser_oxide
-    // structured-clone) to avoid colliding with site code that
-    // happens to use `__type` or similar.
-    // ----------------------------------------------------------------
-
-    const TAG = "__boxsc";
-
-    function _b64encodeBytes(u8) {
-        let bin = "";
-        for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
-        return (typeof globalThis.btoa === "function"
-            ? globalThis.btoa(bin)
-            : bin);
-    }
-
-    function _b64decodeToUint8(str) {
-        const bin =
-            typeof globalThis.atob === "function"
-                ? globalThis.atob(str)
-                : str;
-        const out = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-        return out;
-    }
-
-    function _serializeForWire(value, seen) {
-        if (value === null) return null;
-        const t = typeof value;
-        if (t === "undefined") return { [TAG]: "undefined" };
-        if (t === "bigint") return { [TAG]: "bigint", v: value.toString() };
-        if (t === "number" || t === "string" || t === "boolean") return value;
-        if (t === "function" || t === "symbol") {
-            throw _dataCloneError(
-                t + " values cannot be transferred via postMessage"
-            );
-        }
-        seen = seen || new WeakMap();
-        if (seen.has(value)) {
-            // Cycles aren't JSON-representable. Fall back to `null`
-            // for the duplicate reference — a site that relies on
-            // shared-object identity through postMessage gets a
-            // reasonable approximation rather than a throw.
-            return null;
-        }
-        if (value instanceof Date) {
-            return { [TAG]: "Date", v: value.getTime() };
-        }
-        if (value instanceof RegExp) {
-            return { [TAG]: "RegExp", source: value.source, flags: value.flags };
-        }
-        if (value instanceof ArrayBuffer) {
-            const u8 = new Uint8Array(value);
-            return { [TAG]: "ArrayBuffer", b: _b64encodeBytes(u8) };
-        }
-        if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
-            // TypedArray — preserve the constructor name so the
-            // receiver can reconstruct Uint8Array vs Int16Array etc.
-            const u8 = new Uint8Array(
-                value.buffer,
-                value.byteOffset,
-                value.byteLength
-            );
-            return {
-                [TAG]: "TypedArray",
-                ctor: value.constructor.name,
-                b: _b64encodeBytes(u8),
-            };
-        }
-        if (value instanceof DataView) {
-            const u8 = new Uint8Array(
-                value.buffer,
-                value.byteOffset,
-                value.byteLength
-            );
-            return { [TAG]: "DataView", b: _b64encodeBytes(u8) };
-        }
-        if (value instanceof Map) {
-            seen.set(value, true);
-            const entries = [];
-            for (const [k, v] of value) {
-                entries.push([_serializeForWire(k, seen), _serializeForWire(v, seen)]);
-            }
-            return { [TAG]: "Map", entries };
-        }
-        if (value instanceof Set) {
-            seen.set(value, true);
-            const items = [];
-            for (const v of value) items.push(_serializeForWire(v, seen));
-            return { [TAG]: "Set", items };
-        }
-        if (Array.isArray(value)) {
-            seen.set(value, true);
-            const out = new Array(value.length);
-            for (let i = 0; i < value.length; i++) {
-                out[i] = _serializeForWire(value[i], seen);
-            }
-            return out;
-        }
-        // Plain object (or anything we don't have a specific path for).
-        seen.set(value, true);
-        const out = {};
-        for (const key of Object.keys(value)) {
-            out[key] = _serializeForWire(value[key], seen);
-        }
-        return out;
-    }
-
-    function _deserializeFromWire(value) {
-        if (value === null) return null;
-        const t = typeof value;
-        if (t === "number" || t === "string" || t === "boolean") return value;
-        if (t !== "object") return value;
-        if (Array.isArray(value)) {
-            const out = new Array(value.length);
-            for (let i = 0; i < value.length; i++) {
-                out[i] = _deserializeFromWire(value[i]);
-            }
-            return out;
-        }
-        const tag = value[TAG];
-        if (tag) {
-            switch (tag) {
-                case "undefined":
-                    return undefined;
-                case "bigint":
-                    return BigInt(value.v);
-                case "Date":
-                    return new Date(value.v);
-                case "RegExp":
-                    return new RegExp(value.source, value.flags);
-                case "ArrayBuffer": {
-                    const u8 = _b64decodeToUint8(value.b);
-                    // `.buffer` may be oversized if the underlying
-                    // engine rounds up; return a bytewise-exact copy.
-                    const ab = new ArrayBuffer(u8.byteLength);
-                    new Uint8Array(ab).set(u8);
-                    return ab;
-                }
-                case "TypedArray": {
-                    const u8 = _b64decodeToUint8(value.b);
-                    const ab = new ArrayBuffer(u8.byteLength);
-                    new Uint8Array(ab).set(u8);
-                    const Ctor = globalThis[value.ctor] || Uint8Array;
-                    if (value.ctor === "Uint8Array") return new Uint8Array(ab);
-                    // For non-byte typed arrays the ctor takes the buffer.
-                    try {
-                        return new Ctor(ab);
-                    } catch (_e) {
-                        return new Uint8Array(ab);
-                    }
-                }
-                case "DataView": {
-                    const u8 = _b64decodeToUint8(value.b);
-                    const ab = new ArrayBuffer(u8.byteLength);
-                    new Uint8Array(ab).set(u8);
-                    return new DataView(ab);
-                }
-                case "Map": {
-                    const m = new Map();
-                    for (const [k, v] of value.entries) {
-                        m.set(_deserializeFromWire(k), _deserializeFromWire(v));
-                    }
-                    return m;
-                }
-                case "Set": {
-                    const s = new Set();
-                    for (const v of value.items) s.add(_deserializeFromWire(v));
-                    return s;
-                }
-                default:
-                    break;
-            }
-        }
-        // Plain object.
-        const out = {};
-        for (const key of Object.keys(value)) {
-            out[key] = _deserializeFromWire(value[key]);
-        }
-        return out;
-    }
-
-    // Expose on an internal `__boxide` namespace so window_bootstrap
-    // and worker_bootstrap can call them without colliding with
-    // site-visible globals.
-    if (!globalThis.__boxide) globalThis.__boxide = {};
-    globalThis.__boxide.serializeForWire = _serializeForWire;
-    globalThis.__boxide.deserializeFromWire = _deserializeFromWire;
 })(globalThis);

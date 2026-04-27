@@ -53,25 +53,24 @@
 
     // --- WorkerNavigator (matches StealthProfile) ---
     if (!self.navigator) {
-        const osName = _p("os", "Linux");
-        const browserMajor = _p("browser_major", "130");
-        const browserFullVersion = _p("browser_version", "130.0.6723.91");
-        
         const workerNavigator = {
-            userAgent: _p("user_agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.91 Safari/537.36"),
-            language: _p("language", "ru-RU"),
-            languages: _pJson("languages", ["ru-RU", "ru", "en-US", "en"]),
+            userAgent: _p("user_agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
+            appVersion: _p("app_version", "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
+            language: _p("language", "en-US"),
+            languages: _pJson("languages", ["en-US", "en"]),
             platform: _p("platform", "Linux x86_64"),
             onLine: true,
             cookieEnabled: true,
             hardwareConcurrency: _pInt("hardware_concurrency", 8),
             deviceMemory: _pInt("device_memory", 8),
             appName: "Netscape",
-            appVersion: "5.0 (" + osName + ") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + browserFullVersion,
             product: "Gecko",
-            productSub: "20030107",
-            vendor: "Google Inc.",
-            vendorSub: "",
+            productSub: _p("product_sub", "20030107"),
+            vendor: _p("vendor", "Google Inc."),
+            vendorSub: _p("vendor_sub", ""),
+            doNotTrack: null,
+            pdfViewerEnabled: _p("pdf_viewer_enabled", "true") === "true",
+            webdriver: false,
         };
         Object.defineProperty(workerNavigator, Symbol.toStringTag, { value: "WorkerNavigator", configurable: true });
         self.navigator = workerNavigator;
@@ -130,6 +129,30 @@
         };
     }
 
+    // --- EventTarget for the worker global scope ---
+    const _wListeners = {};
+    self.addEventListener = function addEventListener(type, fn) {
+        if (!_wListeners[type]) _wListeners[type] = [];
+        if (!_wListeners[type].includes(fn)) _wListeners[type].push(fn);
+    };
+    self.removeEventListener = function removeEventListener(type, fn) {
+        if (_wListeners[type]) {
+            _wListeners[type] = _wListeners[type].filter(f => f !== fn);
+        }
+    };
+    self.dispatchEvent = function dispatchEvent(event) {
+        const type = event && event.type;
+        const arr = _wListeners[type] || [];
+        for (const fn of arr.slice()) {
+            try { fn.call(self, event); } catch (_) {}
+        }
+        const on = self['on' + type];
+        if (typeof on === 'function') {
+            try { on.call(self, event); } catch (_) {}
+        }
+        return true;
+    };
+
     // --- postMessage: send a message to the parent thread ---
     self.postMessage = function (message, transfer) {
         // Validate transferables (same shape as main thread).
@@ -148,9 +171,9 @@
         let wire;
         try {
             wire =
-                (globalThis.__boxide &&
-                    globalThis.__boxide.serializeForWire &&
-                    globalThis.__boxide.serializeForWire(message)) ||
+                (_boxide &&
+                    _boxide.serializeForWire &&
+                    _boxide.serializeForWire(message)) ||
                 message;
         } catch (e) {
             // DataCloneError — propagate.

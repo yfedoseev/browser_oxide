@@ -32,9 +32,9 @@ impl QuicClient {
                 .map_err(|e| NetError::Quic(e.to_string()))?,
         ));
         transport.keep_alive_interval(Some(Duration::from_secs(10)));
-        // In quinn 0.11+, this is a field or method depending on the exact version. 
+        // In quinn 0.11+, this is a field or method depending on the exact version.
         // We'll stick to the defaults if the method is missing or use the correct setter.
-        
+
         let mut client_config = quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)
                 .map_err(|e| NetError::Quic(e.to_string()))?,

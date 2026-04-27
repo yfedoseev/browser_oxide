@@ -6,6 +6,8 @@ use crate::extensions::dom_ext::dom_extension;
 use crate::extensions::fetch_ext::{fetch_extension, FetchState};
 use crate::extensions::input_ext::input_extension;
 use crate::extensions::layout_ext::layout_extension;
+use crate::extensions::nav_ext::{nav_extension, NavSignal};
+use crate::extensions::perf_ext::{perf_extension, PerfState};
 use crate::extensions::sse_ext::{sse_extension, SseState};
 use crate::extensions::stealth_ext::{stealth_extension, StealthState};
 use crate::extensions::timer_ext::{timer_extension, TimerState};
@@ -13,7 +15,7 @@ use crate::extensions::webgl_ext::{webgl_extension, WebGLState};
 use crate::extensions::websocket_ext::{websocket_extension, WebSocketState};
 use crate::extensions::worker_ext::worker_extension;
 use crate::state::DomState;
-use deno_core::{JsRuntime, RuntimeOptions};
+use deno_core::{JsRuntime, RuntimeOptions, SharedArrayBufferStore};
 use dom::Dom;
 use stealth::StealthProfile;
 
@@ -34,6 +36,12 @@ pub struct BrowserRuntimeOptions {
     pub storage: Option<HashMap<String, HashMap<String, String>>>,
     /// Optional V8 snapshot to speed up startup.
     pub startup_snapshot: Option<&'static [u8]>,
+    /// Whether the document satisfies cross-origin isolation requirements
+    /// (COOP=same-origin AND COEP=require-corp|credentialless). Drives
+    /// `self.crossOriginIsolated` and gates SAB postMessage transfer to
+    /// workers — see `crates/net/src/headers.rs::is_cross_origin_isolated`
+    /// and gap #30 in docs/GAPS.md. Default false (most pages are not COI).
+    pub cross_origin_isolated: bool,
 }
 
 impl Default for BrowserRuntimeOptions {
@@ -45,12 +53,29 @@ impl Default for BrowserRuntimeOptions {
             init_scripts: Vec::new(),
             storage: None,
             startup_snapshot: None,
+            cross_origin_isolated: false,
         }
     }
 }
 
 /// Create a deno_core JsRuntime configured with browser extensions.
+///
+/// **Backward-compatibility shim.** Prefer [`create_runtime_with_signals`]
+/// in new code — it also returns the per-runtime [`NavSignal`] so the
+/// event loop can short-circuit when JS sets `__pendingNavigation` (gap
+/// in 5-second Kasada retry window). Keeps this fn for existing callers
+/// that don't need the signal.
 pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
+    create_runtime_with_signals(dom, options).0
+}
+
+/// Create a runtime AND return its NavSignal so the event-loop driver
+/// can poll `nav.pending()` between ticks and break out of `run_until_idle`
+/// the moment JS triggers a navigation. See `nav_ext.rs`.
+pub fn create_runtime_with_signals(
+    dom: Dom,
+    options: BrowserRuntimeOptions,
+) -> (JsRuntime, NavSignal) {
     let mut state = DomState::new(dom);
     state.stylesheets = options.stylesheets;
     if let Some(storage) = options.storage {
@@ -69,7 +94,8 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
         None => FetchState::new(None),
     };
 
-    let stealth_state = StealthState::new(options.stealth_profile);
+    let stealth_state =
+        StealthState::new_with_coi(options.stealth_profile, options.cross_origin_isolated);
 
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![
@@ -87,14 +113,26 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
             input_extension::init_ops(),
             worker_extension::init_ops(),
             audio_extension::init_ops(),
+            perf_extension::init_ops(),
+            nav_extension::init_ops(),
         ],
         startup_snapshot: options.startup_snapshot,
+        // Enables postMessage transfer of SharedArrayBuffer between isolates.
+        // The SAB *constructor* is always exposed by V8; we gate transfer
+        // separately on `cross_origin_isolated` (gap #30).
+        shared_array_buffer_store: Some(SharedArrayBufferStore::default()),
         ..Default::default()
     });
+
+    // Per-runtime NavSignal — populated by JS via op_set_pending_nav,
+    // consumed by BrowserEventLoop to short-circuit run_until_idle.
+    let nav_signal = NavSignal::new();
 
     // Insert states into OpState
     runtime.op_state().borrow_mut().put(state);
     runtime.op_state().borrow_mut().put(TimerState::new());
+    runtime.op_state().borrow_mut().put(PerfState::new());
+    runtime.op_state().borrow_mut().put(nav_signal.clone());
     runtime.op_state().borrow_mut().put(stealth_state);
     runtime.op_state().borrow_mut().put(fetch_state);
     runtime.op_state().borrow_mut().put(CanvasState::new());
@@ -105,18 +143,30 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
     // Execute bootstrap JS only if NOT starting from snapshot
     if options.startup_snapshot.is_none() {
         const BOOTSTRAP_JS: &str = concat!(
-            include_str!("js/console_bootstrap.js"), "\n",
-            include_str!("js/stealth_bootstrap.js"), "\n",
-            include_str!("js/interfaces_bootstrap.js"), "\n",
-            include_str!("js/instances_bootstrap.js"), "\n",
-            include_str!("js/fetch_bootstrap.js"), "\n",
-            include_str!("js/timer_bootstrap.js"), "\n",
-            include_str!("js/dom_bootstrap.js"), "\n",
-            include_str!("js/event_bootstrap.js"), "\n",
-            include_str!("js/canvas_bootstrap.js"), "\n",
-            include_str!("js/window_bootstrap.js"), "\n",
-            include_str!("js/streams_bootstrap.js"), "\n",
-            include_str!("js/structured_clone.js"), "\n",
+            include_str!("js/console_bootstrap.js"),
+            "\n",
+            include_str!("js/stealth_bootstrap.js"),
+            "\n",
+            include_str!("js/interfaces_bootstrap.js"),
+            "\n",
+            include_str!("js/instances_bootstrap.js"),
+            "\n",
+            include_str!("js/fetch_bootstrap.js"),
+            "\n",
+            include_str!("js/timer_bootstrap.js"),
+            "\n",
+            include_str!("js/dom_bootstrap.js"),
+            "\n",
+            include_str!("js/event_bootstrap.js"),
+            "\n",
+            include_str!("js/canvas_bootstrap.js"),
+            "\n",
+            include_str!("js/window_bootstrap.js"),
+            "\n",
+            include_str!("js/streams_bootstrap.js"),
+            "\n",
+            include_str!("js/structured_clone.js"),
+            "\n",
             include_str!("js/cleanup_bootstrap.js"),
         );
 
@@ -130,7 +180,6 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
         .execute_script("<cleanup>", include_str!("js/cleanup_bootstrap.js"))
         .expect("cleanup failed");
 
-
     // Run caller-provided init scripts after built-in cleanup.
     // These run in order before any <script> tags parsed from HTML.
     for (i, code) in options.init_scripts.iter().enumerate() {
@@ -140,7 +189,7 @@ pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
         }
     }
 
-    runtime
+    (runtime, nav_signal)
 }
 
 /// Create a minimal JsRuntime suitable for a Web Worker.
@@ -158,23 +207,33 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
             fetch_extension::init_ops(),
             worker_extension::init_ops(),
             canvas_extension::init_ops(),
+            stealth_extension::init_ops(),
         ],
         ..Default::default()
     });
 
     // Populate minimum states required by the enabled extensions.
     runtime.op_state().borrow_mut().put(TimerState::new());
-    runtime
-        .op_state()
-        .borrow_mut()
-        .put(FetchState::new(None));
+    runtime.op_state().borrow_mut().put(FetchState::new(None));
     runtime.op_state().borrow_mut().put(CanvasState::new());
-    
     // Inject DomState even in workers (stubbed) to hold the stealth profile
     // so op_has_stealth_profile() works in the worker isolate.
     let mut dom_state = DomState::new(dom::Dom::new());
-    dom_state.stealth_profile = profile;
+    dom_state.stealth_profile = profile.clone();
     runtime.op_state().borrow_mut().put(dom_state);
+
+    // StealthState must also carry the profile so op_get_profile_value
+    // returns the correct values inside the worker context.
+    runtime.op_state().borrow_mut().put(StealthState::new(profile));
+
+    // stealth_bootstrap must run first: installs Function.prototype.toString patch
+    // and the _nativeTag/_maskFunction/_maskAsNative helpers that worker_bootstrap uses.
+    runtime
+        .execute_script(
+            "<stealth_bootstrap>",
+            include_str!("js/stealth_bootstrap.js"),
+        )
+        .expect("worker: stealth bootstrap failed");
 
     runtime
         .execute_script(
@@ -196,17 +255,11 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
     // impl is self-contained (it gracefully handles the absence of
     // DOMException / Blob via typeof checks).
     runtime
-        .execute_script(
-            "<structured_clone>",
-            include_str!("js/structured_clone.js"),
-        )
+        .execute_script("<structured_clone>", include_str!("js/structured_clone.js"))
         .expect("worker: structured_clone bootstrap failed");
 
     runtime
-        .execute_script(
-            "<worker_bootstrap>",
-            include_str!("js/worker_bootstrap.js"),
-        )
+        .execute_script("<worker_bootstrap>", include_str!("js/worker_bootstrap.js"))
         .expect("worker: worker bootstrap failed");
 
     // canvas_bootstrap installs CanvasRenderingContext2D and the real
@@ -214,15 +267,15 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
     // because its DOM-patch blocks all gate on `globalThis.document?`
     // / `globalThis.Element?` which are undefined in the worker scope.
     runtime
-        .execute_script(
-            "<canvas_bootstrap>",
-            include_str!("js/canvas_bootstrap.js"),
-        )
+        .execute_script("<canvas_bootstrap>", include_str!("js/canvas_bootstrap.js"))
         .expect("worker: canvas bootstrap failed");
 
     // Final cleanup in worker
     runtime
-        .execute_script("<cleanup_bootstrap>", include_str!("js/cleanup_bootstrap.js"))
+        .execute_script(
+            "<cleanup_bootstrap>",
+            include_str!("js/cleanup_bootstrap.js"),
+        )
         .expect("worker: cleanup bootstrap failed");
 
     runtime

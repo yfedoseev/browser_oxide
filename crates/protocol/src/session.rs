@@ -92,7 +92,9 @@ impl CdpSession {
                     } else {
                         format!(
                             r#"{{"id":{},"result":{{"type":"{}","value":{}}}}}"#,
-                            req.id, ty, json_escape_string(&result_str)
+                            req.id,
+                            ty,
+                            json_escape_string(&result_str)
                         )
                     };
                     (resp_json, Vec::new())
@@ -371,6 +373,158 @@ impl CdpSession {
             // --- Security domain ---
             "Security.enable" => Ok(serde_json::json!({})),
 
+            // --- Input domain (gap #31 P3.1e) ---
+            //
+            // Puppeteer/Playwright drive the page via Input.dispatch* CDP
+            // methods. Without these handlers, every user interaction script
+            // gets "method not found" — full incompatibility. We translate
+            // each CDP call into a JS-side event dispatch via page.evaluate.
+            //
+            // Mouse-path humanization is offered separately via the JS
+            // helper `__browserOxide.humanMousePath` (gap #31b, wired to
+            // stealth::behavior::mouse_trajectory). Callers that want
+            // humanized input call multiple Input.dispatchMouseEvent
+            // moves between actions; CDP itself stays event-faithful.
+            "Input.dispatchMouseEvent" => {
+                let event_type = req
+                    .params
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let x = req.params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let y = req.params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let button = req
+                    .params
+                    .get("button")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("none");
+                let buttons = req
+                    .params
+                    .get("buttons")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let click_count = req
+                    .params
+                    .get("clickCount")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(1);
+                let modifiers = req
+                    .params
+                    .get("modifiers")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let js_event = match event_type {
+                    "mousePressed" => "mousedown",
+                    "mouseReleased" => "mouseup",
+                    "mouseMoved" => "mousemove",
+                    _ => "",
+                };
+                if !js_event.is_empty() {
+                    let button_n = match button {
+                        "left" => 0,
+                        "middle" => 1,
+                        "right" => 2,
+                        "back" => 3,
+                        "forward" => 4,
+                        _ => 0,
+                    };
+                    let script = format!(
+                        "(() => {{ \
+                          const e = new MouseEvent({js_event:?}, {{ \
+                            bubbles: true, cancelable: true, \
+                            clientX: {x}, clientY: {y}, screenX: {x}, screenY: {y}, \
+                            button: {button_n}, buttons: {buttons}, detail: {click_count}, \
+                            ctrlKey: {ctrl}, shiftKey: {shift}, altKey: {alt}, metaKey: {meta} \
+                          }}); \
+                          const t = (document.elementFromPoint && document.elementFromPoint({x},{y})) || document.body || document; \
+                          t.dispatchEvent(e); \
+                        }})()",
+                        ctrl = (modifiers & 2) != 0,
+                        shift = (modifiers & 8) != 0,
+                        alt = (modifiers & 1) != 0,
+                        meta = (modifiers & 4) != 0,
+                    );
+                    let _ = page.evaluate(&script);
+                }
+                Ok(serde_json::json!({}))
+            }
+            "Input.dispatchKeyEvent" => {
+                let event_type = req
+                    .params
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let key = req.params.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                let code = req
+                    .params
+                    .get("code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(key);
+                let text = req
+                    .params
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let modifiers = req
+                    .params
+                    .get("modifiers")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let js_event = match event_type {
+                    "keyDown" | "rawKeyDown" => "keydown",
+                    "keyUp" => "keyup",
+                    "char" => "keypress",
+                    _ => "",
+                };
+                if !js_event.is_empty() {
+                    let script = format!(
+                        "(() => {{ \
+                          const e = new KeyboardEvent({js_event:?}, {{ \
+                            bubbles: true, cancelable: true, \
+                            key: {key:?}, code: {code:?}, \
+                            ctrlKey: {ctrl}, shiftKey: {shift}, altKey: {alt}, metaKey: {meta} \
+                          }}); \
+                          (document.activeElement || document.body || document).dispatchEvent(e); \
+                          // For 'char' events, also fire an input event so text fields update.
+                          {input_extra} \
+                        }})()",
+                        ctrl = (modifiers & 2) != 0,
+                        shift = (modifiers & 8) != 0,
+                        alt = (modifiers & 1) != 0,
+                        meta = (modifiers & 4) != 0,
+                        input_extra = if event_type == "char" && !text.is_empty() {
+                            format!(
+                                "const ae = document.activeElement; \
+                                 if (ae && ('value' in ae)) {{ ae.value = (ae.value || '') + {text:?}; \
+                                 ae.dispatchEvent(new Event('input', {{bubbles: true}})); }}"
+                            )
+                        } else {
+                            String::new()
+                        },
+                    );
+                    let _ = page.evaluate(&script);
+                }
+                Ok(serde_json::json!({}))
+            }
+            "Input.dispatchTouchEvent" => Ok(serde_json::json!({})),
+            "Input.insertText" => {
+                let text = req
+                    .params
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !text.is_empty() {
+                    let script = format!(
+                        "(() => {{ const ae = document.activeElement; \
+                         if (ae && ('value' in ae)) {{ ae.value = (ae.value || '') + {text:?}; \
+                         ae.dispatchEvent(new Event('input', {{bubbles: true}})); }} }})()"
+                    );
+                    let _ = page.evaluate(&script);
+                }
+                Ok(serde_json::json!({}))
+            }
+            "Input.setIgnoreInputEvents" => Ok(serde_json::json!({})),
+
             // Unknown method
             _ => {
                 let err = CdpError::method_not_found(req.id, &req.method);
@@ -524,10 +678,12 @@ mod tests {
     #[tokio::test]
     async fn handle_dom_query_selector() {
         let mut session = CdpSession::new();
-        let mut page =
-            Page::from_html("<html><head></head><body><div id='test'></div></body></html>", None)
-                .await
-                .unwrap();
+        let mut page = Page::from_html(
+            "<html><head></head><body><div id='test'></div></body></html>",
+            None,
+        )
+        .await
+        .unwrap();
         let req = CdpRequest {
             id: 6,
             method: "DOM.querySelector".to_string(),

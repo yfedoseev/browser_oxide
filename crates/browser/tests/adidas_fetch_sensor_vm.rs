@@ -30,7 +30,11 @@ async fn adidas_fetch_sensor_vm() {
     let url = format!("https://www.adidas.com{script_path}");
     let script_resp = client.get(&url).await.unwrap();
     let script = script_resp.text();
-    println!("[script] status={} size={}", script_resp.status, script.len());
+    println!(
+        "[script] status={} size={}",
+        script_resp.status,
+        script.len()
+    );
 
     std::fs::write("/tmp/adidas_sensor_vm.js", &script).unwrap();
     println!("[dump] wrote /tmp/adidas_sensor_vm.js");

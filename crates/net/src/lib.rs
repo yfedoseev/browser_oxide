@@ -11,19 +11,26 @@ pub mod h1_client;
 pub mod h2_client;
 pub mod h3_request;
 pub mod headers;
+// JA4H is patent-pending under FoxIO License 1.1 (non-commercial). The
+// computer is test-gated so it never reaches a release binary, fitting the
+// "internal testing/evaluation" carve-out. See ja4h.rs and LICENSE-NOTE.md.
+#[cfg(test)]
+pub(crate) mod ja4h;
+pub mod kasada_session;
 pub mod pool;
 pub mod quic;
 pub mod tcp;
 pub mod tls;
 
 use alt_svc::AltSvcCache;
+use kasada_session::KasadaSessionStore;
 use boring2::ssl::SslConnector;
 use bytes::Bytes;
 use cookies::CookieJar;
 use error::NetError;
 use http2::client::SendRequest;
 use pool::ConnectionPool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use stealth::StealthProfile;
 use tokio::sync::Mutex;
@@ -67,13 +74,17 @@ struct QuicPool {
 
 impl Clone for QuicPool {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 
 impl Default for QuicPool {
     fn default() -> Self {
-        Self { inner: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
 
@@ -100,9 +111,28 @@ pub struct HttpClient {
     dns_cache: tcp::DnsCache,
     quic_client: Option<quic::QuicClient>,
     alt_svc_cache: AltSvcCache,
+    /// Per-origin Kasada session state. Populated when a response includes
+    /// `x-kpsdk-cr: true` + `x-kpsdk-st`; consumed by attaching `x-kpsdk-cd`
+    /// to subsequent requests to the same host. Solver lives in
+    /// `stealth::kasada`. See `docs/TIER0_KASADA_RESULTS.md`.
+    kasada_sessions: KasadaSessionStore,
+    /// Origins that have sent `Accept-CH` in a response. When an origin is
+    /// present, subsequent requests to it use `chrome_headers_with_accept_ch()`
+    /// which adds the full set of high-entropy Client Hints. Mirrors Chrome's
+    /// behaviour: baseline 13 headers on first visit, full hints after opt-in.
+    accept_ch_origins: Arc<Mutex<HashSet<String>>>,
 }
 
 impl HttpClient {
+    /// Borrow this client's stealth profile (read-only). Useful for
+    /// callers that need to spawn auxiliary clients with the same UA /
+    /// locale / TLS profile (e.g., the sync-fetch op which builds a
+    /// fresh client to avoid a connection-pool deadlock with the main
+    /// runtime).
+    pub fn profile(&self) -> &StealthProfile {
+        &self.profile
+    }
+
     /// Create a new client with the given stealth profile.
     pub fn new(profile: &StealthProfile) -> Result<Self, NetError> {
         let connector = tls::chrome_connector()?;
@@ -110,16 +140,106 @@ impl HttpClient {
         // Create QUIC client for HTTP/3 (non-fatal if it fails)
         let quic_client = quic::QuicClient::new().ok();
 
+        // Optionally load a persisted cookie jar so Kasada/Akamai trust
+        // accumulates across runs. Set BOXIDE_COOKIE_JAR to the desired
+        // file path. Without this env var, behavior is the same as before
+        // (fresh in-memory jar each run).
+        let initial_jar = if let Ok(path) = std::env::var("BOXIDE_COOKIE_JAR") {
+            let p = std::path::PathBuf::from(&path);
+            match CookieJar::load_from_file(&p) {
+                Ok(jar) => {
+                    eprintln!("[cookies] loaded persisted jar from {}", path);
+                    jar
+                }
+                Err(e) => {
+                    eprintln!("[cookies] failed to load {}: {} (starting fresh)", path, e);
+                    CookieJar::new()
+                }
+            }
+        } else {
+            CookieJar::new()
+        };
+
         Ok(Self {
             tls_connector: Arc::new(connector),
             profile: profile.clone(),
-            cookies: Arc::new(Mutex::new(CookieJar::new())),
+            cookies: Arc::new(Mutex::new(initial_jar)),
             pool: ConnectionPool::new(),
             quic_pool: QuicPool::default(),
             dns_cache: tcp::DnsCache::new(),
             quic_client,
             alt_svc_cache: AltSvcCache::new(),
+            kasada_sessions: KasadaSessionStore::new(),
+            accept_ch_origins: Arc::new(Mutex::new(HashSet::new())),
         })
+    }
+
+    /// Learn a Kasada session from response headers (called from response
+    /// post-processing). If the response includes `x-kpsdk-cr: true` and
+    /// `x-kpsdk-st`, we cache the server-time offset + a session id so
+    /// subsequent requests to this host can attach a valid `x-kpsdk-cd`.
+    async fn learn_kasada(
+        &self,
+        host: &str,
+        headers: &HashMap<String, String>,
+        request_url: Option<&str>,
+    ) {
+        self.kasada_sessions
+            .learn(host, headers, request_url)
+            .await;
+    }
+
+    /// Record that `host` has advertised `Accept-CH` so subsequent requests
+    /// include the full high-entropy Client Hints set.
+    async fn learn_accept_ch(&self, host: &str, headers: &HashMap<String, String>) {
+        if headers.keys().any(|k| k.eq_ignore_ascii_case("accept-ch")) {
+            self.accept_ch_origins
+                .lock()
+                .await
+                .insert(host.to_string());
+        }
+    }
+
+    /// Return `true` if `host` has previously sent `Accept-CH`.
+    async fn has_accept_ch(&self, host: &str) -> bool {
+        self.accept_ch_origins.lock().await.contains(host)
+    }
+
+    /// Fetch the Kasada `/mfc` endpoint for `host` if we have a session
+    /// with a known tenant prefix and don't yet have an fc token.
+    /// On success, stores `x-kpsdk-fc` from the response in the session.
+    async fn fetch_kasada_mfc_if_needed(&self, host: &str) {
+        let target = self.kasada_sessions.mfc_target(host).await;
+        let Some((tenant_prefix, fc_already)) = target else {
+            return;
+        };
+        if fc_already {
+            return; // Already have it; no need to refetch.
+        }
+        let mfc_url = format!("https://{}{}/mfc", host, tenant_prefix);
+        // Use a single GET via the same HTTP/2 path. We deliberately call
+        // get_with_headers (which auto-injects cookies + x-kpsdk-cd) so
+        // /mfc gets the same context Kasada expects.
+        let resp = match self.get_with_headers(&mfc_url, &[]).await {
+            Ok(r) => r,
+            Err(_e) => {
+                // /mfc fetch failed — fail open; subsequent requests omit fc.
+                return;
+            }
+        };
+        if let Some(fc) = resp.headers.get("x-kpsdk-fc") {
+            self.kasada_sessions.store_fc(host, fc.clone()).await;
+        }
+    }
+
+    /// Compute (and possibly inject) a Kasada `x-kpsdk-cd` header for an
+    /// outgoing request to `host`. Returns the header pair if we have a
+    /// session for that host; caller appends to its header list.
+    pub async fn kasada_cd_header(&self, host: &str) -> Option<(String, String)> {
+        self.kasada_sessions
+            .compute_cd_header(host)
+            .await
+            .map(|cd| ("x-kpsdk-cd".to_string(), cd))
     }
 
     /// Try HTTP/3 for an HTTPS URL. Returns Ok if successful, Err to fall back.
@@ -129,6 +249,12 @@ impl HttpClient {
         method: Method,
         extra_headers: &[(String, String)],
     ) -> Result<Response, NetError> {
+        // Belt-and-suspenders: even if something populates the cache, never
+        // emit a QUIC handshake when allow_http3=false. See learn_alt_svc()
+        // for the full rationale (gap #33).
+        if !self.profile.allow_http3 {
+            return Err(NetError::Quic("h3 disabled by profile".into()));
+        }
         let parsed = Url::parse(url).map_err(|e| NetError::Quic(e.to_string()))?;
         if parsed.scheme() != "https" {
             return Err(NetError::Quic("not HTTPS".into()));
@@ -172,7 +298,19 @@ impl HttpClient {
     }
 
     /// Learn h3 support from a response's Alt-Svc header.
+    ///
+    /// Gap #33 (2026-04-26): when `profile.allow_http3 = false` (the default)
+    /// we DO NOT cache the h3 alternative. Reason: vanilla `quinn-proto 0.11`
+    /// emits transport_parameters in a *random* order with a *random* GREASE
+    /// TP per handshake. Real Chrome uses a deterministic fixed order — so
+    /// upgrading to QUIC with our current stack would emit a uniquely-
+    /// distinguishable browser_oxide signature. Until we vendor-fork
+    /// quinn-proto with a Chrome-fixed-order patch, advertising h3 is worse
+    /// than not speaking it at all.
     async fn learn_alt_svc(&self, url: &str, resp_headers: &HashMap<String, String>) {
+        if !self.profile.allow_http3 {
+            return;
+        }
         if let Some(alt_svc_header) = resp_headers.get("alt-svc") {
             if let Some((port, max_age)) = alt_svc::parse_alt_svc(alt_svc_header) {
                 if let Ok(parsed) = Url::parse(url) {
@@ -193,7 +331,13 @@ impl HttpClient {
     /// Connect TCP+TLS and perform HTTP/2 handshake, returning a sender.
     /// Also spawns the connection driver task.
     async fn connect_h2(&self, host: &str, port: u16) -> Result<SendRequest<Bytes>, NetError> {
-        let tcp_stream = tcp::connect_with_cache(host, port, std::time::Duration::from_secs(10), Some(&self.dns_cache)).await?;
+        let tcp_stream = tcp::connect_with_cache(
+            host,
+            port,
+            std::time::Duration::from_secs(10),
+            Some(&self.dns_cache),
+        )
+        .await?;
 
         // Set TCP TTL to match claimed OS (Linux=64, Windows=128, macOS=64)
         let ttl = match self.profile.os_name.as_str() {
@@ -391,6 +535,13 @@ impl HttpClient {
             }
         };
 
+        // Kasada's `/tl` POST returns x-kpsdk-cr/st on success — train the
+        // session store so the subsequent navigation GET attaches x-kpsdk-cd.
+        // Also kick off the /mfc fetch on stricter tenants — see
+        // HttpClient::fetch_kasada_mfc_if_needed.
+        self.learn_kasada(host, &response.headers, Some(url)).await;
+        self.learn_accept_ch(host, &response.headers).await;
+        self.fetch_kasada_mfc_if_needed(host).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
         Ok(response)
     }
@@ -427,6 +578,30 @@ impl HttpClient {
             }
         }
 
+        // Inject Kasada x-kpsdk-cd if we have a session for this host (gap #Kasada).
+        if !has_header(&hdrs, "x-kpsdk-cd") {
+            if let Some((k, v)) = self.kasada_cd_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
+        // Inject Kasada x-kpsdk-fc on stricter tenants (Hyper-Solutions Flow 2).
+        if !has_header(&hdrs, "x-kpsdk-fc") {
+            if let Some((k, v)) = self.kasada_sessions.fc_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
+        // Inject Kasada x-kpsdk-ct (session token from /tl response). Without
+        // this the server returns the same Kasada init page even with a valid
+        // x-kpsdk-cd PoW. Verified 2026-04-27 on hyatt.com.
+        if !has_header(&hdrs, "x-kpsdk-ct") {
+            if let Some((k, v)) = self.kasada_sessions.ct_header(host).await {
+                eprintln!("[kasada] INJECTING x-kpsdk-ct on GET {} (len={})", host, v.len());
+                hdrs.push((k, v));
+            } else {
+                eprintln!("[kasada] no ct_token to inject for {}", host);
+            }
+        }
+
         let response = 'h2: {
             for attempt in 0..2 {
                 let sender_res = self.get_sender(host, port).await;
@@ -452,9 +627,15 @@ impl HttpClient {
         let response = match response {
             Some(r) => r,
             None => {
-                let tcp_stream =
-                    tcp::connect_with_cache(host, port, std::time::Duration::from_secs(10), Some(&self.dns_cache)).await?;
-                let mut tls_stream = tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
+                let tcp_stream = tcp::connect_with_cache(
+                    host,
+                    port,
+                    std::time::Duration::from_secs(10),
+                    Some(&self.dns_cache),
+                )
+                .await?;
+                let mut tls_stream =
+                    tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
                 let path = if parsed.query().is_some() {
                     format!("{}?{}", parsed.path(), parsed.query().unwrap())
                 } else {
@@ -465,6 +646,8 @@ impl HttpClient {
             }
         };
         self.learn_alt_svc(url, &response.headers).await;
+        self.learn_kasada(host, &response.headers, Some(url)).await;
+        self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
         Ok(response)
     }
@@ -508,8 +691,13 @@ impl HttpClient {
             .ok_or_else(|| NetError::Http("no host in URL".into()))?;
         let port = parsed.port().unwrap_or(443);
 
-        // Build browser headers then merge in extras
-        let mut hdrs = headers::chrome_headers(&self.profile);
+        // Upgrade to high-entropy Client Hints if this origin has sent Accept-CH.
+        let base_hdrs = if self.has_accept_ch(host).await {
+            headers::chrome_headers_with_accept_ch(&self.profile)
+        } else {
+            headers::chrome_headers(&self.profile)
+        };
+        let mut hdrs = base_hdrs;
         merge_headers(&mut hdrs, extra_headers);
 
         // Add cookies (unless caller already supplied one)
@@ -517,6 +705,17 @@ impl HttpClient {
             let jar = self.cookies.lock().await;
             if let Some(cookie_str) = jar.cookies_for(&parsed) {
                 hdrs.push(("cookie".to_string(), cookie_str));
+            }
+        }
+
+        // Inject Kasada `x-kpsdk-cd` PoW header if we have a session for
+        // this host (gap #Kasada). The session is populated when a prior
+        // response from this host included `x-kpsdk-cr: true` + `x-kpsdk-st`.
+        // See `crates/stealth/src/kasada.rs` for the SHA-256 PoW algorithm
+        // and `crates/net/src/kasada_session.rs` for the per-origin store.
+        if !has_header(&hdrs, "x-kpsdk-cd") {
+            if let Some((k, v)) = self.kasada_cd_header(host).await {
+                hdrs.push((k, v));
             }
         }
 
@@ -551,8 +750,13 @@ impl HttpClient {
             Some(r) => r,
             None => {
                 // HTTP/1.1 fallback
-                let tcp_stream =
-                    tcp::connect_with_cache(host, port, std::time::Duration::from_secs(10), Some(&self.dns_cache)).await?;
+                let tcp_stream = tcp::connect_with_cache(
+                    host,
+                    port,
+                    std::time::Duration::from_secs(10),
+                    Some(&self.dns_cache),
+                )
+                .await?;
                 let mut tls_stream =
                     tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
                 let path = if parsed.query().is_some() {
@@ -568,6 +772,10 @@ impl HttpClient {
         // Learn Alt-Svc from response
         self.learn_alt_svc(url, &response.headers).await;
 
+        // Learn Kasada session from response (look for x-kpsdk-cr + x-kpsdk-st).
+        self.learn_kasada(host, &response.headers, Some(url)).await;
+        self.learn_accept_ch(host, &response.headers).await;
+
         // Store Set-Cookie from response into jar
         self.store_set_cookies(&parsed, &response.set_cookies).await;
 
@@ -581,6 +789,14 @@ impl HttpClient {
         }
         let mut jar = self.cookies.lock().await;
         jar.set_cookies(url, set_cookies);
+        // Persist if BOXIDE_COOKIE_JAR is set. Atomic write (tempfile +
+        // rename) so concurrent runs don't tear the file.
+        if let Ok(path) = std::env::var("BOXIDE_COOKIE_JAR") {
+            let p = std::path::PathBuf::from(&path);
+            if let Err(e) = jar.save_to_file(&p) {
+                eprintln!("[cookies] save_to_file({}) failed: {}", path, e);
+            }
+        }
     }
 
     /// GET with explicit redirect following.
@@ -700,7 +916,10 @@ impl HttpClient {
         extra_headers: &[(String, String)],
     ) -> Result<Response, NetError> {
         // Try HTTP/3 first
-        if let Ok(resp) = self.try_h3_request(url, Method::Post(body.to_vec()), extra_headers).await {
+        if let Ok(resp) = self
+            .try_h3_request(url, Method::Post(body.to_vec()), extra_headers)
+            .await
+        {
             return Ok(resp);
         }
 
@@ -710,7 +929,12 @@ impl HttpClient {
             .ok_or_else(|| NetError::Http("no host in URL".into()))?;
         let port = parsed.port().unwrap_or(443);
 
-        let mut hdrs = headers::chrome_headers(&self.profile);
+        let base_hdrs = if self.has_accept_ch(host).await {
+            headers::chrome_headers_with_accept_ch(&self.profile)
+        } else {
+            headers::chrome_headers(&self.profile)
+        };
+        let mut hdrs = base_hdrs;
         merge_headers(&mut hdrs, extra_headers);
 
         // Env-gated POST body dump (for sensor-payload diffing). Writes one
@@ -758,6 +982,16 @@ impl HttpClient {
             }
         }
 
+        // Inject Kasada x-kpsdk-cd if we have a session for this host.
+        // The /tl POST itself doesn't need x-kpsdk-cd (it's the path that
+        // *issues* the session), but POSTs after the initial token exchange
+        // do — and we don't differentiate at this layer.
+        if !has_header(&hdrs, "x-kpsdk-cd") {
+            if let Some((k, v)) = self.kasada_cd_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
+
         // Same stale-connection recovery as GET.
         let response = 'h2: {
             for attempt in 0..2 {
@@ -798,14 +1032,16 @@ impl HttpClient {
                     Some(q) => format!("{}?{}", parsed.path(), q),
                     None => parsed.path().to_string(),
                 };
-                let raw =
-                    h1_client::send_post(&mut tls_stream, host, &path, &hdrs, body).await?;
+                let raw = h1_client::send_post(&mut tls_stream, host, &path, &hdrs, body).await?;
                 self.build_response_from_raw(raw, url).await?
             }
         };
 
         // Store Set-Cookie from POST response — WBAAS sets x_wbaas_token here,
         // Kasada sets KP_UIDz / akm_bmfp_b2 session cookies here.
+        // Also learn Kasada session: the /tl POST returns x-kpsdk-cr/st here.
+        self.learn_kasada(host, &response.headers, Some(url)).await;
+        self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
 
         Ok(response)
@@ -841,11 +1077,7 @@ impl HttpClient {
         url: &str,
     ) -> Result<Response, NetError> {
         let status = parts.status.as_u16();
-        let status_text = parts
-            .status
-            .canonical_reason()
-            .unwrap_or("")
-            .to_string();
+        let status_text = parts.status.canonical_reason().unwrap_or("").to_string();
 
         // Split Set-Cookie out of the regular header map so multi-value
         // Set-Cookie headers aren't collapsed (HashMap would overwrite).
@@ -951,8 +1183,7 @@ fn resolve_redirect(current_url: &str, location: &str) -> Result<String, NetErro
     if location.starts_with("http") {
         Ok(location.to_string())
     } else if location.starts_with('/') {
-        let parsed =
-            Url::parse(current_url).map_err(|e| NetError::Request(e.to_string()))?;
+        let parsed = Url::parse(current_url).map_err(|e| NetError::Request(e.to_string()))?;
         Ok(format!(
             "{}://{}{}",
             parsed.scheme(),
@@ -1044,5 +1275,52 @@ mod tests {
             "Response should show our UA: {}",
             body
         );
+    }
+
+    #[tokio::test]
+    async fn accept_ch_starts_false_then_true_after_learn() {
+        let profile = stealth::chrome_130_windows();
+        let client = HttpClient::new(&profile).unwrap();
+
+        // No response seen yet → no Accept-CH for this origin.
+        assert!(!client.has_accept_ch("example.com").await);
+
+        // Simulate a response that includes Accept-CH.
+        let mut headers = HashMap::new();
+        headers.insert(
+            "accept-ch".to_string(),
+            "Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform-Version".to_string(),
+        );
+        client.learn_accept_ch("example.com", &headers).await;
+
+        assert!(client.has_accept_ch("example.com").await);
+        // Other origins are not affected.
+        assert!(!client.has_accept_ch("other.com").await);
+    }
+
+    #[tokio::test]
+    async fn accept_ch_header_name_is_case_insensitive() {
+        let profile = stealth::chrome_130_linux();
+        let client = HttpClient::new(&profile).unwrap();
+
+        // Mixed-case header name (e.g. from an HTTP/1.1 server that sends
+        // it with canonical capitalisation).
+        let mut headers = HashMap::new();
+        headers.insert("Accept-CH".to_string(), "Sec-CH-UA-Arch".to_string());
+        client.learn_accept_ch("site.example", &headers).await;
+
+        assert!(client.has_accept_ch("site.example").await);
+    }
+
+    #[tokio::test]
+    async fn response_without_accept_ch_does_not_upgrade_origin() {
+        let profile = stealth::chrome_130_linux();
+        let client = HttpClient::new(&profile).unwrap();
+
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "text/html".to_string());
+        client.learn_accept_ch("boring.example", &headers).await;
+
+        assert!(!client.has_accept_ch("boring.example").await);
     }
 }

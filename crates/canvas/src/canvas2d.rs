@@ -258,11 +258,7 @@ impl Pattern {
         let data = skia_safe::Data::new_copy(&self.rgba);
         let image = skia_safe::images::raster_from_data(&info, data, row_bytes)?;
         let (tx, ty) = self.repetition.tile_modes();
-        image.to_shader(
-            Some((tx, ty)),
-            skia_safe::SamplingOptions::default(),
-            None,
-        )
+        image.to_shader(Some((tx, ty)), skia_safe::SamplingOptions::default(), None)
     }
 }
 
@@ -453,12 +449,7 @@ fn compose_filter_chain(
                 // Chrome's conversion is sigma ≈ radius / 2.
                 let sigma = radius / 2.0;
                 if sigma > 0.0 {
-                    image_filters::blur(
-                        (sigma, sigma),
-                        TileMode::Decal,
-                        inner.take(),
-                        None,
-                    )
+                    image_filters::blur((sigma, sigma), TileMode::Decal, inner.take(), None)
                 } else {
                     inner.take()
                 }
@@ -525,10 +516,7 @@ fn grayscale_filter(amount: f32) -> ColorFilter {
     let bg = 0.7152 - 0.7152 * (1.0 - a);
     let b = 0.0722 + 0.9278 * (1.0 - a);
     matrix_color_filter([
-        r, rg, rb, 0.0, 0.0,
-        gr, g, gb, 0.0, 0.0,
-        br, bg, b, 0.0, 0.0,
-        0.0, 0.0, 0.0, 1.0, 0.0,
+        r, rg, rb, 0.0, 0.0, gr, g, gb, 0.0, 0.0, br, bg, b, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
     ])
 }
 
@@ -545,10 +533,7 @@ fn sepia_filter(amount: f32) -> ColorFilter {
     let bg = 0.534 - 0.534 * (1.0 - a);
     let b = 0.131 + 0.869 * (1.0 - a);
     matrix_color_filter([
-        r, rg, rb, 0.0, 0.0,
-        gr, g, gb, 0.0, 0.0,
-        br, bg, b, 0.0, 0.0,
-        0.0, 0.0, 0.0, 1.0, 0.0,
+        r, rg, rb, 0.0, 0.0, gr, g, gb, 0.0, 0.0, br, bg, b, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
     ])
 }
 
@@ -558,20 +543,16 @@ fn invert_filter(amount: f32) -> ColorFilter {
     let diag = 1.0 - 2.0 * a;
     let off = a;
     matrix_color_filter([
-        diag, 0.0, 0.0, 0.0, off,
-        0.0, diag, 0.0, 0.0, off,
-        0.0, 0.0, diag, 0.0, off,
-        0.0, 0.0, 0.0, 1.0, 0.0,
+        diag, 0.0, 0.0, 0.0, off, 0.0, diag, 0.0, 0.0, off, 0.0, 0.0, diag, 0.0, off, 0.0, 0.0,
+        0.0, 1.0, 0.0,
     ])
 }
 
 /// CSS `brightness(x)` — scalar multiply of RGB.
 fn brightness_filter(amount: f32) -> ColorFilter {
     matrix_color_filter([
-        amount, 0.0, 0.0, 0.0, 0.0,
-        0.0, amount, 0.0, 0.0, 0.0,
-        0.0, 0.0, amount, 0.0, 0.0,
-        0.0, 0.0, 0.0, 1.0, 0.0,
+        amount, 0.0, 0.0, 0.0, 0.0, 0.0, amount, 0.0, 0.0, 0.0, 0.0, 0.0, amount, 0.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
     ])
 }
 
@@ -580,10 +561,7 @@ fn contrast_filter(amount: f32) -> ColorFilter {
     let a = amount;
     let t = 0.5 * (1.0 - a);
     matrix_color_filter([
-        a, 0.0, 0.0, 0.0, t,
-        0.0, a, 0.0, 0.0, t,
-        0.0, 0.0, a, 0.0, t,
-        0.0, 0.0, 0.0, 1.0, 0.0,
+        a, 0.0, 0.0, 0.0, t, 0.0, a, 0.0, 0.0, t, 0.0, 0.0, a, 0.0, t, 0.0, 0.0, 0.0, 1.0, 0.0,
     ])
 }
 
@@ -601,20 +579,15 @@ fn saturate_filter(amount: f32) -> ColorFilter {
     let bg = 0.715 - 0.715 * a;
     let b = 0.072 + 0.928 * a;
     matrix_color_filter([
-        r, rg, rb, 0.0, 0.0,
-        gr, g, gb, 0.0, 0.0,
-        br, bg, b, 0.0, 0.0,
-        0.0, 0.0, 0.0, 1.0, 0.0,
+        r, rg, rb, 0.0, 0.0, gr, g, gb, 0.0, 0.0, br, bg, b, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
     ])
 }
 
 /// CSS `opacity(x)` — alpha channel scale.
 fn opacity_filter(amount: f32) -> ColorFilter {
     matrix_color_filter([
-        1.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, amount, 0.0,
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        amount, 0.0,
     ])
 }
 
@@ -674,8 +647,12 @@ impl Canvas2D {
     // --- Style ---
 
     pub fn set_fill_color(&mut self, r: u8, g: u8, b: u8, a: f32) {
-        self.state.fill_style =
-            FillStyle::Solid(Color::from_rgba8(r, g, b, (a.clamp(0.0, 1.0) * 255.0) as u8));
+        self.state.fill_style = FillStyle::Solid(Color::from_rgba8(
+            r,
+            g,
+            b,
+            (a.clamp(0.0, 1.0) * 255.0) as u8,
+        ));
     }
 
     pub fn set_fill_color_str(&mut self, color_str: &str) {
@@ -685,8 +662,12 @@ impl Canvas2D {
     }
 
     pub fn set_stroke_color(&mut self, r: u8, g: u8, b: u8, a: f32) {
-        self.state.stroke_style =
-            FillStyle::Solid(Color::from_rgba8(r, g, b, (a.clamp(0.0, 1.0) * 255.0) as u8));
+        self.state.stroke_style = FillStyle::Solid(Color::from_rgba8(
+            r,
+            g,
+            b,
+            (a.clamp(0.0, 1.0) * 255.0) as u8,
+        ));
     }
 
     pub fn set_stroke_color_str(&mut self, color_str: &str) {
@@ -1017,8 +998,8 @@ impl Canvas2D {
                 if (rng % 100) < 5 {
                     // Jitter RGB channels by +/- 1
                     pixels[i] = pixels[i].wrapping_add((rng & 1) as u8);
-                    pixels[i+1] = pixels[i+1].wrapping_sub(((rng >> 1) & 1) as u8);
-                    pixels[i+2] = pixels[i+2].wrapping_add(((rng >> 2) & 1) as u8);
+                    pixels[i + 1] = pixels[i + 1].wrapping_sub(((rng >> 1) & 1) as u8);
+                    pixels[i + 2] = pixels[i + 2].wrapping_add(((rng >> 2) & 1) as u8);
                 }
             }
         }
@@ -1028,7 +1009,9 @@ impl Canvas2D {
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().expect("PNG header write failed");
-            writer.write_image_data(&pixels).expect("PNG data write failed");
+            writer
+                .write_image_data(&pixels)
+                .expect("PNG data write failed");
         }
         let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &buf);
         format!("data:image/png;base64,{}", b64)
@@ -1071,7 +1054,8 @@ impl Canvas2D {
             None,
         );
         let row_bytes = self.width as usize * 4;
-        let Some(mut surface) = surfaces::wrap_pixels(&info, &mut self.pixels, Some(row_bytes), None)
+        let Some(mut surface) =
+            surfaces::wrap_pixels(&info, &mut self.pixels, Some(row_bytes), None)
         else {
             return;
         };
@@ -1143,9 +1127,9 @@ impl Canvas2D {
                 (self.state.shadow_offset_x, self.state.shadow_offset_y),
                 (sigma, sigma),
                 shadow_col,
-                None,   // default color space
-                None,   // no input filter (draws against source)
-                None,   // default crop rect
+                None, // default color space
+                None, // no input filter (draws against source)
+                None, // default crop rect
             );
         }
 
@@ -1454,8 +1438,18 @@ mod tests {
         assert!(c.has_content());
         let left = c.get_image_data(5, 50, 1, 1);
         let right = c.get_image_data(95, 50, 1, 1);
-        assert!(left[0] > left[2], "left more red: r={} b={}", left[0], left[2]);
-        assert!(right[2] > right[0], "right more blue: r={} b={}", right[0], right[2]);
+        assert!(
+            left[0] > left[2],
+            "left more red: r={} b={}",
+            left[0],
+            left[2]
+        );
+        assert!(
+            right[2] > right[0],
+            "right more blue: r={} b={}",
+            right[0],
+            right[2]
+        );
     }
 
     #[test]
@@ -1754,11 +1748,23 @@ mod tests {
 
     #[test]
     fn pattern_repetition_parse() {
-        assert_eq!(PatternRepetition::parse("repeat"), PatternRepetition::Repeat);
+        assert_eq!(
+            PatternRepetition::parse("repeat"),
+            PatternRepetition::Repeat
+        );
         assert_eq!(PatternRepetition::parse(""), PatternRepetition::Repeat);
-        assert_eq!(PatternRepetition::parse("repeat-x"), PatternRepetition::RepeatX);
-        assert_eq!(PatternRepetition::parse("repeat-y"), PatternRepetition::RepeatY);
-        assert_eq!(PatternRepetition::parse("no-repeat"), PatternRepetition::NoRepeat);
+        assert_eq!(
+            PatternRepetition::parse("repeat-x"),
+            PatternRepetition::RepeatX
+        );
+        assert_eq!(
+            PatternRepetition::parse("repeat-y"),
+            PatternRepetition::RepeatY
+        );
+        assert_eq!(
+            PatternRepetition::parse("no-repeat"),
+            PatternRepetition::NoRepeat
+        );
         assert_eq!(PatternRepetition::parse("bogus"), PatternRepetition::Repeat);
     }
 }

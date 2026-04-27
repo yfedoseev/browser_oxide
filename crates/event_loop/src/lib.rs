@@ -23,20 +23,52 @@ impl BrowserEventLoop {
         Self { runtime }
     }
 
-    /// Run the event loop until idle or timeout.
+    /// Run the event loop until idle, timeout, or a JS-triggered navigation.
     ///
     /// "Idle" means deno_core's event loop has no more pending work
     /// (no timers, no unresolved promises, no pending async ops).
+    ///
+    /// **Nav short-circuit (gap: Kasada 5-second retry window):** if JS
+    /// sets `globalThis.__pendingNavigation` (via `location.href = ...`,
+    /// `location.reload()`, form.submit, meta-refresh, etc.), the JS
+    /// bootstrap calls `op_set_pending_nav` which flips an atomic flag
+    /// shared with this loop. We detect it on the next tick boundary,
+    /// drain microtasks for a ~150 ms tail (so in-flight `fetch().then(...)`
+    /// can land its cookies in the jar), then return `AllWorkDone`. This
+    /// mirrors real-Chrome behavior where the navigation commits within
+    /// tens of ms of the setter call.
+    ///
+    /// Without this short-circuit, sites that issue a challenge-token
+    /// fetch followed by `location.href = retry_url` had to wait for the
+    /// full `timeout` ceiling before the next iteration fired the retry
+    /// — easily blowing past Kasada's ~5-second tolerance.
     pub async fn run_until_idle(
         &mut self,
         timeout: Duration,
     ) -> Result<IdleReason, deno_core::error::AnyError> {
         let deadline = Instant::now() + timeout;
+        // Tail time after nav-pending is detected, to let post-fetch
+        // microtasks (cookies, etc.) settle before we hand off to the
+        // navigation iteration.
+        const NAV_TAIL: Duration = Duration::from_millis(150);
 
         loop {
             // Check timeout
             if Instant::now() >= deadline {
                 return Ok(IdleReason::Timeout);
+            }
+
+            // JS-triggered navigation? Drain a short tail and exit.
+            if self.runtime.nav_pending() {
+                let tail_deadline = Instant::now() + NAV_TAIL;
+                while Instant::now() < tail_deadline {
+                    let _ = tokio::time::timeout(
+                        Duration::from_millis(25),
+                        self.runtime.run_event_loop(),
+                    )
+                    .await;
+                }
+                return Ok(IdleReason::AllWorkDone);
             }
 
             // Run one event loop tick with a short timeout
@@ -53,7 +85,7 @@ impl BrowserEventLoop {
                 Ok(Err(e)) => return Err(e),
                 Err(_timeout) => {
                     // Tick timed out — event loop still has pending work.
-                    // Continue looping.
+                    // Continue looping (and re-check nav_pending at the top).
                     continue;
                 }
             }
@@ -89,6 +121,15 @@ impl BrowserEventLoop {
         &self.runtime
     }
 
+    /// Reset the runtime's pending-navigation signal. Called by callers
+    /// that legitimately set `location.href` for URL-state setup (not as
+    /// a real navigation trigger) — without this, subsequent
+    /// `run_until_idle` calls would see nav_pending=true and short-circuit
+    /// immediately, breaking timer-based tests.
+    pub fn reset_nav_pending(&self) {
+        self.runtime.reset_nav_pending();
+    }
+
     /// Get a mutable reference to the underlying runtime.
     pub fn runtime_mut(&mut self) -> &mut BrowserJsRuntime {
         &mut self.runtime
@@ -102,6 +143,11 @@ impl BrowserEventLoop {
     /// Consume and return the DOM.
     pub fn take_dom(self) -> dom::Dom {
         self.runtime.take_dom()
+    }
+
+    /// Snapshot current localStorage/sessionStorage for carrying across navigations.
+    pub fn get_storage(&mut self) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+        self.runtime.get_storage()
     }
 }
 

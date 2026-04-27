@@ -4,9 +4,68 @@ use crate::stylesheet_collector;
 use dom::Dom;
 use event_loop::{BrowserEventLoop, IdleReason};
 use js_runtime::{runtime::BrowserRuntimeOptions, BrowserJsRuntime};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use stealth;
 use tracing;
+
+/// RAII guard that fires `terminate_execution` on the V8 isolate after
+/// a deadline expires, unless dropped first. Used by `navigate_with_init`
+/// to bound how long any single iteration can spin in CPU-bound JS — for
+/// sites like delta.com or taobao.com whose JS does not yield to tokio.
+///
+/// The `Drop` impl signals the watcher thread to exit cleanly (no
+/// terminate fires). If the deadline elapses before drop, terminate
+/// fires and the next `execute_script` call returns the
+/// "Uncaught Error: execution terminated" exception — caller is
+/// responsible for catching that and bailing out of the iteration.
+struct V8DeadlineWatcher {
+    cancel: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl V8DeadlineWatcher {
+    fn new(isolate: deno_core::v8::IsolateHandle, deadline: Duration) -> Self {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_clone = cancel.clone();
+        let handle = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            // Poll the cancel flag at 100 ms granularity so drop is fast.
+            while start.elapsed() < deadline {
+                if cancel_clone.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if !cancel_clone.load(Ordering::Relaxed) {
+                eprintln!(
+                    "[V8DeadlineWatcher] deadline {}ms expired — firing terminate_execution",
+                    deadline.as_millis()
+                );
+                let ok = isolate.terminate_execution();
+                eprintln!(
+                    "[V8DeadlineWatcher] terminate_execution returned {}",
+                    ok
+                );
+            }
+        });
+        Self {
+            cancel,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for V8DeadlineWatcher {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        if let Some(h) = self.handle.take() {
+            // Best-effort join — watcher polls every 100 ms so this returns fast.
+            let _ = h.join();
+        }
+    }
+}
 
 /// A browser page. Owns a DOM, JS runtime, and event loop.
 ///
@@ -34,14 +93,14 @@ impl Page {
     /// Detect if the current page is an anti-bot challenge (Kasada, Akamai, etc.)
     pub fn is_anti_bot_challenge(&mut self) -> bool {
         let body = self.content();
-        body.contains("ips.js") || 
-        body.contains("kpsdk") || 
-        body.contains("_abck") || 
-        body.contains("bm_sz") ||
-        body.contains("perimeterx") ||
-        body.contains("human security") ||
-        body.contains("smartcaptcha") ||
-        body.contains("checkbox-captcha")
+        body.contains("ips.js")
+            || body.contains("kpsdk")
+            || body.contains("_abck")
+            || body.contains("bm_sz")
+            || body.contains("perimeterx")
+            || body.contains("human security")
+            || body.contains("smartcaptcha")
+            || body.contains("checkbox-captcha")
     }
     /// Create a page from an HTML string. Parses HTML, executes inline scripts,
     /// and runs the event loop until idle (or 30s timeout).
@@ -55,7 +114,11 @@ impl Page {
     /// Create a page quickly — parses HTML, sets up DOM + JS runtime, executes
     /// inline scripts, but does NOT drain the event loop. Useful for CDP
     /// navigation where the caller controls script execution via Runtime.evaluate.
-    pub async fn from_html_fast(html: &str, url: &str, profile: stealth::StealthProfile) -> Result<Self, deno_core::error::AnyError> {
+    pub async fn from_html_fast(
+        html: &str,
+        url: &str,
+        profile: stealth::StealthProfile,
+    ) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
         let scripts = script_runner::find_scripts(&dom);
         let stylesheet_entries = stylesheet_collector::find_stylesheets(&dom);
@@ -71,11 +134,14 @@ impl Page {
         );
         let mut event_loop = BrowserEventLoop::new(runtime);
 
-        // Set location.href
+        // Set location.href (URL-state setup, not a real navigation —
+        // reset the nav-pending signal afterward so subsequent
+        // run_until_idle calls don't short-circuit).
         let url_js = url.replace('\\', "\\\\").replace('\'', "\\'");
         event_loop
             .execute_script(&format!("location.href = '{}';", url_js))
             .ok();
+        event_loop.reset_nav_pending();
 
         // Share the HTTP client with JS fetch()
         let client = net::HttpClient::new(&profile)
@@ -84,7 +150,9 @@ impl Page {
 
         // Execute inline scripts (fast mode skips external scripts by default)
         for (i, script) in scripts.iter().enumerate() {
-            if script.src.is_some() { continue; }
+            if script.src.is_some() {
+                continue;
+            }
             if !script.code.is_empty() {
                 if let Err(e) = event_loop.execute_script(&script.code) {
                     tracing::warn!(script_index = i, error = %e, "Script error in inline script");
@@ -114,12 +182,13 @@ impl Page {
         // Drop old iframe children
         self.children.clear();
 
-        // Update URL
+        // Update URL (URL-state setup, not a real navigation).
         self.url = url.to_string();
         let url_js = url.replace('\\', "\\\\").replace('\'', "\\'");
         self.event_loop
             .execute_script(&format!("location.href = '{}';", url_js))
             .ok();
+        self.event_loop.reset_nav_pending();
 
         // Execute inline scripts in document order
         for (i, script) in scripts.iter().enumerate() {
@@ -158,16 +227,17 @@ impl Page {
         );
         let mut event_loop = BrowserEventLoop::new(runtime);
 
-        // Set location.href
+        // Set location.href (URL-state setup, not a real navigation).
         let url_js = url.replace('\\', "\\\\").replace('\'', "\\'");
         event_loop
             .execute_script(&format!("location.href = '{}';", url_js))
             .ok();
+        event_loop.reset_nav_pending();
 
         // Share the HTTP client with JS fetch()
         let p = profile.unwrap_or_else(stealth::presets::chrome_130_ru);
-        let client = net::HttpClient::new(&p)
-            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        let client =
+            net::HttpClient::new(&p).map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
 
         // Execute scripts in document order
@@ -181,7 +251,9 @@ impl Page {
                                 tracing::warn!(script_src = %src, error = %e, "Script error in external script");
                             }
                         }
-                        Err(e) => tracing::warn!(script_src = %src, error = %e, "Failed to fetch script"),
+                        Err(e) => {
+                            tracing::warn!(script_src = %src, error = %e, "Failed to fetch script")
+                        }
                     }
                 }
             } else if !script.code.is_empty() {
@@ -192,25 +264,37 @@ impl Page {
         }
 
         // Set document.readyState = loading
-        event_loop.execute_script("globalThis.__documentReadyState = 'loading';").ok();
+        event_loop
+            .execute_script("globalThis.__documentReadyState = 'loading';")
+            .ok();
 
         // Fire DOMContentLoaded and load events — many scripts wait for these
         event_loop
-            .execute_script("document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));")
+            .execute_script(
+                "document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));",
+            )
             .ok();
-        
+
         // After DOMContentLoaded, readyState = interactive
-        event_loop.execute_script("globalThis.__documentReadyState = 'interactive';").ok();
+        event_loop
+            .execute_script("globalThis.__documentReadyState = 'interactive';")
+            .ok();
 
         event_loop
             .execute_script("window.dispatchEvent(new Event('load'));")
             .ok();
 
         // After load, readyState = complete
-        event_loop.execute_script("globalThis.__documentReadyState = 'complete';").ok();
+        event_loop
+            .execute_script("globalThis.__documentReadyState = 'complete';")
+            .ok();
 
-        // Run event loop until idle (max 30s)
-        event_loop.run_until_idle(Duration::from_secs(30)).await?;
+        // Run event loop until idle, capped at 8s. Real Chrome treats a page
+        // as ready well before all background timers settle — analytics RUM
+        // beacons + setInterval polling otherwise prevent "idle" indefinitely.
+        // 8s comfortably covers Kasada PoW (<1s), CF turnstile (2-4s), and
+        // most JS-heavy first-paint flows.
+        event_loop.run_until_idle(Duration::from_secs(8)).await?;
 
         // Process <iframe srcdoc="..."> elements
         // Parse srcdoc HTML and execute scripts within an isolated scope
@@ -528,7 +612,17 @@ impl Page {
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         let html = resp.text();
         let resp_url = resp.url.clone();
-        Self::navigate_loop_internal(html, resp_url, profile, client, iterations, 0, init_scripts, debug_nav).await
+        Self::navigate_loop_internal(
+            html,
+            resp_url,
+            profile,
+            client,
+            iterations,
+            0,
+            init_scripts,
+            debug_nav,
+        )
+        .await
     }
 
     /// For tests: start a navigation loop with a provided HTML instead of
@@ -547,7 +641,17 @@ impl Page {
         let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
 
         // Iteration 0 uses provided HTML
-        Self::navigate_loop_internal(html.to_string(), url.to_string(), profile, client, iterations, 0, vec![], debug_nav).await
+        Self::navigate_loop_internal(
+            html.to_string(),
+            url.to_string(),
+            profile,
+            client,
+            iterations,
+            0,
+            vec![],
+            debug_nav,
+        )
+        .await
     }
 
     async fn navigate_loop_internal(
@@ -567,12 +671,58 @@ impl Page {
 
         let mut current_html = html;
         let mut current_url = resp_url;
+        let mut current_storage: Option<std::collections::HashMap<String, std::collections::HashMap<String, String>>> = None;
+
+        // Wall-clock budget for this entire navigate_with_init call.
+        // Default 50 s leaves headroom under the antibot_smoke 60 s wrapper.
+        // Override via BOXIDE_NAV_BUDGET_MS for slow-link or debugging runs.
+        // The budget is mutable: if iter=0 returns a *real-content* page
+        // (no challenge marker AND body > 50 KB), we extend the budget by
+        // BOXIDE_NAV_BUDGET_EXTEND_MS (default 25 s) to allow heavy
+        // legitimate sites (footlocker, walmart) to fully render.
+        let mut nav_budget = Duration::from_millis(
+            std::env::var("BOXIDE_NAV_BUDGET_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(50_000),
+        );
+        let nav_budget_extend = Duration::from_millis(
+            std::env::var("BOXIDE_NAV_BUDGET_EXTEND_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(25_000),
+        );
+        let mut budget_extended = false;
+        let nav_t0 = std::time::Instant::now();
 
         for iter in start_iter..iterations {
+            // Bail before starting a new iteration if the wall-clock
+            // budget is already exhausted — no point doing build_page
+            // and drain if we have no time to react to the result.
+            if nav_t0.elapsed() >= nav_budget {
+                eprintln!(
+                    "[navigate] budget exhausted ({}ms used / {}ms budget) before iter={} — bailing",
+                    nav_t0.elapsed().as_millis(),
+                    nav_budget.as_millis(),
+                    iter
+                );
+                break;
+            }
+
             tracing::info!(iter = iter, url = %current_url, "navigation loop start");
             if debug_nav {
-                eprintln!("[navigate] iter={} url={} html_len={}", iter, current_url, current_html.len());
+                eprintln!(
+                    "[navigate] iter={} url={} html_len={}",
+                    iter,
+                    current_url,
+                    current_html.len()
+                );
             }
+
+            // Reset the per-page sync-fetch counter at the start of each
+            // iteration so MAX_SYNC_FETCH_PER_PAGE bounds *this* page's
+            // chain, not the cumulative across iterations.
+            js_runtime::extensions::fetch_ext::reset_sync_fetch_count();
 
             // Snapshot cookies for this URL before the page runs. If the jar
             // gains new cookies during script execution (e.g. Kasada /tl
@@ -590,22 +740,87 @@ impl Page {
                 tracing::debug!(cookies = %cookies_before, "navigate jar cookies (before)");
             }
 
-            let mut page = Self::build_page_with_scripts_and_init(
+            let mut page = Self::build_page_with_scripts_init_and_storage(
                 &current_html,
                 &current_url,
                 &profile,
                 &client,
                 &init_scripts,
+                current_storage.take(),
             )
             .await?;
 
-            // Drain the event loop
+            // Install the V8 deadline watcher for the remainder of the
+            // wall-clock budget — but always with a minimum 5s floor so
+            // even iterations past the nominal budget have a safety net.
+            // Without the floor, a budget-exhausted iteration could spin
+            // forever in V8 (no watcher → tokio::time::timeout can't
+            // preempt CPU-bound JS).
+            let remaining = nav_budget
+                .saturating_sub(nav_t0.elapsed())
+                .max(Duration::from_secs(5));
+            eprintln!(
+                "[navigate] iter={} installing V8DeadlineWatcher with {}ms remaining",
+                iter,
+                remaining.as_millis()
+            );
+            let _watcher = V8DeadlineWatcher::new(
+                page.event_loop().runtime_mut().isolate_handle(),
+                remaining,
+            );
+
+            // Drain the event loop. Cap at 8s — analytics RUM/setInterval
+            // loops never report idle, so the cap is the real budget. 8s is
+            // enough for Kasada PoW + CF turnstile + most challenge solvers.
             if let Err(e) = page
                 .event_loop()
-                .run_until_idle(Duration::from_secs(30))
+                .run_until_idle(Duration::from_secs(8))
                 .await
             {
                 tracing::warn!(error = %e, "navigate event loop error");
+            }
+
+            // Adaptive budget extension: on the FIRST iteration, if the
+            // page produced real content (no challenge marker AND body
+            // > 50 KB), the site is rendering legitimately — just heavy.
+            // Extend the budget once so sites like footlocker.com (50 s
+            // first-paint, 441 KB) and walmart.com (~60 s, 270 KB) can
+            // finish without sacrificing the tight bail-out for CHL pages.
+            if !budget_extended && iter == start_iter {
+                let body_len: usize = page
+                    .event_loop()
+                    .execute_script(
+                        "document.body ? document.body.outerHTML.length : 0",
+                    )
+                    .unwrap_or_default()
+                    .parse()
+                    .unwrap_or(0);
+                let is_chl = page.is_anti_bot_challenge();
+                if !is_chl && body_len > 20 * 1024 {
+                    nav_budget += nav_budget_extend;
+                    budget_extended = true;
+                    eprintln!(
+                        "[navigate] budget extended +{}ms (body={}KB, no CHL marker)",
+                        nav_budget_extend.as_millis(),
+                        body_len / 1024
+                    );
+                }
+            }
+
+            // If the watcher fired (i.e. we blew past the wall-clock
+            // budget), the V8 isolate is in a "terminated" state until
+            // we cancel it. Cancel here so we can extract the page DOM
+            // snapshot for whatever did render before termination.
+            if nav_t0.elapsed() >= nav_budget {
+                page.event_loop()
+                    .runtime_mut()
+                    .cancel_terminate_execution();
+                tracing::warn!(
+                    elapsed_ms = nav_t0.elapsed().as_millis() as u64,
+                    budget_ms = nav_budget.as_millis() as u64,
+                    "navigate budget exceeded — cancelling V8 termination and returning partial page"
+                );
+                return Ok(page);
             }
 
             // Did a script request a re-navigation?
@@ -623,8 +838,10 @@ impl Page {
             // fixed 2s wait. Checks every 200ms for up to 10s total; exits early
             // on first hit.
             if pending_info.is_empty() && page.is_anti_bot_challenge() {
-                tracing::info!("anti-bot challenge detected with no pending navigation, polling up to 10s...");
-                let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                tracing::info!(
+                    "anti-bot challenge detected with no pending navigation, polling up to 5s..."
+                );
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
                 while std::time::Instant::now() < deadline {
                     let _ = page
                         .event_loop()
@@ -664,8 +881,29 @@ impl Page {
                         );
                     }
                     if cookies_after != cookies_before && !cookies_after.is_empty() {
+                        // Before launching the retry, check we have at least
+                        // ~15s of nav budget left — a retry requires a fresh
+                        // build + drain (~10-15s minimum). If the budget is
+                        // too tight, return the current iter=0 page instead
+                        // of blowing the budget and returning nothing
+                        // (regression we hit on nike.com — Akamai bm_sz
+                        // cookie triggers the retry path even on real
+                        // homepages).
+                        const MIN_RETRY_BUDGET: Duration = Duration::from_secs(15);
+                        if nav_budget.saturating_sub(nav_t0.elapsed()) < MIN_RETRY_BUDGET {
+                            eprintln!(
+                                "[navigate] iter={} skip cookie-delta retry: only {}ms left of {}ms budget",
+                                iter,
+                                nav_budget.saturating_sub(nav_t0.elapsed()).as_millis(),
+                                nav_budget.as_millis()
+                            );
+                            return Ok(page);
+                        }
                         if debug_nav {
-                            eprintln!("[navigate] iter={} POST-SETTLE RETRY firing for {}", iter, current_url);
+                            eprintln!(
+                                "[navigate] iter={} POST-SETTLE RETRY firing for {}",
+                                iter, current_url
+                            );
                         }
                         tracing::info!(
                             before_len = cookies_before.len(),
@@ -775,9 +1013,13 @@ impl Page {
                             deno_core::serde_json::from_str(&kpsdk_json).unwrap_or_default();
                         if debug_nav && !kpsdk.is_empty() {
                             let keys: Vec<&str> = kpsdk.keys().map(|s| s.as_str()).collect();
-                            eprintln!("[navigate] iter={} harvested x-kpsdk-* headers: {:?}", iter, keys);
+                            eprintln!(
+                                "[navigate] iter={} harvested x-kpsdk-* headers: {:?}",
+                                iter, keys
+                            );
                         }
 
+                        current_storage = Some(page.event_loop().get_storage());
                         drop(page);
                         if v8_html_is_real {
                             if debug_nav {
@@ -791,7 +1033,8 @@ impl Page {
                         } else {
                             // Reload-style headers + harvested x-kpsdk-*
                             // tokens on the retry GET.
-                            let mut reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
+                            let mut reload_hdrs =
+                                net::headers::chrome_headers_reload(&profile, &current_url);
                             for (k, v) in &kpsdk {
                                 reload_hdrs.push((k.clone(), v.clone()));
                             }
@@ -808,7 +1051,8 @@ impl Page {
                 return Ok(page);
             }
 
-            let p: deno_core::serde_json::Value = deno_core::serde_json::from_str(&pending_info).unwrap_or_default();
+            let p: deno_core::serde_json::Value =
+                deno_core::serde_json::from_str(&pending_info).unwrap_or_default();
             let pending_url = p["url"].as_str().unwrap_or_default();
             let pending_method = p["method"].as_str().unwrap_or("GET").to_string();
             let pending_body = p["body"].as_str().map(|s| s.to_string());
@@ -824,7 +1068,27 @@ impl Page {
             tracing::debug!(kind = kind, url = %next_url, method = %pending_method, "navigate pending navigation");
 
             if iter + 1 == iterations {
-                tracing::warn!(max_iterations = iterations, "navigate hit max iterations, returning current page");
+                tracing::warn!(
+                    max_iterations = iterations,
+                    "navigate hit max iterations, returning current page"
+                );
+                return Ok(page);
+            }
+
+            // Same MIN_RETRY_BUDGET guard as the cookie-delta path.
+            // The pending-nav path consumes the page (drop) and re-fetches.
+            // If we don't have at least 15s left to build+drain the next
+            // iteration, return the current page to avoid the no-page-FAIL
+            // we hit on nike.com (Kasada-marked homepage triggers pending
+            // nav, then iter=1 bails before producing anything usable).
+            const MIN_PENDING_NAV_BUDGET: Duration = Duration::from_secs(15);
+            if nav_budget.saturating_sub(nav_t0.elapsed()) < MIN_PENDING_NAV_BUDGET {
+                eprintln!(
+                    "[navigate] iter={} skip pending-nav follow: only {}ms left of {}ms budget",
+                    iter,
+                    nav_budget.saturating_sub(nav_t0.elapsed()).as_millis(),
+                    nav_budget.as_millis()
+                );
                 return Ok(page);
             }
 
@@ -874,17 +1138,22 @@ impl Page {
             // PerimeterX, etc.). A fresh Rust-side GET bypasses that patch.
             // Try the refetch through the live V8 fetch first; if the result
             // still looks like a challenge, fall back to the normal Rust path.
-            let same_host_reload = pending_method == "GET"
-                && page.is_anti_bot_challenge()
-                && {
-                    let cur = url::Url::parse(&current_url).ok();
-                    let nxt = url::Url::parse(&next_url).ok();
-                    matches!(
-                        (cur, nxt),
-                        (Some(a), Some(b)) if a.host_str() == b.host_str()
-                    )
-                };
+            let same_host_reload = pending_method == "GET" && page.is_anti_bot_challenge() && {
+                let cur = url::Url::parse(&current_url).ok();
+                let nxt = url::Url::parse(&next_url).ok();
+                matches!(
+                    (cur, nxt),
+                    (Some(a), Some(b)) if a.host_str() == b.host_str()
+                )
+            };
             let v8_refetched: Option<String> = if same_host_reload {
+                // Post-PoW jitter: real Chrome takes 100-500ms between the
+                // challenge solve and the location.reload that follows. Without
+                // this gap, Kasada's per-IP rate limiter returns 429 on the
+                // refetch (verified 2026-04-27 on hyatt.com). 250ms baseline
+                // + small jitter mimics the natural human-action gap.
+                let jitter_ms = 250 + (std::time::Instant::now().elapsed().as_nanos() & 0xFF) as u64;
+                tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
                 let refetch_js = format!(
                     r#"
                     (async () => {{
@@ -906,7 +1175,8 @@ impl Page {
                         }}
                     }})();
                     "#,
-                    url_js = deno_core::serde_json::to_string(&next_url).unwrap_or_else(|_| "''".to_string())
+                    url_js = deno_core::serde_json::to_string(&next_url)
+                        .unwrap_or_else(|_| "''".to_string())
                 );
                 let _ = page
                     .event_loop()
@@ -949,6 +1219,7 @@ impl Page {
                 None
             };
 
+            current_storage = Some(page.event_loop().get_storage());
             drop(page);
 
             if let Some(html) = v8_refetched {
@@ -965,7 +1236,10 @@ impl Page {
             }
 
             if debug_nav {
-                eprintln!("[navigate] iter={} FETCH {} {}", iter, pending_method, next_url);
+                eprintln!(
+                    "[navigate] iter={} FETCH {} {}",
+                    iter, pending_method, next_url
+                );
             }
 
             // Fetch the next page. For form POSTs we must send the form
@@ -975,7 +1249,10 @@ impl Page {
             // distinguish a solved-session reload from a fresh user nav.
             let resp = if pending_method == "POST" {
                 let post_headers = vec![
-                    ("content-type".to_string(), "application/x-www-form-urlencoded".to_string()),
+                    (
+                        "content-type".to_string(),
+                        "application/x-www-form-urlencoded".to_string(),
+                    ),
                     ("origin".to_string(), {
                         url::Url::parse(&current_url)
                             .ok()
@@ -985,7 +1262,12 @@ impl Page {
                     ("referer".to_string(), current_url.clone()),
                 ];
                 client
-                    .post_bytes_follow(&next_url, pending_body.as_deref().unwrap_or("").as_bytes(), &post_headers, 10)
+                    .post_bytes_follow(
+                        &next_url,
+                        pending_body.as_deref().unwrap_or("").as_bytes(),
+                        &post_headers,
+                        10,
+                    )
                     .await
                     .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
             } else {
@@ -995,7 +1277,8 @@ impl Page {
                     matches!((a, b), (Some(u), Some(v)) if u.host_str() == v.host_str())
                 };
                 if same_origin {
-                    let mut reload_hdrs = net::headers::chrome_headers_reload(&profile, &current_url);
+                    let mut reload_hdrs =
+                        net::headers::chrome_headers_reload(&profile, &current_url);
                     for (k, v) in &harvested_kpsdk {
                         reload_hdrs.push((k.clone(), v.clone()));
                     }
@@ -1015,9 +1298,10 @@ impl Page {
         }
 
         // Fallback (should be reachable via the loop)
-        Err(deno_core::error::AnyError::msg("Navigation loop terminated without returning a page"))
+        Err(deno_core::error::AnyError::msg(
+            "Navigation loop terminated without returning a page",
+        ))
     }
-
 
     /// [DEPRECATED] Legacy name — now a thin wrapper around [`Page::navigate`].
     ///
@@ -1032,7 +1316,6 @@ impl Page {
     ) -> Result<Self, deno_core::error::AnyError> {
         Self::navigate(url, profile, max_retries.max(1)).await
     }
-
 
     /// Build a page with external script fetching.
     /// Resolve a potentially-relative URL against a base URL.
@@ -1056,6 +1339,17 @@ impl Page {
         profile: &stealth::StealthProfile,
         client: &net::HttpClient,
         init_scripts: &[String],
+    ) -> Result<Self, deno_core::error::AnyError> {
+        Self::build_page_with_scripts_init_and_storage(html, url, profile, client, init_scripts, None).await
+    }
+
+    async fn build_page_with_scripts_init_and_storage(
+        html: &str,
+        url: &str,
+        profile: &stealth::StealthProfile,
+        client: &net::HttpClient,
+        init_scripts: &[String],
+        storage: Option<std::collections::HashMap<String, std::collections::HashMap<String, String>>>,
     ) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
         let scripts = script_runner::find_scripts(&dom);
@@ -1162,21 +1456,48 @@ impl Page {
                 stealth_profile: Some(profile.clone()),
                 stylesheets,
                 init_scripts: init_scripts.to_vec(),
+                storage,
                 ..Default::default()
             },
         );
         let mut event_loop = BrowserEventLoop::new(runtime);
 
-        // Set location
+        // Install a build-phase V8 deadline watcher to preempt CPU-bound
+        // inline-script execution (delta.com, taobao.com — pages whose
+        // first-paint scripts spawn document.write(<script>) chains or
+        // tight setTimeout polling that hold the V8 thread indefinitely).
+        // 25s is generous: any honest first-paint completes well under it.
+        // Without this, build_page_with_scripts_and_init can run forever
+        // because tokio::time::timeout cannot preempt V8 microtask spins.
+        let build_budget_ms: u64 = std::env::var("BOXIDE_BUILD_BUDGET_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(25_000);
+        let _build_watcher = V8DeadlineWatcher::new(
+            event_loop.runtime_mut().isolate_handle(),
+            Duration::from_millis(build_budget_ms),
+        );
+
+        // Set location (URL-state setup, not a real navigation —
+        // reset the nav-pending signal so subsequent run_until_idle calls
+        // don't short-circuit immediately, see crates/event_loop).
         let url_js = url.replace('\\', "\\\\").replace('\'', "\\'");
         if let Err(e) = event_loop.execute_script(&format!("location.href = '{}';", url_js)) {
             tracing::error!(error = %e, "Failed to set location");
         }
-        let loc = event_loop.execute_script("globalThis.location.href").unwrap_or_default();
+        event_loop.reset_nav_pending();
+        let loc = event_loop
+            .execute_script("globalThis.location.href")
+            .unwrap_or_default();
         tracing::debug!(location = %loc, "Location set");
-        
+
         // Synchronize cookies from the net client so document.cookie is accurate
-        let _ = event_loop.execute_and_run("globalThis.__syncCookiesFromNet && globalThis.__syncCookiesFromNet();", Duration::from_secs(1)).await;
+        let _ = event_loop
+            .execute_and_run(
+                "globalThis.__syncCookiesFromNet && globalThis.__syncCookiesFromNet();",
+                Duration::from_secs(1),
+            )
+            .await;
 
         // Install cookie-write instrumentation. Generic DevTools-style
         // debugging — lets us see what values scripts assign to
@@ -1345,7 +1666,10 @@ impl Page {
                 match prefetched.get(&i) {
                     Some(code) => code.clone(),
                     None => {
-                        tracing::warn!(script_index = i, "Script not prefetched (fetch failed), skipping");
+                        tracing::warn!(
+                            script_index = i,
+                            "Script not prefetched (fetch failed), skipping"
+                        );
                         continue;
                     }
                 }
@@ -1399,13 +1723,15 @@ impl Page {
         // within the event loop (not synchronously during script setup).
         // This ensures async handlers can create Promises that the event loop tracks.
         event_loop
-            .execute_script(r#"
+            .execute_script(
+                r#"
             setTimeout(() => {
                 document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
                 window.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
                 window.dispatchEvent(new Event('load'));
             }, 0);
-        "#)
+        "#,
+            )
             .ok();
 
         // Scan for <meta http-equiv="refresh" content="N;url=..."> and
@@ -1429,6 +1755,8 @@ impl Page {
                             url: target,
                             kind: 'assign',
                         };
+                        // Wake the Rust event loop — see nav_ext.rs.
+                        try { Deno.core.ops.op_set_pending_nav(); } catch (_) {}
                     }, delay * 1000);
                     break;
                 }
@@ -1438,7 +1766,8 @@ impl Page {
 
         // Run event loop until idle. Script errors should NOT abort
         // navigation — log and continue, matching real browser behavior.
-        if let Err(e) = event_loop.run_until_idle(Duration::from_secs(30)).await {
+        // 8s cap (was 30s) — see comment in navigate_with_init.
+        if let Err(e) = event_loop.run_until_idle(Duration::from_secs(8)).await {
             tracing::warn!(error = %e, "Event loop error during run");
         }
 
@@ -1478,7 +1807,8 @@ impl Page {
                 u: f.url,
                 s: f.status,
                 e: f.error,
-            })))"#) {
+            })))"#,
+        ) {
             if fetches_json != "[]" {
                 use deno_core::serde_json;
                 if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&fetches_json) {
@@ -1528,12 +1858,23 @@ impl Page {
                         .await
                         {
                             Ok(child) => children.push(child),
-                            Err(e) => tracing::warn!(src = %full_src, error = %e, "iframe src error"),
+                            Err(e) => {
+                                tracing::warn!(src = %full_src, error = %e, "iframe src error")
+                            }
                         }
                     }
                 }
             }
         }
+
+        // Cancel the build-phase watcher's terminate so the runtime is
+        // usable for the drain phase (and downstream execute_script calls).
+        // Drop the watcher first to stop the thread; then cancel any
+        // pending termination on the isolate.
+        drop(_build_watcher);
+        event_loop
+            .runtime_mut()
+            .cancel_terminate_execution();
 
         Ok(Self {
             event_loop,
@@ -1562,7 +1903,10 @@ mod tests {
 
     #[tokio::test]
     async fn page_from_html_basic() {
-        let mut page = Page::from_html("<html><head><title>Test</title></head><body><p>Hello</p></body></html>", None::<stealth::StealthProfile>)
+        let mut page = Page::from_html(
+            "<html><head><title>Test</title></head><body><p>Hello</p></body></html>",
+            None::<stealth::StealthProfile>,
+        )
         .await
         .unwrap();
         assert_eq!(page.title(), "Test");
@@ -1577,14 +1921,17 @@ mod tests {
 
     #[tokio::test]
     async fn page_script_creates_elements() {
-        let mut page = Page::from_html(r#"<html><head></head><body>
+        let mut page = Page::from_html(
+            r#"<html><head></head><body>
                 <script>
                     const p = document.createElement('p');
                     p.setAttribute('id', 'created');
                     p.textContent = 'Dynamic content';
                     document.body.appendChild(p);
                 </script>
-            </body></html>"#, None::<stealth::StealthProfile>)
+            </body></html>"#,
+            None::<stealth::StealthProfile>,
+        )
         .await
         .unwrap();
         assert!(page.has_element("#created"));
@@ -1609,14 +1956,17 @@ mod tests {
 
     #[tokio::test]
     async fn page_with_timeout_script() {
-        let mut page = Page::from_html(r#"<html><head></head><body>
+        let mut page = Page::from_html(
+            r#"<html><head></head><body>
                 <div id="output">before</div>
                 <script>
                     setTimeout(() => {
                         document.getElementById('output').textContent = 'after';
                     }, 50);
                 </script>
-            </body></html>"#, None::<stealth::StealthProfile>)
+            </body></html>"#,
+            None::<stealth::StealthProfile>,
+        )
         .await
         .unwrap();
         assert_eq!(page.text_of("#output"), Some("after".to_string()));
@@ -1624,36 +1974,48 @@ mod tests {
 
     #[tokio::test]
     async fn page_evaluate() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
-            .await
-            .unwrap();
+        let mut page = Page::from_html(
+            "<html><head></head><body></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
         let result = page.evaluate("1 + 2").unwrap();
         assert_eq!(result, "3");
     }
 
     #[tokio::test]
     async fn page_navigator_exists() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
-            .await
-            .unwrap();
+        let mut page = Page::from_html(
+            "<html><head></head><body></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
         let result = page.evaluate("typeof navigator.userAgent").unwrap();
         assert_eq!(result, "string");
     }
 
     #[tokio::test]
     async fn page_document_has_focus() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
-            .await
-            .unwrap();
+        let mut page = Page::from_html(
+            "<html><head></head><body></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
         let result = page.evaluate("document.hasFocus()").unwrap();
         assert_eq!(result, "true");
     }
 
     #[tokio::test]
     async fn page_webdriver_false() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
-            .await
-            .unwrap();
+        let mut page = Page::from_html(
+            "<html><head></head><body></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
         let result = page.evaluate("typeof navigator.webdriver").unwrap();
         assert_eq!(result, "boolean");
         let val = page.evaluate("navigator.webdriver").unwrap();
@@ -1662,9 +2024,12 @@ mod tests {
 
     #[tokio::test]
     async fn page_window_dimensions() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
-            .await
-            .unwrap();
+        let mut page = Page::from_html(
+            "<html><head></head><body></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
         let w = page.evaluate("window.innerWidth").unwrap();
         assert_eq!(w, "1920");
         let h = page.evaluate("window.innerHeight").unwrap();
@@ -1673,9 +2038,12 @@ mod tests {
 
     #[tokio::test]
     async fn page_local_storage() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
-            .await
-            .unwrap();
+        let mut page = Page::from_html(
+            "<html><head></head><body></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
         page.evaluate("localStorage.setItem('key', 'value')")
             .unwrap();
         let result = page.evaluate("localStorage.getItem('key')").unwrap();
@@ -1684,9 +2052,12 @@ mod tests {
 
     #[tokio::test]
     async fn page_crypto_random() {
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None::<stealth::StealthProfile>)
-            .await
-            .unwrap();
+        let mut page = Page::from_html(
+            "<html><head></head><body></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
         let result = page
             .evaluate("typeof crypto.getRandomValues(new Uint8Array(4))")
             .unwrap();
@@ -1695,14 +2066,17 @@ mod tests {
 
     #[tokio::test]
     async fn page_promise_then() {
-        let mut page = Page::from_html(r#"<html><head></head><body>
+        let mut page = Page::from_html(
+            r#"<html><head></head><body>
                 <div id="out">waiting</div>
                 <script>
                     Promise.resolve('done').then(v => {
                         document.getElementById('out').textContent = v;
                     });
                 </script>
-            </body></html>"#, None::<stealth::StealthProfile>)
+            </body></html>"#,
+            None::<stealth::StealthProfile>,
+        )
         .await
         .unwrap();
         assert_eq!(page.text_of("#out"), Some("done".to_string()));
@@ -1710,12 +2084,15 @@ mod tests {
 
     #[tokio::test]
     async fn page_multiple_scripts() {
-        let mut page = Page::from_html(r#"<html><head></head><body>
+        let mut page = Page::from_html(
+            r#"<html><head></head><body>
                 <div id="out"></div>
                 <script>document.getElementById('out').textContent = 'A';</script>
                 <script>document.getElementById('out').textContent += 'B';</script>
                 <script>document.getElementById('out').textContent += 'C';</script>
-            </body></html>"#, None::<stealth::StealthProfile>)
+            </body></html>"#,
+            None::<stealth::StealthProfile>,
+        )
         .await
         .unwrap();
         assert_eq!(page.text_of("#out"), Some("ABC".to_string()));
@@ -1723,9 +2100,12 @@ mod tests {
 
     #[tokio::test]
     async fn page_take_dom() {
-        let page = Page::from_html("<html><head></head><body><p>test</p></body></html>", None::<stealth::StealthProfile>)
-            .await
-            .unwrap();
+        let page = Page::from_html(
+            "<html><head></head><body><p>test</p></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
         let dom = page.take_dom();
         let ps = dom.get_elements_by_tag_name(dom::NodeId::DOCUMENT, "p");
         assert!(ps.len() >= 1, "expected at least 1 <p>, got {}", ps.len());
@@ -1739,9 +2119,13 @@ mod tests {
     async fn navigate_httpbin() {
         let profile = stealth::chrome_130_linux();
         let client = net::HttpClient::new(&profile).unwrap();
-        let mut page = Page::navigate_simple("https://httpbin.org/html", &client, stealth::presets::chrome_130_ru())
-            .await
-            .expect("navigate to httpbin failed");
+        let mut page = Page::navigate_simple(
+            "https://httpbin.org/html",
+            &client,
+            stealth::presets::chrome_130_ru(),
+        )
+        .await
+        .expect("navigate to httpbin failed");
         let title = page.title();
         println!("[httpbin] title: {title:?}");
         let text = page.text_content();
@@ -1758,9 +2142,13 @@ mod tests {
     async fn navigate_httpbin_user_agent() {
         let profile = stealth::chrome_130_windows();
         let client = net::HttpClient::new(&profile).unwrap();
-        let mut page = Page::navigate_simple("https://httpbin.org/user-agent", &client, stealth::presets::chrome_130_ru())
-            .await
-            .expect("navigate to httpbin/user-agent failed");
+        let mut page = Page::navigate_simple(
+            "https://httpbin.org/user-agent",
+            &client,
+            stealth::presets::chrome_130_ru(),
+        )
+        .await
+        .expect("navigate to httpbin/user-agent failed");
         let text = page.text_content();
         println!("[user-agent] response: {text}");
         assert!(
@@ -1774,9 +2162,13 @@ mod tests {
     async fn navigate_stealth_headers_check() {
         let profile = stealth::chrome_130_linux();
         let client = net::HttpClient::new(&profile).unwrap();
-        let mut page = Page::navigate_simple("https://httpbin.org/headers", &client, stealth::presets::chrome_130_ru())
-            .await
-            .expect("navigate to httpbin/headers failed");
+        let mut page = Page::navigate_simple(
+            "https://httpbin.org/headers",
+            &client,
+            stealth::presets::chrome_130_ru(),
+        )
+        .await
+        .expect("navigate to httpbin/headers failed");
         let text = page.text_content();
         println!("[headers] response: {}", &text[..text.len().min(500)]);
         // httpbin returns JSON with the request headers — verify UA was sent

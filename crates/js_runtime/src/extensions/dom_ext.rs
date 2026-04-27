@@ -141,7 +141,10 @@ pub fn op_dom_get_child_elements(#[state] state: &DomState, #[smi] node_id: i32)
 
 #[op2]
 #[serde]
-pub fn op_dom_get_child_elements_with_types(#[state] state: &DomState, #[smi] node_id: i32) -> Vec<i32> {
+pub fn op_dom_get_child_elements_with_types(
+    #[state] state: &DomState,
+    #[smi] node_id: i32,
+) -> Vec<i32> {
     let id = NodeId::from_raw(node_id as u32);
     let children = state.dom.child_elements(id);
     let mut res = Vec::with_capacity(children.len() * 2);
@@ -1003,7 +1006,11 @@ pub fn op_dom_get_stylesheet_rules(
 #[op2]
 #[string]
 pub fn op_dom_get_base_url(#[state] state: &DomState) -> String {
-    state.base_url.as_ref().map(|u| u.to_string()).unwrap_or_else(|| "about:blank".to_string())
+    state
+        .base_url
+        .as_ref()
+        .map(|u| u.to_string())
+        .unwrap_or_else(|| "about:blank".to_string())
 }
 
 #[op2]
@@ -1013,11 +1020,7 @@ pub fn op_dom_storage_get(
     #[string] area: String,
     #[string] key: String,
 ) -> Option<String> {
-    state
-        .storage
-        .get(&area)
-        .and_then(|m| m.get(&key))
-        .cloned()
+    state.storage.get(&area).and_then(|m| m.get(&key)).cloned()
 }
 
 #[op2(fast)]

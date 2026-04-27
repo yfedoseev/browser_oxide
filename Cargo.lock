@@ -1164,6 +1164,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hmac"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1489,6 +1495,8 @@ dependencies = [
  "net",
  "rand 0.8.5",
  "rand_core 0.6.4",
+ "rand_distr",
+ "rustfft",
  "serde",
  "serde_json",
  "sha1",
@@ -1701,13 +1709,17 @@ dependencies = [
  "futures-util",
  "h3",
  "h3-quinn",
+ "hex",
  "http",
  "http2",
  "httparse",
  "quinn",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "stealth",
  "thiserror 2.0.18",
  "tokio",
@@ -1771,6 +1783,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -2218,6 +2231,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
+]
+
+[[package]]
+name = "rand_distr"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
+dependencies = [
+ "num-traits",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -2760,9 +2783,13 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "stealth"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rand_distr",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

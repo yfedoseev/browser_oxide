@@ -158,9 +158,7 @@ pub fn rasterize_text(
     let mut out = Vec::with_capacity(run.glyphs.len());
     let mut cursor_x = x;
     for glyph in &run.glyphs {
-        if let Some(bitmap) =
-            raster::rasterize_glyph(data, idx, glyph.glyph_id, font.size_px)
-        {
+        if let Some(bitmap) = raster::rasterize_glyph(data, idx, glyph.glyph_id, font.size_px) {
             // `left` is the horizontal offset from the pen position to
             // the glyph bitmap's left edge. `top` is the vertical
             // offset from the baseline to the glyph bitmap's top edge
