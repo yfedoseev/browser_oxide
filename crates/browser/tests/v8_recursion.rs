@@ -148,6 +148,34 @@ async fn getter_chain_recursion_throws_range_error() {
     assert_eq!(r, "RangeError");
 }
 
+/// Verify the test thread has at least 32 MB of stack — proves the
+/// `.cargo/config.toml` `RUST_MIN_STACK = "67108864"` setting is
+/// reaching the libtest-spawned thread. If RUST_MIN_STACK weren't
+/// applied, this test would run on a ~2 MB tokio default stack.
+///
+/// We use a Rust-side recursive function (not JS) because V8 throws
+/// RangeError before the OS stack gets near its limit. This test
+/// drives the C-stack directly: each frame consumes a 4 KB local
+/// array, and we recurse 4096 times = 16 MB. A 2 MB stack overflows
+/// way before reaching that depth; a 64 MB stack reaches it easily.
+#[test]
+fn test_thread_stack_is_at_least_16mb() {
+    fn recurse(depth: u32, max: u32) -> u32 {
+        // 4 KB per frame
+        let _local: [u8; 4096] = [0; 4096];
+        if depth == max {
+            std::hint::black_box(_local[0]) as u32
+        } else {
+            recurse(depth + 1, max)
+        }
+    }
+    let r = recurse(0, 4096);
+    assert_eq!(
+        r, 0,
+        "recurse to 16 MB stack depth must succeed — proves RUST_MIN_STACK env reached this thread"
+    );
+}
+
 /// `toString` recursion via Function.prototype patching — the exact
 /// pattern that fingerprint scripts use to detect monkey-patched
 /// natives. If our shim's Function.prototype.toString wrapper accidentally

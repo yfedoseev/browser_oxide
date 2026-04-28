@@ -1,0 +1,24 @@
+# 64 MB default stack for std::thread::spawn threads, including the
+# libtest-spawned per-test threads that run #[tokio::test] cases.
+#
+# V8's stack guard fires on JS recursion via RangeError when the OS
+# stack is large enough to leave headroom for V8's own C++ frames.
+# At the tokio default (2 MB on macOS), some Tier-1 anti-bot scripts
+# (sannysoft, creepjs) exhaust the C-stack inside V8's parser/compiler
+# before V8's stack guard can throw — the result is a SIGTRAP rather
+# than a recoverable RangeError.
+#
+# 64 MB matches Chrome's renderer thread budget and gives V8 enough
+# headroom that this class of crash cannot happen. Lower values
+# (16/32 MB) work for the patterns we've tested but leave less
+# headroom for unknown future probes.
+#
+# This setting also covers the V8Thread proxy at
+# crates/browser/src/v8_thread.rs which uses an explicit
+# .stack_size(64 * 1024 * 1024) — the env var ensures the OS thread
+# the proxy runs ON is at least that big in case the explicit setter
+# fails.
+#
+# Reference: HANDOFF_2026_04_28.md item V8 #60.
+[env]
+RUST_MIN_STACK = "67108864"
