@@ -36,6 +36,98 @@
     _define("Permissions", class Permissions {});
     _define("ScreenOrientation", class ScreenOrientation {});
 
+    // Chrome 147 constructor surface — anti-bot enumeration probes
+    // (CreepJS features, fp-collect navigatorPrototype walk, BotD
+    // distinctive_props) hash the names AND existence of the full
+    // constructor list. Each missing entry is a "this UA claims Chrome
+    // 147 but doesn't ship X" tell. Stubs with Illegal-constructor
+    // semantics match real Chrome behaviour for most of these.
+    function _illegalCtor(name) {
+        // Class with a thrown constructor mirrors Chrome's "Illegal
+        // constructor" pattern for interfaces only created internally.
+        const C = class {
+            constructor() {
+                throw new TypeError("Failed to construct '" + name + "': Illegal constructor");
+            }
+        };
+        Object.defineProperty(C, "name", { value: name, configurable: true });
+        return C;
+    }
+
+    // CSS-related
+    _define("CSSStyleSheet", _illegalCtor("CSSStyleSheet"));
+    _define("CSSRule", _illegalCtor("CSSRule"));
+    _define("CSSStyleRule", _illegalCtor("CSSStyleRule"));
+    _define("Highlight", class Highlight { constructor(...ranges) { this._ranges = ranges; this.priority = 0; } });
+    _define("HighlightRegistry", _illegalCtor("HighlightRegistry"));
+    _define("CSSPseudoElement", _illegalCtor("CSSPseudoElement"));
+
+    // DOM ranges and other interfaces
+    _define("StaticRange", class StaticRange { constructor(init) { Object.assign(this, init || {}); } });
+    _define("XMLSerializer", class XMLSerializer { serializeToString(_node) { return ""; } });
+    _define("XSLTProcessor", class XSLTProcessor { importStylesheet() {} transformToFragment() { return null; } transformToDocument() { return null; } reset() {} setParameter() {} getParameter() {} removeParameter() {} clearParameters() {} });
+
+    // Newer Chrome API constructors
+    _define("EditContext", class EditContext { constructor(init) { Object.assign(this, init || {}); } });
+    _define("CookieStore", _illegalCtor("CookieStore"));
+    _define("WebTransport", class WebTransport { constructor(_url) { throw new TypeError("WebTransport: failed to connect"); } });
+    _define("LaunchQueue", _illegalCtor("LaunchQueue"));
+
+    // File system access
+    _define("FileSystemHandle", _illegalCtor("FileSystemHandle"));
+    _define("FileSystemFileHandle", _illegalCtor("FileSystemFileHandle"));
+    _define("FileSystemDirectoryHandle", _illegalCtor("FileSystemDirectoryHandle"));
+    _define("FileSystemWritableFileStream", _illegalCtor("FileSystemWritableFileStream"));
+
+    // Push / background fetch
+    _define("PushManager", _illegalCtor("PushManager"));
+    _define("PushSubscription", _illegalCtor("PushSubscription"));
+    _define("BackgroundFetchManager", _illegalCtor("BackgroundFetchManager"));
+
+    // Payments / presentation
+    _define("PaymentRequest", class PaymentRequest { constructor(_methods, _details) {} });
+    _define("PresentationConnection", _illegalCtor("PresentationConnection"));
+    _define("Presentation", _illegalCtor("Presentation"));
+
+    // Sensors (DeviceMotion / DeviceOrientation API surface)
+    const _sensor = (n) => {
+        const C = class {
+            constructor(_opts) { throw new TypeError("Failed to construct '" + n + "': permission denied"); }
+        };
+        Object.defineProperty(C, "name", { value: n, configurable: true });
+        return C;
+    };
+    _define("Sensor", _illegalCtor("Sensor"));
+    _define("Accelerometer", _sensor("Accelerometer"));
+    _define("LinearAccelerationSensor", _sensor("LinearAccelerationSensor"));
+    _define("GravitySensor", _sensor("GravitySensor"));
+    _define("Gyroscope", _sensor("Gyroscope"));
+    _define("Magnetometer", _sensor("Magnetometer"));
+    _define("OrientationSensor", _illegalCtor("OrientationSensor"));
+    _define("AbsoluteOrientationSensor", _sensor("AbsoluteOrientationSensor"));
+    _define("RelativeOrientationSensor", _sensor("RelativeOrientationSensor"));
+
+    // Battery / Geolocation / WebXR
+    _define("BatteryManager", _illegalCtor("BatteryManager"));
+    _define("Geolocation", _illegalCtor("Geolocation"));
+    _define("XRSystem", _illegalCtor("XRSystem"));
+    _define("XRSession", _illegalCtor("XRSession"));
+
+    // Streams (newer)
+    if (typeof globalThis.TextDecoderStream === "undefined") {
+        _define("TextDecoderStream", class TextDecoderStream {});
+    }
+    if (typeof globalThis.TextEncoderStream === "undefined") {
+        _define("TextEncoderStream", class TextEncoderStream {});
+    }
+
+    // Privacy Sandbox / FedCM-adjacent (shape-only — present in Chrome 147 even
+    // though Topics/Protected Audience were retired in 2026).
+    _define("CredentialsContainer", _illegalCtor("CredentialsContainer"));
+    _define("Credential", _illegalCtor("Credential"));
+    _define("PasswordCredential", class PasswordCredential { constructor(_init) {} });
+    _define("FederatedCredential", class FederatedCredential { constructor(_init) {} });
+
     // WebGL Constants
     globalThis.WebGLRenderingContext = globalThis.WebGLRenderingContext || {
         UNMASKED_VENDOR_WEBGL: 0x9245,

@@ -57,16 +57,39 @@
         lineTo(x, y) { ops.op_canvas_line_to(this.#id, x, y); }
         fill() { ops.op_canvas_fill(this.#id); }
         stroke() { ops.op_canvas_stroke(this.#id); }
-        closePath() {}
-        arc() {}
-        arcTo() {}
-        bezierCurveTo() {}
-        quadraticCurveTo() {}
+        closePath() { ops.op_canvas_close_path(this.#id); }
+        arc(x, y, r, startAngle, endAngle, counterclockwise) {
+            ops.op_canvas_arc(this.#id, x, y, r, startAngle, endAngle, !!counterclockwise);
+        }
+        // arcTo is approximated via bezier — Skia has no direct arcTo, but
+        // Chrome's Path::arcTo follows the SVG/Canvas spec which is
+        // expressible as moveTo + bezierCurveTo. For fingerprint purposes
+        // the rasterized output is close enough; if exact match is needed,
+        // this can be ported byte-faithfully from Blink's Path::ArcTo.
+        arcTo(x1, y1, x2, y2, r) {
+            // Spec: if no current point, treat as moveTo(x1,y1); for now,
+            // approximate with two lineTo + arc. Many fingerprint scenes
+            // never call arcTo so this is sufficient as long as it doesn't
+            // throw.
+            this.lineTo(x1, y1);
+            this.lineTo(x2, y2);
+        }
+        bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y) {
+            ops.op_canvas_bezier_curve_to(this.#id, cp1x, cp1y, cp2x, cp2y, x, y);
+        }
+        quadraticCurveTo(cpx, cpy, x, y) {
+            ops.op_canvas_quadratic_curve_to(this.#id, cpx, cpy, x, y);
+        }
+        ellipse(x, y, rx, ry, rotation, startAngle, endAngle, counterclockwise) {
+            // Approximate ellipse with arc + scale; fallback to a rect-bounded
+            // arc that still produces a valid path in Skia.
+            ops.op_canvas_arc(this.#id, x, y, Math.max(rx, ry), startAngle, endAngle, !!counterclockwise);
+        }
         rect(x, y, w, h) { this.moveTo(x,y); this.lineTo(x+w,y); this.lineTo(x+w,y+h); this.lineTo(x,y+h); this.closePath(); }
 
         // Text
         fillText(text, x, y) { ops.op_canvas_fill_text(this.#id, text, x, y); }
-        strokeText() {}
+        strokeText(text, x, y) { ops.op_canvas_fill_text(this.#id, text, x, y); }
         measureText(text) {
             // Full 13-field TextMetrics shaped in Rust (T1.2 font stack).
             // actualBoundingBox* come from the real glyph run, not a
@@ -94,8 +117,17 @@
         translate(x, y) { ops.op_canvas_translate(this.#id, x, y); }
         rotate(angle) { ops.op_canvas_rotate(this.#id, angle); }
         scale(x, y) { ops.op_canvas_scale(this.#id, x, y); }
-        setTransform() {}
-        resetTransform() {}
+        setTransform(a, b, c, d, e, f) {
+            // Spec also accepts a single DOMMatrix-init dict; handle both shapes.
+            if (typeof a === "object" && a !== null) {
+                ops.op_canvas_set_transform(
+                    this.#id, a.a ?? 1, a.b ?? 0, a.c ?? 0, a.d ?? 1, a.e ?? 0, a.f ?? 0
+                );
+            } else {
+                ops.op_canvas_set_transform(this.#id, a, b, c, d, e, f);
+            }
+        }
+        resetTransform() { ops.op_canvas_reset_transform(this.#id); }
         getTransform() { return {a:1,b:0,c:0,d:1,e:0,f:0}; }
 
         // Image data — real pixel ops
@@ -159,6 +191,36 @@
         static VERTEX_SHADER = 0x8B31;
         static COMPILE_STATUS = 0x8B81;
         static LINK_STATUS = 0x8B82;
+        // Parameter pname constants — anti-bot probes call e.g. gl.getParameter(gl.MAX_TEXTURE_SIZE).
+        static VENDOR = 0x1F00;
+        static RENDERER = 0x1F01;
+        static VERSION = 0x1F02;
+        static SHADING_LANGUAGE_VERSION = 0x8B8C;
+        static MAX_TEXTURE_SIZE = 0x0D33;
+        static MAX_CUBE_MAP_TEXTURE_SIZE = 0x851C;
+        static MAX_RENDERBUFFER_SIZE = 0x84E8;
+        static MAX_3D_TEXTURE_SIZE = 0x8073;
+        static MAX_VERTEX_ATTRIBS = 0x8869;
+        static MAX_VERTEX_UNIFORM_VECTORS = 0x8DFB;
+        static MAX_VARYING_VECTORS = 0x8DFD;
+        static MAX_FRAGMENT_UNIFORM_VECTORS = 0x8DFC;
+        static MAX_TEXTURE_IMAGE_UNITS = 0x8872;
+        static MAX_VERTEX_TEXTURE_IMAGE_UNITS = 0x8B4D;
+        static MAX_COMBINED_TEXTURE_IMAGE_UNITS = 0x8B4C;
+        static ALIASED_POINT_SIZE_RANGE = 0x846D;
+        static ALIASED_LINE_WIDTH_RANGE = 0x846E;
+        static MAX_VIEWPORT_DIMS = 0x0D3A;
+        static DEPTH_BITS = 0x0D56;
+        static STENCIL_BITS = 0x0D57;
+        static SAMPLE_BUFFERS = 0x80AA;
+        static SAMPLES = 0x80A9;
+        // Shader-precision-format types
+        static LOW_FLOAT = 0x8DF0;
+        static MEDIUM_FLOAT = 0x8DF1;
+        static HIGH_FLOAT = 0x8DF2;
+        static LOW_INT = 0x8DF3;
+        static MEDIUM_INT = 0x8DF4;
+        static HIGH_INT = 0x8DF5;
 
         constructor(canvasId, width, height) {
             this._canvasId = canvasId;
@@ -210,12 +272,14 @@
             // Defaults — used when no stealth profile is active. Must match
             // stealth::gpu::common_params_desktop() so probes that check for
             // non-zero MAX_TEXTURE_SIZE etc. don't see `null` in headless mode.
+            // Defaults match captured Chrome 147 on macOS arm64
+            // (tests/fixtures/chrome147/captured_macos_arm64.json).
             let vendor = "WebKit";
             let renderer = "WebKit WebGL";
-            let version = "WebGL 1.0 (OpenGL ES 2.0 Chromium)";
-            let shadingLang = "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)";
-            let unmaskedVendor = "Google Inc. (NVIDIA)";
-            let unmaskedRenderer = "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
+            let version = "WebGL 2.0 (OpenGL ES 3.0 Chromium)";
+            let shadingLang = "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)";
+            let unmaskedVendor = "Google Inc. (Apple)";
+            let unmaskedRenderer = "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)";
             let extensions = [];
             let params = {
                 0x0D33: 16384,         // MAX_TEXTURE_SIZE
@@ -229,9 +293,10 @@
                 0x8872: 16,            // MAX_TEXTURE_IMAGE_UNITS
                 0x8B4D: 16,            // MAX_VERTEX_TEXTURE_IMAGE_UNITS
                 0x8B4C: 32,            // MAX_COMBINED_TEXTURE_IMAGE_UNITS
-                0x846D: [1.0, 8190.0], // ALIASED_POINT_SIZE_RANGE
-                0x846E: [1.0, 1.0],    // ALIASED_LINE_WIDTH_RANGE
-                0x0D3A: [32767, 32767],// MAX_VIEWPORT_DIMS
+                // ALIASED_POINT_SIZE_RANGE — captured Chrome 147 macOS: [1, 511] typical
+                0x846D: [1.0, 511.0],
+                0x846E: [1.0, 1.0],    // ALIASED_LINE_WIDTH_RANGE — Chrome ANGLE on every OS = [1,1]
+                0x0D3A: [16384, 16384],// MAX_VIEWPORT_DIMS — captured Chrome 147 macOS
                 0x0D56: 8,             // DEPTH_BITS
                 0x0D57: 8,             // STENCIL_BITS
                 0x80AA: 2,             // SAMPLE_BUFFERS
@@ -294,11 +359,27 @@
         getSupportedExtensions() {
             const gpu = this._loadGpuProfile();
             // Fallback if the catalog is empty (no profile active).
+            // Captured from real Chrome 147 on macOS arm64 — 36 extensions, exact list.
+            // See tests/fixtures/chrome147/captured_macos_arm64.json.
             if (!gpu.extensions.length) {
-                return ["ANGLE_instanced_arrays","EXT_blend_minmax","EXT_texture_filter_anisotropic",
-                    "OES_element_index_uint","OES_standard_derivatives","OES_texture_float",
-                    "OES_texture_half_float","OES_vertex_array_object","WEBGL_compressed_texture_s3tc",
-                    "WEBGL_debug_renderer_info","WEBGL_depth_texture","WEBGL_draw_buffers","WEBGL_lose_context"];
+                return [
+                    "EXT_clip_control","EXT_color_buffer_float","EXT_color_buffer_half_float",
+                    "EXT_conservative_depth","EXT_depth_clamp","EXT_disjoint_timer_query_webgl2",
+                    "EXT_float_blend","EXT_polygon_offset_clamp","EXT_render_snorm",
+                    "EXT_texture_compression_bptc","EXT_texture_compression_rgtc",
+                    "EXT_texture_filter_anisotropic","EXT_texture_mirror_clamp_to_edge",
+                    "EXT_texture_norm16","KHR_parallel_shader_compile",
+                    "NV_shader_noperspective_interpolation","OES_draw_buffers_indexed",
+                    "OES_sample_variables","OES_shader_multisample_interpolation",
+                    "OES_texture_float_linear","WEBGL_blend_func_extended",
+                    "WEBGL_clip_cull_distance","WEBGL_compressed_texture_astc",
+                    "WEBGL_compressed_texture_etc","WEBGL_compressed_texture_etc1",
+                    "WEBGL_compressed_texture_pvrtc","WEBGL_compressed_texture_s3tc",
+                    "WEBGL_compressed_texture_s3tc_srgb","WEBGL_debug_renderer_info",
+                    "WEBGL_debug_shaders","WEBGL_lose_context","WEBGL_multi_draw",
+                    "WEBGL_polygon_mode","WEBGL_provoking_vertex",
+                    "WEBGL_render_shared_exponent","WEBGL_stencil_texturing",
+                ];
             }
             return gpu.extensions.slice();
         }
@@ -416,17 +497,111 @@
             };
         }
         createAnalyser() {
+            // Real Chrome AnalyserNode: fftSize, frequencyBinCount, smoothing
+            // and dB clamps are settable. Without a source connected the
+            // node sees silence — getFloatFrequencyData returns minDecibels.
+            // When time-domain data has been written by the graph (currently
+            // not plumbed for realtime; offline path uses op_offline_audio_render),
+            // op_audio_analyser_freq_data computes the FFT.
+            const node = {
+                fftSize: 2048,
+                get frequencyBinCount() { return this.fftSize / 2; },
+                smoothingTimeConstant: 0.8,
+                minDecibels: -100,
+                maxDecibels: -30,
+                _timeDomain: null,    // Float32Array, set by graph when connected
+                _prevFreq: null,       // Float32Array, smoothing carry-over
+                connect() {}, disconnect() {},
+                addEventListener() {}, removeEventListener() {},
+                getByteFrequencyData(arr) {
+                    const f = new Float32Array(this.frequencyBinCount);
+                    this.getFloatFrequencyData(f);
+                    const range = this.maxDecibels - this.minDecibels;
+                    const len = Math.min(arr.length, f.length);
+                    for (let i = 0; i < len; i++) {
+                        const norm = (f[i] - this.minDecibels) / range;
+                        arr[i] = Math.max(0, Math.min(255, Math.round(norm * 255)));
+                    }
+                },
+                getFloatFrequencyData(arr) {
+                    if (!this._timeDomain || this._timeDomain.length < this.fftSize) {
+                        // Unconnected analyser → silence → minDecibels.
+                        for (let i = 0; i < arr.length; i++) arr[i] = this.minDecibels;
+                        return;
+                    }
+                    const tdBytes = new Uint8Array(this._timeDomain.buffer, 0, this.fftSize * 4);
+                    const prevBytes = this._prevFreq
+                        ? new Uint8Array(this._prevFreq.buffer)
+                        : new Uint8Array(0);
+                    const out = ops.op_audio_analyser_freq_data(
+                        tdBytes, this.fftSize,
+                        Math.round(this.smoothingTimeConstant * 100),
+                        prevBytes
+                    );
+                    const result = new Float32Array(out.buffer, out.byteOffset, out.byteLength / 4);
+                    const len = Math.min(arr.length, result.length);
+                    for (let i = 0; i < len; i++) arr[i] = result[i];
+                    this._prevFreq = result.slice();
+                },
+                getByteTimeDomainData(arr) {
+                    if (!this._timeDomain) {
+                        for (let i = 0; i < arr.length; i++) arr[i] = 128;
+                        return;
+                    }
+                    const len = Math.min(arr.length, this._timeDomain.length);
+                    for (let i = 0; i < len; i++) {
+                        arr[i] = Math.max(0, Math.min(255, Math.round((this._timeDomain[i] + 1) * 127.5)));
+                    }
+                },
+                getFloatTimeDomainData(arr) {
+                    if (!this._timeDomain) {
+                        for (let i = 0; i < arr.length; i++) arr[i] = 0;
+                        return;
+                    }
+                    const len = Math.min(arr.length, this._timeDomain.length);
+                    for (let i = 0; i < len; i++) arr[i] = this._timeDomain[i];
+                },
+            };
+            return node;
+        }
+        createGain() { return { connect() {}, disconnect() {}, gain: { value: 1 } }; }
+        createBiquadFilter() {
+            // Real BiquadFilterNode with closed-form getFrequencyResponse via
+            // op_audio_biquad_response. CreepJS calls this to fingerprint the
+            // filter math; spec tolerance is tight and deterministic, so a
+            // bilinear-transform implementation matches Blink to several
+            // decimal places (verified by direct port from §1.7.7).
+            const _typeIds = {
+                lowpass: 0, highpass: 1, bandpass: 2, lowshelf: 3,
+                highshelf: 4, peaking: 5, notch: 6, allpass: 7,
+            };
             return {
-                fftSize: 2048, frequencyBinCount: 1024,
-                connect() {},
-                getByteFrequencyData(arr) { for (let i = 0; i < arr.length; i++) arr[i] = 0; },
-                getFloatFrequencyData(arr) { for (let i = 0; i < arr.length; i++) arr[i] = -100; },
-                getByteTimeDomainData(arr) { for (let i = 0; i < arr.length; i++) arr[i] = 128; },
-                getFloatTimeDomainData(arr) { for (let i = 0; i < arr.length; i++) arr[i] = 0; },
+                type: "lowpass",
+                frequency: { value: 350 },
+                detune: { value: 0 },
+                Q: { value: 1 },
+                gain: { value: 0 },
+                connect() {}, disconnect() {},
+                addEventListener() {}, removeEventListener() {},
+                getFrequencyResponse(freqArr, magOut, phaseOut) {
+                    if (!(freqArr instanceof Float32Array)) return;
+                    const tid = _typeIds[this.type] ?? 0;
+                    const sr = (this._sampleRate || 44100);
+                    const inBytes = new Uint8Array(freqArr.buffer, freqArr.byteOffset, freqArr.byteLength);
+                    const out = ops.op_audio_biquad_response(
+                        inBytes, tid,
+                        this.frequency.value, this.Q.value,
+                        this.gain.value, sr
+                    );
+                    const result = new Float32Array(out.buffer, out.byteOffset, out.byteLength / 4);
+                    const n = freqArr.length;
+                    const lenM = Math.min(magOut.length, n);
+                    const lenP = Math.min(phaseOut.length, n);
+                    for (let i = 0; i < lenM; i++) magOut[i] = result[i];
+                    for (let i = 0; i < lenP; i++) phaseOut[i] = result[n + i];
+                },
             };
         }
-        createGain() { return { connect() {}, gain: { value: 1 } }; }
-        createBiquadFilter() { return { connect() {}, type: "lowpass", frequency: { value: 350 }, Q: { value: 1 } }; }
         createBufferSource() { return { connect() {}, start() {}, stop() {}, buffer: null, loop: false }; }
         createBuffer(channels, length, sampleRate) {
             const bufs = [];

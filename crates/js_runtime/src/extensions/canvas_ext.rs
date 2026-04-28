@@ -116,6 +116,84 @@ pub fn op_canvas_fill(#[state] state: &mut CanvasState, #[smi] id: i32) {
 }
 
 #[op2(fast)]
+pub fn op_canvas_close_path(#[state] state: &mut CanvasState, #[smi] id: i32) {
+    if let Some(c) = state.canvases.get_mut(&id) {
+        c.close_path();
+    }
+}
+
+#[op2(fast)]
+pub fn op_canvas_arc(
+    #[state] state: &mut CanvasState,
+    #[smi] id: i32,
+    x: f64,
+    y: f64,
+    r: f64,
+    start: f64,
+    end: f64,
+    ccw: bool,
+) {
+    if let Some(c) = state.canvases.get_mut(&id) {
+        c.arc(x as f32, y as f32, r as f32, start as f32, end as f32, ccw);
+    }
+}
+
+#[op2(fast)]
+pub fn op_canvas_bezier_curve_to(
+    #[state] state: &mut CanvasState,
+    #[smi] id: i32,
+    cp1x: f64,
+    cp1y: f64,
+    cp2x: f64,
+    cp2y: f64,
+    x: f64,
+    y: f64,
+) {
+    if let Some(c) = state.canvases.get_mut(&id) {
+        c.bezier_curve_to(
+            cp1x as f32, cp1y as f32, cp2x as f32, cp2y as f32, x as f32, y as f32,
+        );
+    }
+}
+
+#[op2(fast)]
+pub fn op_canvas_quadratic_curve_to(
+    #[state] state: &mut CanvasState,
+    #[smi] id: i32,
+    cpx: f64,
+    cpy: f64,
+    x: f64,
+    y: f64,
+) {
+    if let Some(c) = state.canvases.get_mut(&id) {
+        c.quadratic_curve_to(cpx as f32, cpy as f32, x as f32, y as f32);
+    }
+}
+
+#[op2(fast)]
+pub fn op_canvas_set_transform(
+    #[state] state: &mut CanvasState,
+    #[smi] id: i32,
+    a: f64,
+    b: f64,
+    c_: f64,
+    d: f64,
+    e: f64,
+    f: f64,
+) {
+    if let Some(c) = state.canvases.get_mut(&id) {
+        c.set_transform(a as f32, b as f32, c_ as f32, d as f32, e as f32, f as f32);
+    }
+}
+
+#[op2(fast)]
+pub fn op_canvas_reset_transform(#[state] state: &mut CanvasState, #[smi] id: i32) {
+    if let Some(c) = state.canvases.get_mut(&id) {
+        c.reset_transform();
+    }
+}
+
+#[op2(fast)]
 pub fn op_canvas_stroke(#[state] state: &mut CanvasState, #[smi] id: i32) {
     if let Some(c) = state.canvases.get_mut(&id) {
         c.stroke();
@@ -492,6 +570,12 @@ deno_core::extension!(
         op_canvas_stroke_rect,
         op_canvas_clear_rect,
         op_canvas_begin_path,
+        op_canvas_close_path,
+        op_canvas_arc,
+        op_canvas_bezier_curve_to,
+        op_canvas_quadratic_curve_to,
+        op_canvas_set_transform,
+        op_canvas_reset_transform,
         op_canvas_move_to,
         op_canvas_line_to,
         op_canvas_fill,

@@ -134,16 +134,34 @@ pub async fn op_fetch(
     // Kasada and similar engines use the nav-vs-fetch header distinction as a
     // strong bot signal.
     let method_upper = method.to_uppercase();
-    let resp = match method_upper.as_str() {
-        "POST" | "PUT" | "PATCH" => {
-            client
-                .fetch_post_bytes(&url, &body_bytes, &extra_headers, origin.as_deref())
-                .await
+
+    // Apply a 30-second hard timeout so hanging connections (e.g. Kasada /tl
+    // where the server black-holes requests with invalid solutions) don't hold
+    // the V8 event loop open indefinitely.
+    let fetch_timeout = std::time::Duration::from_secs(30);
+    let resp_result = tokio::time::timeout(fetch_timeout, async {
+        match method_upper.as_str() {
+            "POST" | "PUT" | "PATCH" => {
+                client
+                    .fetch_post_bytes(&url, &body_bytes, &extra_headers, origin.as_deref())
+                    .await
+            }
+            _ => {
+                client
+                    .fetch_get(&url, &extra_headers, origin.as_deref())
+                    .await
+            }
         }
-        _ => {
-            client
-                .fetch_get(&url, &extra_headers, origin.as_deref())
-                .await
+    })
+    .await;
+    let resp = match resp_result {
+        Ok(r) => r,
+        Err(_) => {
+            return Err(deno_core::error::AnyError::msg(format!(
+                "fetch timeout after {}s: {}",
+                fetch_timeout.as_secs(),
+                url
+            )));
         }
     };
 
@@ -153,12 +171,13 @@ pub async fn op_fetch(
     };
 
     let ok = resp.ok();
+    let body_text = resp.text();
 
     Ok(FetchResponse {
         status: resp.status,
         status_text: resp.status_text.clone(),
         headers: resp.headers.clone(),
-        body: resp.text(),
+        body: body_text,
         url: resp.url.clone(),
         ok,
     })
@@ -291,7 +310,138 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
     result
 }
 
+/// Synchronous XHR op: makes a network request (GET or POST) synchronously,
+/// returning a JSON string `{status, headers, body, url}`.
+///
+/// Used by the XHR polyfill so that KPSDK's /tl POST (and similar anti-bot
+/// challenge POSTs) complete even when V8 is busy with a PoW computation
+/// loop that starves the async event loop. Cookies set by the response are
+/// written back to the shared FETCH_CLIENT cookie jar.
+///
+/// Body is marker-prefixed: "s:<utf8>" or "b:<base64>". Empty string = no body.
+#[op2]
+#[string]
+pub fn op_net_xhr_sync(
+    #[string] url: String,
+    #[string] method: String,
+    #[string] headers_json: String,
+    #[string] body: String,
+    #[string] origin: String,
+) -> String {
+    let profile = FETCH_CLIENT
+        .get()
+        .map(|c| c.profile().clone())
+        .unwrap_or_else(stealth::presets::chrome_130_ru);
+
+    // Parse extra headers provided by JS.
+    let extra_headers: Vec<(String, String)> = serde_json::from_str(&headers_json)
+        .unwrap_or_default();
+
+    // Decode the body.
+    let body_bytes: Vec<u8> = if let Some(rest) = body.strip_prefix("b:") {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .decode(rest.as_bytes())
+            .unwrap_or_default()
+    } else if let Some(rest) = body.strip_prefix("s:") {
+        rest.as_bytes().to_vec()
+    } else if body.is_empty() {
+        Vec::new()
+    } else {
+        body.as_bytes().to_vec()
+    };
+
+    let url_clone = url.clone();
+    let method_upper = method.to_uppercase();
+    let origin_str = if origin.is_empty() { None } else { Some(origin) };
+
+    let result = std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(_) => return "{}".to_string(),
+        };
+        rt.block_on(async move {
+            // Fresh client for sync execution (avoids H2 deadlock on FETCH_CLIENT).
+            let client = match net::HttpClient::new(&profile) {
+                Ok(c) => c,
+                Err(_) => return "{}".to_string(),
+            };
+            // Transfer cookies from FETCH_CLIENT into this fresh client.
+            if let Some(main) = FETCH_CLIENT.get() {
+                if let Ok(parsed) = url::Url::parse(&url_clone) {
+                    if let Some(ck) = main.cookies_for_url(&parsed).await {
+                        if !ck.is_empty() {
+                            let _ = client.set_cookie_str(&parsed, &ck).await;
+                        }
+                    }
+                }
+            }
+
+            let resp_result = match method_upper.as_str() {
+                "GET" | "HEAD" => {
+                    client.get_with_headers(&url_clone, &extra_headers).await
+                }
+                _ => {
+                    let hdrs = net::headers::chrome_headers_fetch(
+                        &client.profile(),
+                        &url_clone,
+                        origin_str.as_deref(),
+                    );
+                    let mut merged = hdrs;
+                    for h in &extra_headers { merged.push(h.clone()); }
+                    client.post_bytes_exact_headers(&url_clone, &body_bytes, &merged).await
+                }
+            };
+
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                async { resp_result },
+            ).await {
+                Ok(Ok(resp)) => {
+                    // Write response cookies back to FETCH_CLIENT.
+                    if let Some(main) = FETCH_CLIENT.get() {
+                        if let Ok(parsed) = url::Url::parse(&url_clone) {
+                            for ck in &resp.set_cookies {
+                                main.set_cookie_str(&parsed, ck).await;
+                            }
+                        }
+                    }
+                    let status = resp.status;
+                    let resp_url = resp.url.clone();
+                    let body_text = resp.text();
+                    // Serialize headers as [[k,v],...] for JS.
+                    let headers_arr: Vec<[String; 2]> = resp.headers
+                        .into_iter()
+                        .map(|(k, v)| [k, v])
+                        .collect();
+                    serde_json::json!({
+                        "status": status,
+                        "url": resp_url,
+                        "headers": headers_arr,
+                        "body": body_text,
+                    }).to_string()
+                }
+                Ok(Err(e)) => {
+                    eprintln!("[op_net_xhr_sync] error {}: {e}", url_clone);
+                    serde_json::json!({"status": 0, "url": url_clone, "headers": [], "body": "", "error": e.to_string()}).to_string()
+                }
+                Err(_) => {
+                    eprintln!("[op_net_xhr_sync] timeout {}", url_clone);
+                    serde_json::json!({"status": 0, "url": url_clone, "headers": [], "body": "", "error": "timeout"}).to_string()
+                }
+            }
+        })
+    })
+    .join()
+    .unwrap_or_else(|_| "{}".to_string());
+
+    result
+}
+
 deno_core::extension!(
     fetch_extension,
-    ops = [op_fetch, op_cookie_get, op_cookie_set, op_net_fetch_sync],
+    ops = [op_fetch, op_cookie_get, op_cookie_set, op_net_fetch_sync, op_net_xhr_sync],
 );

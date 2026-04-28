@@ -1,5 +1,10 @@
 ((globalThis) => {
     const _listeners = new Map(); // nodeId → Map<eventType, [{callback, capture, once}]>
+    // Symbol-keyed escape hatch: Rust dispatchers (input_ext.rs etc.) pass
+    // { [Symbol.for('__bo_trusted__')]: true } in options to mark an event as
+    // trusted. Spec-side `new Event(type, opts)` from page JS produces
+    // isTrusted=false because pages don't know this Symbol.
+    const _TRUSTED = Symbol.for('__bo_trusted__');
 
     class Event {
         constructor(type, options = {}) {
@@ -11,7 +16,7 @@
             this.target = null;
             this.currentTarget = null;
             this.eventPhase = 0;
-            this.isTrusted = false;
+            this.isTrusted = !!(options && options[_TRUSTED] === true);
             this.timeStamp = performance.now();
             this._stopped = false;
             this._stoppedImmediate = false;

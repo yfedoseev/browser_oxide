@@ -176,10 +176,10 @@ async fn navigator_webdriver_boolean() {
 
 #[tokio::test]
 async fn chrome_object_structure() {
-    // Chrome always has window.chrome with specific structure
+    // Chrome 147 on a regular page: {app, csi, loadTimes} only.
+    // chrome.runtime is extension-only; chrome.webstore was removed in Chrome 126.
     assert_eq!(check("typeof chrome").await, "object");
-    assert_eq!(check("typeof chrome.runtime").await, "object");
-    assert_eq!(check("typeof chrome.runtime.connect").await, "function");
+    assert_eq!(check("typeof chrome.runtime").await, "undefined");
     assert_eq!(check("typeof chrome.app").await, "object");
     assert_eq!(check("typeof chrome.csi").await, "function");
     assert_eq!(check("typeof chrome.loadTimes").await, "function");
@@ -283,14 +283,12 @@ async fn test_user_agent_data_highentropy() {
     }
 }
 
-// §6.6 item 2 — window.chrome surface parity (chrome.webstore legacy surface).
+// §6.6 item 2 — window.chrome surface parity (Chrome 147 surface).
 #[tokio::test]
 async fn test_chrome_api_surface() {
-    // keys_sorted must contain at least the 4-surface set from the handoff
-    // fixture §10.2. We do not over-pin here (order may evolve) but we
-    // require webstore — that's the gap this test guards against.
+    // Chrome 147: {app, csi, loadTimes} — no runtime, no webstore.
     let keys = check("Object.keys(chrome).sort().join(',')").await;
-    for required in ["app", "csi", "loadTimes", "webstore"] {
+    for required in ["app", "csi", "loadTimes"] {
         assert!(
             keys.contains(required),
             "chrome.{} missing (keys: {})",
@@ -298,44 +296,16 @@ async fn test_chrome_api_surface() {
             keys
         );
     }
+    assert!(!keys.contains("runtime"), "chrome.runtime must be absent on regular pages (keys: {})", keys);
+    assert!(!keys.contains("webstore"), "chrome.webstore was removed in Chrome 126 (keys: {})", keys);
 
-    // chrome.webstore surface
-    assert_eq!(check("typeof chrome.webstore").await, "object");
-    assert_eq!(check("typeof chrome.webstore.install").await, "function");
-    assert!(
-        check("chrome.webstore.install.toString().includes('[native code]')")
-            .await
-            .eq("true"),
-        "chrome.webstore.install must mask as native"
-    );
-    // Event-listener-style handles — present + standard method set
-    for prop in ["onInstallStageChanged", "onDownloadProgress"] {
-        assert_eq!(
-            check(&format!("typeof chrome.webstore.{}", prop)).await,
-            "object",
-            "{} missing",
-            prop
-        );
-        assert_eq!(
-            check(&format!("typeof chrome.webstore.{}.addListener", prop)).await,
-            "function"
-        );
-        assert_eq!(
-            check(&format!("typeof chrome.webstore.{}.removeListener", prop)).await,
-            "function"
-        );
-        assert_eq!(
-            check(&format!("chrome.webstore.{}.hasListener()", prop)).await,
-            "false"
-        );
-    }
-
-    // chrome.loadTimes behavioural asserts from §10.2 fixture
+    // chrome.loadTimes — for a non-HTTP local page, spdy/npn are false.
+    // On real HTTPS pages (tested via anti_bot tests), they are true/"h2".
     assert_eq!(
-        check("chrome.loadTimes().wasFetchedViaSpdy === true").await,
+        check("chrome.loadTimes().wasFetchedViaSpdy === false").await,
         "true"
     );
-    assert_eq!(check("chrome.loadTimes().connectionInfo").await, "h2");
+    assert_eq!(check("chrome.loadTimes().connectionInfo").await, "");
 
     // chrome.csi keys
     assert_eq!(

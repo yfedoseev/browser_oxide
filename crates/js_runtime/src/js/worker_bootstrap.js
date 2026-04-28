@@ -80,7 +80,7 @@
     if (globalThis.performance) {
         Object.defineProperty(globalThis.performance, 'memory', {
             get() {
-                const jsHeapSizeLimit = 2172649472;
+                const jsHeapSizeLimit = 4294705152;
                 const base = 10485760; // 10 MB
                 const jitter = ((Date.now() * 0x9e3779b9) >>> 0) % 5000000;
                 const totalJSHeapSize = base + jitter;

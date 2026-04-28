@@ -522,11 +522,11 @@ async fn stealth_profile_wired_end_to_end() {
     assert_eq!(page.evaluate("innerHeight").unwrap(), "969");
     assert_eq!(page.evaluate("devicePixelRatio").unwrap(), "1");
 
-    // Chrome object
+    // Chrome object — real Chrome 147 has {app, csi, loadTimes}; no runtime on regular pages.
     assert_eq!(page.evaluate("typeof window.chrome").unwrap(), "object");
     assert_eq!(
         page.evaluate("typeof window.chrome.runtime").unwrap(),
-        "object"
+        "undefined"
     );
 
     // UserAgentData

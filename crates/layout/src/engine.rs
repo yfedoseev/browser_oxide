@@ -89,6 +89,7 @@ impl LayoutEngine {
         // Get absolute position by summing ancestor positions
         let (abs_x, abs_y) = self.absolute_position(taffy_id);
 
+        // DOMRect::new quantizes to 1/64 px via LayoutUnit (Blink-coherent).
         DOMRect::new(
             abs_x as f64,
             abs_y as f64,
@@ -240,7 +241,10 @@ impl LayoutEngine {
     fn taffy_size(&self, node_id: NodeId) -> (f64, f64) {
         match self.dom_to_taffy.get(&node_id.to_raw()) {
             Some(taffy_id) => match self.tree.layout(*taffy_id) {
-                Ok(layout) => (layout.size.width as f64, layout.size.height as f64),
+                Ok(layout) => (
+                    crate::layout_unit::LayoutUnit::from_taffy_f32(layout.size.width).to_f64_px(),
+                    crate::layout_unit::LayoutUnit::from_taffy_f32(layout.size.height).to_f64_px(),
+                ),
                 Err(_) => (0.0, 0.0),
             },
             None => (0.0, 0.0),
@@ -250,7 +254,10 @@ impl LayoutEngine {
     fn taffy_position(&self, node_id: NodeId) -> (f64, f64) {
         match self.dom_to_taffy.get(&node_id.to_raw()) {
             Some(taffy_id) => match self.tree.layout(*taffy_id) {
-                Ok(layout) => (layout.location.x as f64, layout.location.y as f64),
+                Ok(layout) => (
+                    crate::layout_unit::LayoutUnit::from_taffy_f32(layout.location.x).to_f64_px(),
+                    crate::layout_unit::LayoutUnit::from_taffy_f32(layout.location.y).to_f64_px(),
+                ),
                 Err(_) => (0.0, 0.0),
             },
             None => (0.0, 0.0),

@@ -769,12 +769,19 @@ impl Page {
                 remaining,
             );
 
-            // Drain the event loop. Cap at 8s — analytics RUM/setInterval
-            // loops never report idle, so the cap is the real budget. 8s is
-            // enough for Kasada PoW + CF turnstile + most challenge solvers.
+            // Drain the event loop. Use the remaining nav budget (floored at 8s)
+            // so that heavy PoW challenges (Kasada KPSDK takes 30+ seconds) can
+            // complete their /tl POST AFTER the PoW finishes. The V8DeadlineWatcher
+            // installed above provides the hard kill for analytics loops that never
+            // reach idle on their own — once V8 is terminated, run_event_loop()
+            // returns and the drain exits naturally.
+            let drain_timeout = {
+                let remaining = nav_budget.saturating_sub(nav_t0.elapsed());
+                remaining.max(Duration::from_secs(8))
+            };
             if let Err(e) = page
                 .event_loop()
-                .run_until_idle(Duration::from_secs(8))
+                .run_until_idle(drain_timeout)
                 .await
             {
                 tracing::warn!(error = %e, "navigate event loop error");
@@ -1655,7 +1662,36 @@ impl Page {
                     entry.error = String(e && e.message || e).substring(0, 200);
                     throw e;
                 }
-            };"#)
+            };
+            // Also wrap XMLHttpRequest.send so XHR requests appear in __fetchLog.
+            // This is critical for SDKs like WBAAS that use sync XHR for token fetches.
+            (function() {
+                const _XHR = globalThis.XMLHttpRequest;
+                if (!_XHR) return;
+                const _origOpen = _XHR.prototype.open;
+                const _origSend = _XHR.prototype.send;
+                _XHR.prototype.open = function(method, url, async) {
+                    this.__logEntry = { method: String(method||'GET').toUpperCase(), url: String(url||''), sync: async === false };
+                    return _origOpen.apply(this, arguments);
+                };
+                _XHR.prototype.send = function(body) {
+                    const entry = this.__logEntry || { method: this._method||'GET', url: this._url||'', sync: !this._async };
+                    entry.hasBody = body != null && body !== '';
+                    if (!window.__fetchLog) window.__fetchLog = [];
+                    window.__fetchLog.push(entry);
+                    const _origRSC = this.onreadystatechange;
+                    const self = this;
+                    const _finish = function() {
+                        if (self.readyState === 4) entry.status = self.status;
+                    };
+                    const prev = this.onreadystatechange;
+                    this.onreadystatechange = function() {
+                        _finish();
+                        if (prev) prev.apply(this, arguments);
+                    };
+                    return _origSend.apply(this, arguments);
+                };
+            })();"#)
             .ok();
 
         // Execute scripts in document order using pre-fetched code.

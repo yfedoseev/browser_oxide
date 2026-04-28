@@ -1,6 +1,12 @@
+use crate::layout_unit::LayoutUnit;
 use serde::Serialize;
 
 /// A DOMRect returned by getBoundingClientRect().
+///
+/// Floats are quantized to 1/64 px (Blink LayoutUnit) at construction time
+/// so anti-bot probes that hash these values (Akamai pHash, CreepJS) see
+/// Chrome-coherent output. Direct `new` callers can pass arbitrary `f64`
+/// values; the constructor quantizes.
 #[derive(Debug, Clone, Copy, Serialize, Default)]
 pub struct DOMRect {
     pub x: f64,
@@ -14,24 +20,30 @@ pub struct DOMRect {
 }
 
 impl DOMRect {
+    /// Construct a DOMRect with all values quantized to 1/64 px.
+    /// Mirrors Blink's LayoutUnit emission pipeline.
     pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
+        let qx = LayoutUnit::from_f64_px(x).to_f64_px();
+        let qy = LayoutUnit::from_f64_px(y).to_f64_px();
+        let qw = LayoutUnit::from_f64_px(width).to_f64_px();
+        let qh = LayoutUnit::from_f64_px(height).to_f64_px();
         Self {
-            x,
-            y,
-            width,
-            height,
-            top: y,
-            right: x + width,
-            bottom: y + height,
-            left: x,
+            x: qx,
+            y: qy,
+            width: qw,
+            height: qh,
+            top: qy,
+            right: qx + qw,
+            bottom: qy + qh,
+            left: qx,
         }
     }
 
     pub fn from_taffy_layout(layout: &taffy::Layout) -> Self {
-        let x = layout.location.x as f64;
-        let y = layout.location.y as f64;
-        let w = layout.size.width as f64;
-        let h = layout.size.height as f64;
+        let x = LayoutUnit::from_taffy_f32(layout.location.x).to_f64_px();
+        let y = LayoutUnit::from_taffy_f32(layout.location.y).to_f64_px();
+        let w = LayoutUnit::from_taffy_f32(layout.size.width).to_f64_px();
+        let h = LayoutUnit::from_taffy_f32(layout.size.height).to_f64_px();
         Self::new(x, y, w, h)
     }
 }

@@ -222,7 +222,8 @@ async fn window_chrome_app() {
 
 #[tokio::test]
 async fn window_chrome_runtime() {
-    assert_eq!(eval("typeof window.chrome.runtime").await, "object");
+    // Real Chrome 147 on a regular page has no chrome.runtime (extension-only).
+    assert_eq!(eval("typeof window.chrome.runtime").await, "undefined");
 }
 
 #[tokio::test]

@@ -3,6 +3,7 @@
     const ops = core.ops;
     const _nodeIds = new WeakMap();
     const _nodeCache = new Map();
+    const _scrollState = new Map(); // nodeId -> {top, left}
 
     function _getNodeId(node) {
         if (node === globalThis || node === globalThis.window) return -999;
@@ -93,6 +94,26 @@
                     const base = globalThis.location ? globalThis.location.href : 'about:blank';
                     fullUrl = new URL(src, base).href;
                 } catch(e) {}
+            }
+
+            // Third-party trackers known to trigger uncontrolled C-stack recursion
+            // inside their own VM (not in our shims). Skip them — they add no
+            // signal to fingerprint scoring, and crashing the engine on them
+            // costs us all subsequent tests on the page.
+            // Known offenders identified via stack-overflow crashes on real
+            // sites: bot.sannysoft.com loads Yandex Metrika; leboncoin.fr
+            // loads it too.
+            const _RECURSIVE_TRACKERS = [
+                "mc.yandex.ru/metrika/tag.js",
+                "mc.yandex.ru/metrika/watch.js",
+                "mc.yandex.ru/webvisor/",
+            ];
+            for (const pat of _RECURSIVE_TRACKERS) {
+                if (fullUrl.includes(pat)) {
+                    if (scriptEl.onload) scriptEl.onload(new Event('load'));
+                    scriptEl.dispatchEvent && scriptEl.dispatchEvent(new Event('load'));
+                    return;
+                }
             }
 
             if (sync) {
@@ -567,10 +588,47 @@
         get clientHeight() { return this.offsetHeight; }
         get scrollWidth() { return this.offsetWidth; }
         get scrollHeight() { return this.offsetHeight; }
-        get scrollTop() { return 0; }
-        set scrollTop(v) {}
-        get scrollLeft() { return 0; }
-        set scrollLeft(v) {}
+        get scrollTop() {
+            const s = _scrollState.get(_getNodeId(this));
+            return s ? s.top : 0;
+        }
+        set scrollTop(v) {
+            const id = _getNodeId(this);
+            const n = Number(v);
+            const top = Number.isFinite(n) ? n : 0;
+            const cur = _scrollState.get(id);
+            if (cur) cur.top = top; else _scrollState.set(id, { top, left: 0 });
+        }
+        get scrollLeft() {
+            const s = _scrollState.get(_getNodeId(this));
+            return s ? s.left : 0;
+        }
+        set scrollLeft(v) {
+            const id = _getNodeId(this);
+            const n = Number(v);
+            const left = Number.isFinite(n) ? n : 0;
+            const cur = _scrollState.get(id);
+            if (cur) cur.left = left; else _scrollState.set(id, { top: 0, left });
+        }
+        scrollIntoView(_arg) { /* spec no-op when no scrollable ancestor; safe stub */ }
+        scrollTo(xOrOpts, y) {
+            if (typeof xOrOpts === "object" && xOrOpts !== null) {
+                if (xOrOpts.left !== undefined) this.scrollLeft = xOrOpts.left;
+                if (xOrOpts.top !== undefined) this.scrollTop = xOrOpts.top;
+            } else {
+                this.scrollLeft = xOrOpts;
+                this.scrollTop = y;
+            }
+        }
+        scrollBy(xOrOpts, y) {
+            if (typeof xOrOpts === "object" && xOrOpts !== null) {
+                if (xOrOpts.left !== undefined) this.scrollLeft = this.scrollLeft + xOrOpts.left;
+                if (xOrOpts.top !== undefined) this.scrollTop = this.scrollTop + xOrOpts.top;
+            } else {
+                this.scrollLeft = this.scrollLeft + xOrOpts;
+                this.scrollTop = this.scrollTop + y;
+            }
+        }
         get offsetParent() { return this.parentElement; }
         // --- Modern DOM manipulation ---
         remove() {
@@ -1687,6 +1745,147 @@
     // per-iframe state is cached in a WeakMap keyed by the element.
 
     const _iframeState = new WeakMap();
+
+    // Build a mirror realm: fresh constructors that mimic the parent's shape
+    // but are reference-distinct, so cross-realm probes like
+    //   iframe.contentWindow.Navigator !== Navigator
+    //   iframe.contentWindow.Navigator.prototype !== Navigator.prototype
+    // hold true while own-property-names lists remain identical. Each
+    // mirrored function carries _nativeTag so Function.prototype.toString
+    // produces "function NAME() { [native code] }" cross-realm.
+    const _MIRRORED_CONSTRUCTORS = [
+        "Navigator", "Window", "Document", "HTMLDocument",
+        "EventTarget", "Node", "Element", "HTMLElement",
+        "HTMLDivElement", "HTMLSpanElement", "HTMLBodyElement",
+        "HTMLAnchorElement", "HTMLImageElement", "HTMLInputElement",
+        "HTMLFormElement", "HTMLButtonElement", "HTMLSelectElement",
+        "HTMLTextAreaElement", "HTMLCanvasElement", "HTMLScriptElement",
+        "HTMLIFrameElement", "Event", "CustomEvent", "MouseEvent",
+        "KeyboardEvent", "MessageEvent", "Array", "Object", "Function",
+        "String", "Number", "Boolean", "Promise", "Error", "TypeError",
+        "RangeError", "Map", "Set", "WeakMap", "WeakSet", "Date",
+        "RegExp", "Symbol",
+    ];
+
+    // Capture the native-tag Symbol from the parent realm. stealth_bootstrap.js
+    // exposes it as globalThis._nativeTag. We capture explicitly so the
+    // freshToString and _mkNativeFn don't accidentally see undefined when
+    // bare-identifier scope chain is shadowed by the IIFE parameter.
+    const _NATIVE_TAG_SYMBOL = globalThis._nativeTag || Symbol.for('__boxide_native__');
+
+    function _mkNativeFn(name) {
+        const fn = function() {};
+        try {
+            Object.defineProperty(fn, "name", { value: name, configurable: true });
+            Object.defineProperty(fn, _NATIVE_TAG_SYMBOL, { value: name, configurable: true });
+            // Per-instance toString returning native shape — used when the
+            // patched Function.prototype.toString is bypassed by direct
+            // .toString() calls. Mirrors stealth_bootstrap's _maskFunction.
+            const ts = function toString() { return "function " + name + "() { [native code] }"; };
+            Object.defineProperty(ts, _NATIVE_TAG_SYMBOL, { value: "toString", configurable: true });
+            Object.defineProperty(ts, "name", { value: "toString", configurable: true });
+            Object.defineProperty(fn, "toString", { value: ts, configurable: true });
+        } catch (_) {}
+        return fn;
+    }
+
+    function _mkMirroredConstructor(parentCtor, name) {
+        // Fresh constructor function — different identity than parent's
+        const fresh = function() {
+            throw new TypeError("Failed to construct '" + name + "': Illegal constructor");
+        };
+        try {
+            Object.defineProperty(fresh, "name", { value: name, configurable: true });
+            Object.defineProperty(fresh, _NATIVE_TAG_SYMBOL, { value: name, configurable: true });
+            const ts = function toString() { return "function " + name + "() { [native code] }"; };
+            Object.defineProperty(ts, _NATIVE_TAG_SYMBOL, { value: "toString", configurable: true });
+            Object.defineProperty(ts, "name", { value: "toString", configurable: true });
+            Object.defineProperty(fresh, "toString", { value: ts, configurable: true });
+        } catch (_) {}
+
+        // Build a fresh prototype mirroring own-property-names of parent's prototype.
+        // Each method/getter/setter is a fresh function with native toString shape.
+        let parentProto = null;
+        try { parentProto = parentCtor && parentCtor.prototype; } catch (_) {}
+        const freshProto = Object.create(parentProto && Object.getPrototypeOf(parentProto) || Object.prototype);
+
+        if (parentProto) {
+            const propNames = Object.getOwnPropertyNames(parentProto);
+            for (const propName of propNames) {
+                if (propName === "constructor") continue;
+                let desc;
+                try { desc = Object.getOwnPropertyDescriptor(parentProto, propName); } catch (_) { continue; }
+                if (!desc) continue;
+                const newDesc = {
+                    configurable: desc.configurable !== false,
+                    enumerable: !!desc.enumerable,
+                };
+                if (desc.get || desc.set) {
+                    if (desc.get) newDesc.get = _mkNativeFn("get " + propName);
+                    if (desc.set) newDesc.set = _mkNativeFn("set " + propName);
+                } else {
+                    newDesc.writable = desc.writable !== false;
+                    if (typeof desc.value === "function") {
+                        // Function-valued props: replace with our fresh native-shape stub
+                        // (so cross-realm Function.prototype.toString.call(this) returns
+                        // "function NAME() { [native code] }").
+                        newDesc.value = _mkNativeFn(propName);
+                    } else {
+                        newDesc.value = desc.value;
+                    }
+                }
+                try { Object.defineProperty(freshProto, propName, newDesc); } catch (_) {}
+            }
+        }
+
+        try {
+            Object.defineProperty(freshProto, "constructor", {
+                value: fresh, writable: true, enumerable: false, configurable: true,
+            });
+            Object.defineProperty(fresh, "prototype", {
+                value: freshProto, writable: false, enumerable: false, configurable: false,
+            });
+        } catch (_) {}
+        return fresh;
+    }
+
+    function _buildRemoteRealm() {
+        const realm = {};
+        for (const name of _MIRRORED_CONSTRUCTORS) {
+            try {
+                const parentCtor = globalThis[name];
+                if (typeof parentCtor === "function") {
+                    realm[name] = _mkMirroredConstructor(parentCtor, name);
+                }
+            } catch (_) {}
+        }
+        // Cross-realm Function.prototype.toString returning native shape for
+        // anything carrying _nativeTag. Anti-bot detectors call:
+        //   iframe.contentWindow.Function.prototype.toString.call(window.fetch)
+        // and expect "function fetch() { [native code] }".
+        try {
+            const FreshFunctionProto = realm.Function && realm.Function.prototype;
+            if (FreshFunctionProto) {
+                const freshToString = function toString() {
+                    if (this !== null && this !== undefined) {
+                        try {
+                            const tag = this[_NATIVE_TAG_SYMBOL];
+                            if (tag) return "function " + tag + "() { [native code] }";
+                        } catch (_) {}
+                    }
+                    try { return Function.prototype.toString.call(this); }
+                    catch (_) { return "function () { [native code] }"; }
+                };
+                Object.defineProperty(freshToString, _NATIVE_TAG_SYMBOL, { value: "toString", configurable: true });
+                Object.defineProperty(freshToString, "name", { value: "toString", configurable: true });
+                Object.defineProperty(FreshFunctionProto, "toString", {
+                    value: freshToString, writable: true, configurable: true,
+                });
+            }
+        } catch (_) {}
+        return realm;
+    }
+
     function _getIframeWindow(el) {
         let state = _iframeState.get(el);
         if (state) return state.contentWindow;
@@ -1713,6 +1912,7 @@
             open() { return _document.open(); },
             close() { return _document.close(); },
         };
+        const remoteRealm = _buildRemoteRealm();
         const iframeLocals = {
             document: iframeDoc,
             location: { href: "about:blank" },
@@ -1726,23 +1926,31 @@
                 });
             },
         };
+        // Probed constructors come from the per-iframe mirror realm — distinct
+        // identity from parent globalThis. Unknown names still fall through to
+        // parent globalThis (Math, JSON, console, performance, etc.) since
+        // those aren't reference-checked by realm-purity probes.
         const iframeWindow = new Proxy(iframeLocals, {
             get(target, prop) {
                 if (prop in target) return target[prop];
+                if (typeof prop === "string" && prop in remoteRealm) return remoteRealm[prop];
                 try { return globalThis[prop]; } catch { return undefined; }
             },
             has(target, prop) {
-                return prop in target || prop in globalThis;
+                return prop in target || prop in remoteRealm || prop in globalThis;
             },
             getOwnPropertyDescriptor(target, prop) {
                 if (prop in target) {
                     return Object.getOwnPropertyDescriptor(target, prop);
                 }
+                if (typeof prop === "string" && prop in remoteRealm) {
+                    return { value: remoteRealm[prop], writable: true, enumerable: true, configurable: true };
+                }
                 return undefined;
             },
         });
         iframeLocals.self = iframeWindow;
-        state = { contentWindow: iframeWindow, contentDocument: iframeDoc };
+        state = { contentWindow: iframeWindow, contentDocument: iframeDoc, remoteRealm };
         _iframeState.set(el, state);
         return iframeWindow;
     }

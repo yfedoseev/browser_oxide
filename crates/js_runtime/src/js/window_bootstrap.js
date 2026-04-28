@@ -1008,13 +1008,22 @@
         return { startE: Date.now(), onloadT: Date.now(), pageT: Date.now(), tran: 15 };
     };
     const _chromeLoadTimes = function loadTimes() {
+        // For HTTP/2 pages these are true/"h2"; for about:blank/non-HTTP they are false/"".
+        const _isHttp = globalThis.location && /^https?:/.test(globalThis.location.protocol);
         return {
-            commitLoadTime: Date.now()/1000, connectionInfo: "h2",
-            finishDocumentLoadTime: Date.now()/1000, finishLoadTime: Date.now()/1000,
-            firstPaintAfterLoadTime: 0, firstPaintTime: Date.now()/1000,
-            navigationType: "Other", npnNegotiatedProtocol: "h2",
-            requestTime: Date.now()/1000, startLoadTime: Date.now()/1000,
-            wasAlternateProtocolAvailable: false, wasFetchedViaSpdy: true, wasNpnNegotiated: true,
+            commitLoadTime: Date.now()/1000,
+            connectionInfo: _isHttp ? "h2" : "",
+            finishDocumentLoadTime: Date.now()/1000,
+            finishLoadTime: Date.now()/1000,
+            firstPaintAfterLoadTime: 0,
+            firstPaintTime: Date.now()/1000,
+            navigationType: "Other",
+            npnNegotiatedProtocol: _isHttp ? "h2" : "",
+            requestTime: Date.now()/1000,
+            startLoadTime: Date.now()/1000,
+            wasAlternateProtocolAvailable: _isHttp,
+            wasFetchedViaSpdy: _isHttp,
+            wasNpnNegotiated: _isHttp,
         };
     };
     Object.defineProperty(_chromeCsi, 'toString', {
@@ -1027,57 +1036,24 @@
         configurable: true,
     });
     Object.defineProperty(_chromeLoadTimes, _nativeTag, { value: 'loadTimes', configurable: true });
-    // chrome.webstore — legacy API (pre-2018). Modern Chrome still exposes
-    // the object on the top-frame; its methods throw off-webstore. Probes
-    // assert: typeof chrome.webstore === 'object', install is a function,
-    // onInstallStageChanged/onDownloadProgress expose the standard
-    // Event-listener-style {addListener, removeListener, hasListener}.
-    const _webstoreInstall = function install(url, onSuccess, onFailure) {
-        // Real Chrome off the Web Store throws here; emulate that shape.
-        if (typeof onFailure === 'function') {
-            try { onFailure("Invalid Chrome Web Store item ID"); } catch (_) {}
-        }
-    };
-    Object.defineProperty(_webstoreInstall, 'toString', {
-        value: function toString() { return 'function install() { [native code] }'; },
-        configurable: true,
-    });
-    Object.defineProperty(_webstoreInstall, _nativeTag, { value: 'install', configurable: true });
-    const _makeListenerHandle = () => ({
-        addListener() {},
-        removeListener() {},
-        hasListener() { return false; },
-        hasListeners() { return false; },
-    });
 
+    // Real Chrome 147 on a regular page (no extensions): {app, csi, loadTimes}
+    // chrome.runtime is ONLY present in extension contexts — absent on regular pages.
+    // chrome.webstore was removed in Chrome 126.
+    // Adding either is a classic bot detection signal (Kasada, Cloudflare, DataDome).
     globalThis.chrome = {
         app: {
             isInstalled: false,
             InstallState: {DISABLED:"disabled",INSTALLED:"installed",NOT_INSTALLED:"not_installed"},
             RunningState: {CANNOT_RUN:"cannot_run",READY_TO_RUN:"ready_to_run",RUNNING:"running"},
-        },
-        runtime: {
-            OnInstalledReason: {CHROME_UPDATE:"chrome_update",INSTALL:"install",SHARED_MODULE_UPDATE:"shared_module_update",UPDATE:"update"},
-            PlatformOs: {ANDROID:"android",CROS:"cros",LINUX:"linux",MAC:"mac",WIN:"win"},
-            PlatformArch: {ARM:"arm",ARM64:"arm64",MIPS:"mips",MIPS64:"mips64",X86_32:"x86-32",X86_64:"x86-64"},
-            PlatformNaclArch: {ARM:"arm",MIPS:"mips",MIPS64:"mips64",X86_32:"x86-32",X86_64:"x86-64"},
-            RequestUpdateCheckStatus: {NO_UPDATE:"no_update",THROTTLED:"throttled",UPDATE_AVAILABLE:"update_available"},
-            OnRestartRequiredReason: {APP_UPDATE:"app_update",OS_UPDATE:"os_update",PERIODIC:"periodic"},
-            id: "kjmdfpjcpgidgjglkaonfhgmjjmghmfe", // Standard Chrome Web Store ID format
-            onConnect: _makeListenerHandle(),
-            onMessage: _makeListenerHandle(),
-            connect() {},
-            sendMessage() {},
-            getURL(s) { return "chrome-extension://kjmdfpjcpgidgjglkaonfhgmjjmghmfe/" + s; },
-            getManifest() { return { name: "Chrome", version: "1.0", manifest_version: 2 }; },
+            // Chrome 147 exposes these functions on chrome.app (bot detectors check them):
+            getDetails: function getDetails() { return null; },
+            getIsInstalled: function getIsInstalled() { return false; },
+            installState: function installState(cb) { if (typeof cb === 'function') setTimeout(() => cb('not_installed'), 0); },
+            runningState: function runningState() { return 'cannot_run'; },
         },
         csi: _chromeCsi,
         loadTimes: _chromeLoadTimes,
-        webstore: {
-            install: _webstoreInstall,
-            onInstallStageChanged: _makeListenerHandle(),
-            onDownloadProgress: _makeListenerHandle(),
-        },
     };
 
     // --- Document visibility/hidden stubs ---
@@ -1732,7 +1708,7 @@
 
     // Performance stub state — installed on Performance.prototype below.
     const _perfMemory = {
-        jsHeapSizeLimit: 2172649472,
+        jsHeapSizeLimit: 4294705152,
         totalJSHeapSize: 10000000,
         usedJSHeapSize: 8000000,
     };
@@ -1977,7 +1953,7 @@
         const _origNow = globalThis.performance.now && globalThis.performance.now.bind(globalThis.performance);
 
         _defProtoGetter(_PerfProto, 'memory', () => {
-            const jsHeapSizeLimit = 2172649472;
+            const jsHeapSizeLimit = 4294705152;
             const base = 10485760; // 10 MB
             const jitter = ((Date.now() * 0x9e3779b9) >>> 0) % 5000000;
             const totalJSHeapSize = base + jitter;
@@ -2634,6 +2610,62 @@
                     if (typeof handler === 'function') handler.call(xhr, ev);
                 } catch {}
             };
+
+            // Encode body for the sync op (marker-prefixed like op_fetch).
+            let bodyEncoded = '';
+            if (body !== null && body !== undefined) {
+                if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+                    const bytes = body instanceof ArrayBuffer
+                        ? new Uint8Array(body)
+                        : new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+                    let bin = '';
+                    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+                    bodyEncoded = 'b:' + btoa(bin);
+                } else {
+                    bodyEncoded = 's:' + String(body);
+                }
+            }
+
+            // For synchronous XHR (async=false) — required by Kasada KPSDK which calls
+            // xhr.open('POST', '/tl', false) + xhr.send() and reads xhr.status immediately
+            // after send() returns. The async fetch() path can never satisfy this because
+            // it requires V8 to yield, which doesn't happen when a PoW busy-wait is running.
+            if (!xhr._async && typeof ops !== 'undefined' && typeof ops.op_net_xhr_sync === 'function') {
+                try {
+                    const origin = (globalThis.location && globalThis.location.origin !== 'null')
+                        ? globalThis.location.origin : '';
+                    const headersJson = JSON.stringify(
+                        Object.entries(xhr._headers).map(([k, v]) => [k, String(v)])
+                    );
+                    const resultJson = ops.op_net_xhr_sync(
+                        xhr._url, xhr._method, headersJson, bodyEncoded, origin
+                    );
+                    const result = JSON.parse(resultJson);
+                    xhr.status = result.status || 0;
+                    xhr.statusText = '';
+                    xhr.responseURL = result.url || xhr._url;
+                    if (Array.isArray(result.headers)) {
+                        for (const [k, v] of result.headers) {
+                            xhr._respHeaders[String(k).toLowerCase()] = String(v);
+                        }
+                    }
+                    xhr.responseText = result.body || '';
+                    xhr.response = xhr.responseText;
+                    xhr.readyState = 2; fireEvent('readystatechange');
+                    xhr.readyState = 3; fireEvent('readystatechange');
+                    xhr.readyState = 4; fireEvent('readystatechange');
+                    fireEvent('load');
+                    fireEvent('loadend');
+                } catch(e) {
+                    xhr.readyState = 4;
+                    fireEvent('readystatechange');
+                    fireEvent('error');
+                    fireEvent('loadend');
+                }
+                return;
+            }
+
+            // Fallback: async fetch() path (used only when op_net_xhr_sync is unavailable).
             fireEvent('loadstart');
             fetch(xhr._url, {
                 method: xhr._method,
@@ -4043,6 +4075,148 @@
     // crossOriginIsolated is now installed as an op-backed getter near the
     // top of window_bootstrap.js (search for op_cross_origin_isolated).
     // No fallback needed — defineProperty above runs before any user JS.
+
+    // ================================================================
+    // Trusted Types API (Chrome 83+)
+    // Anti-bot scripts and CSP policies check window.trustedTypes presence.
+    // ================================================================
+    if (!globalThis.trustedTypes) {
+        const _ttPolicies = new Map();
+        const _TrustedHTML = function TrustedHTML(v) { this._v = v; };
+        _TrustedHTML.prototype.toString = function() { return this._v; };
+        const _TrustedScript = function TrustedScript(v) { this._v = v; };
+        _TrustedScript.prototype.toString = function() { return this._v; };
+        const _TrustedScriptURL = function TrustedScriptURL(v) { this._v = v; };
+        _TrustedScriptURL.prototype.toString = function() { return this._v; };
+        globalThis.trustedTypes = {
+            createPolicy(name, rules) {
+                const p = {
+                    name,
+                    createHTML: (s) => typeof rules.createHTML === 'function' ? new _TrustedHTML(rules.createHTML(s)) : new _TrustedHTML(s),
+                    createScript: (s) => typeof rules.createScript === 'function' ? new _TrustedScript(rules.createScript(s)) : new _TrustedScript(s),
+                    createScriptURL: (s) => typeof rules.createScriptURL === 'function' ? new _TrustedScriptURL(rules.createScriptURL(s)) : new _TrustedScriptURL(s),
+                };
+                _ttPolicies.set(name, p);
+                if (name === 'default') globalThis.trustedTypes.defaultPolicy = p;
+                return p;
+            },
+            isHTML(v) { return v instanceof _TrustedHTML; },
+            isScript(v) { return v instanceof _TrustedScript; },
+            isScriptURL(v) { return v instanceof _TrustedScriptURL; },
+            getAttributeType() { return null; },
+            getPropertyType() { return null; },
+            defaultPolicy: null,
+            emptyHTML: new _TrustedHTML(''),
+            emptyScript: new _TrustedScript(''),
+        };
+        globalThis.TrustedHTML = _TrustedHTML;
+        globalThis.TrustedScript = _TrustedScript;
+        globalThis.TrustedScriptURL = _TrustedScriptURL;
+        _maskAsNative(globalThis.trustedTypes, 'createPolicy', 'isHTML', 'isScript', 'isScriptURL', 'getAttributeType', 'getPropertyType');
+    }
+
+    // ================================================================
+    // Scheduler API (Chrome 104+)
+    // window.scheduler.postTask / scheduler.yield are checked by bot detectors.
+    // ================================================================
+    if (!globalThis.scheduler) {
+        globalThis.scheduler = {
+            postTask(callback, options) {
+                const delay = (options && options.delay) || 0;
+                return new Promise((resolve, reject) => {
+                    setTimeout(() => {
+                        try { resolve(callback()); } catch (e) { reject(e); }
+                    }, delay);
+                });
+            },
+            yield() {
+                return new Promise(resolve => setTimeout(resolve, 0));
+            },
+        };
+        _maskAsNative(globalThis.scheduler, 'postTask', 'yield');
+    }
+
+    // ================================================================
+    // reportError (Chrome 95+) — dispatches an ErrorEvent on window.
+    // ================================================================
+    if (!globalThis.reportError) {
+        globalThis.reportError = function reportError(err) {
+            const evt = new ErrorEvent('error', { error: err, message: err && err.message || String(err), bubbles: true, cancelable: true });
+            globalThis.dispatchEvent(evt);
+        };
+        _maskAsNative(globalThis, 'reportError');
+    }
+
+    // ================================================================
+    // Touch / TouchEvent constructors — present in Chrome on all platforms.
+    // Desktop Chrome defines them even though touch isn't available.
+    // Anti-bot scripts check typeof Touch / typeof TouchEvent.
+    // ================================================================
+    if (!globalThis.Touch) {
+        globalThis.Touch = function Touch(init) {
+            if (!init || init.identifier === undefined || !init.target) {
+                throw new TypeError("Failed to construct 'Touch': required members identifier and target");
+            }
+            this.identifier = init.identifier;
+            this.target = init.target;
+            this.clientX = init.clientX || 0;
+            this.clientY = init.clientY || 0;
+            this.screenX = init.screenX || 0;
+            this.screenY = init.screenY || 0;
+            this.pageX = init.pageX || 0;
+            this.pageY = init.pageY || 0;
+            this.radiusX = init.radiusX || 0;
+            this.radiusY = init.radiusY || 0;
+            this.rotationAngle = init.rotationAngle || 0;
+            this.force = init.force || 0;
+            this.altitudeAngle = init.altitudeAngle || 0;
+            this.azimuthAngle = init.azimuthAngle || 0;
+            this.touchType = init.touchType || 'direct';
+        };
+        globalThis.Touch.prototype = Object.create(Object.prototype, {
+            constructor: { value: globalThis.Touch, configurable: true, writable: true },
+        });
+        _maskAsNative(globalThis.Touch);
+    }
+    if (!globalThis.TouchEvent) {
+        globalThis.TouchEvent = function TouchEvent(type, init) {
+            const base = new Event(type || 'touchstart', init || {});
+            base.touches = (init && init.touches) ? init.touches : new TouchList();
+            base.targetTouches = (init && init.targetTouches) ? init.targetTouches : new TouchList();
+            base.changedTouches = (init && init.changedTouches) ? init.changedTouches : new TouchList();
+            base.altKey = (init && init.altKey) || false;
+            base.ctrlKey = (init && init.ctrlKey) || false;
+            base.metaKey = (init && init.metaKey) || false;
+            base.shiftKey = (init && init.shiftKey) || false;
+            return base;
+        };
+        globalThis.TouchEvent.prototype = Object.create(Event.prototype, {
+            constructor: { value: globalThis.TouchEvent, configurable: true, writable: true },
+        });
+        _maskAsNative(globalThis.TouchEvent);
+    }
+    if (!globalThis.TouchList) {
+        globalThis.TouchList = function TouchList() { this.length = 0; };
+        globalThis.TouchList.prototype.item = function(i) { return this[i] || null; };
+        _maskAsNative(globalThis.TouchList);
+    }
+
+    // ================================================================
+    // SharedArrayBuffer — only available with cross-origin isolation.
+    // Chrome hides it (returns undefined) without COOP+COEP headers.
+    // Most sites don't set these headers, so SAB is undefined on most pages.
+    // V8 doesn't let us delete built-in globals, so we shadow with a getter
+    // that returns undefined, matching Chrome's non-isolated behavior.
+    // ================================================================
+    if (!ops.op_cross_origin_isolated()) {
+        try {
+            Object.defineProperty(globalThis, 'SharedArrayBuffer', {
+                get: () => undefined,
+                configurable: true,
+                enumerable: false,
+            });
+        } catch(_) {}
+    }
 
     // fetch(), Headers, Request, Response are now provided by fetch_bootstrap.js
     // (wired to real net::HttpClient via op_fetch)
