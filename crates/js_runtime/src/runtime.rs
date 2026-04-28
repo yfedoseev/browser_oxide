@@ -224,7 +224,10 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
 
     // StealthState must also carry the profile so op_get_profile_value
     // returns the correct values inside the worker context.
-    runtime.op_state().borrow_mut().put(StealthState::new(profile));
+    runtime
+        .op_state()
+        .borrow_mut()
+        .put(StealthState::new(profile));
 
     // stealth_bootstrap must run first: installs Function.prototype.toString patch
     // and the _nativeTag/_maskFunction/_maskAsNative helpers that worker_bootstrap uses.

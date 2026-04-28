@@ -11,11 +11,3 @@
 # Claude Code / Playwright MCP scratch
 .claude/scheduled_tasks.lock
 .playwright-mcp/
-
-# Root-level debug screenshots from manual anti-bot probing
-/areyouheadless.png
-/botd_screenshot.png
-/fingerprintscan.png
-/fingerprintscan_full.png
-/nowsecure.png
-/sannysoft_full.png

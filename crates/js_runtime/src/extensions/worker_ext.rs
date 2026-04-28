@@ -210,7 +210,10 @@ pub fn op_worker_spawn(
 ) -> i32 {
     // Prefer StealthState.profile (always set from BrowserRuntimeOptions) over
     // DomState.stealth_profile (historically always None in the main runtime).
-    let profile = stealth.profile.clone().or_else(|| state.stealth_profile.clone());
+    let profile = stealth
+        .profile
+        .clone()
+        .or_else(|| state.stealth_profile.clone());
     let (to_worker_tx, to_worker_rx) = std::sync::mpsc::channel::<String>();
     let (to_parent_tx, to_parent_rx) = std::sync::mpsc::channel::<String>();
     let terminate = Arc::new(AtomicBool::new(false));

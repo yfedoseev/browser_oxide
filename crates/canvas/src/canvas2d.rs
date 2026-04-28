@@ -840,6 +840,25 @@ impl Canvas2D {
         self.path.arc(x, y, r, start, end, ccw);
     }
 
+    pub fn arc_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) {
+        self.path.arc_to(x1, y1, x2, y2, radius);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn ellipse(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        rx: f32,
+        ry: f32,
+        rotation: f32,
+        start: f32,
+        end: f32,
+        ccw: bool,
+    ) {
+        self.path.ellipse(cx, cy, rx, ry, rotation, start, end, ccw);
+    }
+
     pub fn close_path(&mut self) {
         self.path.close_path();
     }

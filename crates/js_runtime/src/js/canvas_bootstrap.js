@@ -61,18 +61,8 @@
         arc(x, y, r, startAngle, endAngle, counterclockwise) {
             ops.op_canvas_arc(this.#id, x, y, r, startAngle, endAngle, !!counterclockwise);
         }
-        // arcTo is approximated via bezier — Skia has no direct arcTo, but
-        // Chrome's Path::arcTo follows the SVG/Canvas spec which is
-        // expressible as moveTo + bezierCurveTo. For fingerprint purposes
-        // the rasterized output is close enough; if exact match is needed,
-        // this can be ported byte-faithfully from Blink's Path::ArcTo.
         arcTo(x1, y1, x2, y2, r) {
-            // Spec: if no current point, treat as moveTo(x1,y1); for now,
-            // approximate with two lineTo + arc. Many fingerprint scenes
-            // never call arcTo so this is sufficient as long as it doesn't
-            // throw.
-            this.lineTo(x1, y1);
-            this.lineTo(x2, y2);
+            ops.op_canvas_arc_to(this.#id, x1, y1, x2, y2, r);
         }
         bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y) {
             ops.op_canvas_bezier_curve_to(this.#id, cp1x, cp1y, cp2x, cp2y, x, y);
@@ -81,9 +71,7 @@
             ops.op_canvas_quadratic_curve_to(this.#id, cpx, cpy, x, y);
         }
         ellipse(x, y, rx, ry, rotation, startAngle, endAngle, counterclockwise) {
-            // Approximate ellipse with arc + scale; fallback to a rect-bounded
-            // arc that still produces a valid path in Skia.
-            ops.op_canvas_arc(this.#id, x, y, Math.max(rx, ry), startAngle, endAngle, !!counterclockwise);
+            ops.op_canvas_ellipse(this.#id, x, y, rx, ry, rotation, startAngle, endAngle, !!counterclockwise);
         }
         rect(x, y, w, h) { this.moveTo(x,y); this.lineTo(x+w,y); this.lineTo(x+w,y+h); this.lineTo(x,y+h); this.closePath(); }
 

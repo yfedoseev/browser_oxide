@@ -334,8 +334,8 @@ pub fn op_net_xhr_sync(
         .unwrap_or_else(stealth::presets::chrome_130_ru);
 
     // Parse extra headers provided by JS.
-    let extra_headers: Vec<(String, String)> = serde_json::from_str(&headers_json)
-        .unwrap_or_default();
+    let extra_headers: Vec<(String, String)> =
+        serde_json::from_str(&headers_json).unwrap_or_default();
 
     // Decode the body.
     let body_bytes: Vec<u8> = if let Some(rest) = body.strip_prefix("b:") {
@@ -353,7 +353,11 @@ pub fn op_net_xhr_sync(
 
     let url_clone = url.clone();
     let method_upper = method.to_uppercase();
-    let origin_str = if origin.is_empty() { None } else { Some(origin) };
+    let origin_str = if origin.is_empty() {
+        None
+    } else {
+        Some(origin)
+    };
 
     let result = std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_current_thread()
@@ -443,5 +447,11 @@ pub fn op_net_xhr_sync(
 
 deno_core::extension!(
     fetch_extension,
-    ops = [op_fetch, op_cookie_get, op_cookie_set, op_net_fetch_sync, op_net_xhr_sync],
+    ops = [
+        op_fetch,
+        op_cookie_get,
+        op_cookie_set,
+        op_net_fetch_sync,
+        op_net_xhr_sync
+    ],
 );

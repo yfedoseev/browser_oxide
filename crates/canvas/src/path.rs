@@ -18,6 +18,11 @@ enum PathCommand {
     BezierCurveTo(f32, f32, f32, f32, f32, f32),
     QuadraticCurveTo(f32, f32, f32, f32),
     Arc(f32, f32, f32, f32, f32, bool),
+    /// Canvas `arcTo(x1, y1, x2, y2, radius)` — tangent arc between
+    /// the current point and (x2, y2) via control point (x1, y1).
+    ArcTo(f32, f32, f32, f32, f32),
+    /// Canvas `ellipse(x, y, rx, ry, rotation, startAngle, endAngle, ccw)`.
+    Ellipse(f32, f32, f32, f32, f32, f32, f32, bool),
     Rect(f32, f32, f32, f32),
     ClosePath,
 }
@@ -64,6 +69,35 @@ impl Path2D {
         ));
     }
 
+    pub fn arc_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) {
+        self.commands
+            .push(PathCommand::ArcTo(x1, y1, x2, y2, radius));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn ellipse(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        rx: f32,
+        ry: f32,
+        rotation: f32,
+        start_angle: f32,
+        end_angle: f32,
+        counter_clockwise: bool,
+    ) {
+        self.commands.push(PathCommand::Ellipse(
+            cx,
+            cy,
+            rx,
+            ry,
+            rotation,
+            start_angle,
+            end_angle,
+            counter_clockwise,
+        ));
+    }
+
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.commands.push(PathCommand::Rect(x, y, w, h));
     }
@@ -104,6 +138,12 @@ impl Path2D {
                 }
                 PathCommand::Arc(cx, cy, r, start, end, ccw) => {
                     append_arc(&mut builder, *cx, *cy, *r, *start, *end, *ccw);
+                }
+                PathCommand::ArcTo(x1, y1, x2, y2, r) => {
+                    builder.arc_to_tangent((*x1, *y1), (*x2, *y2), *r);
+                }
+                PathCommand::Ellipse(cx, cy, rx, ry, rot, start, end, ccw) => {
+                    append_ellipse(&mut builder, *cx, *cy, *rx, *ry, *rot, *start, *end, *ccw);
                 }
                 PathCommand::Rect(x, y, w, h) => {
                     builder.add_rect(SkRect::from_xywh(*x, *y, *w, *h), None, None);
@@ -165,6 +205,90 @@ fn append_arc(
     builder.arc_to(oval, start_deg, sweep_deg, false);
 }
 
+/// Append a rotated ellipse arc using cubic-bezier approximation.
+///
+/// Canvas's `ellipse(cx, cy, rx, ry, rotation, startAngle, endAngle, ccw)`
+/// is split into ⌈|sweep|/(π/2)⌉ bezier segments. For a unit circle, each
+/// 90° quarter is approximated by a cubic with control-point magnitude
+/// α = (4/3)·tan(θ/4) where θ is the segment sweep. Unit-circle endpoints
+/// and tangents are then scaled by (rx, ry), rotated by `rotation`, and
+/// translated by (cx, cy). This is the standard approximation Blink and
+/// Servo use, and the output is byte-stable.
+#[allow(clippy::too_many_arguments)]
+fn append_ellipse(
+    builder: &mut SkPathBuilder,
+    cx: f32,
+    cy: f32,
+    rx: f32,
+    ry: f32,
+    rotation: f32,
+    start: f32,
+    end: f32,
+    ccw: bool,
+) {
+    let tau = std::f32::consts::TAU;
+    let half_pi = std::f32::consts::FRAC_PI_2;
+
+    let mut sweep = end - start;
+    if !ccw {
+        while sweep < 0.0 {
+            sweep += tau;
+        }
+        if sweep > tau {
+            sweep = tau;
+        }
+    } else {
+        while sweep > 0.0 {
+            sweep -= tau;
+        }
+        if sweep < -tau {
+            sweep = -tau;
+        }
+    }
+
+    let cos_rot = rotation.cos();
+    let sin_rot = rotation.sin();
+    // Map a unit-circle point (ux, uy) to ellipse coords.
+    let map = |ux: f32, uy: f32| -> (f32, f32) {
+        let sx = ux * rx;
+        let sy = uy * ry;
+        let rxp = sx * cos_rot - sy * sin_rot;
+        let ryp = sx * sin_rot + sy * cos_rot;
+        (cx + rxp, cy + ryp)
+    };
+
+    // First point: ensure the contour starts at the arc start.
+    // Per Canvas spec, ellipse implicitly connects with a line from the
+    // current point if there is one — Skia's default line_to-on-implicit-
+    // start handles this when we line_to the first endpoint instead of
+    // move_to. But conservatively emit line_to so we match spec semantics
+    // even when this is the first command.
+    let (sx0, sy0) = (start.cos(), start.sin());
+    let (px0, py0) = map(sx0, sy0);
+    builder.line_to((px0, py0));
+
+    if sweep == 0.0 {
+        return;
+    }
+
+    let n_segs = (sweep.abs() / half_pi).ceil().max(1.0) as i32;
+    let seg_sweep = sweep / n_segs as f32;
+    let alpha = (4.0_f32 / 3.0) * (seg_sweep / 4.0).tan();
+
+    let mut a0 = start;
+    for _ in 0..n_segs {
+        let a1 = a0 + seg_sweep;
+        let (cos0, sin0) = (a0.cos(), a0.sin());
+        let (cos1, sin1) = (a1.cos(), a1.sin());
+        // Unit-circle tangent at angle a is (-sin a, cos a).
+        let cp0 = (cos0 - alpha * sin0, sin0 + alpha * cos0);
+        let cp1 = (cos1 + alpha * sin1, sin1 - alpha * cos1);
+        let p1 = (cos1, sin1);
+        builder.cubic_to(map(cp0.0, cp0.1), map(cp1.0, cp1.1), map(p1.0, p1.1));
+        a0 = a1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +319,45 @@ mod tests {
     fn empty_path_returns_none() {
         let p = Path2D::new();
         assert!(p.to_skia_path().is_none());
+    }
+
+    #[test]
+    fn arc_to_path() {
+        let mut p = Path2D::new();
+        p.move_to(20.0, 20.0);
+        p.arc_to(80.0, 20.0, 80.0, 80.0, 20.0);
+        assert!(p.to_skia_path().is_some());
+    }
+
+    #[test]
+    fn ellipse_path() {
+        let mut p = Path2D::new();
+        p.ellipse(
+            50.0,
+            50.0,
+            30.0,
+            20.0,
+            0.0,
+            0.0,
+            std::f32::consts::TAU,
+            false,
+        );
+        assert!(p.to_skia_path().is_some());
+    }
+
+    #[test]
+    fn ellipse_with_rotation() {
+        let mut p = Path2D::new();
+        p.ellipse(
+            50.0,
+            50.0,
+            30.0,
+            20.0,
+            std::f32::consts::FRAC_PI_4,
+            0.0,
+            std::f32::consts::PI,
+            false,
+        );
+        assert!(p.to_skia_path().is_some());
     }
 }

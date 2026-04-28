@@ -139,6 +139,48 @@ pub fn op_canvas_arc(
 }
 
 #[op2(fast)]
+pub fn op_canvas_arc_to(
+    #[state] state: &mut CanvasState,
+    #[smi] id: i32,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    radius: f64,
+) {
+    if let Some(c) = state.canvases.get_mut(&id) {
+        c.arc_to(x1 as f32, y1 as f32, x2 as f32, y2 as f32, radius as f32);
+    }
+}
+
+#[op2(fast)]
+pub fn op_canvas_ellipse(
+    #[state] state: &mut CanvasState,
+    #[smi] id: i32,
+    cx: f64,
+    cy: f64,
+    rx: f64,
+    ry: f64,
+    rotation: f64,
+    start: f64,
+    end: f64,
+    ccw: bool,
+) {
+    if let Some(c) = state.canvases.get_mut(&id) {
+        c.ellipse(
+            cx as f32,
+            cy as f32,
+            rx as f32,
+            ry as f32,
+            rotation as f32,
+            start as f32,
+            end as f32,
+            ccw,
+        );
+    }
+}
+
+#[op2(fast)]
 pub fn op_canvas_bezier_curve_to(
     #[state] state: &mut CanvasState,
     #[smi] id: i32,
@@ -151,7 +193,12 @@ pub fn op_canvas_bezier_curve_to(
 ) {
     if let Some(c) = state.canvases.get_mut(&id) {
         c.bezier_curve_to(
-            cp1x as f32, cp1y as f32, cp2x as f32, cp2y as f32, x as f32, y as f32,
+            cp1x as f32,
+            cp1y as f32,
+            cp2x as f32,
+            cp2y as f32,
+            x as f32,
+            y as f32,
         );
     }
 }
@@ -572,6 +619,8 @@ deno_core::extension!(
         op_canvas_begin_path,
         op_canvas_close_path,
         op_canvas_arc,
+        op_canvas_arc_to,
+        op_canvas_ellipse,
         op_canvas_bezier_curve_to,
         op_canvas_quadratic_curve_to,
         op_canvas_set_transform,

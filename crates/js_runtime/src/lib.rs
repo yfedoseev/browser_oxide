@@ -28,7 +28,8 @@ pub struct BrowserJsRuntime {
 impl BrowserJsRuntime {
     /// Create a new runtime with the given DOM (no stealth profile).
     pub fn new(dom: Dom) -> Self {
-        let (inner, nav_signal) = create_runtime_with_signals(dom, BrowserRuntimeOptions::default());
+        let (inner, nav_signal) =
+            create_runtime_with_signals(dom, BrowserRuntimeOptions::default());
         Self { inner, nav_signal }
     }
 
@@ -183,7 +184,9 @@ impl BrowserJsRuntime {
 
     /// Snapshot the current localStorage and sessionStorage contents.
     /// Used by the navigation loop to carry storage across same-origin reloads.
-    pub fn get_storage(&mut self) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+    pub fn get_storage(
+        &mut self,
+    ) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
         let state = self.inner.op_state();
         let state = state.borrow();
         state.borrow::<DomState>().storage.clone()
