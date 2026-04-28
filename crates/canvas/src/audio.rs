@@ -155,19 +155,25 @@ impl AudioFingerprint {
         //
         // `BLINK_OSCILLATOR_SCALE` is the empirical factor that matches
         // Blink's observed compressor-input amplitude on the FingerprintJS
-        // reference (triangle 10 kHz at 44.1 kHz). Blink normalises its
-        // wavetable to peak 1.0 and then applies internal scaling we don't
-        // replicate exactly — this factor bridges the gap. Universal
-        // scaling (rather than the old per-frequency 0.4762 sine
-        // shortcut) means arbitrary frequencies inherit plausibly Blink-
-        // shaped amplitudes instead of rendering silent / wildly wrong.
+        // reference (triangle 10 kHz at 44.1 kHz, *default* compressor
+        // params: threshold=-24, attack=0.003). At 0.47624 our engine
+        // matches Chrome's `sum(abs(data[4500..5000])) = 124.04347` for
+        // those params to ~3.6 ppm.
         //
-        // Calibrated against Chrome's `sum(abs(data[4500..5000])) =
-        // 124.04347527516074` via the `fine_scan_blink_oscillator_scale`
-        // helper in `tests/audio_reference.rs`. At this value the
-        // residual delta is ~3.6 ppm (down from ~50 ppm with 0.4762)
-        // — within the noise floor of f32 DSP stage propagation
-        // through `DynamicsCompressorKernel`.
+        // Open issue (deferred): real Chrome 147 produces the same sum
+        // (~124.04) at threshold=-50 too — the compressor's makeup gain
+        // compensates for the more aggressive threshold. Our port does
+        // NOT match: at threshold=-50 we get 103.92 with this scale.
+        // Empirical scan showed scale=0.81047 closes the gap at
+        // threshold=-50 but breaks the default-threshold case (jumps
+        // to 172.6 vs 124.04 expected). A single global scale can't
+        // fit both → bug is in the compressor's response to threshold,
+        // not in the oscillator. The CreepJS audio probe uses
+        // threshold=-50, so this matters for fingerprint parity, but
+        // closing it requires bisecting the Blink kernel's static
+        // compression curve / makeup gain math (~1 wk).
+        // Current value matches the default-threshold scenario which
+        // covers FingerprintJS / adidas Akamai / Cloudflare BM probes.
         const BLINK_OSCILLATOR_SCALE: f32 = 0.47624;
 
         let wave = crate::periodic_wave::PeriodicWave::new(
