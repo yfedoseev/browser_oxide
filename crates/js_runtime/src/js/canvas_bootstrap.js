@@ -77,7 +77,7 @@
 
         // Text
         fillText(text, x, y) { ops.op_canvas_fill_text(this.#id, text, x, y); }
-        strokeText(text, x, y) { ops.op_canvas_fill_text(this.#id, text, x, y); }
+        strokeText(text, x, y) { ops.op_canvas_stroke_text(this.#id, text, x, y); }
         measureText(text) {
             // Full 13-field TextMetrics shaped in Rust (T1.2 font stack).
             // actualBoundingBox* come from the real glyph run, not a

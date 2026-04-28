@@ -983,6 +983,30 @@ impl Canvas2D {
         }
     }
 
+    /// Stroke text at `(x, y)` (alphabetic baseline). Builds a Path2D
+    /// from glyph outlines via ttf-parser, then strokes that path with
+    /// the current `strokeStyle` / `lineWidth` / cap / join. Mirrors
+    /// Chrome's Skia-based strokeText: glyphs are filled by tracing
+    /// their contours, not by rasterizing-and-edge-detecting.
+    pub fn stroke_text(&mut self, text: &str, x: f32, y: f32) {
+        let mut path = crate::path::Path2D::new();
+        let any = text::append_text_outline_to_path(&mut path, text, x, y, &self.state.font);
+        if !any {
+            return;
+        }
+        let Some(sk_path) = path.to_skia_path() else {
+            return;
+        };
+        let paint = self.build_stroke_paint();
+        let matrix = self.state.transform;
+        self.with_canvas(|canvas| {
+            canvas.save();
+            canvas.concat(&matrix);
+            canvas.draw_path(&sk_path, &paint);
+            canvas.restore();
+        });
+    }
+
     // --- Image compositing ---
 
     /// Draw RGBA pixel data onto the canvas at a position.

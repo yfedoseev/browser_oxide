@@ -217,6 +217,80 @@ async fn ellipse_rotation_changes_bounding_box() {
     assert_eq!(r, "true");
 }
 
+/// strokeText must trace glyph outlines (via ttf-parser) and stroke
+/// them with the current strokeStyle/lineWidth — NOT alias to fillText.
+/// A bot detector that calls both at the same position and compares
+/// pixel counts catches a fillText alias trivially. This test renders
+/// both and asserts the pixel sets are non-trivially different.
+#[tokio::test]
+async fn stroke_text_pixels_differ_from_fill_text() {
+    let r = evaluate(
+        "
+        function render(method) {
+            const c = document.createElement('canvas');
+            c.width = 200; c.height = 50;
+            const ctx = c.getContext('2d');
+            ctx.font = '32px Arial';
+            ctx.fillStyle = '#000';
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx[method]('Hello', 10, 35);
+            const data = ctx.getImageData(0, 0, 200, 50).data;
+            let nonzero = 0;
+            for (let i = 3; i < data.length; i += 4) if (data[i] > 0) nonzero++;
+            return nonzero;
+        }
+        const filled = render('fillText');
+        const stroked = render('strokeText');
+        // If aliased, stroked === filled. Real strokeText traces only
+        // the contour at lineWidth=2 — for 'Hello' at 32px this is
+        // visibly different (typically more outline pixels because the
+        // stroke is 2 px wide on both sides of every edge, vs filled
+        // interior which has hollow centers in 'l', 'o', 'e'). Assert
+        // the absolute difference is at least 20% of the smaller count.
+        const diff = Math.abs(stroked - filled);
+        const smaller = Math.min(stroked, filled);
+        const ratio = diff / Math.max(smaller, 1);
+        ratio > 0.2 ? 'differs' : ('similar:filled=' + filled + ',stroked=' + stroked)
+        ",
+    )
+    .await;
+    assert_eq!(
+        r, "differs",
+        "strokeText must produce a visibly different pixel set than fillText"
+    );
+}
+
+/// strokeText must respond to `lineWidth` — wider stroke produces more
+/// pixels. This proves the stroke is genuinely tracing contours with
+/// the current paint width, not just rendering filled glyphs.
+#[tokio::test]
+async fn stroke_text_responds_to_line_width() {
+    let r = evaluate(
+        "
+        function render(lineWidth) {
+            const c = document.createElement('canvas');
+            c.width = 200; c.height = 50;
+            const ctx = c.getContext('2d');
+            ctx.font = '32px Arial';
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = lineWidth;
+            ctx.strokeText('Hello', 10, 35);
+            const data = ctx.getImageData(0, 0, 200, 50).data;
+            let nonzero = 0;
+            for (let i = 3; i < data.length; i += 4) if (data[i] > 0) nonzero++;
+            return nonzero;
+        }
+        const thin = render(0.5);
+        const thick = render(4);
+        // Wider stroke must produce more covered pixels.
+        thick > thin * 1.3 ? 'thicker' : ('not-thicker:thin=' + thin + ',thick=' + thick)
+        ",
+    )
+    .await;
+    assert_eq!(r, "thicker");
+}
+
 /// Composite test: full CreepJS-style scene with paths + text. Asserts
 /// `toDataURL()` produces a non-trivial PNG (length > 1000 bytes).
 #[tokio::test]

@@ -182,6 +182,116 @@ pub fn rasterize_text(
     out
 }
 
+/// Adapter that turns `ttf_parser::OutlineBuilder` callbacks into
+/// `Path2D` commands, applying the EM→pixel scale and the Y-axis
+/// flip (font space is Y-up, canvas is Y-down).
+struct Path2DOutlineBuilder<'a> {
+    path: &'a mut crate::path::Path2D,
+    /// Origin x in canvas space (where x=0 in font-space lands).
+    origin_x: f32,
+    /// Origin y in canvas space (the alphabetic baseline of the run).
+    origin_y: f32,
+    /// EM-units-to-pixels factor = size_px / units_per_em.
+    scale: f32,
+}
+
+impl Path2DOutlineBuilder<'_> {
+    fn map(&self, x: f32, y: f32) -> (f32, f32) {
+        // Font space: y up, em units. Canvas space: y down, pixels.
+        (self.origin_x + x * self.scale, self.origin_y - y * self.scale)
+    }
+}
+
+impl rustybuzz::ttf_parser::OutlineBuilder for Path2DOutlineBuilder<'_> {
+    fn move_to(&mut self, x: f32, y: f32) {
+        let (mx, my) = self.map(x, y);
+        self.path.move_to(mx, my);
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        let (mx, my) = self.map(x, y);
+        self.path.line_to(mx, my);
+    }
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let (cpx, cpy) = self.map(x1, y1);
+        let (mx, my) = self.map(x, y);
+        self.path.quadratic_curve_to(cpx, cpy, mx, my);
+    }
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let (c1x, c1y) = self.map(x1, y1);
+        let (c2x, c2y) = self.map(x2, y2);
+        let (mx, my) = self.map(x, y);
+        self.path.bezier_curve_to(c1x, c1y, c2x, c2y, mx, my);
+    }
+    fn close(&mut self) {
+        self.path.close_path();
+    }
+}
+
+/// Shape `text` and append the outline contours of every glyph into
+/// `path`, positioned at the given baseline origin. Returns true if any
+/// glyph contributed contours (false for empty text or all-bitmap fonts
+/// — color-emoji fonts have no `glyf` table and silently produce no
+/// outline).
+///
+/// Used by `Canvas2D::stroke_text` to build a stroke-able path. The
+/// shaping pipeline matches `rasterize_text` so stroked text aligns
+/// pixel-for-pixel with what filled text would have rendered.
+pub fn append_text_outline_to_path(
+    path: &mut crate::path::Path2D,
+    text: &str,
+    x: f32,
+    y: f32,
+    font: &ParsedFont,
+) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    let Some((data, idx)) = resolve_face(font) else {
+        return false;
+    };
+    // Parse a fresh ttf_parser::Face for outline access. rustybuzz's
+    // Face wraps this internally but doesn't expose outline_glyph
+    // directly — re-parsing is cheap (header-only, no glyph data
+    // copied).
+    let Ok(ttf_face) = rustybuzz::ttf_parser::Face::parse(data, idx) else {
+        return false;
+    };
+    let upem = ttf_face.units_per_em() as f32;
+    if upem <= 0.0 {
+        return false;
+    }
+    let scale = font.size_px / upem;
+    let run = shaper::shape(text, data, idx, font.size_px);
+
+    let mut any_outline = false;
+    let mut cursor_x = x;
+    for glyph in &run.glyphs {
+        // Per-glyph origin: the cursor + the shaper's per-glyph offset.
+        // y_offset is in pixels (already-scaled), which matches our
+        // origin-in-canvas-space convention; subtract because canvas
+        // y grows downward.
+        let glyph_origin_x = cursor_x + glyph.x_offset;
+        let glyph_origin_y = y - glyph.y_offset;
+        let mut builder = Path2DOutlineBuilder {
+            path,
+            origin_x: glyph_origin_x,
+            origin_y: glyph_origin_y,
+            scale,
+        };
+        if ttf_face
+            .outline_glyph(
+                rustybuzz::ttf_parser::GlyphId(glyph.glyph_id as u16),
+                &mut builder,
+            )
+            .is_some()
+        {
+            any_outline = true;
+        }
+        cursor_x += glyph.x_advance;
+    }
+    any_outline
+}
+
 /// Composite a single PlacedGlyph onto a premultiplied-RGBA pixel
 /// buffer. Uses SRC_OVER with the glyph colour premultiplied by the
 /// per-pixel coverage × global alpha.

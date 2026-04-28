@@ -261,6 +261,19 @@ pub fn op_canvas_fill_text(
 }
 
 #[op2(fast)]
+pub fn op_canvas_stroke_text(
+    #[state] state: &mut CanvasState,
+    #[smi] id: i32,
+    #[string] text: &str,
+    x: f64,
+    y: f64,
+) {
+    if let Some(c) = state.canvases.get_mut(&id) {
+        c.stroke_text(text, x as f32, y as f32);
+    }
+}
+
+#[op2(fast)]
 pub fn op_canvas_set_fill_style(
     #[state] state: &mut CanvasState,
     #[smi] id: i32,
@@ -630,6 +643,7 @@ deno_core::extension!(
         op_canvas_fill,
         op_canvas_stroke,
         op_canvas_fill_text,
+        op_canvas_stroke_text,
         op_canvas_set_fill_style,
         op_canvas_set_stroke_style,
         op_canvas_set_font,
