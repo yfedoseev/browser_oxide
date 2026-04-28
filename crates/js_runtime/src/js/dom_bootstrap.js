@@ -61,9 +61,35 @@
     let _syncEvalDepth = 0;
     const _MAX_SYNC_EVAL_DEPTH = 4;
 
+    // Guards against unbounded `document.write` chains. Two failure modes
+    // we observed on bot.sannysoft.com:
+    //   (a) A script does `document.write('<script>...</script>')` and the
+    //       written script does the same — direct cycle. Caught by depth.
+    //   (b) `document.write` dispatches every new node through
+    //       `_onNodeInserted`, which evals scripts. If a written script
+    //       calls `document.write` again during its eval (synchronously),
+    //       we re-enter `_onNodeInserted` from inside its own call.
+    let _onNodeInsertedDepth = 0;
+    const _MAX_NODE_INSERT_DEPTH = 64;
+
     function _onNodeInserted(child, sync = true) {
         if (!child) return;
+        if (_onNodeInsertedDepth >= _MAX_NODE_INSERT_DEPTH) {
+            // Bail — log once and skip. This breaks document.write recursion
+            // chains that would otherwise blow the C-stack via deep nested
+            // eval -> op_dom_document_write -> _onNodeInserted.
+            console.log(`[DOM] _onNodeInserted depth limit (${_MAX_NODE_INSERT_DEPTH}) — skipping`);
+            return;
+        }
+        _onNodeInsertedDepth++;
+        try {
+            return _onNodeInsertedInner(child, sync);
+        } finally {
+            _onNodeInsertedDepth--;
+        }
+    }
 
+    function _onNodeInsertedInner(child, sync = true) {
         // 1. Dynamic script loading
         const childTag = (child.tagName || child.nodeName || "").toLowerCase();
         const type = (child.getAttribute?.('type') || '').toLowerCase();

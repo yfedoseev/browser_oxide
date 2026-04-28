@@ -97,6 +97,16 @@ pub fn create_runtime_with_signals(
     let stealth_state =
         StealthState::new_with_coi(options.stealth_profile, options.cross_origin_isolated);
 
+    // Match Chrome 147's renderer heap budget. V8's default ~1.5 GB OOMs
+    // on probe sites that build very large fingerprint payloads (creepjs
+    // hits `Builtins_ArrayPrototypePush` OOM at ~1.8 GB on macOS arm64
+    // — the engine is collecting hundreds of thousands of property
+    // descriptors across every WebIDL interface). Real Chrome on a
+    // desktop has 4 GB+ available per renderer; we mirror that.
+    const HEAP_INITIAL: usize = 256 * 1024 * 1024; // 256 MB initial
+    const HEAP_MAX: usize = 4 * 1024 * 1024 * 1024; // 4 GB max
+    let create_params = deno_core::v8::CreateParams::default().heap_limits(HEAP_INITIAL, HEAP_MAX);
+
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![
             console_extension::init_ops(),
@@ -117,6 +127,7 @@ pub fn create_runtime_with_signals(
             nav_extension::init_ops(),
         ],
         startup_snapshot: options.startup_snapshot,
+        create_params: Some(create_params),
         // Enables postMessage transfer of SharedArrayBuffer between isolates.
         // The SAB *constructor* is always exposed by V8; we gate transfer
         // separately on `cross_origin_isolated` (gap #30).
