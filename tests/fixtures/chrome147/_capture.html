@@ -197,6 +197,29 @@ async function capture() {
   r("chrome_runtime_exists", () => typeof chrome !== 'undefined' && typeof chrome.runtime === 'object');
   r("chrome_loadTimes_exists", () => typeof chrome !== 'undefined' && typeof chrome.loadTimes === 'function');
 
+  // chrome.app sub-shape: enumerate own-property names + call each method
+  // and record return shapes. Real non-automation Chrome 147 should expose
+  // {isInstalled, InstallState, RunningState, getDetails, getIsInstalled,
+  //  installState, runningState}. Validating this is the entire point of
+  //  the chrome.app shape capture.
+  if (typeof chrome !== 'undefined' && typeof chrome.app === 'object') {
+    r("chrome_app_keys", () => Object.getOwnPropertyNames(chrome.app).sort());
+    r("chrome_app_is_installed", () => chrome.app.isInstalled);
+    r("chrome_app_InstallState", () => chrome.app.InstallState);
+    r("chrome_app_RunningState", () => chrome.app.RunningState);
+    r("chrome_app_getDetails_returns", () => chrome.app.getDetails());
+    r("chrome_app_getIsInstalled_returns", () => chrome.app.getIsInstalled());
+    r("chrome_app_runningState_returns", () => chrome.app.runningState());
+    // installState is async (callback). Capture both that the function
+    // accepts a callback and the value it passes.
+    await new Promise(res => {
+      try { chrome.app.installState(s => { out.chrome_app_installState_returns = s; res(); }); }
+      catch (e) { out.chrome_app_installState_returns = "ERR:" + e.message; res(); }
+      // Safety: timeout in case the impl never calls back.
+      setTimeout(() => res(), 200);
+    });
+  }
+
   // ---- UA-CH ----
   if (navigator.userAgentData) {
     r("ua_data_brands", () => navigator.userAgentData.brands);

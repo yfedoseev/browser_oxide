@@ -64,6 +64,20 @@ const CAPTURE_PROBE: &str = r##"
     out["ctor_" + name] = typeof globalThis[name];
   }
 
+  // chrome.app shape — synchronous part. installState is async (callback)
+  // and is asserted separately in chrome147_parity.rs where the test can
+  // await it. Here we only assert that it's a function.
+  if (typeof chrome !== 'undefined' && typeof chrome.app === 'object') {
+    out.chrome_app_keys = Object.getOwnPropertyNames(chrome.app).sort();
+    out.chrome_app_is_installed = chrome.app.isInstalled;
+    out.chrome_app_InstallState = chrome.app.InstallState;
+    out.chrome_app_RunningState = chrome.app.RunningState;
+    out.chrome_app_installState_typeof = typeof chrome.app.installState;
+    try { out.chrome_app_getDetails_returns = chrome.app.getDetails(); } catch (e) { out.chrome_app_getDetails_returns = "ERR:" + e.message; }
+    try { out.chrome_app_getIsInstalled_returns = chrome.app.getIsInstalled(); } catch (e) { out.chrome_app_getIsInstalled_returns = "ERR:" + e.message; }
+    try { out.chrome_app_runningState_returns = chrome.app.runningState(); } catch (e) { out.chrome_app_runningState_returns = "ERR:" + e.message; }
+  }
+
   return JSON.stringify(out);
 })()
 "##;
@@ -102,9 +116,15 @@ async fn engine_self_capture_succeeds() {
 
     // ---- Navigator surface ----
     assert_eq!(parsed["navigator_vendor"].as_str().unwrap(), "Google Inc.");
-    assert_eq!(parsed["navigator_product_sub"].as_str().unwrap(), "20030107");
+    assert_eq!(
+        parsed["navigator_product_sub"].as_str().unwrap(),
+        "20030107"
+    );
     assert_eq!(parsed["navigator_webdriver"], false);
-    assert_eq!(parsed["notification_permission"].as_str().unwrap(), "default");
+    assert_eq!(
+        parsed["notification_permission"].as_str().unwrap(),
+        "default"
+    );
 
     // ---- Iframe realm purity (matches captured Chrome 147) ----
     assert_eq!(parsed["iframe_navigator_distinct"], true);
@@ -115,12 +135,21 @@ async fn engine_self_capture_succeeds() {
     // ---- Sub-pixel layout (LayoutUnit 1/64 px) ----
     let w = parsed["rect_width_1_3px"].as_f64().unwrap();
     let h = parsed["rect_height_0_5px"].as_f64().unwrap();
-    assert!(((w * 64.0).round() - (w * 64.0)).abs() < 1e-9, "width must be 1/64-px multiple: {w}");
-    assert!(((h * 64.0).round() - (h * 64.0)).abs() < 1e-9, "height must be 1/64-px multiple: {h}");
+    assert!(
+        ((w * 64.0).round() - (w * 64.0)).abs() < 1e-9,
+        "width must be 1/64-px multiple: {w}"
+    );
+    assert!(
+        ((h * 64.0).round() - (h * 64.0)).abs() < 1e-9,
+        "height must be 1/64-px multiple: {h}"
+    );
 
     // ---- Canvas produces a non-trivial PNG ----
     let url = parsed["canvas_data_url"].as_str().unwrap();
-    assert!(url.starts_with("data:image/png;base64,"), "canvas must emit PNG data URL");
+    assert!(
+        url.starts_with("data:image/png;base64,"),
+        "canvas must emit PNG data URL"
+    );
     assert!(url.len() > 100, "canvas PNG must be non-trivial");
 
     // Hash the canvas PNG and report (does not assert match against real
@@ -134,9 +163,16 @@ async fn engine_self_capture_succeeds() {
 
     // ---- Constructor existence (P7 surface) ----
     for ctor in [
-        "EditContext", "Highlight", "CookieStore", "WebTransport",
-        "FileSystemHandle", "BatteryManager", "Geolocation",
-        "XRSession", "Accelerometer", "Gyroscope",
+        "EditContext",
+        "Highlight",
+        "CookieStore",
+        "WebTransport",
+        "FileSystemHandle",
+        "BatteryManager",
+        "Geolocation",
+        "XRSession",
+        "Accelerometer",
+        "Gyroscope",
     ] {
         let key = format!("ctor_{ctor}");
         assert_eq!(
@@ -145,4 +181,58 @@ async fn engine_self_capture_succeeds() {
             "constructor {ctor} must be a function"
         );
     }
+
+    // ---- chrome.app shape (Chromium source-documented surface) ----
+    // Real non-automation Chrome 147 exposes exactly these own-property
+    // names on chrome.app. Cross-checked against
+    // third_party/blink/renderer/extensions/chromeos/chrome.idl.
+    let keys = parsed["chrome_app_keys"]
+        .as_array()
+        .expect("chrome_app_keys must be an array")
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect::<Vec<_>>();
+    let expected_keys = vec![
+        "InstallState",
+        "RunningState",
+        "getDetails",
+        "getIsInstalled",
+        "installState",
+        "isInstalled",
+        "runningState",
+    ];
+    assert_eq!(
+        keys, expected_keys,
+        "chrome.app own-property-names mismatch"
+    );
+    assert_eq!(parsed["chrome_app_is_installed"], false);
+    assert_eq!(
+        parsed["chrome_app_installState_typeof"].as_str().unwrap(),
+        "function"
+    );
+    assert!(
+        parsed["chrome_app_getDetails_returns"].is_null(),
+        "getDetails() must return null"
+    );
+    assert_eq!(parsed["chrome_app_getIsInstalled_returns"], false);
+    assert_eq!(
+        parsed["chrome_app_runningState_returns"].as_str().unwrap(),
+        "cannot_run"
+    );
+
+    // InstallState / RunningState enum dicts
+    let install_state = &parsed["chrome_app_InstallState"];
+    assert_eq!(install_state["DISABLED"].as_str().unwrap(), "disabled");
+    assert_eq!(install_state["INSTALLED"].as_str().unwrap(), "installed");
+    assert_eq!(
+        install_state["NOT_INSTALLED"].as_str().unwrap(),
+        "not_installed"
+    );
+    let running_state = &parsed["chrome_app_RunningState"];
+    assert_eq!(running_state["CANNOT_RUN"].as_str().unwrap(), "cannot_run");
+    assert_eq!(
+        running_state["READY_TO_RUN"].as_str().unwrap(),
+        "ready_to_run"
+    );
+    assert_eq!(running_state["RUNNING"].as_str().unwrap(), "running");
 }

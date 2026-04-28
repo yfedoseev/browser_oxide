@@ -114,7 +114,10 @@ async fn parity_rect_width_1_3px() {
         ",
     )
     .await;
-    assert_eq!(r, "true", "rect width must be a multiple of 1/64 px (LayoutUnit)");
+    assert_eq!(
+        r, "true",
+        "rect width must be a multiple of 1/64 px (LayoutUnit)"
+    );
 }
 
 #[tokio::test]
@@ -160,7 +163,10 @@ async fn parity_iframe_array_instanceof_is_false() {
         "(()=>{ const f = document.createElement('iframe'); document.body.appendChild(f); return ([] instanceof f.contentWindow.Array); })()",
     )
     .await;
-    assert_eq!(r, "false", "Chrome 147 returns false; cross-realm instanceof must be false");
+    assert_eq!(
+        r, "false",
+        "Chrome 147 returns false; cross-realm instanceof must be false"
+    );
 }
 
 #[tokio::test]
@@ -227,6 +233,82 @@ async fn parity_chrome_runtime_absent_like_user_session() {
         r, "undefined",
         "chrome.runtime must be absent (presence is automation-mode tell)"
     );
+}
+
+// chrome.app sub-shape (Chromium-source-documented surface). A bot
+// detector that enumerates `Object.getOwnPropertyNames(chrome.app)` or
+// calls each method gets the same return values as real Chrome 147.
+
+#[tokio::test]
+async fn parity_chrome_app_own_property_names() {
+    let r = evaluate("Object.getOwnPropertyNames(chrome.app).sort().join(',')").await;
+    assert_eq!(
+        r,
+        "InstallState,RunningState,getDetails,getIsInstalled,installState,isInstalled,runningState"
+    );
+}
+
+#[tokio::test]
+async fn parity_chrome_app_get_details_returns_null() {
+    let r = evaluate("chrome.app.getDetails()").await;
+    assert_eq!(r, "null", "getDetails() off-CWS must return null");
+}
+
+#[tokio::test]
+async fn parity_chrome_app_get_is_installed_returns_false() {
+    let r = evaluate("chrome.app.getIsInstalled()").await;
+    assert_eq!(r, "false");
+}
+
+#[tokio::test]
+async fn parity_chrome_app_running_state_returns_cannot_run() {
+    let r = evaluate("chrome.app.runningState()").await;
+    assert_eq!(r, "cannot_run");
+}
+
+#[tokio::test]
+async fn parity_chrome_app_install_state_async_callback_fires() {
+    // installState is async (callback). Kick it off, drain the event loop
+    // so the setTimeout(0)-deferred callback fires, then read the global.
+    // Real Chrome 147 calls back with 'not_installed' when invoked off
+    // the Web Store.
+    let mut page = Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    page.evaluate(
+        r#"window.__installStateResult = null;
+        chrome.app.installState(s => { window.__installStateResult = s; });"#,
+    )
+    .unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200))
+        .await
+        .ok();
+    let r = page.evaluate("window.__installStateResult").unwrap();
+    assert_eq!(
+        r, "not_installed",
+        "installState callback must fire with 'not_installed'"
+    );
+}
+
+#[tokio::test]
+async fn parity_chrome_app_install_state_dict() {
+    let r = evaluate(
+        "JSON.stringify([chrome.app.InstallState.DISABLED, chrome.app.InstallState.INSTALLED, chrome.app.InstallState.NOT_INSTALLED])",
+    )
+    .await;
+    assert_eq!(r, "[\"disabled\",\"installed\",\"not_installed\"]");
+}
+
+#[tokio::test]
+async fn parity_chrome_app_running_state_dict() {
+    let r = evaluate(
+        "JSON.stringify([chrome.app.RunningState.CANNOT_RUN, chrome.app.RunningState.READY_TO_RUN, chrome.app.RunningState.RUNNING])",
+    )
+    .await;
+    assert_eq!(r, "[\"cannot_run\",\"ready_to_run\",\"running\"]");
 }
 
 // ================================================================
