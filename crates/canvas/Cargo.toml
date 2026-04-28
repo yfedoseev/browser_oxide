@@ -17,6 +17,13 @@ webgl-render = ["glow"]
 # `git-sync-deps` to fetch the entire Skia tree.
 skia-safe = "0.93"
 png = "0.17"
+# zlib-rs is a pure-Rust port of zlib bit-compatible with the C library.
+# Enabling it through flate2 makes the `png` crate emit deterministic
+# DEFLATE bytes (vs. miniz_oxide whose output drifts between versions),
+# which is the prerequisite for canvas SHA-256 fingerprint stability —
+# CreepJS-style lies-canvas probes hash the data URL, so unstable IDAT
+# bytes mean each run produces a different fingerprint.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 base64 = "0.22"
 thiserror = "2"
 ab_glyph = "0.2"
@@ -34,3 +41,4 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 glow = { version = "0.14", optional = true }
 
 [dev-dependencies]
+sha2 = "0.10"

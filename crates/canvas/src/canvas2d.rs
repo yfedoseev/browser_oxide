@@ -1061,12 +1061,26 @@ impl Canvas2D {
     }
 
     /// Encode the canvas as PNG bytes (non-premultiplied RGBA).
+    ///
+    /// Output is **byte-deterministic** across runs: with the
+    /// `flate2/zlib-rs` backend selected in `crates/canvas/Cargo.toml`,
+    /// DEFLATE encoding is bit-compatible with C zlib. We also pin the
+    /// PNG filter strategy and compression level explicitly so the
+    /// IDAT bytes for a given pixel buffer are stable across builds.
+    /// Filter `Paeth` + adaptive selection mirrors libpng's default
+    /// `PNG_FILTER_HEURISTIC_DEFAULT` (which Chrome's Skia uses), so
+    /// per-row filter choices follow the same heuristic the reference
+    /// implementation uses. The chunk set remains the minimal IHDR +
+    /// IDAT + IEND (verified in `crates/canvas/tests/png_chunks.rs`).
     pub fn to_png_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut buf, self.width, self.height);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_compression(png::Compression::Default);
+            encoder.set_filter(png::FilterType::Paeth);
+            encoder.set_adaptive_filter(png::AdaptiveFilterType::Adaptive);
             let mut writer = encoder.write_header().expect("PNG header write failed");
             let unpremultiplied = self.get_image_data(0, 0, self.width, self.height);
             writer
