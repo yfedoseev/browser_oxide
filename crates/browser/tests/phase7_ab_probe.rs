@@ -168,6 +168,81 @@ async fn phase7_ab_probe_capture_oxide() {
     eprintln!("wrote {} keys to {path}", result.len());
 }
 
+/// Phase 7 D4 gates — screen preset, WebGL renderer, Symbol.toStringTag.
+#[tokio::test]
+async fn phase7_d4_screen_webgl_tostringtag() {
+    use browser::Page;
+    use stealth::presets::chrome_130_macos;
+    let mut p = Page::from_html_with_url(
+        "<!doctype html><html><body><canvas id=c></canvas></body></html>",
+        "https://example.com/",
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+
+    // Screen preset matches Chrome 147 macOS arm64 (M3) values
+    let want = [
+        ("screen.width", "1512"),
+        ("screen.height", "982"),
+        ("screen.availWidth", "1512"),
+        ("screen.availHeight", "949"),
+        ("screen.availTop", "33"),
+        ("screen.colorDepth", "30"),
+        ("screen.pixelDepth", "30"),
+        ("navigator.hardwareConcurrency", "8"),
+    ];
+    for (k, v) in want {
+        let got = p.evaluate(&format!("String({k})")).unwrap();
+        assert_eq!(got.trim_matches('"'), v, "{k} mismatch");
+    }
+
+    // WebGL renderer says Apple M3, extension count is 39
+    let renderer = p
+        .evaluate(
+            r#"(() => {
+                const gl = document.getElementById('c').getContext('webgl');
+                if (!gl) return 'no-webgl';
+                const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+                return dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'no-ext';
+            })()"#,
+        )
+        .unwrap();
+    assert!(
+        renderer.contains("Apple M3"),
+        "renderer should say Apple M3, got {renderer}"
+    );
+    let ext_count = p
+        .evaluate(
+            r#"String(document.getElementById('c').getContext('webgl').getSupportedExtensions().length)"#,
+        )
+        .unwrap();
+    assert_eq!(ext_count.trim_matches('"'), "39", "extension count");
+
+    // Symbol.toStringTag on each navigator object
+    let tags = [
+        ("navigator.usb", "USB"),
+        ("navigator.hid", "HID"),
+        ("navigator.serial", "Serial"),
+        ("navigator.locks", "LockManager"),
+        ("navigator.clipboard", "Clipboard"),
+        ("navigator.geolocation", "Geolocation"),
+        ("navigator.wakeLock", "WakeLock"),
+        ("navigator.scheduling", "Scheduling"),
+        ("navigator.gpu", "GPU"),
+    ];
+    for (k, want) in tags {
+        let got = p
+            .evaluate(&format!("Object.prototype.toString.call({k})"))
+            .unwrap();
+        assert_eq!(
+            got.trim_matches('"'),
+            format!("[object {want}]"),
+            "toString tag for {k} should be [object {want}]"
+        );
+    }
+}
+
 /// Phase 7 D3 gates — scrollX/Y own-accessor placement (Phase 6 D2
 /// revert), eventCounts pre-population, userAgentData GREASE "8".
 #[tokio::test]

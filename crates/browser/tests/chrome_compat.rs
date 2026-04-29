@@ -1224,7 +1224,7 @@ async fn webgl_unmasked_vendor_matches_windows_profile() {
 
 #[tokio::test]
 async fn webgl_unmasked_renderer_matches_macos_profile() {
-    // macOS profile should get the Apple M2 Pro renderer.
+    // macOS profile reports Apple M3 (Phase 7 — was M2 Pro).
     let profile = stealth::chrome_130_macos();
     let r = webgl_eval(
         profile,
@@ -1235,8 +1235,8 @@ async fn webgl_unmasked_renderer_matches_macos_profile() {
     )
     .await;
     assert!(
-        r.contains("Apple M2"),
-        "macOS profile should report Apple M2, got: {r}"
+        r.contains("Apple M3"),
+        "macOS profile should report Apple M3, got: {r}"
     );
 }
 
@@ -2062,11 +2062,13 @@ async fn worker_hardware_concurrency_matches_window() {
 // availTop===0 for macOS profiles is a geometry inconsistency signal.
 
 #[tokio::test]
-async fn screen_avail_top_macos_is_25() {
+async fn screen_avail_top_macos_is_33() {
+    // Phase 7 — Chrome 147 macOS arm64 (M3) reports availTop=33,
+    // not 25. Verified against Playwright MCP.
     use stealth::presets;
     let profile = presets::chrome_130_macos();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
-    assert_eq!(page.evaluate("screen.availTop").unwrap(), "25");
+    assert_eq!(page.evaluate("screen.availTop").unwrap(), "33");
 }
 
 #[tokio::test]

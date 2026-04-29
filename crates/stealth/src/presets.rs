@@ -132,19 +132,22 @@ pub fn chrome_130_macos() -> StealthProfile {
         product_sub: "20030107".into(),
         app_version: "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
 
-        screen_width: 1440,
-        screen_height: 900,
-        screen_avail_width: 1440,
-        screen_avail_height: 875,
-        screen_avail_top: 25,
+        // Phase 7 — match real Chrome 147 on macOS arm64 (M3 MacBook Pro):
+        // 1512x982 viewport, availHeight 949 (982 - 33 top), colorDepth 30,
+        // 8 cpu cores. Verified against Playwright MCP probe_mcp_secure.json.
+        screen_width: 1512,
+        screen_height: 982,
+        screen_avail_width: 1512,
+        screen_avail_height: 949,
+        screen_avail_top: 33,
         screen_color_depth: 30,
         device_pixel_ratio: 2.0,
-        cpu_cores: 10,
+        cpu_cores: 8,
         device_memory: 16,
         max_touch_points: 0,
 
         webgl_vendor: "Google Inc. (Apple)".into(),
-        webgl_renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)".into(),
+        webgl_renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)".into(),
 
         language: "en-US".into(),
         languages: vec!["en-US".into(), "en".into()],
@@ -176,14 +179,15 @@ pub fn chrome_130_macos() -> StealthProfile {
         pointer_type: "fine".into(),
         hover_capability: "hover".into(),
 
-        inner_width: 1440,
-        inner_height: 789,
-        outer_width: 1440,
-        outer_height: 900,
+        // Phase 7 — match Chrome 147 macOS arm64 viewport.
+        inner_width: 1512,
+        inner_height: 871,
+        outer_width: 1512,
+        outer_height: 982,
 
         proxy: None,
         media_devices: default_media_devices("macos"),
-        gpu_profile: crate::gpu::apple_m2_pro_macos(),
+        gpu_profile: crate::gpu::apple_m3_macos(),
     }
 }
 

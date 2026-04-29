@@ -101,6 +101,69 @@ pub fn nvidia_rtx_3060_windows() -> GpuProfile {
     }
 }
 
+/// Chrome 147 on macOS 15 with Apple M3.
+///
+/// Phase 7 — verified against Playwright MCP capture from real Chrome
+/// 147 on M3 MacBook Pro. 39 extensions vs M2 Pro's 36 (adds
+/// `EXT_disjoint_timer_query`, `WEBGL_provoking_vertex`,
+/// `WEBGL_clip_cull_distance`). Order matches Chromium's
+/// `WebGLRenderingContextBase::EnabledWebGLExtensions` registration
+/// sequence.
+pub fn apple_m3_macos() -> GpuProfile {
+    GpuProfile {
+        vendor: "WebKit".into(),
+        renderer: "WebKit WebGL".into(),
+        version: "WebGL 1.0 (OpenGL ES 2.0 Chromium)".into(),
+        shading_language_version: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)".into(),
+        unmasked_vendor: "Google Inc. (Apple)".into(),
+        unmasked_renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)"
+            .into(),
+        extensions: vec![
+            "ANGLE_instanced_arrays".into(),
+            "EXT_blend_minmax".into(),
+            "EXT_clip_control".into(),
+            "EXT_color_buffer_half_float".into(),
+            "EXT_depth_clamp".into(),
+            "EXT_disjoint_timer_query".into(),
+            "EXT_float_blend".into(),
+            "EXT_frag_depth".into(),
+            "EXT_polygon_offset_clamp".into(),
+            "EXT_shader_texture_lod".into(),
+            "EXT_texture_compression_bptc".into(),
+            "EXT_texture_compression_rgtc".into(),
+            "EXT_texture_filter_anisotropic".into(),
+            "EXT_texture_mirror_clamp_to_edge".into(),
+            "EXT_sRGB".into(),
+            "KHR_parallel_shader_compile".into(),
+            "OES_element_index_uint".into(),
+            "OES_fbo_render_mipmap".into(),
+            "OES_standard_derivatives".into(),
+            "OES_texture_float".into(),
+            "OES_texture_float_linear".into(),
+            "OES_texture_half_float".into(),
+            "OES_texture_half_float_linear".into(),
+            "OES_vertex_array_object".into(),
+            "WEBGL_blend_func_extended".into(),
+            "WEBGL_clip_cull_distance".into(),
+            "WEBGL_color_buffer_float".into(),
+            "WEBGL_compressed_texture_astc".into(),
+            "WEBGL_compressed_texture_etc".into(),
+            "WEBGL_compressed_texture_etc1".into(),
+            "WEBGL_compressed_texture_s3tc".into(),
+            "WEBGL_compressed_texture_s3tc_srgb".into(),
+            "WEBGL_debug_renderer_info".into(),
+            "WEBGL_debug_shaders".into(),
+            "WEBGL_depth_texture".into(),
+            "WEBGL_draw_buffers".into(),
+            "WEBGL_lose_context".into(),
+            "WEBGL_multi_draw".into(),
+            "WEBGL_provoking_vertex".into(),
+        ],
+        params: common_params_desktop(),
+        shader_precision: standard_shader_precision(),
+    }
+}
+
 /// Chrome 131 on macOS 15 with Apple M2 Pro.
 /// Note the `WEBGL_compressed_texture_astc` that replaces the s3tc set
 /// on Apple Silicon, and the absence of `EXT_disjoint_timer_query`.

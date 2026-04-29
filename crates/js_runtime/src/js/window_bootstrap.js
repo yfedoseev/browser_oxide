@@ -507,10 +507,14 @@
     globalThis.Bluetooth = Bluetooth;
     const _navBluetooth = Object.create(Bluetooth.prototype);
 
-    const _navUsb = {};
-    const _navSerial = {};
-    const _navHid = {};
-    const _navLocks = {};
+    // Phase 7 — instances need Symbol.toStringTag so
+    // `Object.prototype.toString.call(navigator.usb)` returns
+    // `[object USB]` (not `[object Object]`). Real Chrome's IDL gives
+    // each one a class identity even when they're effectively stubs.
+    const _navUsb = {}; Object.defineProperty(_navUsb, Symbol.toStringTag, { value: "USB", configurable: true });
+    const _navSerial = {}; Object.defineProperty(_navSerial, Symbol.toStringTag, { value: "Serial", configurable: true });
+    const _navHid = {}; Object.defineProperty(_navHid, Symbol.toStringTag, { value: "HID", configurable: true });
+    const _navLocks = {}; Object.defineProperty(_navLocks, Symbol.toStringTag, { value: "LockManager", configurable: true });
 
     // navigator.keyboard — Keyboard API (probed by CreepJS + DataDome).
     // Real Chrome exposes a Keyboard instance with getLayoutMap() returning a
@@ -627,10 +631,14 @@
     globalThis.ServiceWorkerContainer = ServiceWorkerContainer;
     const _navServiceWorker = new ServiceWorkerContainer();
     const _navClipboard = { readText() { return Promise.resolve(""); }, writeText() { return Promise.resolve(); } };
+    Object.defineProperty(_navClipboard, Symbol.toStringTag, { value: "Clipboard", configurable: true });
     const _navGeolocation = {};
+    Object.defineProperty(_navGeolocation, Symbol.toStringTag, { value: "Geolocation", configurable: true });
     const _navWakeLock = {};
+    Object.defineProperty(_navWakeLock, Symbol.toStringTag, { value: "WakeLock", configurable: true });
     const _navMediaSession = {};
     const _navScheduling = { isInputPending() { return false; } };
+    Object.defineProperty(_navScheduling, Symbol.toStringTag, { value: "Scheduling", configurable: true });
     const _navUserActivation = { isActive: false, hasBeenActive: false };
     // navigator.languages is CACHED per runtime — Chrome returns the same
     // frozen array reference on every access, so we memoize after the first
@@ -1006,7 +1014,7 @@
     _defProtoGetter(_ScreenProto, 'availLeft', () => 0);
     _defProtoGetter(_ScreenProto, 'availTop', () => _pInt("screen_avail_top", 0));
     _defProtoGetter(_ScreenProto, 'colorDepth', () => _pInt("screen_color_depth", 24));
-    _defProtoGetter(_ScreenProto, 'pixelDepth', () => 24);
+    _defProtoGetter(_ScreenProto, 'pixelDepth', () => _pInt("screen_color_depth", 24));
     _defProtoGetter(_ScreenProto, 'orientation', () => _screenOrientation);
     _defProtoGetter(_ScreenProto, 'isExtended', () => false);
     Object.defineProperty(_ScreenProto, Symbol.toStringTag, { value: "Screen", configurable: true });
@@ -1219,8 +1227,8 @@
         const _ScreenProto = Screen.prototype;
         _defProtoGetter(_ScreenProto, 'availLeft', () => 0);
         _defProtoGetter(_ScreenProto, 'availTop', () => _pInt("screen_avail_top", 0));
-        _defProtoGetter(_ScreenProto, 'colorDepth', () => 24);
-        _defProtoGetter(_ScreenProto, 'pixelDepth', () => 24);
+        _defProtoGetter(_ScreenProto, 'colorDepth', () => _pInt("screen_color_depth", 24));
+        _defProtoGetter(_ScreenProto, 'pixelDepth', () => _pInt("screen_color_depth", 24));
     }
 
     globalThis.devicePixelRatio = 2.0;
@@ -4688,6 +4696,7 @@
             },
             getPreferredCanvasFormat() { return "bgra8unorm"; },
         };
+        Object.defineProperty(_navGpu, Symbol.toStringTag, { value: "GPU", configurable: true });
         // WebGPU is [SecureContext] — undefined on data:/http:/about:blank.
         _defNav('gpu', () => _secure() ? _navGpu : undefined);
     }
