@@ -31,7 +31,16 @@ const HEADER_TABLE_SIZE: u32 = 65_536; // SETTINGS 1
 const ENABLE_PUSH: bool = false; // SETTINGS 2 = 0
 const INITIAL_STREAM_WINDOW_SIZE: u32 = 6_291_456; // SETTINGS 4 = 6 MB
 const MAX_HEADER_LIST_SIZE: u32 = 262_144; // SETTINGS 6 = 256 KB
-const INITIAL_CONNECTION_WINDOW_SIZE: u32 = 15_728_640; // 15 MB (WINDOW_UPDATE)
+// Real Chrome 147 emits WINDOW_UPDATE = 15_663_105 bytes (NOT 15_728_640
+// = 15 MB even). The 65,535-byte delta corresponds to the
+// (initial_max_data - default_initial_window_size) calculation Chrome
+// does internally. Akamai-FP and other H2 fingerprint hashes include the
+// exact byte value of WINDOW_UPDATE; rounding to 15 MB lands us in a
+// non-Chrome bucket and triggers `_abck=~-1~...` (Akamai BMP "untrusted")
+// at the edge before the sensor JS even runs. Closes 9 retail-Akamai
+// sites (walmart, target, homedepot, costco, bestbuy, wayfair, h-m,
+// uniqlo, zara) per docs/GAP_DEEP_ANALYSIS_2026_04_28.md.
+const INITIAL_CONNECTION_WINDOW_SIZE: u32 = 15_663_105; // ~14.94 MB (WINDOW_UPDATE)
 
 /// Perform an HTTP/2 handshake over a TLS stream and return a sender + connection.
 ///
@@ -70,8 +79,12 @@ where
         .settings_order(settings_order)
         .headers_stream_dependency(StreamDependency::new(
             StreamId::zero(),
-            255,  // weight
-            true, // exclusive
+            // Wire byte 255 represents HTTP/2 weight 256 (RFC 7540 §5.3 —
+            // "Add one to the value to obtain a weight between 1 and 256").
+            // Chrome 147's PRIORITY frame for the implicit headers stream
+            // has wire byte 255 = weight 256, exclusive=true.
+            255,
+            true,
         ));
 
     builder

@@ -800,10 +800,30 @@ impl HttpClient {
 
     /// GET with explicit redirect following.
     /// Perform a GET request, following redirects up to `max_redirects`.
+    /// Set `BOXIDE_DEBUG_REDIRECTS=1` for hop-by-hop tracing.
     pub async fn get_follow(&self, url: &str, max_redirects: u8) -> Result<Response, NetError> {
+        let debug = std::env::var("BOXIDE_DEBUG_REDIRECTS").is_ok();
         let mut current_url = url.to_string();
-        for _ in 0..max_redirects {
+        for hop in 0..max_redirects {
+            if debug {
+                eprintln!("[redirect] hop={} GET {}", hop, current_url);
+            }
             let resp = self.get(&current_url).await?;
+            if debug {
+                let body_len = resp.body.len();
+                let cookies: Vec<&str> = resp
+                    .set_cookies
+                    .iter()
+                    .map(|s| s.split(';').next().unwrap_or("").trim())
+                    .collect();
+                eprintln!(
+                    "[redirect]   <- status={} body_len={} location={:?} set-cookies={:?}",
+                    resp.status,
+                    body_len,
+                    resp.headers.get("location"),
+                    cookies
+                );
+            }
 
             if matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
                 if let Some(loc) = resp.headers.get("location") {
@@ -815,6 +835,9 @@ impl HttpClient {
                 }
             }
             return Ok(resp);
+        }
+        if debug {
+            eprintln!("[redirect] hit max_redirects={}, final GET {}", max_redirects, current_url);
         }
         self.get(&current_url).await
     }
