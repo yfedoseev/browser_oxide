@@ -168,6 +168,30 @@ async fn phase7_ab_probe_capture_oxide() {
     eprintln!("wrote {} keys to {path}", result.len());
 }
 
+/// Phase 7 D5 gate — document.characterSet is "windows-1252", the HTML
+/// legacy default that real Chrome reports for HTML docs without an
+/// explicit <meta charset>.
+#[tokio::test]
+async fn phase7_d5_doc_charset_default() {
+    use browser::Page;
+    use stealth::presets::chrome_130_macos;
+    let mut p = Page::from_html_with_url(
+        "<!doctype html><html><body></body></html>",
+        "https://example.com/",
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        p.evaluate("document.characterSet").unwrap().trim_matches('"'),
+        "windows-1252"
+    );
+    assert_eq!(
+        p.evaluate("document.charset").unwrap().trim_matches('"'),
+        "windows-1252"
+    );
+}
+
 /// Phase 7 D4 gates — screen preset, WebGL renderer, Symbol.toStringTag.
 #[tokio::test]
 async fn phase7_d4_screen_webgl_tostringtag() {

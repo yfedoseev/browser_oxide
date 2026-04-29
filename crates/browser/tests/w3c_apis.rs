@@ -892,7 +892,8 @@ async fn get_selection_exists() {
 
 #[tokio::test]
 async fn document_properties() {
-    assert_eq!(eval("document.characterSet").await, "UTF-8");
+    // Phase 7 — HTML legacy default per spec is windows-1252.
+    assert_eq!(eval("document.characterSet").await, "windows-1252");
     assert_eq!(eval("document.contentType").await, "text/html");
     assert_eq!(eval("document.compatMode").await, "CSS1Compat");
     assert_eq!(eval("document.defaultView === window").await, "true");

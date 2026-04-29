@@ -340,10 +340,23 @@
         "window-management": "prompt",
     };
 
+    // Permissions that require secure context — on data:/http:/about:blank
+    // these report "denied" instead of "prompt" per Permissions Policy
+    // (geolocation, camera, mic, midi, etc. are all [SecureContext] APIs
+    // and the corresponding permissions are unobtainable). Phase 7.
+    const _SC_GATED_PERMISSIONS = new Set([
+        "geolocation", "camera", "microphone", "midi", "push",
+        "notifications", "clipboard-read",
+        "nfc", "display-capture", "window-management",
+    ]);
+
     class PermissionStatus {
         constructor(name) { this._name = name; }
         get name() { return this._name; }
         get state() {
+            if (!_secure() && _SC_GATED_PERMISSIONS.has(this._name)) {
+                return "denied";
+            }
             return _PERMISSION_STATE_MAP[this._name] || "prompt";
         }
         get onchange() { return null; }
@@ -667,7 +680,9 @@
     _defNav('onLine', () => true);
     _defNav('cookieEnabled', () => true);
     _defNav('hardwareConcurrency', () => _pInt("hardware_concurrency", 8));
-    _defNav('deviceMemory', () => _pInt("device_memory", 8));
+    // navigator.deviceMemory is [SecureContext] — undefined on
+    // data:/http:/about:blank. Phase 7.
+    _defNav('deviceMemory', () => _secure() ? _pInt("device_memory", 8) : undefined);
     _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
     _defNav('pdfViewerEnabled', () => true);
     _defNav('webdriver', () => false);
@@ -5034,9 +5049,11 @@
         Object.defineProperty(Notification.prototype, Symbol.toStringTag, {
             value: "Notification", configurable: true,
         });
-        // Static state — Chrome's "default" until granted explicitly.
+        // Phase 7 — Chrome's "default" on secure contexts; "denied"
+        // on insecure (data:/http:/about:blank) per Notification API
+        // spec which gates the prompt UI on secure context.
         Object.defineProperty(Notification, "permission", {
-            get: () => "default", configurable: true,
+            get: () => _secure() ? "default" : "denied", configurable: true,
         });
         Object.defineProperty(Notification, "maxActions", {
             value: 2, configurable: true,

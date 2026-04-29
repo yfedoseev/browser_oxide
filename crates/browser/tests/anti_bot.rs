@@ -66,7 +66,8 @@ async fn navigator_hardware_concurrency_positive() {
 
 #[tokio::test]
 async fn navigator_device_memory_positive() {
-    assert_eq!(eval("navigator.deviceMemory > 0").await, "true");
+    // deviceMemory is [SecureContext]. Phase 7.
+    assert_eq!(eval_secure("navigator.deviceMemory > 0").await, "true");
 }
 
 #[tokio::test]
@@ -166,7 +167,9 @@ async fn notification_exists() {
 
 #[tokio::test]
 async fn notification_permission_default() {
-    assert_eq!(eval("Notification.permission").await, "default");
+    // Phase 7 — "default" on secure context, "denied" on insecure.
+    assert_eq!(eval_secure("Notification.permission").await, "default");
+    assert_eq!(eval("Notification.permission").await, "denied");
 }
 
 #[tokio::test]

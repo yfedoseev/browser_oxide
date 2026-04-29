@@ -1380,8 +1380,13 @@
                 }
             } catch (e) { /* ignore */ }
         }
-        get characterSet() { return "UTF-8"; }
-        get charset() { return "UTF-8"; }
+        // HTML legacy default per HTML Standard §2.4 — Chrome reports
+        // "windows-1252" for HTML documents without an explicit
+        // `<meta charset>` declaration. Verified via Playwright MCP
+        // probe_mcp.json + probe_mcp_secure.json (both report
+        // "windows-1252"). Phase 7.
+        get characterSet() { return "windows-1252"; }
+        get charset() { return "windows-1252"; }
         get contentType() { return "text/html"; }
         get compatMode() { return "CSS1Compat"; }
         // document.implementation — the DOMImplementation API. fpCollect and

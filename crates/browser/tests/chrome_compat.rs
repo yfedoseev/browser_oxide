@@ -243,7 +243,8 @@ async fn nav_hardware_concurrency() {
 }
 #[tokio::test]
 async fn nav_device_memory() {
-    assert_eq!(check("navigator.deviceMemory > 0").await, "true");
+    // deviceMemory is [SecureContext]. Phase 7.
+    assert_eq!(check_secure("navigator.deviceMemory > 0").await, "true");
 }
 #[tokio::test]
 async fn nav_max_touch_points() {
@@ -479,7 +480,9 @@ async fn doc_has_focus() {
 }
 #[tokio::test]
 async fn doc_character_set() {
-    assert_eq!(check("document.characterSet").await, "UTF-8");
+    // Phase 7 — HTML legacy default per spec is windows-1252. Real
+    // Chrome reports this for HTML docs without explicit <meta charset>.
+    assert_eq!(check("document.characterSet").await, "windows-1252");
 }
 #[tokio::test]
 async fn doc_content_type() {
