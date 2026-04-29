@@ -6,9 +6,20 @@
     const _scrollState = new Map(); // nodeId -> {top, left}
 
     function _getNodeId(node) {
+        if (node === null || node === undefined) return -1;
         if (node === globalThis || node === globalThis.window) return -999;
+        // WeakMap.get on a non-object returns undefined per spec — no throw.
         const id = _nodeIds.get(node);
-        if (id === undefined) return 0; // Return 0 instead of throwing to be more resilient
+        if (id === undefined) {
+            // node is not a registered DOM node. Returning 0 (the DOCUMENT
+            // id) here used to be a "resilience" default, but it caused
+            // every appendChild(weirdValue) to surface as
+            // appendChild(parent, document) → cycle assertion fires.
+            // -1 makes the Rust op layer's `dom.get(NodeId(u32::MAX))` miss
+            // and silently no-op, which is the right behaviour for a JS
+            // mutation against a non-node argument.
+            return -1;
+        }
         return id;
     }
 
@@ -524,6 +535,27 @@
                 cache[toKebab(prop)] = String(value);
                 flush();
                 return true;
+            },
+            // V8 Proxy invariant: has/ownKeys/getOwnPropertyDescriptor must
+            // agree. Without explicit traps V8 reconciles against the empty
+            // target object on every `prop in style` / Object.keys(style)
+            // call — hot work that creepjs hits per WebIDL property under test.
+            has(target, prop) {
+                if (prop === "setProperty" || prop === "getPropertyValue" ||
+                    prop === "removeProperty" || prop === "cssText") return true;
+                if (typeof prop === "string") return Object.prototype.hasOwnProperty.call(cache, toKebab(prop));
+                return false;
+            },
+            ownKeys() {
+                return Object.keys(cache);
+            },
+            getOwnPropertyDescriptor(target, prop) {
+                if (typeof prop !== "string") return undefined;
+                const key = toKebab(prop);
+                if (Object.prototype.hasOwnProperty.call(cache, key)) {
+                    return { value: cache[key], enumerable: true, configurable: true, writable: true };
+                }
+                return undefined;
             }
         });
     }
@@ -763,30 +795,97 @@
         }
         // --- Attribute helpers ---
         get attributes() {
-            // Minimal NamedNodeMap-like object
+            // NamedNodeMap-like object. Uses op_dom_get_attribute_names to
+            // enumerate real attributes; previous shim hardcoded length: 0
+            // which violates the V8 Proxy invariant ownKeys ⇔ has and made
+            // creepjs's per-element attribute audit do redundant work.
             const el = this;
+            const id = _getNodeId(this);
+            const namesOf = () => ops.op_dom_get_attribute_names(id);
+            const itemFor = (name) => {
+                const val = ops.op_dom_get_attribute(id, name);
+                return val ? { name, value: val, specified: true } : null;
+            };
             return new Proxy([], {
                 get(target, prop) {
-                    if (prop === "length") return 0; // simplified
-                    if (prop === "getNamedItem") return (name) => {
-                        const val = el.getAttribute(name);
-                        return val ? { name, value: val, specified: true } : null;
+                    if (prop === "length") return namesOf().length;
+                    if (prop === "getNamedItem") return (name) => itemFor(String(name));
+                    if (prop === "item") return (i) => {
+                        const n = namesOf()[i];
+                        return n ? itemFor(n) : null;
                     };
+                    if (prop === Symbol.iterator) return function* () {
+                        for (const n of namesOf()) yield itemFor(n);
+                    };
+                    if (typeof prop === "string" && /^\d+$/.test(prop)) {
+                        const n = namesOf()[parseInt(prop, 10)];
+                        return n ? itemFor(n) : undefined;
+                    }
+                    if (typeof prop === "string") return itemFor(prop);
+                    return undefined;
+                },
+                has(target, prop) {
+                    if (prop === "length" || prop === "getNamedItem" || prop === "item") return true;
+                    if (typeof prop === "string" && /^\d+$/.test(prop)) {
+                        return parseInt(prop, 10) < namesOf().length;
+                    }
+                    if (typeof prop === "string") return ops.op_dom_has_attribute(id, prop);
+                    return false;
+                },
+                ownKeys() {
+                    const names = namesOf();
+                    const keys = [];
+                    for (let i = 0; i < names.length; i++) keys.push(String(i));
+                    return keys.concat(["length"]);
+                },
+                getOwnPropertyDescriptor(target, prop) {
+                    if (prop === "length") {
+                        return { value: namesOf().length, enumerable: false, configurable: false, writable: false };
+                    }
+                    if (typeof prop === "string" && /^\d+$/.test(prop)) {
+                        const n = namesOf()[parseInt(prop, 10)];
+                        if (n) return { value: itemFor(n), enumerable: true, configurable: true, writable: false };
+                    }
                     return undefined;
                 }
             });
         }
         get dataset() {
             const el = this;
+            const id = _getNodeId(this);
+            const toKebab = (p) => "data-" + p.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+            const fromKebab = (a) => a.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+            const dataNames = () => ops.op_dom_get_attribute_names(id).filter(n => n.startsWith("data-"));
             return new Proxy({}, {
                 get(target, prop) {
-                    const attr = "data-" + prop.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
-                    return el.getAttribute(attr) || undefined;
+                    if (typeof prop !== "string") return undefined;
+                    return ops.op_dom_get_attribute(id, toKebab(prop)) || undefined;
                 },
                 set(target, prop, value) {
-                    const attr = "data-" + prop.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
-                    el.setAttribute(attr, String(value));
+                    el.setAttribute(toKebab(prop), String(value));
                     return true;
+                },
+                has(target, prop) {
+                    if (typeof prop !== "string") return false;
+                    return ops.op_dom_has_attribute(id, toKebab(prop));
+                },
+                deleteProperty(target, prop) {
+                    if (typeof prop === "string") el.removeAttribute(toKebab(prop));
+                    return true;
+                },
+                ownKeys() {
+                    return dataNames().map(fromKebab);
+                },
+                getOwnPropertyDescriptor(target, prop) {
+                    if (typeof prop !== "string") return undefined;
+                    const attr = toKebab(prop);
+                    if (ops.op_dom_has_attribute(id, attr)) {
+                        return {
+                            value: ops.op_dom_get_attribute(id, attr) || "",
+                            enumerable: true, configurable: true, writable: true,
+                        };
+                    }
+                    return undefined;
                 }
             });
         }
@@ -1815,7 +1914,7 @@
         return fn;
     }
 
-    function _mkMirroredConstructor(parentCtor, name) {
+    function _mkMirroredConstructor(parentCtor, name, freshGrandparentProto) {
         // Fresh constructor function — different identity than parent's
         const fresh = function() {
             throw new TypeError("Failed to construct '" + name + "': Illegal constructor");
@@ -1833,7 +1932,12 @@
         // Each method/getter/setter is a fresh function with native toString shape.
         let parentProto = null;
         try { parentProto = parentCtor && parentCtor.prototype; } catch (_) {}
-        const freshProto = Object.create(parentProto && Object.getPrototypeOf(parentProto) || Object.prototype);
+        // The fresh prototype's own __proto__ must point at the FRESH grandparent
+        // prototype (built earlier in _buildRemoteRealm's topological pass),
+        // NOT at the parent realm's grandparent. Crossing realms here makes
+        // creepjs's lie-detection walk the parent realm's full chain on top
+        // of the fresh chain, multiplying its work O(N) → O(N²+).
+        const freshProto = Object.create(freshGrandparentProto || Object.prototype);
 
         if (parentProto) {
             const propNames = Object.getOwnPropertyNames(parentProto);
@@ -1875,14 +1979,71 @@
         return fresh;
     }
 
+    // For each mirrored constructor name, find the nearest ancestor in
+    // _MIRRORED_CONSTRUCTORS by walking the real prototype chain. Returns
+    // an array of names in topological order (ancestors before descendants)
+    // and a name -> direct-parent-name map.
+    function _topoSortMirrored(names) {
+        const realCtors = {};
+        for (const n of names) {
+            try {
+                const c = globalThis[n];
+                if (typeof c === "function") realCtors[n] = c;
+            } catch (_) {}
+        }
+        const directParent = {};
+        for (const n of names) {
+            const ctor = realCtors[n];
+            if (!ctor) { directParent[n] = null; continue; }
+            let proto = null;
+            try { proto = Object.getPrototypeOf(ctor.prototype); } catch (_) {}
+            let parentName = null;
+            let guard = 0;
+            while (proto && guard++ < 32) {
+                for (const m of names) {
+                    const mc = realCtors[m];
+                    if (mc && mc.prototype === proto) { parentName = m; break; }
+                }
+                if (parentName) break;
+                try { proto = Object.getPrototypeOf(proto); } catch (_) { break; }
+            }
+            directParent[n] = parentName;
+        }
+        const ordered = [];
+        const remaining = new Set(names);
+        while (remaining.size > 0) {
+            let progress = false;
+            for (const n of Array.from(remaining)) {
+                const p = directParent[n];
+                if (p == null || !remaining.has(p)) {
+                    ordered.push(n);
+                    remaining.delete(n);
+                    progress = true;
+                }
+            }
+            if (!progress) {
+                // Defensive: cyclic dependency in the real prototype graph
+                // shouldn't happen, but if it does, append remaining without
+                // ordering rather than infinite-looping.
+                for (const n of remaining) ordered.push(n);
+                break;
+            }
+        }
+        return { ordered: ordered, directParent: directParent };
+    }
+
     function _buildRemoteRealm() {
         const realm = {};
-        for (const name of _MIRRORED_CONSTRUCTORS) {
+        const sorted = _topoSortMirrored(_MIRRORED_CONSTRUCTORS);
+        for (const name of sorted.ordered) {
             try {
                 const parentCtor = globalThis[name];
-                if (typeof parentCtor === "function") {
-                    realm[name] = _mkMirroredConstructor(parentCtor, name);
-                }
+                if (typeof parentCtor !== "function") continue;
+                const parentName = sorted.directParent[name];
+                const freshGrandparentProto = parentName && realm[parentName]
+                    ? realm[parentName].prototype
+                    : Object.prototype;
+                realm[name] = _mkMirroredConstructor(parentCtor, name, freshGrandparentProto);
             } catch (_) {}
         }
         // Cross-realm Function.prototype.toString returning native shape for

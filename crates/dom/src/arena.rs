@@ -1,10 +1,22 @@
 use crate::node::*;
+use std::collections::HashSet;
 
 /// Arena-allocated DOM tree. All nodes live in a flat Vec, referenced by NodeId.
 pub struct Dom {
     nodes: Vec<Option<Node>>,
     free_list: Vec<usize>,
 }
+
+/// Tripwire for tree-walking helpers. A correct DOM tree never has cycles
+/// and is bounded by `nodes.len()` unique ids; if a walker hits this many
+/// steps without terminating it is iterating a cycle and we panic with a
+/// clear message instead of running until OS abort.
+const WALK_LIMIT: usize = 100_000;
+
+/// Bound for ancestor walks used by the cycle assertion at mutation sites.
+/// Realistic DOMs are <100 deep; 10K is several orders of magnitude beyond
+/// any legitimate document.
+const ANCESTOR_LIMIT: usize = 10_000;
 
 impl Dom {
     /// Create a new DOM with a Document node at index 0.
@@ -100,8 +112,50 @@ impl Dom {
 
     // --- Tree mutation (all O(1)) ---
 
+    /// Returns true if `candidate` is `target` or an ancestor of `target`.
+    /// Used by cycle assertions on tree-mutation entry points.
+    fn is_ancestor_or_self(&self, candidate: NodeId, target: NodeId) -> bool {
+        if candidate == target {
+            return true;
+        }
+        let mut current = self.get(target).and_then(|n| n.parent);
+        let mut depth = 0usize;
+        while let Some(id) = current {
+            if id == candidate {
+                return true;
+            }
+            depth += 1;
+            if depth > ANCESTOR_LIMIT {
+                panic!(
+                    "DOM ancestor walk exceeded {} steps from {:?} — pre-existing cycle",
+                    ANCESTOR_LIMIT, target
+                );
+            }
+            current = self.get(id).and_then(|n| n.parent);
+        }
+        false
+    }
+
     /// Append `child` as the last child of `parent`.
+    /// Per the DOM spec's pre-insertion validity rules, an attempt to make
+    /// `parent` a descendant of itself is a `HierarchyRequestError`. We can't
+    /// throw a JS exception from here (called from non-unwinding op fast
+    /// paths), so we log and no-op — the script's bug surfaces as a silently
+    /// skipped mutation rather than a process abort or a stack overflow.
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) {
+        // Both ids must reference live arena nodes. The JS shim returns
+        // NodeId(u32::MAX) (-1 cast) for non-Node values; treat unknown ids
+        // as a silent no-op rather than partially wiring the link list.
+        if self.get(parent).is_none() || self.get(child).is_none() {
+            return;
+        }
+        if self.is_ancestor_or_self(child, parent) {
+            eprintln!(
+                "[dom] cycle prevented in append_child: child {:?} is parent {:?} or one of its ancestors — skipping",
+                child, parent
+            );
+            return;
+        }
         self.detach(child);
 
         let old_last = self.get(parent).and_then(|n| n.last_child);
@@ -128,7 +182,18 @@ impl Dom {
     }
 
     /// Insert `child` before `reference` (which must be a child of `parent`).
+    /// Same cycle-protection semantics as `append_child`: log and no-op.
     pub fn insert_before(&mut self, parent: NodeId, child: NodeId, reference: NodeId) {
+        if self.get(parent).is_none() || self.get(child).is_none() || self.get(reference).is_none() {
+            return;
+        }
+        if self.is_ancestor_or_self(child, parent) {
+            eprintln!(
+                "[dom] cycle prevented in insert_before: child {:?} is parent {:?} or one of its ancestors — skipping",
+                child, parent
+            );
+            return;
+        }
         self.detach(child);
 
         let prev = self.get(reference).and_then(|n| n.prev_sibling);
@@ -236,16 +301,41 @@ impl Dom {
         result
     }
 
-    fn collect_text(&self, id: NodeId, result: &mut String) {
-        if let Some(node) = self.get(id) {
+    /// Iterative pre-order DFS that concatenates text-node payloads in document order.
+    /// `visited` + step counter guard against cycles in the arena (which should be
+    /// impossible given `append_child`/`insert_before` cycle assertions, but provides
+    /// a clear panic message instead of an OS abort if state ever becomes corrupt).
+    fn collect_text(&self, root: NodeId, result: &mut String) {
+        let mut stack: Vec<NodeId> = vec![root];
+        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut steps: usize = 0;
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+            steps += 1;
+            if steps > WALK_LIMIT {
+                panic!(
+                    "DOM walk cycle in collect_text from {:?} — visited {} unique nodes",
+                    root,
+                    visited.len()
+                );
+            }
+            let node = match self.get(id) {
+                Some(n) => n,
+                None => continue,
+            };
             match &node.data {
                 NodeData::Text(t) => result.push_str(t),
                 _ => {
+                    // Push children in reverse so leftmost child pops first (document order).
+                    let mut kids: Vec<NodeId> = Vec::new();
                     let mut child = node.first_child;
-                    while let Some(child_id) = child {
-                        self.collect_text(child_id, result);
-                        child = self.get(child_id).and_then(|n| n.next_sibling);
+                    while let Some(c) = child {
+                        kids.push(c);
+                        child = self.get(c).and_then(|n| n.next_sibling);
                     }
+                    stack.extend(kids.into_iter().rev());
                 }
             }
         }
@@ -315,103 +405,186 @@ impl Dom {
     /// Serialize children of a node as HTML (for innerHTML getter).
     pub fn serialize_inner_html(&self, id: NodeId) -> String {
         let mut out = String::new();
+        let mut kids: Vec<NodeId> = Vec::new();
         let mut child = self.get(id).and_then(|n| n.first_child);
         while let Some(child_id) = child {
-            self.serialize_node(child_id, &mut out);
+            kids.push(child_id);
             child = self.get(child_id).and_then(|n| n.next_sibling);
+        }
+        for c in kids {
+            self.serialize_node(c, &mut out);
         }
         out
     }
 
-    fn serialize_node(&self, id: NodeId, out: &mut String) {
-        let node = match self.get(id) {
-            Some(n) => n,
-            None => return,
-        };
-        match &node.data {
-            NodeData::Element(elem) => {
-                out.push('<');
-                out.push_str(&elem.name.local);
-                for attr in &elem.attrs {
-                    out.push(' ');
-                    out.push_str(&attr.name.local);
-                    out.push_str("=\"");
-                    out.push_str(&attr.value.replace('&', "&amp;").replace('"', "&quot;"));
-                    out.push('"');
-                }
-                out.push('>');
+    /// Iterative serializer. Uses an explicit work-stack with two kinds of
+    /// items: `Open(id)` to begin processing a node, `Close(s)` to emit a
+    /// closing tag string after that node's descendants have been serialized.
+    /// `visited` + step counter guard against cycles in the arena.
+    fn serialize_node(&self, root: NodeId, out: &mut String) {
+        enum SerWork {
+            Open(NodeId),
+            Close(String),
+        }
+        const VOID_ELEMENTS: &[&str] = &[
+            "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+            "source", "track", "wbr",
+        ];
 
-                // Serialize children
-                let mut child = node.first_child;
-                while let Some(child_id) = child {
-                    self.serialize_node(child_id, out);
-                    child = self.get(child_id).and_then(|n| n.next_sibling);
-                }
+        let mut stack: Vec<SerWork> = vec![SerWork::Open(root)];
+        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut steps: usize = 0;
+        while let Some(work) = stack.pop() {
+            match work {
+                SerWork::Close(s) => out.push_str(&s),
+                SerWork::Open(id) => {
+                    if !visited.insert(id) {
+                        continue;
+                    }
+                    steps += 1;
+                    if steps > WALK_LIMIT {
+                        panic!(
+                            "DOM walk cycle in serialize_node from {:?} — visited {} unique nodes",
+                            root,
+                            visited.len()
+                        );
+                    }
+                    let node = match self.get(id) {
+                        Some(n) => n,
+                        None => continue,
+                    };
+                    match &node.data {
+                        NodeData::Element(elem) => {
+                            out.push('<');
+                            out.push_str(&elem.name.local);
+                            for attr in &elem.attrs {
+                                out.push(' ');
+                                out.push_str(&attr.name.local);
+                                out.push_str("=\"");
+                                out.push_str(
+                                    &attr.value.replace('&', "&amp;").replace('"', "&quot;"),
+                                );
+                                out.push('"');
+                            }
+                            out.push('>');
 
-                // Closing tag (skip void elements)
-                let void_elements = [
-                    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
-                    "param", "source", "track", "wbr",
-                ];
-                if !void_elements.contains(&elem.name.local.as_str()) {
-                    out.push_str("</");
-                    out.push_str(&elem.name.local);
-                    out.push('>');
+                            let is_void = VOID_ELEMENTS.contains(&elem.name.local.as_str());
+                            // Schedule the close tag first so it pops last (after all descendants).
+                            if !is_void {
+                                stack.push(SerWork::Close(format!("</{}>", elem.name.local)));
+                            }
+                            // Then push children in reverse so leftmost pops first.
+                            let mut kids: Vec<NodeId> = Vec::new();
+                            let mut child = node.first_child;
+                            while let Some(c) = child {
+                                kids.push(c);
+                                child = self.get(c).and_then(|n| n.next_sibling);
+                            }
+                            for c in kids.into_iter().rev() {
+                                stack.push(SerWork::Open(c));
+                            }
+                        }
+                        NodeData::Text(text) => {
+                            out.push_str(
+                                &text
+                                    .replace('&', "&amp;")
+                                    .replace('<', "&lt;")
+                                    .replace('>', "&gt;"),
+                            );
+                        }
+                        NodeData::Comment(text) => {
+                            out.push_str("<!--");
+                            out.push_str(text);
+                            out.push_str("-->");
+                        }
+                        NodeData::DocumentType { name, .. } => {
+                            out.push_str("<!DOCTYPE ");
+                            out.push_str(name);
+                            out.push('>');
+                        }
+                        NodeData::Document | NodeData::DocumentFragment => {
+                            let mut kids: Vec<NodeId> = Vec::new();
+                            let mut child = node.first_child;
+                            while let Some(c) = child {
+                                kids.push(c);
+                                child = self.get(c).and_then(|n| n.next_sibling);
+                            }
+                            for c in kids.into_iter().rev() {
+                                stack.push(SerWork::Open(c));
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
-            NodeData::Text(text) => {
-                out.push_str(
-                    &text
-                        .replace('&', "&amp;")
-                        .replace('<', "&lt;")
-                        .replace('>', "&gt;"),
-                );
-            }
-            NodeData::Comment(text) => {
-                out.push_str("<!--");
-                out.push_str(text);
-                out.push_str("-->");
-            }
-            NodeData::DocumentType { name, .. } => {
-                out.push_str("<!DOCTYPE ");
-                out.push_str(name);
-                out.push('>');
-            }
-            NodeData::Document | NodeData::DocumentFragment => {
-                let mut child = node.first_child;
-                while let Some(child_id) = child {
-                    self.serialize_node(child_id, out);
-                    child = self.get(child_id).and_then(|n| n.next_sibling);
-                }
-            }
-            _ => {}
         }
     }
 
     /// Copy a subtree from another Dom into this one. Returns the new root NodeId.
+    /// Iterative: each work item is `(source_id, dest_parent_id)`. The root is
+    /// created up-front and returned; descendants are appended in document order.
     pub fn merge_subtree(&mut self, source: &Dom, source_root: NodeId) -> NodeId {
-        let source_node = match source.get(source_root) {
-            Some(n) => n,
+        // Helper: clone a source node's data into a fresh node in `self`.
+        fn create_from(this: &mut Dom, source: &Dom, src_id: NodeId) -> Option<NodeId> {
+            let src = source.get(src_id)?;
+            Some(match &src.data {
+                NodeData::Element(elem) => {
+                    this.create_element(elem.name.clone(), elem.attrs.clone())
+                }
+                NodeData::Text(t) => this.create_text(t.clone()),
+                NodeData::Comment(t) => this.create_comment(t.clone()),
+                NodeData::DocumentFragment | NodeData::Document => this.create_document_fragment(),
+                _ => this.create_document_fragment(),
+            })
+        }
+
+        let new_root = match create_from(self, source, source_root) {
+            Some(id) => id,
             None => return self.create_document_fragment(),
         };
 
-        let new_id = match &source_node.data {
-            NodeData::Element(elem) => self.create_element(elem.name.clone(), elem.attrs.clone()),
-            NodeData::Text(t) => self.create_text(t.clone()),
-            NodeData::Comment(t) => self.create_comment(t.clone()),
-            NodeData::DocumentFragment | NodeData::Document => self.create_document_fragment(),
-            _ => self.create_document_fragment(),
-        };
+        // BFS-style queue: process all source children, appending under their
+        // mirrored dest parents. visited tracks source ids so a cycle in the
+        // source (which would be data corruption) cannot loop forever.
+        let mut queue: Vec<(NodeId, NodeId)> = Vec::new();
+        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        visited.insert(source_root);
 
-        // Recursively copy children
-        let mut child = source_node.first_child;
-        while let Some(child_id) = child {
-            let new_child = self.merge_subtree(source, child_id);
-            self.append_child(new_id, new_child);
-            child = source.get(child_id).and_then(|n| n.next_sibling);
+        let mut child = source.get(source_root).and_then(|n| n.first_child);
+        while let Some(c) = child {
+            queue.push((c, new_root));
+            child = source.get(c).and_then(|n| n.next_sibling);
         }
 
-        new_id
+        let mut steps: usize = 0;
+        let mut i = 0usize;
+        while i < queue.len() {
+            let (src_id, dest_parent) = queue[i];
+            i += 1;
+            steps += 1;
+            if steps > WALK_LIMIT {
+                panic!(
+                    "DOM walk cycle in merge_subtree from {:?} — visited {} unique source nodes",
+                    source_root,
+                    visited.len()
+                );
+            }
+            if !visited.insert(src_id) {
+                continue;
+            }
+            let new_id = match create_from(self, source, src_id) {
+                Some(id) => id,
+                None => continue,
+            };
+            self.append_child(dest_parent, new_id);
+            let mut child = source.get(src_id).and_then(|n| n.first_child);
+            while let Some(c) = child {
+                queue.push((c, new_id));
+                child = source.get(c).and_then(|n| n.next_sibling);
+            }
+        }
+
+        new_root
     }
 
     /// Get the node type number (matches DOM spec nodeType).
@@ -431,37 +604,97 @@ impl Dom {
 
     // --- Internal helpers ---
 
+    /// Iterative pre-order DFS that returns the first descendant of `root`
+    /// (excluding `root` itself) matching `predicate`, in document order.
     fn find_element(&self, root: NodeId, predicate: &dyn Fn(&Node) -> bool) -> Option<NodeId> {
+        let mut stack: Vec<NodeId> = Vec::new();
+        // Seed with children of root (predicate is not checked against root itself,
+        // matching the original recursive semantics).
         let mut child = self.get(root).and_then(|n| n.first_child);
-        while let Some(child_id) = child {
-            if let Some(node) = self.get(child_id) {
-                if predicate(node) {
-                    return Some(child_id);
-                }
-                if let Some(found) = self.find_element(child_id, predicate) {
-                    return Some(found);
-                }
+        let mut seed: Vec<NodeId> = Vec::new();
+        while let Some(c) = child {
+            seed.push(c);
+            child = self.get(c).and_then(|n| n.next_sibling);
+        }
+        stack.extend(seed.into_iter().rev());
+
+        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut steps: usize = 0;
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                continue;
             }
-            child = self.get(child_id).and_then(|n| n.next_sibling);
+            steps += 1;
+            if steps > WALK_LIMIT {
+                panic!(
+                    "DOM walk cycle in find_element from {:?} — visited {} unique nodes",
+                    root,
+                    visited.len()
+                );
+            }
+            let node = match self.get(id) {
+                Some(n) => n,
+                None => continue,
+            };
+            if predicate(node) {
+                return Some(id);
+            }
+            let mut kids: Vec<NodeId> = Vec::new();
+            let mut child = node.first_child;
+            while let Some(c) = child {
+                kids.push(c);
+                child = self.get(c).and_then(|n| n.next_sibling);
+            }
+            stack.extend(kids.into_iter().rev());
         }
         None
     }
 
+    /// Iterative pre-order DFS that pushes every descendant of `root` matching
+    /// `predicate` into `results`, in document order.
     fn collect_elements(
         &self,
         root: NodeId,
         predicate: &dyn Fn(&Node) -> bool,
         results: &mut Vec<NodeId>,
     ) {
+        let mut stack: Vec<NodeId> = Vec::new();
+        let mut seed: Vec<NodeId> = Vec::new();
         let mut child = self.get(root).and_then(|n| n.first_child);
-        while let Some(child_id) = child {
-            if let Some(node) = self.get(child_id) {
-                if predicate(node) {
-                    results.push(child_id);
-                }
-                self.collect_elements(child_id, predicate, results);
+        while let Some(c) = child {
+            seed.push(c);
+            child = self.get(c).and_then(|n| n.next_sibling);
+        }
+        stack.extend(seed.into_iter().rev());
+
+        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut steps: usize = 0;
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                continue;
             }
-            child = self.get(child_id).and_then(|n| n.next_sibling);
+            steps += 1;
+            if steps > WALK_LIMIT {
+                panic!(
+                    "DOM walk cycle in collect_elements from {:?} — visited {} unique nodes",
+                    root,
+                    visited.len()
+                );
+            }
+            let node = match self.get(id) {
+                Some(n) => n,
+                None => continue,
+            };
+            if predicate(node) {
+                results.push(id);
+            }
+            let mut kids: Vec<NodeId> = Vec::new();
+            let mut child = node.first_child;
+            while let Some(c) = child {
+                kids.push(c);
+                child = self.get(c).and_then(|n| n.next_sibling);
+            }
+            stack.extend(kids.into_iter().rev());
         }
     }
 }
@@ -739,6 +972,62 @@ mod tests {
                 .local,
             "div"
         );
+    }
+
+    #[test]
+    fn append_child_rejects_self_cycle() {
+        let mut dom = Dom::new();
+        let div = dom.create_element(QualName::new("div"), vec![]);
+        dom.append_child(NodeId::DOCUMENT, div);
+        // Trying to make div its own child must be a no-op, not silently
+        // corrupt the arena.
+        dom.append_child(div, div);
+        // div is still a top-level child of document; div has no children.
+        assert_eq!(dom.children(NodeId::DOCUMENT), vec![div]);
+        assert!(dom.children(div).is_empty());
+        assert_eq!(dom.get(div).unwrap().parent, Some(NodeId::DOCUMENT));
+    }
+
+    #[test]
+    fn append_child_rejects_ancestor_cycle() {
+        let mut dom = Dom::new();
+        let outer = dom.create_element(QualName::new("outer"), vec![]);
+        let inner = dom.create_element(QualName::new("inner"), vec![]);
+        dom.append_child(NodeId::DOCUMENT, outer);
+        dom.append_child(outer, inner);
+        // inner is a descendant of outer; making outer a child of inner would cycle.
+        dom.append_child(inner, outer);
+        // Tree state must be unchanged: inner still under outer, outer still under doc.
+        assert_eq!(dom.children(NodeId::DOCUMENT), vec![outer]);
+        assert_eq!(dom.children(outer), vec![inner]);
+        assert!(dom.children(inner).is_empty());
+        assert_eq!(dom.get(outer).unwrap().parent, Some(NodeId::DOCUMENT));
+        assert_eq!(dom.get(inner).unwrap().parent, Some(outer));
+    }
+
+    #[test]
+    fn iterative_walkers_terminate_on_cycle_instead_of_overflowing() {
+        // Force a cycle by directly mutating arena pointers (bypassing the
+        // public mutation API which would reject this). The original recursive
+        // walker would overflow the C stack; the iterative walker's visited
+        // set must dedup cycle nodes and complete in bounded time.
+        let mut dom = Dom::new();
+        let a = dom.create_element(QualName::new("a"), vec![]);
+        let b = dom.create_element(QualName::new("b"), vec![]);
+        let txt = dom.create_text("hi".to_string());
+        dom.append_child(NodeId::DOCUMENT, a);
+        dom.append_child(a, b);
+        dom.append_child(b, txt);
+        // Splice b's first_child to a — a cycle a → b → a (with text under b too).
+        dom.get_mut(b).unwrap().first_child = Some(a);
+
+        // Each call must return without overflowing or hanging.
+        let _ = dom.text_content(a);
+        let _ = dom.serialize_html(a);
+        let _ = dom.serialize_inner_html(a);
+        let mut results = Vec::new();
+        dom.collect_elements(a, &|n| n.is_element(), &mut results);
+        assert!(dom.find_element(a, &|_| false).is_none());
     }
 
     #[test]

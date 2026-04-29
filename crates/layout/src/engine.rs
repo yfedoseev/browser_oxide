@@ -7,8 +7,15 @@ use css_values::property::{CssValue, PropertyId};
 use css_values::types::display::Display;
 use dom::node::{NodeData, NodeId};
 use dom::Dom;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use taffy::prelude::*;
+
+/// Step limit for the iterative DOM walk in `build_node`. A correct DOM has
+/// at most `nodes.len()` unique ids; if the walker takes more steps than this
+/// it is iterating a cycle and we panic with a clear message rather than
+/// running until OS abort. 100K is several orders of magnitude beyond any
+/// real document.
+const LAYOUT_BUILD_LIMIT: usize = 100_000;
 
 /// The layout engine. Converts a DOM + styles into positioned elements.
 pub struct LayoutEngine {
@@ -124,18 +131,76 @@ impl LayoutEngine {
 
     // --- Internal ---
 
+    /// Build a taffy subtree rooted at `root`. Iterative post-order DFS:
+    /// each node is "visited" first to enqueue its children, then "finished"
+    /// after all descendants are processed so children's taffy IDs are
+    /// available via `self.dom_to_taffy` when we call `tree.new_with_children`.
+    /// `visited` + step counter guard against arena cycles (impossible given
+    /// the cycle assertions in `Dom::append_child`/`insert_before`, but
+    /// provides a clear panic if state ever becomes corrupt).
     fn build_node(
         &mut self,
         dom: &Dom,
-        node_id: NodeId,
+        root: NodeId,
         ctx: &ResolveContext,
     ) -> Option<taffy::NodeId> {
-        let node = dom.get(node_id)?;
+        enum Work {
+            Visit(NodeId),
+            Finish(NodeId),
+        }
+        let mut stack: Vec<Work> = vec![Work::Visit(root)];
+        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut steps: usize = 0;
+        while let Some(work) = stack.pop() {
+            match work {
+                Work::Visit(node_id) => {
+                    if !visited.insert(node_id) {
+                        continue;
+                    }
+                    steps += 1;
+                    if steps > LAYOUT_BUILD_LIMIT {
+                        panic!(
+                            "Layout build cycle from {:?} — visited {} unique nodes",
+                            root,
+                            visited.len()
+                        );
+                    }
+                    // Schedule Finish first so it pops after all children.
+                    stack.push(Work::Finish(node_id));
+                    // Push children in reverse for document order on pop.
+                    let kids = dom.children(node_id);
+                    for c in kids.into_iter().rev() {
+                        stack.push(Work::Visit(c));
+                    }
+                }
+                Work::Finish(node_id) => {
+                    self.finish_node(dom, node_id, ctx);
+                }
+            }
+        }
+        self.dom_to_taffy.get(&root.to_raw()).copied()
+    }
 
-        match &node.data {
+    /// Build the taffy node for `node_id` using already-built children
+    /// recorded in `self.dom_to_taffy` (set by prior Finish calls in
+    /// post-order). Returns nothing — the result lives in `dom_to_taffy`.
+    fn finish_node(&mut self, dom: &Dom, node_id: NodeId, ctx: &ResolveContext) {
+        let node = match dom.get(node_id) {
+            Some(n) => n,
+            None => return,
+        };
+
+        // Collect already-built children's taffy IDs in document order.
+        // Children that returned None (e.g. display:none, unsupported node
+        // type) are absent from dom_to_taffy and naturally filtered out.
+        let children: Vec<taffy::NodeId> = dom
+            .children(node_id)
+            .into_iter()
+            .filter_map(|cid| self.dom_to_taffy.get(&cid.to_raw()).copied())
+            .collect();
+
+        let taffy_id = match &node.data {
             NodeData::Document | NodeData::DocumentFragment => {
-                // Container node: just build children
-                let children = self.build_children(dom, node_id, ctx);
                 let style = taffy::Style {
                     display: taffy::Display::Block,
                     size: taffy::Size {
@@ -144,35 +209,29 @@ impl LayoutEngine {
                     },
                     ..Default::default()
                 };
-                let taffy_id = self.tree.new_with_children(style, &children).ok()?;
-                self.dom_to_taffy.insert(node_id.to_raw(), taffy_id);
-                Some(taffy_id)
+                match self.tree.new_with_children(style, &children) {
+                    Ok(id) => id,
+                    Err(_) => return,
+                }
             }
             NodeData::Element(elem) => {
-                // Get computed style (simplified: use default cascade)
                 let computed = ComputedStyle::resolve(&HashMap::new(), None);
-
-                // Check for inline style attribute
                 let inline_style = self.parse_inline_style(elem);
                 let computed = if !inline_style.is_empty() {
                     ComputedStyle::resolve(&inline_style, None)
                 } else {
                     computed
                 };
-
-                // Skip display:none
                 if let Some(CssValue::Display(Display::None)) = computed.get(&PropertyId::Display) {
-                    return None;
+                    return;
                 }
-
                 let taffy_style = computed_to_taffy(&computed, ctx);
-                let children = self.build_children(dom, node_id, ctx);
-                let taffy_id = self.tree.new_with_children(taffy_style, &children).ok()?;
-                self.dom_to_taffy.insert(node_id.to_raw(), taffy_id);
-                Some(taffy_id)
+                match self.tree.new_with_children(taffy_style, &children) {
+                    Ok(id) => id,
+                    Err(_) => return,
+                }
             }
             NodeData::Text(text) => {
-                // Text node: fixed size based on content
                 let char_count = text.chars().count() as f32;
                 let width = char_count * ctx.font_size * 0.6;
                 let height = ctx.font_size * 1.2;
@@ -183,24 +242,14 @@ impl LayoutEngine {
                     },
                     ..Default::default()
                 };
-                let taffy_id = self.tree.new_leaf(style).ok()?;
-                self.dom_to_taffy.insert(node_id.to_raw(), taffy_id);
-                Some(taffy_id)
+                match self.tree.new_leaf(style) {
+                    Ok(id) => id,
+                    Err(_) => return,
+                }
             }
-            _ => None,
-        }
-    }
-
-    fn build_children(
-        &mut self,
-        dom: &Dom,
-        parent: NodeId,
-        ctx: &ResolveContext,
-    ) -> Vec<taffy::NodeId> {
-        dom.children(parent)
-            .into_iter()
-            .filter_map(|child_id| self.build_node(dom, child_id, ctx))
-            .collect()
+            _ => return,
+        };
+        self.dom_to_taffy.insert(node_id.to_raw(), taffy_id);
     }
 
     fn parse_inline_style(&self, elem: &dom::node::ElementData) -> HashMap<PropertyId, CssValue> {

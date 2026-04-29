@@ -150,8 +150,28 @@
 
     // Runtime count resolvers — clamped to physical array size so a probe
     // that walks plugins[i] for i<length never hits undefined.
-    const _pluginsLen = () => Math.max(0, Math.min(_allPlugins.length, _pInt("plugins_count", _allPlugins.length)));
-    const _mimesLen = () => Math.max(0, Math.min(_allMimes.length, _pInt("mime_types_count", _allMimes.length)));
+    //
+    // Memoized on first call so repeated probes (creepjs's per-property
+    // lie-detection spreads `[...navigator.plugins]` for every WebIDL
+    // member it audits) hit a cached number instead of re-reading the
+    // profile and re-computing the clamp on each numeric-index getter.
+    // The first call still happens at runtime — by which time the profile
+    // IS installed (we cannot eager-cache here because window_bootstrap.js
+    // is evaluated at snapshot build-time without a profile).
+    let _pluginsLenCache = -1;
+    const _pluginsLen = () => {
+        if (_pluginsLenCache < 0) {
+            _pluginsLenCache = Math.max(0, Math.min(_allPlugins.length, _pInt("plugins_count", _allPlugins.length)));
+        }
+        return _pluginsLenCache;
+    };
+    let _mimesLenCache = -1;
+    const _mimesLen = () => {
+        if (_mimesLenCache < 0) {
+            _mimesLenCache = Math.max(0, Math.min(_allMimes.length, _pInt("mime_types_count", _allMimes.length)));
+        }
+        return _mimesLenCache;
+    };
 
     // 2. Setup PluginArray.prototype — length + item() dispatch via live count.
     const _PluginArrayProto = PluginArray.prototype;
@@ -2390,6 +2410,7 @@
     }
 
     function makeStorage(type) {
+        const STORAGE_METHODS = ["getItem", "setItem", "removeItem", "clear", "key", "length"];
         return new Proxy({}, {
             get(target, key) {
                 if (key === "getItem") return (k) => ops.op_dom_storage_get(type, String(k));
@@ -2398,9 +2419,18 @@
                 if (key === "clear") return () => { ops.op_dom_storage_clear(type); };
                 if (key === "key") return (i) => ops.op_dom_storage_keys(type)[i] ?? null;
                 if (key === "length") return ops.op_dom_storage_keys(type).length;
-                
+
                 // Fallback to getting the item directly if it's not a method
                 return ops.op_dom_storage_get(type, String(key)) ?? undefined;
+            },
+            // V8 Proxy invariant: `has` must agree with `ownKeys` about what
+            // keys exist. Without an explicit trap, V8 falls back to the empty
+            // target object — which says "no keys" and contradicts ownKeys's
+            // real list. The reconciliation is hot work that creepjs hits
+            // repeatedly via `'name' in storage` style probes.
+            has(target, key) {
+                if (STORAGE_METHODS.includes(key)) return true;
+                return ops.op_dom_storage_get(type, String(key)) !== null;
             },
             set(target, key, value) { return setStorageItem(type, String(key), value); },
             deleteProperty(target, key) {

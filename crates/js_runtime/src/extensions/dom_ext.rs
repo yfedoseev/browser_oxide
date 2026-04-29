@@ -91,6 +91,23 @@ pub fn op_dom_has_attribute(
         })
 }
 
+/// Returns the names of all attributes on `node_id`, in source order.
+/// Used by Proxy ownKeys traps for `element.attributes` and `element.dataset`.
+#[op2]
+#[serde]
+pub fn op_dom_get_attribute_names(
+    #[state] state: &DomState,
+    #[smi] node_id: i32,
+) -> Vec<String> {
+    let id = NodeId::from_raw(node_id as u32);
+    state
+        .dom
+        .get(id)
+        .and_then(|n| n.as_element())
+        .map(|e| e.attrs.iter().map(|a| a.name.local.clone()).collect())
+        .unwrap_or_default()
+}
+
 /// Returns parent NodeId or -1 if no parent.
 #[op2(fast)]
 #[smi]
@@ -1074,6 +1091,7 @@ deno_core::extension!(
         op_dom_get_outer_html,
         op_dom_get_attribute,
         op_dom_has_attribute,
+        op_dom_get_attribute_names,
         op_dom_get_parent,
         op_dom_get_children,
         op_dom_get_children_with_types,

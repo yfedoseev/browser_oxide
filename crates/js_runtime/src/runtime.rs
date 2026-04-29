@@ -103,7 +103,12 @@ pub fn create_runtime_with_signals(
     // — the engine is collecting hundreds of thousands of property
     // descriptors across every WebIDL interface). Real Chrome on a
     // desktop has 4 GB+ available per renderer; we mirror that.
-    const HEAP_INITIAL: usize = 256 * 1024 * 1024; // 256 MB initial
+    //
+    // HEAP_INITIAL was 256 MB but caused early-growth GC pauses on
+    // fingerprint-heavy sites (creepjs allocates well past 256 MB during
+    // its lie-detection pass; V8 spent time compacting old space before
+    // growing the heap). 1 GB initial skips those early compactions.
+    const HEAP_INITIAL: usize = 1024 * 1024 * 1024; // 1 GB initial
     const HEAP_MAX: usize = 4 * 1024 * 1024 * 1024; // 4 GB max
     let create_params = deno_core::v8::CreateParams::default().heap_limits(HEAP_INITIAL, HEAP_MAX);
 
