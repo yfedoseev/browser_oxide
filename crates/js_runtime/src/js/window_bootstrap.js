@@ -279,10 +279,19 @@
             if (kind === "audioinput" || kind === "audiooutput") return _PERMISSION_STATE_MAP["microphone"] || "prompt";
             return "granted"; // unknown kinds — don't blank
         };
+        // Real Chrome's enumerateDevices behaviour pre-permission:
+        //   - Returns the SAME array length (count of devices is leaked).
+        //   - Each entry has empty deviceId / groupId / label until the
+        //     user grants getUserMedia for the corresponding permission
+        //     (camera for videoinput, microphone for audioinput/audiooutput).
+        // Previously we only blanked `label`; spec says all three string
+        // fields must blank pre-grant. FingerprintJS open-source and
+        // BrowserLeaks both probe deviceId equality across runs to fingerprint.
         const out = raw.map((d) => {
-            const deviceId = d.deviceId != null ? d.deviceId : (d.device_id || "");
-            const groupId = d.groupId != null ? d.groupId : (d.group_id || "");
-            const label = permFor(d.kind) === "granted" ? (d.label || "") : "";
+            const granted = permFor(d.kind) === "granted";
+            const deviceId = granted ? (d.deviceId != null ? d.deviceId : (d.device_id || "")) : "";
+            const groupId = granted ? (d.groupId != null ? d.groupId : (d.group_id || "")) : "";
+            const label = granted ? (d.label || "") : "";
             return { deviceId, kind: d.kind || "", label, groupId };
         });
         return Promise.resolve(out);
@@ -1007,32 +1016,89 @@
     Object.defineProperty(globalThis, 'outerWidth',  { get: () => _pInt("outer_width", 1920),   configurable: true });
     Object.defineProperty(globalThis, 'outerHeight', { get: () => _pInt("outer_height", 1080),  configurable: true });
     Object.defineProperty(globalThis, 'devicePixelRatio', { get: () => _pFloat("device_pixel_ratio", 1), configurable: true });
-    globalThis.screenX = 0;
-    globalThis.screenY = 0;
-    globalThis.pageXOffset = 0;
-    globalThis.pageYOffset = 0;
-    globalThis.scrollX = 0;
-    globalThis.scrollY = 0;
+
+    // Scroll + screen position — must be ACCESSOR properties on
+    // Window.prototype, NOT data properties on globalThis. Real Chrome's
+    // descriptors:
+    //
+    //   Object.getOwnPropertyDescriptor(window, 'scrollX')
+    //     → undefined (inherited from Window.prototype)
+    //   Object.getOwnPropertyDescriptor(Window.prototype, 'scrollX')
+    //     → { get: f, set: undefined, enumerable: true, configurable: true }
+    //
+    // The previous implementation assigned them as own data properties
+    // on globalThis, which detection libraries spot via:
+    //   typeof Object.getOwnPropertyDescriptor(window, 'scrollX').value === 'number'
+    //
+    // Backing storage is module-scope state, mutated by scrollTo()/scrollBy().
+    // screenX/Y are always 0 on a windowless engine (matches headless Chrome
+    // and matches our prior behaviour).
+    let _scrollX = 0;
+    let _scrollY = 0;
+
+    // Resolve Window.prototype. In our V8 runtime, `globalThis` IS the
+    // window object, so `Object.getPrototypeOf(globalThis)` yields the
+    // Window prototype where these accessors must live.
+    const _WindowProto = Object.getPrototypeOf(globalThis);
+    if (_WindowProto && _WindowProto !== Object.prototype) {
+        Object.defineProperty(_WindowProto, 'scrollX', {
+            get: function() { return _scrollX; },
+            enumerable: true, configurable: true,
+        });
+        Object.defineProperty(_WindowProto, 'scrollY', {
+            get: function() { return _scrollY; },
+            enumerable: true, configurable: true,
+        });
+        Object.defineProperty(_WindowProto, 'pageXOffset', {
+            get: function() { return _scrollX; },
+            enumerable: true, configurable: true,
+        });
+        Object.defineProperty(_WindowProto, 'pageYOffset', {
+            get: function() { return _scrollY; },
+            enumerable: true, configurable: true,
+        });
+        Object.defineProperty(_WindowProto, 'screenX', {
+            get: function() { return 0; },
+            enumerable: true, configurable: true,
+        });
+        Object.defineProperty(_WindowProto, 'screenY', {
+            get: function() { return 0; },
+            enumerable: true, configurable: true,
+        });
+        Object.defineProperty(_WindowProto, 'screenLeft', {
+            get: function() { return 0; },
+            enumerable: true, configurable: true,
+        });
+        Object.defineProperty(_WindowProto, 'screenTop', {
+            get: function() { return 0; },
+            enumerable: true, configurable: true,
+        });
+    } else {
+        // Fallback if prototype walk failed — keep them as own getters on
+        // globalThis (better than data properties).
+        Object.defineProperty(globalThis, 'scrollX',     { get: () => _scrollX, configurable: true });
+        Object.defineProperty(globalThis, 'scrollY',     { get: () => _scrollY, configurable: true });
+        Object.defineProperty(globalThis, 'pageXOffset', { get: () => _scrollX, configurable: true });
+        Object.defineProperty(globalThis, 'pageYOffset', { get: () => _scrollY, configurable: true });
+        Object.defineProperty(globalThis, 'screenX',     { get: () => 0, configurable: true });
+        Object.defineProperty(globalThis, 'screenY',     { get: () => 0, configurable: true });
+    }
 
     globalThis.scrollTo = function(xOrOptions, y) {
         if (typeof xOrOptions === "object" && xOrOptions !== null) {
-            globalThis.scrollX = xOrOptions.left || 0;
-            globalThis.pageXOffset = globalThis.scrollX;
-            globalThis.scrollY = xOrOptions.top || 0;
-            globalThis.pageYOffset = globalThis.scrollY;
+            _scrollX = xOrOptions.left || 0;
+            _scrollY = xOrOptions.top || 0;
         } else {
-            globalThis.scrollX = xOrOptions || 0;
-            globalThis.pageXOffset = globalThis.scrollX;
-            globalThis.scrollY = y || 0;
-            globalThis.pageYOffset = globalThis.scrollY;
+            _scrollX = xOrOptions || 0;
+            _scrollY = y || 0;
         }
     };
     globalThis.scroll = globalThis.scrollTo;
     globalThis.scrollBy = function(xOrOptions, y) {
         if (typeof xOrOptions === "object" && xOrOptions !== null) {
-            globalThis.scrollTo(globalThis.scrollX + (xOrOptions.left || 0), globalThis.scrollY + (xOrOptions.top || 0));
+            globalThis.scrollTo(_scrollX + (xOrOptions.left || 0), _scrollY + (xOrOptions.top || 0));
         } else {
-            globalThis.scrollTo(globalThis.scrollX + (xOrOptions || 0), globalThis.scrollY + (y || 0));
+            globalThis.scrollTo(_scrollX + (xOrOptions || 0), _scrollY + (y || 0));
         }
     };
 
@@ -1857,6 +1923,167 @@
             configurable: true,
         });
         Object.defineProperty(Date.prototype.getTimezoneOffset, _nativeTag, { value: 'getTimezoneOffset', configurable: true });
+
+        // =========================================================
+        // Date.prototype toString patches — print the profile's
+        // timezone, not UTC. Detection libraries probe
+        // `new Date().toString()` because it's the cheapest TZ probe
+        // available; UTC output on a macOS profile is a hard tell.
+        //
+        // Real Chrome on macOS / America/Los_Angeles produces:
+        //   "Tue Apr 29 2026 13:02:46 GMT-0700 (Pacific Daylight Time)"
+        //
+        // We patch four methods consistently:
+        //   - toString()        full date+time+tz
+        //   - toDateString()    date portion only
+        //   - toTimeString()    time + tz portion only
+        //   - toLocaleString()  default-locale form (when called w/o args)
+        // =========================================================
+
+        // Map IANA name → English long-form ("Pacific Daylight Time", etc.)
+        // Chrome derives this from the longGeneric+timeZoneName fields that
+        // Intl.DateTimeFormat exposes. Compute via the cached _OrigDTF.
+        const _tzLongName = (date, tz) => {
+            try {
+                const fmt = new _OrigDTF("en-US", {
+                    timeZone: tz, timeZoneName: "long",
+                });
+                const parts = fmt.formatToParts(date);
+                const tzPart = parts.find(p => p.type === "timeZoneName");
+                return tzPart ? tzPart.value : "";
+            } catch (_e) { return ""; }
+        };
+
+        // Compute "GMT-0700" style offset string from the profile timezone
+        // for a specific moment (DST-aware via our patched getTimezoneOffset).
+        const _gmtOffsetString = (date) => {
+            const offMin = date.getTimezoneOffset();
+            const sign = offMin <= 0 ? "+" : "-";
+            const abs = Math.abs(offMin);
+            const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+            const mm = String(abs % 60).padStart(2, "0");
+            return `GMT${sign}${hh}${mm}`;
+        };
+
+        // Pull profile-localized date+time parts so we can format the
+        // "Tue Apr 29 2026 13:02:46" portion the way real Chrome does.
+        // Returns { weekday, month, day, year, hh, mm, ss } strings.
+        const _tzParts = (date, tz) => {
+            try {
+                const fmt = new _OrigDTF("en-US", {
+                    timeZone: tz, weekday: "short", month: "short",
+                    day: "2-digit", year: "numeric",
+                    hour: "2-digit", minute: "2-digit", second: "2-digit",
+                    hour12: false,
+                });
+                const parts = fmt.formatToParts(date);
+                const get = (t) => parts.find(p => p.type === t)?.value || "";
+                const hour = get("hour");
+                // Chrome uses 24-hour; Intl may produce "24" for midnight in
+                // some locales — normalize to "00".
+                return {
+                    weekday: get("weekday"),
+                    month: get("month"),
+                    day: get("day"),
+                    year: get("year"),
+                    hour: hour === "24" ? "00" : hour,
+                    minute: get("minute"),
+                    second: get("second"),
+                };
+            } catch (_e) { return null; }
+        };
+
+        const _origDateToString = Date.prototype.toString;
+        Date.prototype.toString = function toString() {
+            // `Date.prototype.toString.call(non-Date)` must throw TypeError —
+            // mirror real Chrome by delegating to the original.
+            if (!(this instanceof Date) || Number.isNaN(this.getTime?.())) {
+                return _origDateToString.call(this);
+            }
+            const tz = _profileTz();
+            if (!tz) return _origDateToString.call(this);
+            const p = _tzParts(this, tz);
+            if (!p) return _origDateToString.call(this);
+            const longName = _tzLongName(this, tz);
+            const offStr = _gmtOffsetString(this);
+            // Format: "Tue Apr 29 2026 13:02:46 GMT-0700 (Pacific Daylight Time)"
+            const longPart = longName ? ` (${longName})` : "";
+            return `${p.weekday} ${p.month} ${p.day} ${p.year} ${p.hour}:${p.minute}:${p.second} ${offStr}${longPart}`;
+        };
+        Object.defineProperty(Date.prototype.toString, "toString", {
+            value: () => "function toString() { [native code] }",
+            configurable: true,
+        });
+        Object.defineProperty(Date.prototype.toString, _nativeTag, { value: 'toString', configurable: true });
+
+        const _origDateToDateString = Date.prototype.toDateString;
+        Date.prototype.toDateString = function toDateString() {
+            if (!(this instanceof Date) || Number.isNaN(this.getTime?.())) {
+                return _origDateToDateString.call(this);
+            }
+            const tz = _profileTz();
+            if (!tz) return _origDateToDateString.call(this);
+            const p = _tzParts(this, tz);
+            if (!p) return _origDateToDateString.call(this);
+            return `${p.weekday} ${p.month} ${p.day} ${p.year}`;
+        };
+        Object.defineProperty(Date.prototype.toDateString, "toString", {
+            value: () => "function toDateString() { [native code] }",
+            configurable: true,
+        });
+        Object.defineProperty(Date.prototype.toDateString, _nativeTag, { value: 'toDateString', configurable: true });
+
+        const _origDateToTimeString = Date.prototype.toTimeString;
+        Date.prototype.toTimeString = function toTimeString() {
+            if (!(this instanceof Date) || Number.isNaN(this.getTime?.())) {
+                return _origDateToTimeString.call(this);
+            }
+            const tz = _profileTz();
+            if (!tz) return _origDateToTimeString.call(this);
+            const p = _tzParts(this, tz);
+            if (!p) return _origDateToTimeString.call(this);
+            const longName = _tzLongName(this, tz);
+            const offStr = _gmtOffsetString(this);
+            const longPart = longName ? ` (${longName})` : "";
+            return `${p.hour}:${p.minute}:${p.second} ${offStr}${longPart}`;
+        };
+        Object.defineProperty(Date.prototype.toTimeString, "toString", {
+            value: () => "function toTimeString() { [native code] }",
+            configurable: true,
+        });
+        Object.defineProperty(Date.prototype.toTimeString, _nativeTag, { value: 'toTimeString', configurable: true });
+
+        // toLocaleString is already covered by the patched Intl.DateTimeFormat
+        // (which Date.prototype.toLocaleString delegates to internally), but
+        // V8's implementation calls the *original* Intl constructor directly
+        // bypassing our patch. Force-route through our patched constructor.
+        const _origDateToLocaleString = Date.prototype.toLocaleString;
+        Date.prototype.toLocaleString = function toLocaleString(...args) {
+            if (!(this instanceof Date) || Number.isNaN(this.getTime?.())) {
+                return _origDateToLocaleString.apply(this, args);
+            }
+            const tz = _profileTz();
+            const loc = _profileLocale() || "en-US";
+            if (!tz) return _origDateToLocaleString.apply(this, args);
+            try {
+                const locales = args[0] !== undefined ? args[0] : loc;
+                const options = Object.assign(
+                    { timeZone: tz },
+                    args[1] || {
+                        year: "numeric", month: "numeric", day: "numeric",
+                        hour: "numeric", minute: "numeric", second: "numeric",
+                    },
+                );
+                return new _OrigDTF(locales, options).format(this);
+            } catch (_e) {
+                return _origDateToLocaleString.apply(this, args);
+            }
+        };
+        Object.defineProperty(Date.prototype.toLocaleString, "toString", {
+            value: () => "function toLocaleString() { [native code] }",
+            configurable: true,
+        });
+        Object.defineProperty(Date.prototype.toLocaleString, _nativeTag, { value: 'toLocaleString', configurable: true });
     }
 
     // =========================================================
@@ -2889,27 +3116,220 @@
     Object.defineProperty(_HistoryProto, Symbol.toStringTag, { value: "History", configurable: true });
     globalThis.history = Object.create(_HistoryProto);
 
-    // --- matchMedia ---
-    globalThis.matchMedia = function(query) {
-        // Evaluate common media queries based on our stealth profile
-        let matches = false;
-        if (query.includes("prefers-color-scheme: light")) matches = true;
-        if (query.includes("prefers-reduced-motion: no-preference")) matches = true;
-        const widthMatch = query.match(/\(min-width:\s*(\d+)px\)/);
-        if (widthMatch && globalThis.innerWidth >= parseInt(widthMatch[1])) matches = true;
-        const maxWidthMatch = query.match(/\(max-width:\s*(\d+)px\)/);
-        if (maxWidthMatch && globalThis.innerWidth <= parseInt(maxWidthMatch[1])) matches = true;
-        return {
-            matches,
-            media: query,
-            onchange: null,
-            addListener(cb) {},  // deprecated
-            removeListener(cb) {},  // deprecated
-            addEventListener(type, cb) {},
-            removeEventListener(type, cb) {},
-            dispatchEvent(event) { return true; },
+    // =========================================================
+    // matchMedia — covers the 12 standard CSS Media Queries Level 5
+    // features that detection libraries probe. Profile-driven defaults
+    // (light theme, fine pointer, hover-capable) for the desktop
+    // chrome_130_* presets. Returns a real `class MediaQueryList
+    // extends EventTarget` instead of a plain object literal so
+    // `mql instanceof MediaQueryList` and
+    // `Object.prototype.toString.call(mql) === "[object MediaQueryList]"`
+    // both hold (the prior shim failed both probes).
+    //
+    // Supported features (matches Chrome 130+ on macOS desktop):
+    //   prefers-color-scheme  : light | dark | no-preference
+    //   prefers-reduced-motion: reduce | no-preference
+    //   prefers-reduced-data  : reduce | no-preference
+    //   prefers-reduced-transparency: reduce | no-preference
+    //   prefers-contrast      : more | less | custom | no-preference
+    //   inverted-colors       : inverted | none
+    //   forced-colors         : active | none
+    //   pointer / any-pointer : none | coarse | fine
+    //   hover  / any-hover    : none | hover
+    //   color  / color-gamut  / monochrome / dynamic-range
+    //   orientation           : landscape | portrait
+    //   resolution            : matching dppx
+    //   width / height / device-width / device-height (min/max/exact)
+    //   aspect-ratio / device-aspect-ratio
+    //   display-mode          : browser | standalone | fullscreen | minimal-ui
+    //   update / overflow-block / overflow-inline
+    //   scripting / scan / grid
+    // =========================================================
+    {
+        const _profileFeature = (key, fallback) => {
+            try { return _p(key, fallback); } catch (_e) { return fallback; }
         };
-    };
+
+        // Feature -> (value-string -> bool) for the chosen profile defaults.
+        const _featureValue = (name) => {
+            // Honor profile fields when they exist; else use desktop default.
+            switch (name) {
+                case "prefers-color-scheme":
+                    return _profileFeature("prefers_color_scheme", "light");
+                case "prefers-reduced-motion": return "no-preference";
+                case "prefers-reduced-data": return "no-preference";
+                case "prefers-reduced-transparency": return "no-preference";
+                case "prefers-contrast": return "no-preference";
+                case "inverted-colors": return "none";
+                case "forced-colors": return "none";
+                case "pointer":
+                case "any-pointer":
+                    return _profileFeature("pointer_type", "fine");
+                case "hover":
+                case "any-hover":
+                    return _profileFeature("hover_capability", "hover");
+                case "display-mode": return "browser";
+                case "update": return "fast";
+                case "overflow-block": return "scroll";
+                case "overflow-inline": return "scroll";
+                case "scripting": return "enabled";
+                case "scan": return "progressive";
+                case "grid": return "0";
+                case "color-gamut": return "srgb";
+                case "dynamic-range": return "standard";
+                case "orientation": return _orientationValue();
+                default: return null;
+            }
+        };
+
+        // Numeric features
+        const _numericFeature = (name) => {
+            switch (name) {
+                case "width":
+                case "device-width":
+                    return _pInt("inner_width", 1920);
+                case "height":
+                case "device-height":
+                    return _pInt("inner_height", 1080);
+                case "color":
+                    // Bits per color channel; Chrome reports 8.
+                    return 8;
+                case "monochrome":
+                    return 0;
+                case "resolution":
+                    // Reported as dppx; matches devicePixelRatio.
+                    return _pFloat("device_pixel_ratio", 1);
+                case "device-pixel-ratio":
+                    return _pFloat("device_pixel_ratio", 1);
+                case "aspect-ratio":
+                case "device-aspect-ratio": {
+                    const w = _pInt("inner_width", 1920);
+                    const h = _pInt("inner_height", 1080);
+                    return h > 0 ? w / h : 16 / 9;
+                }
+                default: return null;
+            }
+        };
+
+        // Orientation is enum-valued ("landscape"/"portrait"), so it lives
+        // in the enumerated-feature path even though the source is a
+        // numeric comparison. Moved out of _numericFeature to avoid
+        // tripping the `typeof num === "number"` check below.
+        const _orientationValue = () => {
+            const w = _pInt("inner_width", 1920);
+            const h = _pInt("inner_height", 1080);
+            return w >= h ? "landscape" : "portrait";
+        };
+
+        // Parse a single feature predicate like
+        //   "prefers-color-scheme: light"
+        //   "min-width: 1024px"
+        //   "(pointer)"  (existence — true if any value is supported)
+        const _evalSingle = (feat) => {
+            feat = feat.trim().toLowerCase();
+            if (!feat) return false;
+
+            // (feature) without value → "is this feature supported with any
+            // non-none value?"
+            if (!feat.includes(":")) {
+                const numeric = _numericFeature(feat);
+                if (numeric !== null) {
+                    if (typeof numeric === "number") return numeric > 0;
+                    return true;
+                }
+                const enumVal = _featureValue(feat);
+                if (enumVal !== null) return enumVal !== "none" && enumVal !== "no-preference" && enumVal !== "0";
+                return false;
+            }
+
+            // "feature: value" — split, trim
+            const colonIdx = feat.indexOf(":");
+            let name = feat.slice(0, colonIdx).trim();
+            const valueStr = feat.slice(colonIdx + 1).trim();
+
+            // Range prefixes — min-* / max-*.
+            let cmp = "eq";
+            if (name.startsWith("min-")) { cmp = "min"; name = name.slice(4); }
+            else if (name.startsWith("max-")) { cmp = "max"; name = name.slice(4); }
+
+            // Numeric features (width / height / resolution / aspect-ratio)
+            const num = _numericFeature(name);
+            if (num !== null && typeof num === "number") {
+                // Parse value: "1024px" / "1.5dppx" / "16/9" / "2"
+                let target;
+                if (valueStr.endsWith("px")) target = parseFloat(valueStr);
+                else if (valueStr.endsWith("dppx")) target = parseFloat(valueStr);
+                else if (valueStr.endsWith("dpi")) target = parseFloat(valueStr) / 96;
+                else if (valueStr.includes("/")) {
+                    const [a, b] = valueStr.split("/").map(parseFloat);
+                    target = b > 0 ? a / b : NaN;
+                }
+                else target = parseFloat(valueStr);
+                if (Number.isNaN(target)) return false;
+                if (cmp === "min") return num >= target;
+                if (cmp === "max") return num <= target;
+                return Math.abs(num - target) < 1e-6;
+            }
+
+            // Enumerated features
+            const enumVal = _featureValue(name);
+            if (enumVal !== null) return enumVal === valueStr;
+
+            return false;
+        };
+
+        // Evaluate a full media query string. Supports comma-separated
+        // alternatives, `and`, `not`, `only`, parens.
+        const _evalQuery = (query) => {
+            if (typeof query !== "string") return false;
+            const q = query.trim().toLowerCase();
+            if (!q || q === "all" || q === "screen") return true;
+            // Comma = OR.
+            if (q.includes(",")) return q.split(",").some(_evalQuery);
+            // Strip leading "only " — same semantics as the bare query.
+            const stripped = q.startsWith("only ") ? q.slice(5).trim() : q;
+            // Strip leading "not " — invert.
+            if (stripped.startsWith("not ")) return !_evalQuery(stripped.slice(4));
+            // Match "(features) and (more)" — split on AND.
+            const tokens = stripped.split(/\s+and\s+/);
+            return tokens.every(tok => {
+                tok = tok.trim();
+                // Bare media type like "screen" / "print" — accept screen.
+                if (tok === "screen" || tok === "all") return true;
+                if (tok === "print") return false;
+                // Strip parens.
+                if (tok.startsWith("(") && tok.endsWith(")")) tok = tok.slice(1, -1);
+                return _evalSingle(tok);
+            });
+        };
+
+        class MediaQueryList extends EventTarget {
+            constructor(query) {
+                super();
+                this._media = String(query || "");
+                this._matches = _evalQuery(this._media);
+                this._onchange = null;
+            }
+            get matches() { return this._matches; }
+            get media() { return this._media; }
+            get onchange() { return this._onchange; }
+            set onchange(v) { this._onchange = (typeof v === "function") ? v : null; }
+            // Deprecated aliases — kept for legacy compat (Safari, etc.).
+            addListener(cb) { try { this.addEventListener("change", cb); } catch(_) {} }
+            removeListener(cb) { try { this.removeEventListener("change", cb); } catch(_) {} }
+        }
+        Object.defineProperty(MediaQueryList.prototype, Symbol.toStringTag, {
+            value: "MediaQueryList", configurable: true,
+        });
+        globalThis.MediaQueryList = MediaQueryList;
+
+        globalThis.matchMedia = function matchMedia(query) {
+            return new MediaQueryList(query);
+        };
+        if (typeof _maskFunction === "function") {
+            _maskFunction(globalThis.matchMedia, "matchMedia");
+        }
+    }
 
     // --- window.open/close/postMessage ---
     globalThis.open = function(url, target, features) { return null; };
@@ -4428,6 +4848,320 @@
                 enumerable: false,
             });
         } catch(_) {}
+    }
+
+    // ================================================================
+    // Phase 6 D4 — Missing-constructor batch (10 surfaces)
+    //
+    // Real Chrome 147 macOS exposes these surfaces. Most are
+    // "present-but-doesn't-work" — Chrome ships the constructor /
+    // instance with the right shape, but invoking the network/IO path
+    // either rejects (network APIs) or no-ops (UI APIs). We mirror the
+    // shape so detection probes don't see absence.
+    //
+    // See docs/PHASE6_FINGERPRINT_INVENTORY_FINDINGS_2026_04_29.md
+    // for per-surface detection sources and rationale.
+    // ================================================================
+
+    // (1) globalThis.caches — CacheStorage (Service Worker spec)
+    // Spec: https://w3c.github.io/ServiceWorker/#cachestorage
+    if (typeof globalThis.caches === "undefined") {
+        class CacheStorage {
+            match(_request, _options) { return Promise.resolve(undefined); }
+            has(_cacheName) { return Promise.resolve(false); }
+            open(_cacheName) {
+                return Promise.resolve({
+                    match() { return Promise.resolve(undefined); },
+                    matchAll() { return Promise.resolve([]); },
+                    add() { return Promise.reject(new TypeError("Cache.add not supported")); },
+                    addAll() { return Promise.reject(new TypeError("Cache.addAll not supported")); },
+                    put() { return Promise.reject(new TypeError("Cache.put not supported")); },
+                    delete() { return Promise.resolve(false); },
+                    keys() { return Promise.resolve([]); },
+                });
+            }
+            delete(_cacheName) { return Promise.resolve(false); }
+            keys() { return Promise.resolve([]); }
+        }
+        Object.defineProperty(CacheStorage.prototype, Symbol.toStringTag, {
+            value: "CacheStorage", configurable: true,
+        });
+        globalThis.CacheStorage = CacheStorage;
+        Object.defineProperty(globalThis, "caches", {
+            value: new CacheStorage(), configurable: true, enumerable: true, writable: false,
+        });
+    }
+
+    // (2) globalThis.cookieStore — async Cookie Store API
+    // Spec: https://wicg.github.io/cookie-store/
+    // Real Chrome exposes a CookieStore INSTANCE on globalThis (not a
+    // constructor). Our prior `_illegalCtor("CookieStore")` made
+    // `typeof cookieStore === "function"` (constructor), but Chrome makes
+    // it `"object"`. Fix: real instance with the documented method set.
+    {
+        class CookieStore extends EventTarget {
+            get(_name) { return Promise.resolve(null); }
+            getAll(_name) { return Promise.resolve([]); }
+            set(_optionsOrName, _value) { return Promise.resolve(); }
+            delete(_optionsOrName) { return Promise.resolve(); }
+        }
+        Object.defineProperty(CookieStore.prototype, Symbol.toStringTag, {
+            value: "CookieStore", configurable: true,
+        });
+        // Override the earlier _illegalCtor binding from interfaces_bootstrap.
+        Object.defineProperty(globalThis, "CookieStore", {
+            value: CookieStore, configurable: true, writable: true,
+        });
+        Object.defineProperty(globalThis, "cookieStore", {
+            value: new CookieStore(), configurable: true, enumerable: true,
+        });
+    }
+
+    // (3) performance.eventCounts — EventCounts Map
+    // Spec: https://wicg.github.io/event-timing/#eventcounts
+    // Real Chrome populates this lazily; on a fresh page it has no keys
+    // until the user/script dispatches input events. We expose an empty
+    // Map-like with the correct shape.
+    if (globalThis.performance && typeof globalThis.performance.eventCounts === "undefined") {
+        class EventCounts {
+            constructor() { this._inner = new Map(); }
+            get size() { return this._inner.size; }
+            get(name) { return this._inner.get(String(name)); }
+            has(name) { return this._inner.has(String(name)); }
+            entries() { return this._inner.entries(); }
+            keys() { return this._inner.keys(); }
+            values() { return this._inner.values(); }
+            forEach(cb, thisArg) { this._inner.forEach(cb, thisArg); }
+            [Symbol.iterator]() { return this._inner[Symbol.iterator](); }
+        }
+        Object.defineProperty(EventCounts.prototype, Symbol.toStringTag, {
+            value: "EventCounts", configurable: true,
+        });
+        globalThis.EventCounts = EventCounts;
+        try {
+            Object.defineProperty(globalThis.performance, "eventCounts", {
+                value: new EventCounts(), configurable: true, enumerable: true,
+            });
+        } catch (_e) {}
+    }
+
+    // (4) Notification.requestPermission — upgrade the existing minimal
+    // Notification class to a full constructor + Promise-returning
+    // requestPermission. Real Chrome's requestPermission returns a
+    // Promise that resolves to "default" / "granted" / "denied".
+    // Both Promise and legacy callback forms are supported per spec.
+    {
+        const _NotifProto = globalThis.Notification?.prototype;
+        class Notification extends EventTarget {
+            constructor(title, options) {
+                super();
+                options = options || {};
+                this.title = String(title || "");
+                this.dir = options.dir || "auto";
+                this.lang = options.lang || "";
+                this.body = options.body || "";
+                this.tag = options.tag || "";
+                this.icon = options.icon || "";
+                this.image = options.image || "";
+                this.badge = options.badge || "";
+                this.data = options.data ?? null;
+                this.silent = options.silent ?? null;
+                this.requireInteraction = !!options.requireInteraction;
+                this.actions = options.actions || [];
+                this.timestamp = Date.now();
+                this.onclick = null;
+                this.onerror = null;
+                this.onclose = null;
+                this.onshow = null;
+            }
+            close() {}
+        }
+        Object.defineProperty(Notification.prototype, Symbol.toStringTag, {
+            value: "Notification", configurable: true,
+        });
+        // Static state — Chrome's "default" until granted explicitly.
+        Object.defineProperty(Notification, "permission", {
+            get: () => "default", configurable: true,
+        });
+        Object.defineProperty(Notification, "maxActions", {
+            value: 2, configurable: true,
+        });
+        Notification.requestPermission = function requestPermission(deprecatedCallback) {
+            // Always resolves to "default" — we never actually grant; matches
+            // headless Chrome behaviour and avoids a tell when the user
+            // never clicks the (non-existent) browser permission UI.
+            const result = "default";
+            const promise = Promise.resolve(result);
+            // Legacy callback form support (Notification spec § Permission).
+            if (typeof deprecatedCallback === "function") {
+                Promise.resolve().then(() => {
+                    try { deprecatedCallback(result); } catch (_e) {}
+                });
+            }
+            return promise;
+        };
+        if (typeof _maskFunction === "function") {
+            _maskFunction(Notification.requestPermission, "requestPermission");
+        }
+        globalThis.Notification = Notification;
+    }
+
+    // (5) IdleDetector — User Idle Detection API (Chrome 94+)
+    // Spec: https://wicg.github.io/idle-detection/
+    if (typeof globalThis.IdleDetector === "undefined") {
+        class IdleDetector extends EventTarget {
+            constructor() {
+                super();
+                this.userState = null;
+                this.screenState = null;
+                this.onchange = null;
+            }
+            start(_options) { return Promise.reject(new DOMException("Not allowed", "NotAllowedError")); }
+            abort() {}
+        }
+        Object.defineProperty(IdleDetector.prototype, Symbol.toStringTag, {
+            value: "IdleDetector", configurable: true,
+        });
+        IdleDetector.requestPermission = function requestPermission() {
+            return Promise.resolve("default");
+        };
+        if (typeof _maskFunction === "function") {
+            _maskFunction(IdleDetector.requestPermission, "requestPermission");
+        }
+        globalThis.IdleDetector = IdleDetector;
+    }
+
+    // (6) EyeDropper — Color picker constructor (Chrome 95+)
+    // Spec: https://wicg.github.io/eyedropper-api/
+    if (typeof globalThis.EyeDropper === "undefined") {
+        class EyeDropper {
+            constructor() {}
+            open(_options) {
+                return Promise.reject(new DOMException("The user canceled the selection", "AbortError"));
+            }
+        }
+        Object.defineProperty(EyeDropper.prototype, Symbol.toStringTag, {
+            value: "EyeDropper", configurable: true,
+        });
+        globalThis.EyeDropper = EyeDropper;
+    }
+
+    // (7) navigator.virtualKeyboard — Virtual Keyboard API (Chrome 94+)
+    // Spec: https://w3c.github.io/virtual-keyboard/
+    {
+        class VirtualKeyboard extends EventTarget {
+            constructor() {
+                super();
+                this._overlaysContent = false;
+                this._boundingRect = { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
+                this.ongeometrychange = null;
+            }
+            get overlaysContent() { return this._overlaysContent; }
+            set overlaysContent(v) { this._overlaysContent = !!v; }
+            get boundingRect() { return this._boundingRect; }
+            show() {}
+            hide() {}
+        }
+        Object.defineProperty(VirtualKeyboard.prototype, Symbol.toStringTag, {
+            value: "VirtualKeyboard", configurable: true,
+        });
+        globalThis.VirtualKeyboard = VirtualKeyboard;
+        try {
+            const _vk = new VirtualKeyboard();
+            Object.defineProperty(_NavProto, "virtualKeyboard", {
+                get: () => _vk, configurable: true, enumerable: true,
+            });
+        } catch (_e) {}
+    }
+
+    // (8) navigator.devicePosture — Device Posture API (Chrome 132+)
+    // Spec: https://w3c.github.io/device-posture/
+    {
+        class DevicePosture extends EventTarget {
+            constructor() {
+                super();
+                this._type = "continuous"; // Desktop default
+                this.onchange = null;
+            }
+            get type() { return this._type; }
+        }
+        Object.defineProperty(DevicePosture.prototype, Symbol.toStringTag, {
+            value: "DevicePosture", configurable: true,
+        });
+        globalThis.DevicePosture = DevicePosture;
+        try {
+            const _dp = new DevicePosture();
+            Object.defineProperty(_NavProto, "devicePosture", {
+                get: () => _dp, configurable: true, enumerable: true,
+            });
+        } catch (_e) {}
+    }
+
+    // (9) navigator.windowControlsOverlay — PWA Window Controls Overlay
+    // Spec: https://wicg.github.io/window-controls-overlay/
+    // Outside an installed PWA context this object exists with
+    // visible:false and an empty rect — match that.
+    {
+        class WindowControlsOverlay extends EventTarget {
+            constructor() {
+                super();
+                this._visible = false;
+                this.ongeometrychange = null;
+            }
+            get visible() { return this._visible; }
+            getTitlebarAreaRect() {
+                return { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0,
+                         toJSON() { return {x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0}; } };
+            }
+        }
+        Object.defineProperty(WindowControlsOverlay.prototype, Symbol.toStringTag, {
+            value: "WindowControlsOverlay", configurable: true,
+        });
+        globalThis.WindowControlsOverlay = WindowControlsOverlay;
+        try {
+            const _wco = new WindowControlsOverlay();
+            Object.defineProperty(_NavProto, "windowControlsOverlay", {
+                get: () => _wco, configurable: true, enumerable: true,
+            });
+        } catch (_e) {}
+    }
+
+    // (10) Document.prototype.startViewTransition — View Transitions API
+    // Spec: https://drafts.csswg.org/css-view-transitions-1/
+    // Real Chrome 111+ exposes this method on Document.prototype.
+    if (globalThis.Document && typeof globalThis.Document.prototype.startViewTransition === "undefined") {
+        class ViewTransition {
+            constructor(updateCallback) {
+                // The view-transition lifecycle: ready Promise resolves
+                // when the snapshot is ready; finished resolves after
+                // the transition completes. updateCallbackDone resolves
+                // after the user's callback finishes.
+                let cbResult = Promise.resolve();
+                if (typeof updateCallback === "function") {
+                    try { cbResult = Promise.resolve(updateCallback()); }
+                    catch (e) { cbResult = Promise.reject(e); }
+                }
+                this.updateCallbackDone = cbResult;
+                // No real animation in headless — resolve immediately.
+                this.ready = cbResult.then(() => {});
+                this.finished = cbResult.then(() => {});
+                this.types = new Set();
+            }
+            skipTransition() {}
+        }
+        Object.defineProperty(ViewTransition.prototype, Symbol.toStringTag, {
+            value: "ViewTransition", configurable: true,
+        });
+        globalThis.ViewTransition = ViewTransition;
+        const _startViewTransition = function startViewTransition(updateCallback) {
+            return new ViewTransition(updateCallback);
+        };
+        if (typeof _maskFunction === "function") {
+            _maskFunction(_startViewTransition, "startViewTransition");
+        }
+        Object.defineProperty(globalThis.Document.prototype, "startViewTransition", {
+            value: _startViewTransition, configurable: true, writable: true,
+        });
     }
 
     // fetch(), Headers, Request, Response are now provided by fetch_bootstrap.js

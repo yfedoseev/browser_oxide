@@ -321,4 +321,335 @@ async fn perimeterx_surface_macos() {
     assert_eq!(ms_proto, "[object MediaSession]", "navigator.mediaSession must be a MediaSession instance");
     assert_eq!(ms_state, "none", "default playbackState must be 'none' per spec");
     assert_eq!(ms_set_action_typeof, "function", "setActionHandler must be callable");
+
+    // --- Phase 6 D1: Date.toString TZ + matchMedia full features --
+    // Real Chrome on macOS / America/Los_Angeles produces:
+    //   "Tue Apr 29 2026 13:02:46 GMT-0700 (Pacific Daylight Time)"
+    // Detection libraries grep `new Date().toString()` for "GMT-" or
+    // `(Pacific Daylight Time)` to verify the TZ matches the
+    // navigator.userAgent platform claim. UTC output is a hard tell.
+    let date_to_string = pull(&mut page, "new Date('2026-04-29T20:02:46Z').toString()");
+    let date_has_gmt_offset = pull(
+        &mut page,
+        "String(/GMT[-+]\\d{4}/.test(new Date('2026-04-29T20:02:46Z').toString()))",
+    );
+    let date_has_long_name = pull(
+        &mut page,
+        "String(/\\(.+\\)$/.test(new Date('2026-04-29T20:02:46Z').toString()))",
+    );
+    let date_to_time_string = pull(&mut page, "new Date('2026-04-29T20:02:46Z').toTimeString()");
+    let date_to_date_string = pull(&mut page, "new Date('2026-04-29T20:02:46Z').toDateString()");
+    let date_to_string_native = pull(
+        &mut page,
+        "Function.prototype.toString.call(Date.prototype.toString)",
+    );
+    println!("\n--- Phase 6 D1: Date.toString TZ format ---");
+    println!("  Date.toString:                {date_to_string}");
+    println!("  has GMT[+-]####:              {date_has_gmt_offset}");
+    println!("  has long-name suffix:         {date_has_long_name}");
+    println!("  Date.toTimeString:            {date_to_time_string}");
+    println!("  Date.toDateString:            {date_to_date_string}");
+    println!("  toString native-mask:         {date_to_string_native}");
+    assert_eq!(
+        date_has_gmt_offset, "true",
+        "Date.toString must include GMT[+-]#### offset, not UTC. Got: {date_to_string}"
+    );
+    assert!(
+        !date_to_string.contains("GMT+0000"),
+        "Date.toString must not print UTC on macOS profile (timezone=America/Los_Angeles). Got: {date_to_string}"
+    );
+    assert_eq!(
+        date_has_long_name, "true",
+        "Date.toString must include long timezone name in parens. Got: {date_to_string}"
+    );
+    assert!(
+        date_to_time_string.contains("GMT"),
+        "Date.toTimeString must include GMT[+-]####. Got: {date_to_time_string}"
+    );
+    assert!(
+        date_to_date_string.contains("2026"),
+        "Date.toDateString must include the year. Got: {date_to_date_string}"
+    );
+    assert!(
+        date_to_string_native.contains("[native code]"),
+        "Date.prototype.toString must serialize as native code"
+    );
+
+    let mql_color_scheme = pull(&mut page, "matchMedia('(prefers-color-scheme: light)').matches");
+    let mql_pointer_fine = pull(&mut page, "matchMedia('(pointer: fine)').matches");
+    let mql_hover = pull(&mut page, "matchMedia('(hover: hover)').matches");
+    let mql_forced_colors_none = pull(&mut page, "matchMedia('(forced-colors: none)').matches");
+    let mql_inverted_colors_none = pull(&mut page, "matchMedia('(inverted-colors: none)').matches");
+    let mql_prefers_contrast = pull(
+        &mut page,
+        "matchMedia('(prefers-contrast: no-preference)').matches",
+    );
+    let mql_orientation = pull(&mut page, "matchMedia('(orientation: landscape)').matches");
+    let mql_min_width = pull(&mut page, "matchMedia('(min-width: 100px)').matches");
+    let mql_proto = pull(
+        &mut page,
+        "Object.prototype.toString.call(matchMedia('(min-width: 0)'))",
+    );
+    let mql_is_event_target = pull(
+        &mut page,
+        "String(matchMedia('(min-width: 0)') instanceof EventTarget)",
+    );
+    let mql_is_class = pull(
+        &mut page,
+        "String(matchMedia('(min-width: 0)') instanceof MediaQueryList)",
+    );
+    println!("\n--- Phase 6 D1: matchMedia full features ---");
+    println!("  prefers-color-scheme: light:  {mql_color_scheme}");
+    println!("  pointer: fine:                {mql_pointer_fine}");
+    println!("  hover: hover:                 {mql_hover}");
+    println!("  forced-colors: none:          {mql_forced_colors_none}");
+    println!("  inverted-colors: none:        {mql_inverted_colors_none}");
+    println!("  prefers-contrast: no-pref:    {mql_prefers_contrast}");
+    println!("  orientation: landscape:       {mql_orientation}");
+    println!("  min-width: 100px:             {mql_min_width}");
+    println!("  toStringTag:                  {mql_proto}");
+    println!("  instanceof EventTarget:       {mql_is_event_target}");
+    println!("  instanceof MediaQueryList:    {mql_is_class}");
+    assert_eq!(mql_color_scheme, "true", "macOS profile defaults light theme");
+    assert_eq!(mql_pointer_fine, "true", "desktop profile default pointer:fine");
+    assert_eq!(mql_hover, "true", "desktop profile default hover:hover");
+    assert_eq!(mql_forced_colors_none, "true");
+    assert_eq!(mql_inverted_colors_none, "true");
+    assert_eq!(mql_prefers_contrast, "true");
+    assert_eq!(mql_orientation, "true", "1440x789 viewport is landscape");
+    assert_eq!(mql_min_width, "true", "1440 viewport >= 100");
+    assert_eq!(mql_proto, "[object MediaQueryList]");
+    assert_eq!(mql_is_event_target, "true");
+    assert_eq!(mql_is_class, "true");
+
+    // --- Phase 6 D2: enumerateDevices full blanking + scroll accessors --
+    // Stash the device list on a global via Promise.then, then drain a few
+    // event-loop ticks so the resolution settles before we read.
+    page.evaluate(
+        "globalThis.__edev = null; navigator.mediaDevices.enumerateDevices().then(d => { globalThis.__edev = d.map(x => ({k: x.kind, idLen: x.deviceId.length, gidLen: x.groupId.length, labelLen: x.label.length})); });"
+    ).unwrap();
+    for _ in 0..5 {
+        let _ = page.evaluate("0").unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let edev_pre = pull(&mut page, "JSON.stringify(globalThis.__edev)");
+    let edev_count = pull(&mut page, "String(globalThis.__edev ? globalThis.__edev.length : 0)");
+    println!("\n--- Phase 6 D2: enumerateDevices pre-permission blanking ---");
+    println!("  count: {edev_count}");
+    println!("  per-device shape: {edev_pre}");
+    let edev_count_n: i64 = edev_count.parse().unwrap();
+    assert!(
+        edev_count_n >= 1,
+        "real Chrome leaks the count of devices; we should match"
+    );
+    // All deviceId/groupId/label fields must be empty pre-permission.
+    assert!(
+        !edev_pre.contains("\"idLen\":") || edev_pre.matches("\"idLen\":0").count() == edev_count_n as usize,
+        "deviceId must be blank (length 0) for every device pre-permission, got {edev_pre}"
+    );
+    assert!(
+        !edev_pre.contains("\"gidLen\":") || edev_pre.matches("\"gidLen\":0").count() == edev_count_n as usize,
+        "groupId must be blank pre-permission, got {edev_pre}"
+    );
+    assert!(
+        !edev_pre.contains("\"labelLen\":") || edev_pre.matches("\"labelLen\":0").count() == edev_count_n as usize,
+        "label must be blank pre-permission, got {edev_pre}"
+    );
+
+    // scroll/page/screen position accessors must live on Window.prototype,
+    // NOT as own data properties on globalThis.
+    let scroll_own = pull(
+        &mut page,
+        "String(Object.getOwnPropertyDescriptor(window, 'scrollX'))",
+    );
+    let scroll_proto_has_get = pull(
+        &mut page,
+        "String(typeof Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'scrollX').get)",
+    );
+    let page_x_offset_proto = pull(
+        &mut page,
+        "String(typeof Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'pageXOffset').get)",
+    );
+    let screen_x_proto = pull(
+        &mut page,
+        "String(typeof Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'screenX').get)",
+    );
+    let scroll_initial = pull(&mut page, "String(window.scrollY)");
+    let scroll_after = pull(
+        &mut page,
+        "(() => { window.scrollTo(0, 100); return String(window.scrollY); })()",
+    );
+    let page_y_after = pull(&mut page, "String(window.pageYOffset)");
+    let scroll_by_after = pull(
+        &mut page,
+        "(() => { window.scrollBy(0, 50); return String(window.scrollY); })()",
+    );
+    println!("\n--- Phase 6 D2: scrollX/Y/pageX/YOffset/screenX/Y as Window.prototype accessors ---");
+    println!("  own descriptor on window:        {scroll_own}");
+    println!("  proto descriptor.get is fn:      {scroll_proto_has_get}");
+    println!("  pageXOffset proto descriptor get: {page_x_offset_proto}");
+    println!("  screenX proto descriptor get:    {screen_x_proto}");
+    println!("  scrollY initial:                 {scroll_initial}");
+    println!("  scrollY after scrollTo(0,100):   {scroll_after}");
+    println!("  pageYOffset after scrollTo:      {page_y_after}");
+    println!("  scrollY after scrollBy(0,50):    {scroll_by_after}");
+    assert_eq!(
+        scroll_own, "undefined",
+        "Object.getOwnPropertyDescriptor(window, 'scrollX') must be undefined (inherited from Window.prototype)"
+    );
+    assert_eq!(
+        scroll_proto_has_get, "function",
+        "Window.prototype.scrollX must be an accessor with a getter"
+    );
+    assert_eq!(
+        page_x_offset_proto, "function",
+        "Window.prototype.pageXOffset must be an accessor"
+    );
+    assert_eq!(
+        screen_x_proto, "function",
+        "Window.prototype.screenX must be an accessor"
+    );
+    assert_eq!(scroll_initial, "0", "initial scrollY is 0");
+    assert_eq!(scroll_after, "100", "scrollTo(0, 100) updates scrollY");
+    assert_eq!(page_y_after, "100", "pageYOffset mirrors scrollY");
+    assert_eq!(scroll_by_after, "150", "scrollBy(0, 50) adds to scrollY");
+
+    // --- Phase 6 D3: chrome.runtime gating + WebTransport async-reject --
+    let chrome_has_runtime = pull(&mut page, "String('runtime' in chrome)");
+    let chrome_has_app = pull(&mut page, "String('app' in chrome)");
+    let chrome_has_csi = pull(&mut page, "String('csi' in chrome)");
+    let chrome_has_load_times = pull(&mut page, "String('loadTimes' in chrome)");
+    let chrome_runtime_undefined = pull(&mut page, "String(typeof chrome.runtime)");
+    println!("\n--- Phase 6 D3: chrome.runtime gating ---");
+    println!("  'runtime' in chrome:    {chrome_has_runtime}");
+    println!("  'app' in chrome:        {chrome_has_app}");
+    println!("  'csi' in chrome:        {chrome_has_csi}");
+    println!("  'loadTimes' in chrome:  {chrome_has_load_times}");
+    println!("  typeof chrome.runtime:  {chrome_runtime_undefined}");
+    assert_eq!(
+        chrome_has_runtime, "false",
+        "chrome.runtime is extension-context only — must be absent on regular pages"
+    );
+    assert_eq!(chrome_has_app, "true");
+    assert_eq!(chrome_has_csi, "true");
+    assert_eq!(chrome_has_load_times, "true");
+    assert_eq!(chrome_runtime_undefined, "undefined");
+
+    let wt_typeof = pull(
+        &mut page,
+        "String(typeof new WebTransport('https://example.invalid/'))",
+    );
+    let wt_ready_is_promise = pull(
+        &mut page,
+        "String(new WebTransport('https://example.invalid/').ready instanceof Promise)",
+    );
+    let wt_closed_is_promise = pull(
+        &mut page,
+        "String(new WebTransport('https://example.invalid/').closed instanceof Promise)",
+    );
+    let wt_reliability = pull(
+        &mut page,
+        "new WebTransport('https://example.invalid/').reliability",
+    );
+    let wt_get_stats_promise = pull(
+        &mut page,
+        "String(new WebTransport('https://example.invalid/').getStats() instanceof Promise)",
+    );
+    println!("\n--- Phase 6 D3: WebTransport async-reject ---");
+    println!("  typeof new WebTransport():           {wt_typeof}");
+    println!("  ready instanceof Promise:            {wt_ready_is_promise}");
+    println!("  closed instanceof Promise:           {wt_closed_is_promise}");
+    println!("  reliability:                         {wt_reliability}");
+    println!("  getStats() instanceof Promise:       {wt_get_stats_promise}");
+    assert_eq!(
+        wt_typeof, "object",
+        "new WebTransport(badUrl) must return an object — real Chrome doesn't throw synchronously"
+    );
+    assert_eq!(wt_ready_is_promise, "true");
+    assert_eq!(wt_closed_is_promise, "true");
+    assert_eq!(wt_reliability, "pending");
+    assert_eq!(wt_get_stats_promise, "true");
+
+    // --- Phase 6 D4: 10 missing-constructor batch -------------------
+    // (1) caches
+    let caches_typeof = pull(&mut page, "String(typeof caches)");
+    let caches_proto = pull(&mut page, "Object.prototype.toString.call(caches)");
+    let caches_match_typeof = pull(&mut page, "String(typeof caches.match)");
+    // (2) cookieStore
+    let cs_typeof = pull(&mut page, "String(typeof cookieStore)");
+    let cs_proto = pull(&mut page, "Object.prototype.toString.call(cookieStore)");
+    let cs_get_typeof = pull(&mut page, "String(typeof cookieStore.get)");
+    let cs_is_event_target = pull(&mut page, "String(cookieStore instanceof EventTarget)");
+    // (3) performance.eventCounts
+    let ec_proto = pull(&mut page, "Object.prototype.toString.call(performance.eventCounts)");
+    let ec_size = pull(&mut page, "String(performance.eventCounts.size)");
+    let ec_get_typeof = pull(&mut page, "String(typeof performance.eventCounts.get)");
+    // (4) Notification.requestPermission
+    let n_perm = pull(&mut page, "Notification.permission");
+    let n_max = pull(&mut page, "String(Notification.maxActions)");
+    let n_req_perm_typeof = pull(&mut page, "String(typeof Notification.requestPermission)");
+    let n_req_perm_returns_promise = pull(&mut page, "String(Notification.requestPermission() instanceof Promise)");
+    // (5) IdleDetector
+    let id_typeof = pull(&mut page, "String(typeof IdleDetector)");
+    let id_req_perm_typeof = pull(&mut page, "String(typeof IdleDetector.requestPermission)");
+    // (6) EyeDropper
+    let ed_typeof = pull(&mut page, "String(typeof EyeDropper)");
+    let ed_open_returns_promise = pull(&mut page, "String((new EyeDropper()).open() instanceof Promise)");
+    // (7) navigator.virtualKeyboard
+    let vk_typeof = pull(&mut page, "String(typeof navigator.virtualKeyboard)");
+    let vk_overlays = pull(&mut page, "String(navigator.virtualKeyboard.overlaysContent)");
+    let vk_show_typeof = pull(&mut page, "String(typeof navigator.virtualKeyboard.show)");
+    // (8) navigator.devicePosture
+    let dp_typeof = pull(&mut page, "String(typeof navigator.devicePosture)");
+    let dp_type = pull(&mut page, "navigator.devicePosture.type");
+    // (9) navigator.windowControlsOverlay
+    let wco_typeof = pull(&mut page, "String(typeof navigator.windowControlsOverlay)");
+    let wco_visible = pull(&mut page, "String(navigator.windowControlsOverlay.visible)");
+    let wco_rect_typeof = pull(&mut page, "String(typeof navigator.windowControlsOverlay.getTitlebarAreaRect())");
+    // (10) Document.startViewTransition
+    let svt_typeof = pull(&mut page, "String(typeof document.startViewTransition)");
+    let svt_returns_obj = pull(&mut page, "Object.prototype.toString.call(document.startViewTransition(() => {}))");
+    let svt_ready_promise = pull(&mut page, "String(document.startViewTransition(() => {}).ready instanceof Promise)");
+
+    println!("\n--- Phase 6 D4: 10 missing-constructor batch ---");
+    println!("  caches:                {caches_typeof} {caches_proto} match={caches_match_typeof}");
+    println!("  cookieStore:           {cs_typeof} {cs_proto} get={cs_get_typeof} EventTarget={cs_is_event_target}");
+    println!("  performance.eventCounts: {ec_proto} size={ec_size} get={ec_get_typeof}");
+    println!("  Notification:          permission={n_perm} maxActions={n_max} reqPerm={n_req_perm_typeof} reqPerm()->Promise={n_req_perm_returns_promise}");
+    println!("  IdleDetector:          {id_typeof} reqPerm={id_req_perm_typeof}");
+    println!("  EyeDropper:            {ed_typeof} open()->Promise={ed_open_returns_promise}");
+    println!("  virtualKeyboard:       {vk_typeof} overlaysContent={vk_overlays} show={vk_show_typeof}");
+    println!("  devicePosture:         {dp_typeof} type={dp_type}");
+    println!("  windowControlsOverlay: {wco_typeof} visible={wco_visible} rect={wco_rect_typeof}");
+    println!("  startViewTransition:   {svt_typeof} returns={svt_returns_obj} ready=Promise:{svt_ready_promise}");
+
+    assert_eq!(caches_typeof, "object");
+    assert_eq!(caches_proto, "[object CacheStorage]");
+    assert_eq!(caches_match_typeof, "function");
+    assert_eq!(cs_typeof, "object", "cookieStore must be an instance, not a constructor");
+    assert_eq!(cs_proto, "[object CookieStore]");
+    assert_eq!(cs_get_typeof, "function");
+    assert_eq!(cs_is_event_target, "true");
+    assert_eq!(ec_proto, "[object EventCounts]");
+    assert_eq!(ec_size, "0");
+    assert_eq!(ec_get_typeof, "function");
+    assert_eq!(n_perm, "default");
+    assert_eq!(n_max, "2");
+    assert_eq!(n_req_perm_typeof, "function");
+    assert_eq!(n_req_perm_returns_promise, "true");
+    assert_eq!(id_typeof, "function");
+    assert_eq!(id_req_perm_typeof, "function");
+    assert_eq!(ed_typeof, "function");
+    assert_eq!(ed_open_returns_promise, "true");
+    assert_eq!(vk_typeof, "object");
+    assert_eq!(vk_overlays, "false");
+    assert_eq!(vk_show_typeof, "function");
+    assert_eq!(dp_typeof, "object");
+    assert_eq!(dp_type, "continuous");
+    assert_eq!(wco_typeof, "object");
+    assert_eq!(wco_visible, "false");
+    assert_eq!(wco_rect_typeof, "object");
+    assert_eq!(svt_typeof, "function");
+    assert_eq!(svt_returns_obj, "[object ViewTransition]");
+    assert_eq!(svt_ready_promise, "true");
 }

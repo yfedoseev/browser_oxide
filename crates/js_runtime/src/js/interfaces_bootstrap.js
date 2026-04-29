@@ -70,7 +70,60 @@
     // Newer Chrome API constructors
     _define("EditContext", class EditContext { constructor(init) { Object.assign(this, init || {}); } });
     _define("CookieStore", _illegalCtor("CookieStore"));
-    _define("WebTransport", class WebTransport { constructor(_url) { throw new TypeError("WebTransport: failed to connect"); } });
+    // WebTransport — real Chrome's constructor returns successfully; the
+    // `ready` and `closed` Promises reject asynchronously when the URL is
+    // unreachable. Throwing synchronously is detectable by sites that
+    // probe `typeof new WebTransport(...)`. We provide an instance whose
+    // Promises reject after a microtask so listeners fire normally.
+    //
+    // Spec: https://www.w3.org/TR/webtransport/#webtransport
+    _define("WebTransport", class WebTransport {
+        constructor(url, options) {
+            this._url = String(url || "");
+            this._options = options || {};
+            // WebTransportError equivalent — Chrome's WebTransport rejects
+            // with a DOMException-like { name, message }.
+            const _err = (msg) => {
+                try { return new DOMException(msg, "WebTransportError"); }
+                catch (_e) { const e = new Error(msg); e.name = "WebTransportError"; return e; }
+            };
+            this.ready = Promise.reject(_err("WebTransport: connection failed"));
+            // Suppress the unhandled-rejection warning from V8 — sites
+            // that don't `.catch()` on `.ready` shouldn't blow up the
+            // surrounding navigation.
+            this.ready.catch(() => {});
+            this.closed = Promise.reject(_err("WebTransport: connection closed"));
+            this.closed.catch(() => {});
+            this.draining = Promise.resolve();
+            // Default Chrome shape per spec.
+            this.reliability = "pending";
+            this.congestionControl = "default";
+            this.protocol = "";
+            this.anticipatedConcurrentIncomingBidirectionalStreams = null;
+            this.anticipatedConcurrentIncomingUnidirectionalStreams = null;
+            // Stream readers — empty ReadableStreams mirror Chrome's
+            // pre-connection shape.
+            const _emptyStream = () => {
+                try { return new ReadableStream({ start(_c) {} }); }
+                catch (_e) { return null; }
+            };
+            this.incomingBidirectionalStreams = _emptyStream();
+            this.incomingUnidirectionalStreams = _emptyStream();
+            this.datagrams = {
+                readable: _emptyStream(),
+                writable: typeof WritableStream !== "undefined" ? new WritableStream() : null,
+                maxDatagramSize: 1024,
+                incomingHighWaterMark: 1,
+                incomingMaxAge: NaN,
+                outgoingHighWaterMark: 1,
+                outgoingMaxAge: NaN,
+            };
+        }
+        getStats() { return Promise.resolve({ smoothedRtt: 0, rttVariation: 0, minRtt: 0, packetsLost: 0, packetsReceived: 0, packetsSent: 0, numOutgoingStreamsCreated: 0, numIncomingStreamsCreated: 0, bytesSent: 0, bytesReceived: 0, estimatedSendRate: 0, datagrams: { droppedIncoming: 0, expiredIncoming: 0, expiredOutgoing: 0, lostOutgoing: 0 }, timestamp: 0 }); }
+        close(_info) {}
+        createBidirectionalStream(_options) { return Promise.reject(new Error("WebTransport: connection failed")); }
+        createUnidirectionalStream(_options) { return Promise.reject(new Error("WebTransport: connection failed")); }
+    });
     _define("LaunchQueue", _illegalCtor("LaunchQueue"));
 
     // File system access
@@ -138,11 +191,20 @@
         UNMASKED_RENDERER_WEBGL: 0x9246,
     };
 
-    // Common non-standard Chrome global
+    // Common non-standard Chrome global. Real Chrome on regular pages
+    // exposes window.chrome with `app` / `csi` / `loadTimes`, but
+    // **NOT** `runtime` — `chrome.runtime` only exists inside extension
+    // contexts. Detection libraries probe `'runtime' in chrome` to
+    // confirm a non-extension page; the early-built shim here used to
+    // include `runtime`, leaking that we look extension-shaped.
+    //
+    // The fuller chrome surface (csi, loadTimes, etc.) is set later in
+    // window_bootstrap.js; we just need an early-shape with `app` so
+    // any inline scripts that touch `chrome.app` before that bootstrap
+    // runs don't crash.
     if (!globalThis.chrome) {
         globalThis.chrome = {
             app: { isInstalled: false },
-            runtime: { OnInstalledReason: { INSTALL: "install", UPDATE: "update", CHROME_UPDATE: "chrome_update", SHARED_MODULE_UPDATE: "shared_module_update" } }
         };
     }
 
