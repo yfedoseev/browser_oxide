@@ -141,6 +141,23 @@ pub struct StealthProfile {
     // === Media devices ===
     #[serde(default)]
     pub media_devices: Vec<MediaDeviceInfo>,
+
+    /// Enforce Content Security Policy on sub-resource fetches and
+    /// `<script src>` loads. When true, browser_oxide will refuse to
+    /// fetch URLs that violate the page's CSP — matching real Chrome.
+    /// When false (legacy behaviour), we issue every fetch the page
+    /// requests, which can be a cross-vendor bot tell because real
+    /// Chrome would have blocked some of them.
+    /// Defaults via `serde(default)` to `true` so new profiles get the
+    /// safer behaviour automatically; preset constructors can flip
+    /// it for benchmarking purity. Override at runtime with
+    /// `BOXIDE_CSP_BYPASS=1`.
+    #[serde(default = "default_true")]
+    pub enforce_csp: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_gpu_profile() -> GpuProfile {
@@ -153,10 +170,6 @@ fn default_cpu_architecture() -> String {
 
 fn default_cpu_bitness() -> String {
     "64".into()
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl StealthProfile {

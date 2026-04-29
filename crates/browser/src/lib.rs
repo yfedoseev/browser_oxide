@@ -2,6 +2,7 @@
 //!
 //! Provides `Page` — parse HTML, execute JavaScript, extract content.
 
+pub mod csp_collector;
 pub mod iframe;
 mod page;
 pub mod parallel;

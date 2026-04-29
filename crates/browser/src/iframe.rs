@@ -75,6 +75,28 @@ impl ChildIframe {
         client: &net::HttpClient,
         stealth_profile: Option<&stealth::StealthProfile>,
     ) -> Result<Self, deno_core::error::AnyError> {
+        // CSP `frame-src` enforcement (falls back to child-src then
+        // default-src). Real Chrome refuses to navigate iframes whose
+        // src violates the parent's CSP, surfacing the same network-
+        // error shape we return on op_fetch blocks.
+        if let Ok(parsed_url) = url::Url::parse(url) {
+            if let Err(violated) = js_runtime::extensions::fetch_ext::check_csp(
+                net::csp::Directive::FrameSrc,
+                &parsed_url,
+                None,
+                false,
+            ) {
+                eprintln!(
+                    "[csp] Refused to frame '{}' because it violates the following Content Security Policy directive: \"{}\".",
+                    url, violated
+                );
+                return Err(deno_core::error::AnyError::msg(format!(
+                    "iframe blocked by CSP: {}",
+                    url
+                )));
+            }
+        }
+
         let resp = client
             .get(url)
             .await

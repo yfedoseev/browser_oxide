@@ -11,3 +11,7 @@
 # Claude Code / Playwright MCP scratch
 .claude/scheduled_tasks.lock
 .playwright-mcp/
+
+# Live-debug dumps (not source)
+oxide_dump/
+downloaded_files/

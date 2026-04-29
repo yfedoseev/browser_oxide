@@ -386,9 +386,49 @@
         return _winDispatch.call(globalThis, event);
     };
 
+    // Native-code masking — PerimeterX/HUMAN run
+    // `Function.prototype.toString.call(addEventListener)` against both
+    // window-level and prototype-level methods. Each must serialize as
+    // `function NAME() { [native code] }`; otherwise the JS source body
+    // leaks and is a hard bot tell.
+    if (typeof _maskFunction === 'function') {
+        _maskFunction(globalThis.addEventListener, 'addEventListener');
+        _maskFunction(globalThis.removeEventListener, 'removeEventListener');
+        _maskFunction(globalThis.dispatchEvent, 'dispatchEvent');
+        _maskFunction(origNodeProto.addEventListener, 'addEventListener');
+        _maskFunction(origNodeProto.removeEventListener, 'removeEventListener');
+        _maskFunction(origNodeProto.dispatchEvent, 'dispatchEvent');
+    }
+
     // Export all event classes
+    // SecurityPolicyViolationEvent — what real Chrome dispatches on
+    // `document` (and propagates to `window`) when a CSP rule blocks
+    // a fetch. Sites can listen for `securitypolicyviolation` to log
+    // their own violations; we must surface the same shape so that
+    // analytics/telemetry code probing the event fires correctly.
+    // Spec: https://www.w3.org/TR/CSP3/#securitypolicyviolationevent
+    class SecurityPolicyViolationEvent extends Event {
+        constructor(type, init) {
+            super(type, init || {});
+            const i = init || {};
+            this.blockedURI = String(i.blockedURI ?? "");
+            this.documentURI = String(i.documentURI ?? (typeof location !== 'undefined' ? location.href : ""));
+            this.referrer = String(i.referrer ?? (typeof document !== 'undefined' && document.referrer ? document.referrer : ""));
+            this.violatedDirective = String(i.violatedDirective ?? "");
+            this.effectiveDirective = String(i.effectiveDirective ?? this.violatedDirective);
+            this.originalPolicy = String(i.originalPolicy ?? "");
+            this.disposition = String(i.disposition ?? "enforce");
+            this.sample = String(i.sample ?? "");
+            this.sourceFile = String(i.sourceFile ?? "");
+            this.statusCode = +i.statusCode || 0;
+            this.lineNumber = +i.lineNumber || 0;
+            this.columnNumber = +i.columnNumber || 0;
+        }
+    }
+
     globalThis.Event = Event;
     globalThis.CustomEvent = CustomEvent;
+    globalThis.SecurityPolicyViolationEvent = SecurityPolicyViolationEvent;
     globalThis.UIEvent = UIEvent;
     globalThis.MouseEvent = MouseEvent;
     globalThis.KeyboardEvent = KeyboardEvent;

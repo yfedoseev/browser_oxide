@@ -42,6 +42,148 @@ impl FetchState {
 /// Used by the async op_fetch since deno_core async ops can't borrow OpState.
 static FETCH_CLIENT: OnceLock<net::HttpClient> = OnceLock::new();
 
+/// Active CSP policy + origin, mirrored from `DomState` so async
+/// `op_fetch` can enforce without borrowing `OpState`. Updated per
+/// top-level navigation by `set_csp_policy`. Reset (set to None-style
+/// empty) by `clear_csp_policy` between navigations.
+///
+/// We use `std::sync::RwLock<Option<...>>` instead of `OnceLock` here
+/// because the policy genuinely changes per navigation; OnceLock would
+/// strand stale walmart policy on the next site we visit.
+static ACTIVE_CSP: std::sync::OnceLock<std::sync::RwLock<Option<ActiveCsp>>> =
+    std::sync::OnceLock::new();
+
+#[derive(Clone)]
+struct ActiveCsp {
+    policy: std::sync::Arc<net::csp::PolicySet>,
+    origin: Url,
+    enforce: bool,
+}
+
+fn active_csp_lock() -> &'static std::sync::RwLock<Option<ActiveCsp>> {
+    ACTIVE_CSP.get_or_init(|| std::sync::RwLock::new(None))
+}
+
+/// Install a CSP policy + origin for the current navigation. `enforce`
+/// is wired from `profile.enforce_csp` and the `BOXIDE_CSP_BYPASS=1`
+/// escape hatch. Called by `Page::navigate_with_init` after parsing
+/// the response headers + meta tags.
+///
+/// Drains the violation queue at install time — violations from the
+/// previous document are no longer relevant once a new navigation
+/// installs its own policy. Real Chrome resets the violation list per
+/// top-level navigation; this matches that behaviour.
+pub fn set_csp_policy(
+    policy: std::sync::Arc<net::csp::PolicySet>,
+    origin: Url,
+    enforce: bool,
+) {
+    if let Ok(mut q) = violations_lock().lock() {
+        q.clear();
+    }
+    let mut w = active_csp_lock().write().expect("CSP lock poisoned");
+    *w = Some(ActiveCsp { policy, origin, enforce });
+}
+
+/// Clear any active CSP. Called between top-level navigations so a
+/// strict policy from site A doesn't leak into site B. Also drains
+/// any queued violations — they belong to the previous document.
+pub fn clear_csp_policy() {
+    if let Ok(mut q) = violations_lock().lock() {
+        q.clear();
+    }
+    let mut w = active_csp_lock().write().expect("CSP lock poisoned");
+    *w = None;
+}
+
+/// Returns `Err(blocked_directive)` when the active policy denies the
+/// fetch; `Ok(())` when allowed (no policy installed, or matched).
+/// On block, pushes a record onto the per-runtime violation queue so
+/// JS can later dispatch `securitypolicyviolation` events for each.
+pub fn check_csp(
+    directive: net::csp::Directive,
+    url: &Url,
+    nonce: Option<&str>,
+    parser_inserted: bool,
+) -> Result<(), &'static str> {
+    let guard = active_csp_lock().read().expect("CSP lock poisoned");
+    let Some(active) = guard.as_ref() else {
+        return Ok(());
+    };
+    if !active.enforce {
+        return Ok(());
+    }
+    let ctx = net::csp::CheckCtx {
+        directive,
+        url,
+        page_origin: &active.origin,
+        nonce,
+        parser_inserted,
+    };
+    let decision = active.policy.allows(&ctx);
+    if decision.allowed {
+        Ok(())
+    } else {
+        let dir_name = decision.matched_directive.as_str();
+        push_csp_violation(CspViolation {
+            blocked_uri: url.as_str().to_string(),
+            effective_directive: dir_name.to_string(),
+            violated_directive: dir_name.to_string(),
+            disposition: "enforce".to_string(),
+        });
+        Err(dir_name)
+    }
+}
+
+// ---------------------------------------------------------------------
+// Violation queue — the gates push, JS drains via `op_drain_csp_violations`
+// and dispatches `securitypolicyviolation` events. We keep the queue
+// process-global next to ACTIVE_CSP because the gates run from
+// non-op call sites (page.rs build_page_with_scripts) where there's no
+// OpState handle.
+// ---------------------------------------------------------------------
+
+#[derive(Clone, serde::Serialize)]
+pub struct CspViolation {
+    #[serde(rename = "blockedURI")]
+    pub blocked_uri: String,
+    #[serde(rename = "effectiveDirective")]
+    pub effective_directive: String,
+    #[serde(rename = "violatedDirective")]
+    pub violated_directive: String,
+    pub disposition: String,
+}
+
+static CSP_VIOLATIONS: std::sync::OnceLock<std::sync::Mutex<Vec<CspViolation>>> =
+    std::sync::OnceLock::new();
+
+fn violations_lock() -> &'static std::sync::Mutex<Vec<CspViolation>> {
+    CSP_VIOLATIONS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+fn push_csp_violation(v: CspViolation) {
+    if let Ok(mut q) = violations_lock().lock() {
+        // Cap queue at 256 to avoid unbounded growth on pathological
+        // scripts that retry blocked fetches in a loop.
+        if q.len() < 256 {
+            q.push(v);
+        }
+    }
+}
+
+/// JS-callable drain. Returns the queue contents and clears it.
+/// Caller iterates and dispatches one `securitypolicyviolation` event
+/// per item on `document` and `window`.
+#[op2]
+#[serde]
+pub fn op_drain_csp_violations() -> Vec<CspViolation> {
+    if let Ok(mut q) = violations_lock().lock() {
+        std::mem::take(&mut *q)
+    } else {
+        Vec::new()
+    }
+}
+
 /// Initialize the shared fetch client from a profile.
 /// Call this once during runtime setup.
 pub fn init_fetch_client(profile: &stealth::StealthProfile) {
@@ -91,6 +233,31 @@ pub async fn op_fetch(
     #[serde] headers: HashMap<String, String>,
     #[string] body: String,
 ) -> Result<FetchResponse, deno_core::error::AnyError> {
+    // CSP `connect-src` enforcement — `window.fetch()` and XHR both
+    // route through this op. Real Chrome blocks fetches that violate
+    // the active policy by returning a 0-status, opaque, network-error
+    // response. We mirror that shape so JS code's
+    // `try { await fetch(...) } catch (e) { ... }` path fires the same
+    // way it would in Chrome.
+    if let Ok(parsed) = Url::parse(&url) {
+        if let Err(violated) =
+            check_csp(net::csp::Directive::ConnectSrc, &parsed, None, false)
+        {
+            eprintln!(
+                "[csp] Refused to connect to '{}' because it violates the following Content Security Policy directive: \"{}\".",
+                url, violated
+            );
+            return Ok(FetchResponse {
+                status: 0,
+                status_text: "".to_string(),
+                headers: HashMap::new(),
+                body: String::new(),
+                url: url.clone(),
+                ok: false,
+            });
+        }
+    }
+
     // Resource blocker — short-circuit ad/tracker requests before TLS+JS.
     // Empty source_url is OK; the JS layer doesn't currently pass the page
     // origin here, but adblock's first-party rules degrade gracefully.
@@ -229,6 +396,24 @@ pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
 #[op2]
 #[string]
 pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> String {
+    // CSP `script-src-elem` enforcement. Sync-fetch is the path
+    // `document.write('<script src=...>')` and dynamic
+    // `appendChild(script)` use. Real Chrome enforces CSP on these
+    // identically to parser-injected scripts. Without a nonce on the
+    // dynamically-inserted script (we don't track them today), under
+    // strict-dynamic this fetch will block.
+    if let Ok(parsed) = Url::parse(&url) {
+        if let Err(violated) =
+            check_csp(net::csp::Directive::ScriptSrcElem, &parsed, None, false)
+        {
+            eprintln!(
+                "[csp] Refused to load the script '{}' (sync-fetch) — violates: \"{}\".",
+                url, violated
+            );
+            return String::new();
+        }
+    }
+
     // Resource blocker — return empty body for ad/tracker URLs without
     // doing any HTTP work. Tracker JS that loads via <script src=…>
     // (gtm.js, gpt.js, doubleclick) is the dominant time sink on
@@ -476,6 +661,7 @@ deno_core::extension!(
         op_cookie_get,
         op_cookie_set,
         op_net_fetch_sync,
-        op_net_xhr_sync
+        op_net_xhr_sync,
+        op_drain_csp_violations
     ],
 );

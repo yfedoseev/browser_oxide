@@ -1,6 +1,7 @@
 use dom::Dom;
 use layout::{LayoutEngine, Viewport};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Shared state stored in deno_core's OpState, accessible by all ops.
 pub struct DomState {
@@ -14,6 +15,18 @@ pub struct DomState {
     /// CSS from `<style>` blocks, used by getComputedStyle
     pub stylesheets: Vec<String>,
     pub stealth_profile: Option<stealth::StealthProfile>,
+    /// Active Content Security Policy. Built from the response
+    /// `Content-Security-Policy` header(s) plus any
+    /// `<meta http-equiv="Content-Security-Policy">` tags found in the
+    /// parsed HTML. None means no policy applies (e.g. about:blank,
+    /// from_html with no header). The policy applies to ALL fetches —
+    /// `<script src>`, `op_fetch`, `op_net_fetch_sync`, iframes — until
+    /// the next top-level navigation.
+    pub csp_policy: Option<Arc<net::csp::PolicySet>>,
+    /// Origin used to resolve `'self'` in CSP source matching. Equals
+    /// the document's origin (scheme + host + port of the navigated
+    /// URL). None for opaque/about:blank documents — those bypass CSP.
+    pub csp_origin: Option<url::Url>,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +57,8 @@ impl DomState {
             storage,
             stylesheets: Vec::new(),
             stealth_profile: None,
+            csp_policy: None,
+            csp_origin: None,
         }
     }
 

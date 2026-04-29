@@ -7,6 +7,13 @@ pub struct ScriptInfo {
     pub code: String,
     pub src: Option<String>,
     pub is_module: bool,
+    /// Value of the `nonce` attribute, if any. Required by CSP3
+    /// `'nonce-...'` source matching — when the active policy uses
+    /// `'strict-dynamic'`, only nonce-tagged parser-inserted scripts
+    /// are authorized to load. Captured here at HTML-walk time so the
+    /// fetch path (`page.rs::navigate_with_init`) can pass it to
+    /// `net::csp::CheckCtx`.
+    pub nonce: Option<String>,
 }
 
 /// Find all <script> elements in the DOM and extract their content.
@@ -56,12 +63,20 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                         .find(|a| a.name.local == "src")
                         .map(|a| decode_html_entities(a.value.as_str()));
 
+                    let nonce = elem
+                        .attrs
+                        .iter()
+                        .find(|a| a.name.local == "nonce")
+                        .map(|a| a.value.to_string())
+                        .filter(|n| !n.is_empty());
+
                     if src.is_some() {
                         // External script — store the URL for fetching
                         scripts.push(ScriptInfo {
                             code: String::new(),
                             src,
                             is_module,
+                            nonce,
                         });
                     } else {
                         // Inline script
@@ -71,6 +86,7 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                                 code,
                                 src: None,
                                 is_module,
+                                nonce,
                             });
                         }
                     }

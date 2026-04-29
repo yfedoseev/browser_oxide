@@ -38,6 +38,7 @@ fn default_media_devices(seed: &str) -> Vec<MediaDeviceInfo> {
 /// Chrome 130 on Windows 10.
 pub fn chrome_130_windows() -> StealthProfile {
     StealthProfile {
+        enforce_csp: true,
         user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
         browser_version: "147.0.7727.117".into(),
@@ -116,6 +117,7 @@ pub fn chrome_130_windows() -> StealthProfile {
 /// comparing httpbin.org/headers from playwright vs our pipeline.)
 pub fn chrome_130_macos() -> StealthProfile {
     StealthProfile {
+        enforce_csp: true,
         user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
         // browser_version stores the FULL version — used by sec-ch-ua-full-version-list
@@ -188,6 +190,7 @@ pub fn chrome_130_macos() -> StealthProfile {
 /// Chrome 130 on Linux.
 pub fn chrome_130_linux() -> StealthProfile {
     StealthProfile {
+        enforce_csp: true,
         user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
         browser_version: "147.0.7727.117".into(),
@@ -258,6 +261,7 @@ pub fn chrome_130_linux() -> StealthProfile {
 /// Chrome 130 on Windows — Russian locale (Moscow).
 pub fn chrome_130_ru() -> StealthProfile {
     StealthProfile {
+        enforce_csp: true,
         user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
         browser_version: "147.0.7727.117".into(),
@@ -302,6 +306,7 @@ pub fn chrome_130_ru() -> StealthProfile {
 /// Chrome 130 on Windows — Chinese locale (Shanghai).
 pub fn chrome_130_cn() -> StealthProfile {
     StealthProfile {
+        enforce_csp: true,
         user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
         browser_version: "147.0.7727.117".into(),
@@ -393,6 +398,7 @@ pub fn chrome_130_jp() -> StealthProfile {
 /// Firefox 135 on macOS.
 pub fn firefox_135_macos() -> StealthProfile {
     StealthProfile {
+        enforce_csp: true,
         user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
         browser_name: "Firefox".into(),
         browser_version: "135.0".into(),
@@ -472,6 +478,7 @@ pub fn firefox_135_macos() -> StealthProfile {
 /// Firefox 135 on Windows 10.
 pub fn firefox_135_windows() -> StealthProfile {
     StealthProfile {
+        enforce_csp: true,
         user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
         browser_name: "Firefox".into(),
         browser_version: "135.0".into(),
@@ -541,6 +548,7 @@ pub fn firefox_135_windows() -> StealthProfile {
 /// Firefox 135 on Linux.
 pub fn firefox_135_linux() -> StealthProfile {
     StealthProfile {
+        enforce_csp: true,
         user_agent: "Mozilla/5.0 (X11; Linux x86_64; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
         browser_name: "Firefox".into(),
         browser_version: "135.0".into(),

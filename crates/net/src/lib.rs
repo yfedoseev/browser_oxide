@@ -7,6 +7,7 @@ pub mod alt_svc;
 pub mod blocker;
 pub mod compression;
 pub mod cookies;
+pub mod csp;
 pub mod error;
 pub mod h1_client;
 pub mod h2_client;

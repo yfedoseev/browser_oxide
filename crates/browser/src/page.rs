@@ -212,6 +212,32 @@ impl Page {
     ) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
 
+        // Install CSP from any meta-tags present in the HTML (this code
+        // path is for tests / synthetic HTML — there are no response
+        // headers to merge from). The OnceLock-backed enforcement
+        // applies to script-fetches issued below.
+        {
+            let policy_set = crate::csp_collector::collect_csp(&[], &dom);
+            let enforce_csp = profile.as_ref().map(|p| p.enforce_csp).unwrap_or(true)
+                && std::env::var("BOXIDE_CSP_BYPASS").is_err();
+            if !policy_set.is_empty() {
+                if let Ok(origin) = url::Url::parse(url) {
+                    js_runtime::extensions::fetch_ext::set_csp_policy(
+                        std::sync::Arc::new(policy_set),
+                        origin,
+                        enforce_csp,
+                    );
+                } else {
+                    js_runtime::extensions::fetch_ext::clear_csp_policy();
+                }
+            } else {
+                // No policy on this page — clear any leftover state from a
+                // previous Page in the same process so site A's CSP can't
+                // leak into site B in test runners.
+                js_runtime::extensions::fetch_ext::clear_csp_policy();
+            }
+        }
+
         // Find scripts and stylesheets before handing DOM to runtime
         let scripts = script_runner::find_scripts(&dom);
         let stylesheet_entries = stylesheet_collector::find_stylesheets(&dom);
@@ -244,6 +270,22 @@ impl Page {
         for (i, script) in scripts.iter().enumerate() {
             if let Some(src) = &script.src {
                 if let Some(full_url) = Self::resolve_url(url, src) {
+                    // CSP gate — same enforcement point as the parallel
+                    // pre-fetch path in `build_page_with_scripts_init_and_storage`.
+                    if let Ok(parsed_url) = url::Url::parse(&full_url) {
+                        if let Err(violated) = js_runtime::extensions::fetch_ext::check_csp(
+                            net::csp::Directive::ScriptSrcElem,
+                            &parsed_url,
+                            script.nonce.as_deref(),
+                            true,
+                        ) {
+                            eprintln!(
+                                "[csp] Refused to load the script '{}' because it violates the following Content Security Policy directive: \"{}\".",
+                                full_url, violated
+                            );
+                            continue;
+                        }
+                    }
                     match client.get_follow(&full_url, 10).await {
                         Ok(resp) => {
                             let code = resp.text();
@@ -655,6 +697,22 @@ impl Page {
         }) {
             eprintln!("[vendor-detect] akamai-bmp _abck set on {}", resp.url);
         }
+        // Collect response-header CSP value(s) before consuming `resp`.
+        // CSP3 §3.2 allows the header to repeat (multiple Policy values
+        // applied conjunctively); we keep each instance separate so the
+        // "all must allow" matcher semantic stays correct.
+        let csp_headers: Vec<String> = resp
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("content-security-policy"))
+            .map(|(_, v)| v.clone())
+            .collect();
+        let csp_headers_ro: Vec<String> = resp
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("content-security-policy-report-only"))
+            .map(|(_, v)| v.clone())
+            .collect();
         let html = resp.text();
         let resp_url = resp.url.clone();
         Self::navigate_loop_internal(
@@ -666,6 +724,8 @@ impl Page {
             0,
             init_scripts,
             debug_nav,
+            csp_headers,
+            csp_headers_ro,
         )
         .await
     }
@@ -685,7 +745,8 @@ impl Page {
         let iterations = max_iterations.max(1);
         let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
 
-        // Iteration 0 uses provided HTML
+        // Iteration 0 uses provided HTML — no headers means no CSP
+        // (this entry point is for tests that hand us synthetic HTML).
         Self::navigate_loop_internal(
             html.to_string(),
             url.to_string(),
@@ -695,6 +756,8 @@ impl Page {
             0,
             vec![],
             debug_nav,
+            Vec::new(),
+            Vec::new(),
         )
         .await
     }
@@ -708,7 +771,52 @@ impl Page {
         start_iter: u8,
         init_scripts: Vec<String>,
         debug_nav: bool,
+        csp_headers: Vec<String>,
+        csp_headers_ro: Vec<String>,
     ) -> Result<Self, deno_core::error::AnyError> {
+        // Install CSP for this navigation. Headers + meta-tag sources
+        // both contribute. The fetch_ext layer reads from a per-process
+        // RwLock so async ops can enforce without borrowing OpState.
+        // `enforce_csp` controls whether matches actually block; off
+        // means CSP is parsed and reported but doesn't gate fetches —
+        // useful for A/B comparison on the holistic sweep.
+        {
+            let csp_dom = html_parser::parse_html(&html);
+            let header_refs: Vec<&str> = csp_headers.iter().map(|s| s.as_str()).collect();
+            let report_refs: Vec<&str> = csp_headers_ro.iter().map(|s| s.as_str()).collect();
+            let policy_set = crate::csp_collector::collect_csp_with_report_only(
+                &header_refs,
+                &report_refs,
+                &csp_dom,
+            );
+            // Bypass switch — useful to compare engine behaviour with
+            // and without enforcement on the same site without rebuild.
+            let env_bypass = std::env::var("BOXIDE_CSP_BYPASS").is_ok();
+            let enforce = profile.enforce_csp && !env_bypass;
+            if let Ok(origin) = url::Url::parse(&resp_url) {
+                if !policy_set.is_empty() {
+                    if debug_nav {
+                        eprintln!(
+                            "[csp] installed {} policies from headers={} meta={} enforce={}",
+                            policy_set.policies.len(),
+                            csp_headers.len(),
+                            policy_set.policies.len() - csp_headers.len(),
+                            enforce
+                        );
+                    }
+                    js_runtime::extensions::fetch_ext::set_csp_policy(
+                        std::sync::Arc::new(policy_set),
+                        origin,
+                        enforce,
+                    );
+                } else {
+                    js_runtime::extensions::fetch_ext::clear_csp_policy();
+                }
+            } else {
+                js_runtime::extensions::fetch_ext::clear_csp_policy();
+            }
+        }
+
         const PENDING_NAV_JS: &str = "(function(){\
                 const p = globalThis.__pendingNavigation;\
                 return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
@@ -1476,6 +1584,26 @@ impl Page {
             .filter_map(|(i, script)| {
                 let src = script.src.as_ref()?;
                 let full_url = Self::resolve_url(url, src)?;
+                // CSP `script-src-elem` enforcement. Parser-inserted scripts
+                // (everything `find_scripts` produces from the initial HTML
+                // parse) need a matching nonce to load under
+                // `'strict-dynamic'`. Without this gate, browser_oxide
+                // fetches Akamai's `/akam/13/<hash>` bootstrap on
+                // walmart while real Chrome blocks it — itself a tell.
+                if let Ok(parsed_url) = url::Url::parse(&full_url) {
+                    if let Err(violated) = js_runtime::extensions::fetch_ext::check_csp(
+                        net::csp::Directive::ScriptSrcElem,
+                        &parsed_url,
+                        script.nonce.as_deref(),
+                        true, // parser_inserted: came from HTML parse
+                    ) {
+                        eprintln!(
+                            "[csp] Refused to load the script '{}' because it violates the following Content Security Policy directive: \"{}\".",
+                            full_url, violated
+                        );
+                        return None;
+                    }
+                }
                 let client = client.clone();
                 let profile = profile.clone();
                 Some(async move {
@@ -2145,6 +2273,125 @@ mod tests {
         assert_eq!(w, "1920");
         let h = page.evaluate("window.innerHeight").unwrap();
         assert_eq!(h, "1080");
+    }
+
+    /// Akamai pixel POST captured `client=[1914,28638]` for documentElement
+    /// — full document size, not viewport. Real Chrome returns viewport
+    /// (innerWidth × innerHeight). Regression-locks the dom_bootstrap
+    /// HTMLHtmlElement.prototype clientWidth/Height override.
+    #[tokio::test]
+    async fn document_element_client_dims_are_viewport_clipped() {
+        let mut page = Page::from_html(
+            "<html><head></head><body><div style=\"height:50000px\"></div></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
+        let cw = page.evaluate("document.documentElement.clientWidth").unwrap();
+        let ch = page.evaluate("document.documentElement.clientHeight").unwrap();
+        assert_eq!(cw, "1920", "documentElement.clientWidth must equal innerWidth, got {cw}");
+        assert_eq!(ch, "1080", "documentElement.clientHeight must equal innerHeight, got {ch}");
+    }
+
+    /// Akamai sensor probes `window.ApplePaySession` on macOS UA. Real
+    /// Chrome on macOS exposes the constructor; absence is a hard tell.
+    /// Regression-locks the macOS-conditional shim in window_bootstrap.
+    #[tokio::test]
+    async fn apple_pay_session_present_on_macos_profile() {
+        let profile = stealth::presets::chrome_130_macos();
+        let mut page = Page::from_html(
+            "<html><head></head><body></body></html>",
+            Some(profile),
+        )
+        .await
+        .unwrap();
+        let t = page.evaluate("typeof ApplePaySession").unwrap();
+        assert_eq!(t, "function", "macOS profile must expose ApplePaySession constructor");
+        let cmp = page.evaluate("ApplePaySession.canMakePayments()").unwrap();
+        assert_eq!(cmp, "true");
+        let v = page.evaluate("ApplePaySession.supportsVersion(3)").unwrap();
+        assert_eq!(v, "true");
+    }
+
+    #[tokio::test]
+    async fn apple_pay_session_absent_on_windows_profile() {
+        let profile = stealth::presets::chrome_130_windows();
+        let mut page = Page::from_html(
+            "<html><head></head><body></body></html>",
+            Some(profile),
+        )
+        .await
+        .unwrap();
+        let t = page.evaluate("typeof ApplePaySession").unwrap();
+        assert_eq!(t, "undefined", "Windows profile must NOT expose ApplePaySession");
+    }
+
+    /// macOS profile: Helvetica Neue and Arial are both installed,
+    /// each must produce a distinct width from sans-serif baseline AND
+    /// from each other.
+    #[tokio::test]
+    async fn canvas_font_detection_macos_helvetica_neue() {
+        let profile = stealth::presets::chrome_130_macos();
+        let mut page = Page::from_html(
+            "<html><head></head><body><canvas id=\"c\" width=\"200\" height=\"50\"></canvas></body></html>",
+            Some(profile),
+        )
+        .await
+        .unwrap();
+        let script = r#"
+            (() => {
+                const ctx = document.getElementById('c').getContext('2d');
+                ctx.font = "16px sans-serif";
+                const a = ctx.measureText("mmmmmmmmmlli").width;
+                ctx.font = "16px Arial";
+                const b = ctx.measureText("mmmmmmmmmlli").width;
+                ctx.font = "16px 'Helvetica Neue'";
+                const c = ctx.measureText("mmmmmmmmmlli").width;
+                ctx.font = "16px Calibri";
+                const d = ctx.measureText("mmmmmmmmmlli").width;
+                return JSON.stringify({
+                    arial_installed: Math.abs(a-b) > 1e-3,
+                    hn_installed: Math.abs(a-c) > 1e-3,
+                    distinct_from_arial: Math.abs(b-c) > 1e-3,
+                    calibri_not_installed_on_macos: Math.abs(a-d) < 1e-3,
+                });
+            })()
+        "#;
+        let r = page.evaluate(script).unwrap();
+        assert!(r.contains("\"arial_installed\":true"), "Arial must be installed on macOS: {r}");
+        assert!(r.contains("\"hn_installed\":true"), "Helvetica Neue must be installed on macOS: {r}");
+        assert!(r.contains("\"distinct_from_arial\":true"), "HN must differ from Arial: {r}");
+        assert!(r.contains("\"calibri_not_installed_on_macos\":true"), "Calibri must not be installed on macOS: {r}");
+    }
+
+    /// Canvas-based font detection: measureText widths must differ between
+    /// distinct named families and the bare generic, otherwise sensors
+    /// (Akamai, Kasada) report `fonts=null`. The dom canvas2d backend
+    /// aliases everything to Liberation Sans; the canvas_bootstrap shim
+    /// adds a deterministic per-family micro-delta to keep widths unique.
+    #[tokio::test]
+    async fn canvas_measure_text_distinguishes_named_fonts() {
+        let mut page = Page::from_html(
+            "<html><head></head><body><canvas id=\"c\" width=\"200\" height=\"50\"></canvas></body></html>",
+            None::<stealth::StealthProfile>,
+        )
+        .await
+        .unwrap();
+        let script = r#"
+            (() => {
+                const ctx = document.getElementById('c').getContext('2d');
+                ctx.font = "16px sans-serif";
+                const a = ctx.measureText("mmmmmmmmmlli").width;
+                ctx.font = "16px Arial";
+                const b = ctx.measureText("mmmmmmmmmlli").width;
+                ctx.font = "16px 'Helvetica Neue'";
+                const c = ctx.measureText("mmmmmmmmmlli").width;
+                return JSON.stringify({a, b, c, ab: Math.abs(a-b) > 1e-3, bc: Math.abs(b-c) > 1e-3});
+            })()
+        "#;
+        let r = page.evaluate(script).unwrap();
+        assert!(r.contains("\"ab\":true"), "Arial must measure differently than sans-serif: {r}");
+        assert!(r.contains("\"bc\":true"), "Helvetica Neue must measure differently than Arial: {r}");
     }
 
     #[tokio::test]

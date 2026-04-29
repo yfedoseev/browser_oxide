@@ -303,4 +303,54 @@
     globalThis.Headers = Headers;
     globalThis.Response = Response;
     globalThis.Request = Request;
+
+    // CSP violation drain — pulls violations the Rust gates queued and
+    // dispatches `securitypolicyviolation` events for each on document
+    // and window. Real Chrome dispatches the event synchronously at
+    // the moment of block; we batch + drain because our gates run
+    // off-OpState. Drain on a few timed checkpoints so listeners
+    // installed early in page lifecycle catch the events.
+    function _drainCspViolations() {
+        try {
+            const violations = ops.op_drain_csp_violations();
+            if (!violations || !violations.length) return;
+            for (const v of violations) {
+                let ev;
+                try {
+                    ev = new SecurityPolicyViolationEvent("securitypolicyviolation", {
+                        bubbles: true,
+                        cancelable: false,
+                        blockedURI: v.blockedURI,
+                        violatedDirective: v.violatedDirective,
+                        effectiveDirective: v.effectiveDirective,
+                        disposition: v.disposition,
+                    });
+                } catch (_) {
+                    // Fallback if SecurityPolicyViolationEvent is unavailable.
+                    ev = new CustomEvent("securitypolicyviolation", {
+                        bubbles: true, cancelable: false, detail: v,
+                    });
+                }
+                try { if (globalThis.document) globalThis.document.dispatchEvent(ev); } catch (_) {}
+                try { globalThis.dispatchEvent(ev); } catch (_) {}
+                if (globalThis.console && typeof console.error === 'function') {
+                    console.error(
+                        "Refused to load '" + v.blockedURI +
+                        "' because it violates the following Content Security Policy directive: \"" +
+                        v.effectiveDirective + "\"."
+                    );
+                }
+            }
+        } catch (_) { /* best-effort */ }
+    }
+
+    Promise.resolve().then(_drainCspViolations);
+    if (typeof setTimeout === "function") {
+        setTimeout(_drainCspViolations, 0);
+        setTimeout(_drainCspViolations, 50);
+        setTimeout(_drainCspViolations, 250);
+    }
+    Object.defineProperty(globalThis, "__drainCspViolations", {
+        value: _drainCspViolations, enumerable: false, configurable: true,
+    });
 })(globalThis);
