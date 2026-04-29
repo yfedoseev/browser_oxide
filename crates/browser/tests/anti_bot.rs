@@ -16,6 +16,20 @@ async fn eval(js: &str) -> String {
     page.evaluate(js).unwrap()
 }
 
+/// Same as `eval`, but treats the page as a secure context (https://
+/// origin). Required for tests that probe [SecureContext]-only APIs
+/// (mediaDevices, getBattery, userAgentData, etc.) — Phase 7.
+async fn eval_secure(js: &str) -> String {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    page.evaluate(js).unwrap()
+}
+
 // === navigator checks ===
 
 #[tokio::test]
@@ -245,13 +259,14 @@ async fn performance_memory_exists() {
 
 #[tokio::test]
 async fn navigator_user_agent_data_exists() {
-    assert_eq!(eval("typeof navigator.userAgentData").await, "object");
+    // userAgentData is [SecureContext] — only present on https/etc.
+    assert_eq!(eval_secure("typeof navigator.userAgentData").await, "object");
 }
 
 #[tokio::test]
 async fn navigator_user_agent_data_brands() {
     assert_eq!(
-        eval("navigator.userAgentData.brands.length > 0").await,
+        eval_secure("navigator.userAgentData.brands.length > 0").await,
         "true"
     );
 }
@@ -471,22 +486,28 @@ async fn navigator_send_beacon_returns_true() {
 
 #[tokio::test]
 async fn navigator_get_battery_exists() {
-    assert_eq!(eval("typeof navigator.getBattery").await, "function");
+    // getBattery is [SecureContext] — only present on https/etc.
+    assert_eq!(eval_secure("typeof navigator.getBattery").await, "function");
 }
 
 #[tokio::test]
 async fn navigator_get_battery_returns_promise() {
     assert_eq!(
-        eval("navigator.getBattery() instanceof Promise").await,
+        eval_secure("navigator.getBattery() instanceof Promise").await,
         "true"
     );
 }
 
 #[tokio::test]
 async fn navigator_get_battery_resolves() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    // getBattery is [SecureContext] — page must use https://
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate("navigator.getBattery().then(b => { globalThis._bat = b; })")
         .unwrap();
     use std::time::Duration;

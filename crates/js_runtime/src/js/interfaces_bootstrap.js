@@ -76,7 +76,11 @@
     // probe `typeof new WebTransport(...)`. We provide an instance whose
     // Promises reject after a microtask so listeners fire normally.
     //
+    // [SecureContext] — undefined on insecure contexts (Phase 7). The
+    // constructor is only registered on https/wss/file/localhost.
+    //
     // Spec: https://www.w3.org/TR/webtransport/#webtransport
+    if (Deno.core.ops.op_is_secure_context())
     _define("WebTransport", class WebTransport {
         constructor(url, options) {
             this._url = String(url || "");

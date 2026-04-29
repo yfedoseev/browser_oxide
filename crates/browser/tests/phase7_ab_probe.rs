@@ -168,6 +168,109 @@ async fn phase7_ab_probe_capture_oxide() {
     eprintln!("wrote {} keys to {path}", result.len());
 }
 
+/// Phase 7 D2 gate — 18 [SecureContext] APIs return undefined on
+/// insecure contexts (about:blank/data:/http:) and are present on
+/// secure contexts (https:). Byte-exact match against
+/// `.playwright-mcp/captures/probe_mcp.json` (insecure).
+#[tokio::test]
+async fn phase7_d2_secure_context_gating() {
+    use browser::Page;
+    use stealth::presets::chrome_130_macos;
+
+    // INSECURE: about:blank — every gated API should be undefined
+    let mut p = Page::from_html(
+        "<!doctype html><html><body></body></html>",
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    let _ = p
+        .event_loop()
+        .run_until_idle(std::time::Duration::from_secs(2))
+        .await;
+
+    let undef_keys = [
+        // Navigator getters
+        "navigator.mediaDevices",
+        "navigator.serviceWorker",
+        "navigator.clipboard",
+        "navigator.credentials",
+        "navigator.keyboard",
+        "navigator.locks",
+        "navigator.wakeLock",
+        "navigator.usb",
+        "navigator.bluetooth",
+        "navigator.hid",
+        "navigator.serial",
+        "navigator.virtualKeyboard",
+        "navigator.devicePosture",
+        "navigator.storage",
+        "navigator.gpu",
+        "navigator.userAgentData",
+        // Globals
+        "globalThis.caches",
+        "globalThis.cookieStore",
+        "globalThis.IdleDetector",
+        "globalThis.EyeDropper",
+        "globalThis.WebTransport",
+        // crypto SC-only
+        "crypto.subtle",
+        "crypto.randomUUID",
+    ];
+    for k in undef_keys {
+        let v = p.evaluate(&format!("typeof ({})", k)).unwrap();
+        assert_eq!(
+            v.trim_matches('"'),
+            "undefined",
+            "{k} must be undefined on insecure context (about:blank)"
+        );
+    }
+    // navigator.getBattery is a method, so it's `function` if registered,
+    // `undefined` if absent. Real Chrome reports "is not a function".
+    let v = p.evaluate("typeof navigator.getBattery").unwrap();
+    assert_eq!(
+        v.trim_matches('"'),
+        "undefined",
+        "getBattery must be absent on insecure context"
+    );
+
+    // SECURE: https://example.com/ — every gated API must be present
+    let mut p = Page::from_html_with_url(
+        "<!doctype html><html><body></body></html>",
+        "https://example.com/",
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    let _ = p
+        .event_loop()
+        .run_until_idle(std::time::Duration::from_secs(2))
+        .await;
+
+    let present = [
+        ("typeof navigator.mediaDevices", "object"),
+        ("typeof navigator.serviceWorker", "object"),
+        ("typeof navigator.clipboard", "object"),
+        ("typeof navigator.credentials", "object"),
+        ("typeof navigator.usb", "object"),
+        ("typeof navigator.bluetooth", "object"),
+        ("typeof navigator.userAgentData", "object"),
+        ("typeof navigator.getBattery", "function"),
+        ("typeof globalThis.caches", "object"),
+        ("typeof globalThis.cookieStore", "object"),
+        ("typeof globalThis.IdleDetector", "function"),
+        ("typeof globalThis.EyeDropper", "function"),
+        ("typeof globalThis.WebTransport", "function"),
+        ("typeof crypto.subtle", "object"),
+        ("typeof crypto.randomUUID", "function"),
+    ];
+    for (expr, want) in present {
+        let v = p.evaluate(expr).unwrap();
+        assert_eq!(v.trim_matches('"'), want,
+            "{expr} on secure context should be {want}");
+    }
+}
+
 /// Phase 7 D1 gate — `isSecureContext` is URL-scheme driven.
 /// Real Chrome reports false on `about:blank`/`data:`/`http:` and
 /// true on `https:`/`http://localhost`. Locks the bool against

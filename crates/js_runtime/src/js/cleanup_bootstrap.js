@@ -1,4 +1,55 @@
 ((globalThis) => {
+    // -- Per-page secure-context gating (Phase 7) --------------------
+    // The V8 snapshot bootstraps with is_secure_context=true so all
+    // [SecureContext]-only Web Platform APIs are baked in. On insecure
+    // pages (data:/http:/about:blank) we strip them here to match real
+    // Chrome — see docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md.
+    try {
+        const _ops = Deno && Deno.core && Deno.core.ops;
+        const _isSecure = _ops && _ops.op_is_secure_context && _ops.op_is_secure_context();
+        if (!_isSecure) {
+            // Methods + globals registered as values in the snapshot.
+            // Navigator getters (mediaDevices, clipboard, ...) gate
+            // themselves lazily so they don't need stripping.
+            try { delete globalThis.Navigator.prototype.getBattery; } catch (_e) {}
+            for (const k of ['caches', 'cookieStore', 'IdleDetector', 'EyeDropper', 'WebTransport']) {
+                try { delete globalThis[k]; } catch (_e) {}
+            }
+            // crypto.subtle + crypto.randomUUID are [SecureContext]. They
+            // come from deno_core's crypto extension and are non-configurable
+            // own properties. `delete` fails — replace `globalThis.crypto`
+            // with a Proxy that hides those two keys.
+            if (globalThis.crypto) {
+                const _origCrypto = globalThis.crypto;
+                const _maskedCrypto = new Proxy(_origCrypto, {
+                    get(target, prop, receiver) {
+                        if (prop === 'subtle' || prop === 'randomUUID') return undefined;
+                        const v = Reflect.get(target, prop, receiver);
+                        return typeof v === 'function' ? v.bind(target) : v;
+                    },
+                    has(target, prop) {
+                        if (prop === 'subtle' || prop === 'randomUUID') return false;
+                        return Reflect.has(target, prop);
+                    },
+                    ownKeys(target) {
+                        return Reflect.ownKeys(target).filter(
+                            (k) => k !== 'subtle' && k !== 'randomUUID',
+                        );
+                    },
+                    getOwnPropertyDescriptor(target, prop) {
+                        if (prop === 'subtle' || prop === 'randomUUID') return undefined;
+                        return Reflect.getOwnPropertyDescriptor(target, prop);
+                    },
+                });
+                try {
+                    Object.defineProperty(globalThis, 'crypto', {
+                        value: _maskedCrypto, configurable: true, enumerable: true, writable: true,
+                    });
+                } catch (_e) {}
+            }
+        }
+    } catch (_e) { /* secure-context cleanup is best-effort */ }
+
     // -- Profile-conditional installs --------------------------------
     // These run AFTER the V8 startup snapshot is restored, so the
     // stealth profile is loaded and op-based reads return real values.

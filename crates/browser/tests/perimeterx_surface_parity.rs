@@ -179,7 +179,14 @@ fn pull(page: &mut Page, expr: &str) -> String {
 
 #[tokio::test]
 async fn perimeterx_surface_macos() {
-    let mut page = Page::from_html(PROBE_HTML, Some(stealth::presets::chrome_130_macos()))
+    // PerimeterX probe references [SecureContext] APIs (mediaDevices,
+    // userAgentData, etc.) — load over https:// so they're exposed.
+    // Phase 7.
+    let mut page = Page::from_html_with_url(
+        PROBE_HTML,
+        "https://example.com/",
+        Some(stealth::presets::chrome_130_macos()),
+    )
         .await
         .unwrap();
 

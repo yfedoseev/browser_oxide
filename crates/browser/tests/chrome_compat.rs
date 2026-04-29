@@ -21,6 +21,21 @@ async fn check(js: &str) -> String {
     page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
 }
 
+/// Same as `check`, but treats the page as a secure context (https://
+/// origin). Required for tests that probe [SecureContext]-only APIs
+/// (mediaDevices, getBattery, userAgentData, crypto.subtle, etc.) —
+/// Phase 7.
+async fn check_secure(js: &str) -> String {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
+}
+
 // ================================================================
 // Window globals
 // ================================================================
@@ -268,23 +283,23 @@ async fn nav_send_beacon() {
 }
 #[tokio::test]
 async fn nav_get_battery() {
-    assert_eq!(check("typeof navigator.getBattery").await, "function");
+    assert_eq!(check_secure("typeof navigator.getBattery").await, "function");
 }
 #[tokio::test]
 async fn nav_user_agent_data() {
-    assert_eq!(check("typeof navigator.userAgentData").await, "object");
+    assert_eq!(check_secure("typeof navigator.userAgentData").await, "object");
 }
 #[tokio::test]
 async fn nav_ua_data_brands() {
     assert_eq!(
-        check("navigator.userAgentData.brands.length > 0").await,
+        check_secure("navigator.userAgentData.brands.length > 0").await,
         "true"
     );
 }
 #[tokio::test]
 async fn nav_ua_data_mobile() {
     assert_eq!(
-        check("typeof navigator.userAgentData.mobile").await,
+        check_secure("typeof navigator.userAgentData.mobile").await,
         "boolean"
     );
 }
@@ -293,14 +308,14 @@ async fn nav_ua_data_mobile() {
 #[tokio::test]
 async fn nav_ua_data_get_high_entropy_is_function() {
     assert_eq!(
-        check("typeof navigator.userAgentData.getHighEntropyValues").await,
+        check_secure("typeof navigator.userAgentData.getHighEntropyValues").await,
         "function"
     );
 }
 #[tokio::test]
 async fn nav_ua_data_get_high_entropy_returns_promise() {
     assert_eq!(
-        check("navigator.userAgentData.getHighEntropyValues([]) instanceof Promise").await,
+        check_secure("navigator.userAgentData.getHighEntropyValues([]) instanceof Promise").await,
         "true"
     );
 }
@@ -310,7 +325,7 @@ async fn nav_ua_data_get_high_entropy_returns_promise() {
 // populated by the time the second evaluate() reads it.
 #[tokio::test]
 async fn nav_ua_data_high_entropy_full_version_list() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     page.evaluate(
@@ -333,7 +348,7 @@ async fn nav_ua_data_high_entropy_full_version_list() {
 }
 #[tokio::test]
 async fn nav_ua_data_high_entropy_architecture_and_bitness() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     page.evaluate(
@@ -356,7 +371,7 @@ async fn nav_ua_data_high_entropy_architecture_and_bitness() {
 }
 #[tokio::test]
 async fn nav_ua_data_high_entropy_only_returns_requested_plus_low_entropy() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     page.evaluate(
@@ -384,7 +399,7 @@ async fn nav_ua_data_high_entropy_only_returns_requested_plus_low_entropy() {
 #[tokio::test]
 async fn nav_ua_data_to_json_returns_low_entropy_only() {
     assert_eq!(
-        check(
+        check_secure(
             r#"(() => {
                 const j = navigator.userAgentData.toJSON();
                 return Array.isArray(j.brands) && typeof j.mobile === 'boolean' && typeof j.platform === 'string'
@@ -398,7 +413,7 @@ async fn nav_ua_data_to_json_returns_low_entropy_only() {
 async fn nav_ua_data_brands_match_user_agent_version() {
     // Consistency: the major version in brands[] must match the version in navigator.userAgent
     assert_eq!(
-        check(
+        check_secure(
             r#"(() => {
                 const uaMatch = navigator.userAgent.match(/Chrome\/(\d+)/);
                 if (!uaMatch) return 'no-ua-match';
@@ -411,7 +426,7 @@ async fn nav_ua_data_brands_match_user_agent_version() {
 }
 #[tokio::test]
 async fn nav_media_devices() {
-    assert_eq!(check("typeof navigator.mediaDevices").await, "object");
+    assert_eq!(check_secure("typeof navigator.mediaDevices").await, "object");
 }
 #[tokio::test]
 async fn nav_permissions() {
@@ -419,15 +434,15 @@ async fn nav_permissions() {
 }
 #[tokio::test]
 async fn nav_clipboard() {
-    assert_eq!(check("typeof navigator.clipboard").await, "object");
+    assert_eq!(check_secure("typeof navigator.clipboard").await, "object");
 }
 #[tokio::test]
 async fn nav_storage() {
-    assert_eq!(check("typeof navigator.storage").await, "object");
+    assert_eq!(check_secure("typeof navigator.storage").await, "object");
 }
 #[tokio::test]
 async fn nav_service_worker() {
-    assert_eq!(check("typeof navigator.serviceWorker").await, "object");
+    assert_eq!(check_secure("typeof navigator.serviceWorker").await, "object");
 }
 
 // ================================================================
@@ -922,7 +937,7 @@ async fn api_permissions_query() {
 // Battery
 #[tokio::test]
 async fn api_battery() {
-    assert_eq!(check("typeof navigator.getBattery").await, "function");
+    assert_eq!(check_secure("typeof navigator.getBattery").await, "function");
 }
 
 // Dynamic script loading via DOM
@@ -1832,7 +1847,7 @@ async fn chrome_csi_is_native() {
 #[tokio::test]
 async fn fn_proto_tostring_nav_getbattery_native() {
     assert_eq!(
-        check("Function.prototype.toString.call(navigator.getBattery).includes('[native code]')").await,
+        check_secure("Function.prototype.toString.call(navigator.getBattery).includes('[native code]')").await,
         "true"
     );
 }
@@ -1856,7 +1871,7 @@ async fn fn_proto_tostring_permissions_query_native() {
 #[tokio::test]
 async fn fn_proto_tostring_media_devices_enumerate_native() {
     assert_eq!(
-        check("Function.prototype.toString.call(navigator.mediaDevices.enumerateDevices).includes('[native code]')").await,
+        check_secure("Function.prototype.toString.call(navigator.mediaDevices.enumerateDevices).includes('[native code]')").await,
         "true"
     );
 }
@@ -2107,13 +2122,13 @@ async fn nav_permissions_query_is_native() {
 
 #[tokio::test]
 async fn nav_keyboard_exists() {
-    assert_eq!(check("typeof navigator.keyboard").await, "object");
+    assert_eq!(check_secure("typeof navigator.keyboard").await, "object");
 }
 
 #[tokio::test]
 async fn nav_keyboard_getlayoutmap_is_function() {
     assert_eq!(
-        check("typeof navigator.keyboard.getLayoutMap").await,
+        check_secure("typeof navigator.keyboard.getLayoutMap").await,
         "function"
     );
 }
@@ -2121,14 +2136,14 @@ async fn nav_keyboard_getlayoutmap_is_function() {
 #[tokio::test]
 async fn nav_keyboard_getlayoutmap_returns_promise() {
     assert_eq!(
-        check("navigator.keyboard.getLayoutMap() instanceof Promise").await,
+        check_secure("navigator.keyboard.getLayoutMap() instanceof Promise").await,
         "true"
     );
 }
 
 #[tokio::test]
 async fn nav_keyboard_getlayoutmap_resolves_to_map() {
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     page.evaluate("window.__r = null; navigator.keyboard.getLayoutMap().then(m => { window.__r = m; });").unwrap();
@@ -2139,7 +2154,7 @@ async fn nav_keyboard_getlayoutmap_resolves_to_map() {
 #[tokio::test]
 async fn nav_keyboard_getlayoutmap_has_entries() {
     // A real QWERTY layout has ~50 entries; we just need > 0.
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     page.evaluate("window.__r = 0; navigator.keyboard.getLayoutMap().then(m => { window.__r = m.size; });").unwrap();
@@ -2151,7 +2166,7 @@ async fn nav_keyboard_getlayoutmap_has_entries() {
 #[tokio::test]
 async fn nav_keyboard_getlayoutmap_has_keya() {
     // KeyA is always present in any Latin keyboard layout.
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
         .await
         .unwrap();
     page.evaluate("window.__r = false; navigator.keyboard.getLayoutMap().then(m => { window.__r = m.has('KeyA'); });").unwrap();
@@ -2162,7 +2177,7 @@ async fn nav_keyboard_getlayoutmap_has_keya() {
 #[tokio::test]
 async fn nav_keyboard_getlayoutmap_is_native() {
     assert_eq!(
-        check("Function.prototype.toString.call(navigator.keyboard.getLayoutMap).includes('[native code]')").await,
+        check_secure("Function.prototype.toString.call(navigator.keyboard.getLayoutMap).includes('[native code]')").await,
         "true"
     );
 }
@@ -2227,7 +2242,7 @@ async fn crypto_instanceof_crypto() {
 
 #[tokio::test]
 async fn crypto_subtle_instanceof_subtle_crypto() {
-    assert_eq!(check("crypto.subtle instanceof SubtleCrypto").await, "true");
+    assert_eq!(check_secure("crypto.subtle instanceof SubtleCrypto").await, "true");
 }
 
 #[tokio::test]
@@ -2249,7 +2264,7 @@ async fn crypto_get_random_values_native() {
 #[tokio::test]
 async fn crypto_random_uuid_native() {
     assert_eq!(
-        check("crypto.randomUUID.toString().includes('[native code]')").await,
+        check_secure("crypto.randomUUID.toString().includes('[native code]')").await,
         "true"
     );
 }
@@ -2257,7 +2272,7 @@ async fn crypto_random_uuid_native() {
 #[tokio::test]
 async fn crypto_random_uuid_format() {
     assert_eq!(
-        check("/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(crypto.randomUUID())").await,
+        check_secure("/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(crypto.randomUUID())").await,
         "true"
     );
 }
@@ -2275,13 +2290,13 @@ async fn crypto_get_random_values_returns_non_zero() {
 
 #[tokio::test]
 async fn crypto_subtle_digest_exists() {
-    assert_eq!(check("typeof crypto.subtle.digest").await, "function");
+    assert_eq!(check_secure("typeof crypto.subtle.digest").await, "function");
 }
 
 #[tokio::test]
 async fn crypto_subtle_digest_is_native() {
     assert_eq!(
-        check("crypto.subtle.digest.toString().includes('[native code]')").await,
+        check_secure("crypto.subtle.digest.toString().includes('[native code]')").await,
         "true"
     );
 }
@@ -2367,21 +2382,33 @@ async fn performance_get_entries_is_native() {
 // shim) have time to fire. Stashes resolved value in window.__r and rejection
 // in window.__rej. Returns either "ok:<value>" or "rej:<error.name>".
 async fn await_promise(js: &str, timeout_ms: u64) -> String {
-    await_promise_inner(js, timeout_ms, None).await
+    await_promise_inner(js, timeout_ms, None, false).await
+}
+/// Same as `await_promise`, but the page is loaded over https:// so
+/// [SecureContext]-only APIs (credentials, etc.) are exposed. Phase 7.
+async fn await_promise_secure(js: &str, timeout_ms: u64) -> String {
+    await_promise_inner(js, timeout_ms, None, true).await
 }
 async fn await_promise_with_profile(
     js: &str,
     timeout_ms: u64,
     profile: stealth::StealthProfile,
 ) -> String {
-    await_promise_inner(js, timeout_ms, Some(profile)).await
+    await_promise_inner(js, timeout_ms, Some(profile), false).await
 }
 async fn await_promise_inner(
     js: &str,
     timeout_ms: u64,
     profile: Option<stealth::StealthProfile>,
+    secure: bool,
 ) -> String {
-    let mut page = Page::from_html(&html(""), profile).await.unwrap();
+    let mut page = if secure {
+        Page::from_html_with_url(&html(""), "https://example.com/", profile)
+            .await
+            .unwrap()
+    } else {
+        Page::from_html(&html(""), profile).await.unwrap()
+    };
     let stash = format!(
         "window.__r = null; window.__rej = null; \
          ({js}).then(v => {{ window.__r = String(v); }}, \
@@ -2518,7 +2545,7 @@ async fn webauthn_isuvpa_is_native() {
 #[tokio::test]
 async fn webauthn_credentials_create_is_native() {
     assert_eq!(
-        check("navigator.credentials.create.toString().includes('[native code]')").await,
+        check_secure("navigator.credentials.create.toString().includes('[native code]')").await,
         "true"
     );
 }
@@ -2527,7 +2554,7 @@ async fn webauthn_credentials_create_is_native() {
 async fn webauthn_credentials_create_rejects_with_not_allowed() {
     // Shim sleeps 120 ms before rejecting; pump 250 ms.
     assert_eq!(
-        await_promise("navigator.credentials.create({publicKey:{}})", 250,).await,
+        await_promise_secure("navigator.credentials.create({publicKey:{}})", 250,).await,
         "rej:NotAllowedError"
     );
 }
@@ -2535,7 +2562,7 @@ async fn webauthn_credentials_create_rejects_with_not_allowed() {
 #[tokio::test]
 async fn webauthn_credentials_get_publickey_rejects() {
     assert_eq!(
-        await_promise("navigator.credentials.get({publicKey:{}})", 250,).await,
+        await_promise_secure("navigator.credentials.get({publicKey:{}})", 250,).await,
         "rej:NotAllowedError"
     );
 }
@@ -2544,7 +2571,7 @@ async fn webauthn_credentials_get_publickey_rejects() {
 async fn webauthn_credentials_create_no_args_rejects_typeerror() {
     // Synchronous Promise.reject(new TypeError(...)). 50 ms pump is plenty.
     assert_eq!(
-        await_promise("navigator.credentials.create()", 50,).await,
+        await_promise_secure("navigator.credentials.create()", 50,).await,
         "rej:TypeError"
     );
 }
@@ -2552,7 +2579,7 @@ async fn webauthn_credentials_create_no_args_rejects_typeerror() {
 #[tokio::test]
 async fn webauthn_navigator_credentials_is_credentials_container() {
     assert_eq!(
-        check("navigator.credentials instanceof CredentialsContainer").await,
+        check_secure("navigator.credentials instanceof CredentialsContainer").await,
         "true"
     );
 }
@@ -3127,7 +3154,7 @@ async fn atomics_wait_returns_timed_out_synchronously() {
 async fn fedcm_credentials_get_identity_rejects() {
     // FedCM shim sleeps 200 ms before rejecting; pump 350 ms.
     assert_eq!(
-        await_promise(
+        await_promise_secure(
             "navigator.credentials.get({ identity: { providers: [{ configURL: 'https://x/cfg.json', clientId: 'a' }] } })",
             350,
         )

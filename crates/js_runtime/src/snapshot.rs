@@ -49,7 +49,13 @@ pub fn get_snapshot() -> &'static [u8] {
             let mut op_state = op_state.borrow_mut();
             op_state.put(DomState::new(Dom::new()));
             op_state.put(TimerState::new());
-            op_state.put(StealthState::new(None));
+            // Build the snapshot with `is_secure_context = true` so the
+            // bootstrap registers ALL secure-context-only APIs (getBattery,
+            // caches, cookieStore, IdleDetector, EyeDropper, WebTransport).
+            // Per-page gating runs lazily — navigator getters call _secure()
+            // at access time, and cleanup_bootstrap.js strips the rest on
+            // insecure pages. Phase 7.
+            op_state.put(StealthState::new_with_flags(None, false, true));
             op_state.put(FetchState::new(None));
             op_state.put(CanvasState::new());
             op_state.put(WebSocketState::new());

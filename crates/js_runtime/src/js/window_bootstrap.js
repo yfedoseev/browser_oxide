@@ -28,6 +28,14 @@
         }
         return fallback;
     };
+
+    // Helper: is the document a secure context? Drives the IDL
+    // `[SecureContext]` extended attribute — gates the ~18 modern
+    // Web Platform APIs (mediaDevices, serviceWorker, clipboard,
+    // credentials, usb, etc.) so they're undefined on
+    // about:blank/data:/http: but defined on https:/wss:/file:/
+    // http://localhost. Phase 7 fix.
+    const _secure = () => ops.op_is_secure_context();
     const _pInt = (key, fallback) => {
         const v = _p(key, "");
         return v !== "" ? parseInt(v, 10) : fallback;
@@ -664,20 +672,24 @@
     Object.defineProperty(_NavProto, 'connection', { get: () => _navConnection, enumerable: true, configurable: true });
     Object.defineProperty(_NavProto, 'plugins', { get: () => _navPlugins, enumerable: true, configurable: true });
     Object.defineProperty(_NavProto, 'mimeTypes', { get: () => _navMimeTypes, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'mediaDevices', { get: () => _navMediaDevices, enumerable: true, configurable: true });
+    // Navigator getters. Properties marked /* SC */ are
+    // [SecureContext]-only per their IDL — return undefined on
+    // insecure contexts so the surface matches real Chrome on
+    // data:/http:/about:blank URLs. Phase 7 fix.
+    Object.defineProperty(_NavProto, 'mediaDevices', { get: () => _secure() ? _navMediaDevices : undefined, enumerable: true, configurable: true });
     Object.defineProperty(_NavProto, 'permissions', { get: () => _navPermissions, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'credentials', { get: () => _navCredentials, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'bluetooth', { get: () => _navBluetooth, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'usb', { get: () => _navUsb, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'serial', { get: () => _navSerial, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'hid', { get: () => _navHid, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'keyboard', { get: () => _navKeyboard, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'locks', { get: () => _navLocks, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'storage', { get: () => _navStorage, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'serviceWorker', { get: () => _navServiceWorker, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'clipboard', { get: () => _navClipboard, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'credentials', { get: () => _secure() ? _navCredentials : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'bluetooth', { get: () => _secure() ? _navBluetooth : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'usb', { get: () => _secure() ? _navUsb : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'serial', { get: () => _secure() ? _navSerial : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'hid', { get: () => _secure() ? _navHid : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'keyboard', { get: () => _secure() ? _navKeyboard : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'locks', { get: () => _secure() ? _navLocks : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'storage', { get: () => _secure() ? _navStorage : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'serviceWorker', { get: () => _secure() ? _navServiceWorker : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'clipboard', { get: () => _secure() ? _navClipboard : undefined, enumerable: true, configurable: true });
     Object.defineProperty(_NavProto, 'geolocation', { get: () => _navGeolocation, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'wakeLock', { get: () => _navWakeLock, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'wakeLock', { get: () => _secure() ? _navWakeLock : undefined, enumerable: true, configurable: true });
 
     // Apply native masking to all getters
     _maskAsNative(_NavProto, 'userAgent', 'platform', 'vendor', 'vendorSub', 'productSub', 
@@ -755,9 +767,14 @@
     });
     globalThis.BatteryManager = BatteryManager;
     const _batteryInstance = new BatteryManager();
-    _defNavMethod('getBattery', function getBattery() {
-        return Promise.resolve(_batteryInstance);
-    });
+    // getBattery is [SecureContext] — exists only on https/wss/file/
+    // localhost. On data:/http:, real Chrome reports
+    // `TypeError: navigator.getBattery is not a function`. Phase 7.
+    if (_secure()) {
+        _defNavMethod('getBattery', function getBattery() {
+            return Promise.resolve(_batteryInstance);
+        });
+    }
     _defNavMethod('getUserMedia', function getUserMedia(constraints, success, error) {
         if (error) error(new Error("Permission denied"));
         return undefined;
@@ -1352,7 +1369,10 @@
                 };
             },
         };
-        _defNav('userAgentData', () => _navUaData);
+        // userAgentData is [SecureContext] — return undefined on
+        // insecure contexts so probes get a TypeError when reading
+        // navigator.userAgentData.brands. Phase 7.
+        _defNav('userAgentData', () => _secure() ? _navUaData : undefined);
     })();
 
     // Notification
@@ -4674,7 +4694,8 @@
             },
             getPreferredCanvasFormat() { return "bgra8unorm"; },
         };
-        _defNav('gpu', () => _navGpu);
+        // WebGPU is [SecureContext] — undefined on data:/http:/about:blank.
+        _defNav('gpu', () => _secure() ? _navGpu : undefined);
     }
 
     // Storage Access API
@@ -4873,7 +4894,8 @@
 
     // (1) globalThis.caches — CacheStorage (Service Worker spec)
     // Spec: https://w3c.github.io/ServiceWorker/#cachestorage
-    if (typeof globalThis.caches === "undefined") {
+    // [SecureContext] — undefined on insecure contexts. Phase 7.
+    if (_secure() && typeof globalThis.caches === "undefined") {
         class CacheStorage {
             match(_request, _options) { return Promise.resolve(undefined); }
             has(_cacheName) { return Promise.resolve(false); }
@@ -4902,10 +4924,12 @@
 
     // (2) globalThis.cookieStore — async Cookie Store API
     // Spec: https://wicg.github.io/cookie-store/
+    // [SecureContext] — undefined on insecure contexts. Phase 7.
     // Real Chrome exposes a CookieStore INSTANCE on globalThis (not a
-    // constructor). Our prior `_illegalCtor("CookieStore")` made
-    // `typeof cookieStore === "function"` (constructor), but Chrome makes
-    // it `"object"`. Fix: real instance with the documented method set.
+    // constructor) when secure. Our prior `_illegalCtor("CookieStore")`
+    // from interfaces_bootstrap is replaced unconditionally so the
+    // *constructor* exists on globalThis as a real class — but the
+    // instance binding `globalThis.cookieStore` is gated on secure.
     {
         class CookieStore extends EventTarget {
             get(_name) { return Promise.resolve(null); }
@@ -4920,9 +4944,11 @@
         Object.defineProperty(globalThis, "CookieStore", {
             value: CookieStore, configurable: true, writable: true,
         });
-        Object.defineProperty(globalThis, "cookieStore", {
-            value: new CookieStore(), configurable: true, enumerable: true,
-        });
+        if (_secure()) {
+            Object.defineProperty(globalThis, "cookieStore", {
+                value: new CookieStore(), configurable: true, enumerable: true,
+            });
+        }
     }
 
     // (3) performance.eventCounts — EventCounts Map
@@ -5016,7 +5042,8 @@
 
     // (5) IdleDetector — User Idle Detection API (Chrome 94+)
     // Spec: https://wicg.github.io/idle-detection/
-    if (typeof globalThis.IdleDetector === "undefined") {
+    // [SecureContext] — undefined on insecure contexts. Phase 7.
+    if (_secure() && typeof globalThis.IdleDetector === "undefined") {
         class IdleDetector extends EventTarget {
             constructor() {
                 super();
@@ -5041,7 +5068,8 @@
 
     // (6) EyeDropper — Color picker constructor (Chrome 95+)
     // Spec: https://wicg.github.io/eyedropper-api/
-    if (typeof globalThis.EyeDropper === "undefined") {
+    // [SecureContext] — undefined on insecure contexts. Phase 7.
+    if (_secure() && typeof globalThis.EyeDropper === "undefined") {
         class EyeDropper {
             constructor() {}
             open(_options) {
@@ -5076,8 +5104,9 @@
         globalThis.VirtualKeyboard = VirtualKeyboard;
         try {
             const _vk = new VirtualKeyboard();
+            // VirtualKeyboard is [SecureContext]. Phase 7.
             Object.defineProperty(_NavProto, "virtualKeyboard", {
-                get: () => _vk, configurable: true, enumerable: true,
+                get: () => _secure() ? _vk : undefined, configurable: true, enumerable: true,
             });
         } catch (_e) {}
     }
@@ -5099,8 +5128,9 @@
         globalThis.DevicePosture = DevicePosture;
         try {
             const _dp = new DevicePosture();
+            // DevicePosture is [SecureContext]. Phase 7.
             Object.defineProperty(_NavProto, "devicePosture", {
-                get: () => _dp, configurable: true, enumerable: true,
+                get: () => _secure() ? _dp : undefined, configurable: true, enumerable: true,
             });
         } catch (_e) {}
     }
@@ -5174,4 +5204,12 @@
 
     // fetch(), Headers, Request, Response are now provided by fetch_bootstrap.js
     // (wired to real net::HttpClient via op_fetch)
+
+    // NOTE: secure-context API gating is split:
+    // - Navigator getters (mediaDevices, clipboard, ...) lazily check
+    //   _secure() at access time — they work directly off the snapshot.
+    // - Globals + getBattery are always registered into the snapshot
+    //   (snapshot bootstraps with is_secure_context=true) and then
+    //   stripped per-page in cleanup_bootstrap.js when the actual page
+    //   URL is insecure.
 })(globalThis);
