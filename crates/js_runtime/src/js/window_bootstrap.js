@@ -1042,72 +1042,63 @@
     Object.defineProperty(globalThis, 'outerHeight', { get: () => _pInt("outer_height", 1080),  configurable: true });
     Object.defineProperty(globalThis, 'devicePixelRatio', { get: () => _pFloat("device_pixel_ratio", 1), configurable: true });
 
-    // Scroll + screen position — must be ACCESSOR properties on
-    // Window.prototype, NOT data properties on globalThis. Real Chrome's
-    // descriptors:
+    // Scroll + screen position — OWN accessor properties on the window
+    // instance (globalThis), per real Chrome (verified via Playwright
+    // MCP capture in docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md):
     //
     //   Object.getOwnPropertyDescriptor(window, 'scrollX')
-    //     → undefined (inherited from Window.prototype)
+    //     → { get: f, set: f, enumerable: true, configurable: true }
     //   Object.getOwnPropertyDescriptor(Window.prototype, 'scrollX')
-    //     → { get: f, set: undefined, enumerable: true, configurable: true }
+    //     → undefined (NOT on the prototype)
     //
-    // The previous implementation assigned them as own data properties
-    // on globalThis, which detection libraries spot via:
-    //   typeof Object.getOwnPropertyDescriptor(window, 'scrollX').value === 'number'
+    // The Phase 6 D2 attempt put them on Window.prototype based on a
+    // wrong reading of the spec; Phase 7 reverts that.
     //
-    // Backing storage is module-scope state, mutated by scrollTo()/scrollBy().
-    // screenX/Y are always 0 on a windowless engine (matches headless Chrome
-    // and matches our prior behaviour).
+    // Backing storage is module-scope state, mutated by scrollTo()/
+    // scrollBy(). screenX/Y are always 0 on a windowless engine.
     let _scrollX = 0;
     let _scrollY = 0;
 
-    // Resolve Window.prototype. In our V8 runtime, `globalThis` IS the
-    // window object, so `Object.getPrototypeOf(globalThis)` yields the
-    // Window prototype where these accessors must live.
-    const _WindowProto = Object.getPrototypeOf(globalThis);
-    if (_WindowProto && _WindowProto !== Object.prototype) {
-        Object.defineProperty(_WindowProto, 'scrollX', {
-            get: function() { return _scrollX; },
-            enumerable: true, configurable: true,
-        });
-        Object.defineProperty(_WindowProto, 'scrollY', {
-            get: function() { return _scrollY; },
-            enumerable: true, configurable: true,
-        });
-        Object.defineProperty(_WindowProto, 'pageXOffset', {
-            get: function() { return _scrollX; },
-            enumerable: true, configurable: true,
-        });
-        Object.defineProperty(_WindowProto, 'pageYOffset', {
-            get: function() { return _scrollY; },
-            enumerable: true, configurable: true,
-        });
-        Object.defineProperty(_WindowProto, 'screenX', {
-            get: function() { return 0; },
-            enumerable: true, configurable: true,
-        });
-        Object.defineProperty(_WindowProto, 'screenY', {
-            get: function() { return 0; },
-            enumerable: true, configurable: true,
-        });
-        Object.defineProperty(_WindowProto, 'screenLeft', {
-            get: function() { return 0; },
-            enumerable: true, configurable: true,
-        });
-        Object.defineProperty(_WindowProto, 'screenTop', {
-            get: function() { return 0; },
-            enumerable: true, configurable: true,
-        });
-    } else {
-        // Fallback if prototype walk failed — keep them as own getters on
-        // globalThis (better than data properties).
-        Object.defineProperty(globalThis, 'scrollX',     { get: () => _scrollX, configurable: true });
-        Object.defineProperty(globalThis, 'scrollY',     { get: () => _scrollY, configurable: true });
-        Object.defineProperty(globalThis, 'pageXOffset', { get: () => _scrollX, configurable: true });
-        Object.defineProperty(globalThis, 'pageYOffset', { get: () => _scrollY, configurable: true });
-        Object.defineProperty(globalThis, 'screenX',     { get: () => 0, configurable: true });
-        Object.defineProperty(globalThis, 'screenY',     { get: () => 0, configurable: true });
-    }
+    Object.defineProperty(globalThis, 'scrollX', {
+        get: function() { return _scrollX; },
+        set: function(_v) { /* read-only per spec; setter exists in descriptor */ },
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(globalThis, 'scrollY', {
+        get: function() { return _scrollY; },
+        set: function(_v) {},
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(globalThis, 'pageXOffset', {
+        get: function() { return _scrollX; },
+        set: function(_v) {},
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(globalThis, 'pageYOffset', {
+        get: function() { return _scrollY; },
+        set: function(_v) {},
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(globalThis, 'screenX', {
+        get: function() { return 0; },
+        set: function(_v) {},
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(globalThis, 'screenY', {
+        get: function() { return 0; },
+        set: function(_v) {},
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(globalThis, 'screenLeft', {
+        get: function() { return 0; },
+        set: function(_v) {},
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(globalThis, 'screenTop', {
+        get: function() { return 0; },
+        set: function(_v) {},
+        enumerable: true, configurable: true,
+    });
 
     globalThis.scrollTo = function(xOrOptions, y) {
         if (typeof xOrOptions === "object" && xOrOptions !== null) {
@@ -1305,15 +1296,18 @@
             return copy;
         };
 
+        // Phase 7 — real Chrome 147 GREASE entry is
+        // `{brand: "Not.A/Brand", version: "8"}`, not "24".
+        // Chrome rotates the GREASE version periodically.
         const _makeLowBrands = () => Object.freeze(_shuffled([
             Object.freeze({ brand: "Chromium", version: _uaBrowserMajor() }),
             Object.freeze({ brand: "Google Chrome", version: _uaBrowserMajor() }),
-            Object.freeze({ brand: "Not.A/Brand", version: "24" }),
+            Object.freeze({ brand: "Not.A/Brand", version: "8" }),
         ]).map(Object.freeze));
         const _makeFullBrands = () => Object.freeze(_shuffled([
             Object.freeze({ brand: "Chromium", version: _uaBrowserFull() }),
             Object.freeze({ brand: "Google Chrome", version: _uaBrowserFull() }),
-            Object.freeze({ brand: "Not.A/Brand", version: "24.0.0.0" }),
+            Object.freeze({ brand: "Not.A/Brand", version: "8.0.0.0" }),
         ]).map(Object.freeze));
         // Chrome re-uses the same GREASE ordering across a userAgentData
         // object's lifetime; only randomized once per construction.
@@ -4953,9 +4947,13 @@
 
     // (3) performance.eventCounts — EventCounts Map
     // Spec: https://wicg.github.io/event-timing/#eventcounts
-    // Real Chrome populates this lazily; on a fresh page it has no keys
-    // until the user/script dispatches input events. We expose an empty
-    // Map-like with the correct shape.
+    // Real Chrome 147 pre-populates this with 36 known event-type keys
+    // at value 0. Insertion order matches Chromium's EventTypeNames
+    // enumeration — anti-bot scripts probe `eventCounts.size > 0` and
+    // `Array.from(eventCounts.keys()).slice(0, 10)`. First-10 captured
+    // from Playwright MCP confirm: pointerdown, touchend, input,
+    // keydown, mouseleave, mouseenter, drop, beforeinput, pointerenter,
+    // dragend. Phase 7.
     if (globalThis.performance && typeof globalThis.performance.eventCounts === "undefined") {
         class EventCounts {
             constructor() { this._inner = new Map(); }
@@ -4972,9 +4970,23 @@
             value: "EventCounts", configurable: true,
         });
         globalThis.EventCounts = EventCounts;
+        const _ec = new EventCounts();
+        for (const k of [
+            "pointerdown", "touchend", "input", "keydown",
+            "mouseleave", "mouseenter", "drop", "beforeinput",
+            "pointerenter", "dragend", "dragstart", "dragenter",
+            "dragover", "dragleave", "drag", "pointerout",
+            "pointerleave", "pointercancel", "pointermove", "pointerup",
+            "pointerover", "wheel", "click", "auxclick",
+            "contextmenu", "dblclick", "mousedown", "mouseup",
+            "mousemove", "mouseout", "mouseover", "keyup",
+            "keypress", "compositionstart", "compositionupdate", "compositionend",
+        ]) {
+            _ec._inner.set(k, 0);
+        }
         try {
             Object.defineProperty(globalThis.performance, "eventCounts", {
-                value: new EventCounts(), configurable: true, enumerable: true,
+                value: _ec, configurable: true, enumerable: true,
             });
         } catch (_e) {}
     }

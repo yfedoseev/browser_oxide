@@ -168,6 +168,72 @@ async fn phase7_ab_probe_capture_oxide() {
     eprintln!("wrote {} keys to {path}", result.len());
 }
 
+/// Phase 7 D3 gates — scrollX/Y own-accessor placement (Phase 6 D2
+/// revert), eventCounts pre-population, userAgentData GREASE "8".
+#[tokio::test]
+async fn phase7_d3_scroll_eventcounts_grease() {
+    use browser::Page;
+    use stealth::presets::chrome_130_macos;
+    let mut p = Page::from_html_with_url(
+        "<!doctype html><html></html>",
+        "https://example.com/",
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+
+    // 3a) scrollX/Y are own accessors on window, NOT on Window.prototype.
+    // Use String() not JSON.stringify so we can substring-match without
+    // worrying about escaped quotes through Rust's JSON envelope.
+    let on_win = p
+        .evaluate(
+            "Object.keys(Object.getOwnPropertyDescriptor(window, 'scrollX')||{}).sort().join(',')",
+        )
+        .unwrap();
+    let on_win = on_win.trim_matches('"');
+    assert!(
+        on_win.contains("get") && on_win.contains("configurable"),
+        "scrollX must be an own accessor on window, got {on_win}"
+    );
+    let on_proto = p
+        .evaluate(
+            "Object.keys(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'scrollX')||{}).join(',')",
+        )
+        .unwrap();
+    assert_eq!(
+        on_proto.trim_matches('"'),
+        "",
+        "scrollX must NOT be on Window.prototype, got {on_proto}"
+    );
+
+    // 3b) eventCounts has 36 keys, first-10 in Chrome's order
+    assert_eq!(
+        p.evaluate("String(performance.eventCounts.size)")
+            .unwrap()
+            .trim_matches('"'),
+        "36"
+    );
+    let first10 = p
+        .evaluate(
+            "Array.from(performance.eventCounts.keys()).slice(0,10).join(',')",
+        )
+        .unwrap();
+    assert_eq!(
+        first10.trim_matches('"'),
+        "pointerdown,touchend,input,keydown,mouseleave,mouseenter,drop,beforeinput,pointerenter,dragend"
+    );
+
+    // 3c) GREASE "8" not "24"
+    let brands = p
+        .evaluate("navigator.userAgentData.brands.map(b=>b.brand+':'+b.version).join(',')")
+        .unwrap();
+    let s = brands.trim_matches('"');
+    assert!(s.contains("Not.A/Brand:8"),
+        "Not.A/Brand version should be '8', got: {s}");
+    assert!(!s.contains("Not.A/Brand:24"),
+        "stale GREASE version 24 leaked into brands: {s}");
+}
+
 /// Phase 7 D2 gate — 18 [SecureContext] APIs return undefined on
 /// insecure contexts (about:blank/data:/http:) and are present on
 /// secure contexts (https:). Byte-exact match against
