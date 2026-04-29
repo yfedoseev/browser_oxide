@@ -192,3 +192,287 @@ python3 /tmp/diff_probe.py
   recoverability data
 - `crates/browser/tests/phase7_ab_probe.rs` — the probe + capture
   infrastructure (commit alongside this doc)
+
+---
+
+## Appendix A — Root cause of the 18 secure-context leaks
+
+The single byte that explains the entire Category A column:
+
+| Capture | URL | `isSecureContext` |
+|---|---|---|
+| `probe_mcp.json` (real Chrome insecure) | `data:text/html,...` | **false** |
+| `probe_mcp_secure.json` (real Chrome secure) | `https://example.com/` | **true** |
+| `probe_oxide.json` (us, default `from_html`) | `about:blank` | **true** ← bug |
+
+Our `from_html` path treats `about:blank` as a secure context. Real
+Chrome treats `about:blank` (and `data:` and `http:` and `file:`) as
+**non-secure**, which gates all 18 APIs at the IDL level. Fixing this
+flag alone is necessary; gating the APIs on it is the other half of
+the fix.
+
+**Where to fix**:
+- `crates/js_runtime/src/js/window_bootstrap.js` — wrap each of the
+  18 APIs in `if (isSecureContext) { ... }`
+- The `isSecureContext` global getter must reflect actual scheme
+  (https/file with allowed origin/wss/etc.) — currently hard-coded
+  true. Trace the value through `crates/browser/src/page.rs` /
+  `from_url` initialization to make sure http:///data:/about:blank
+  paths set it false.
+
+## Appendix B — Full per-key dump from `probe_oxide.json` (106 keys)
+
+This is the literal capture our `phase7_ab_probe_capture_oxide` test
+wrote. Reproduced inline so the doc remains self-contained even if
+the capture file is regenerated later.
+
+```json
+{
+  "url": "about:blank",
+  "isSecureContext": "true",
+  "nav.userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+  "nav.appName": "Netscape",
+  "nav.appCodeName": "Mozilla",
+  "nav.appVersion": "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+  "nav.product": "Gecko",
+  "nav.productSub": "20030107",
+  "nav.vendor": "Google Inc.",
+  "nav.vendorSub": "",
+  "nav.platform": "MacIntel",
+  "nav.language": "en-US",
+  "nav.languages": "[\"en-US\",\"en\"]",
+  "nav.cookieEnabled": "true",
+  "nav.doNotTrack": "null",
+  "nav.webdriver": "false",
+  "nav.hardwareConcurrency": "10",
+  "nav.deviceMemory": "16",
+  "nav.maxTouchPoints": "0",
+  "nav.onLine": "true",
+  "nav.pdfViewerEnabled": "true",
+  "nav.geolocation": "[object Object]",
+  "nav.mediaDevices": "[object MediaDevices]",
+  "nav.permissions": "[object Permissions]",
+  "nav.plugins": "[object PluginArray]",
+  "nav.plugins.length": "5",
+  "nav.plugins.names": "[\"PDF Viewer\",\"Chrome PDF Viewer\",\"Chromium PDF Viewer\",\"Microsoft Edge PDF Viewer\",\"WebKit built-in PDF\"]",
+  "nav.mimeTypes": "[object MimeTypeArray]",
+  "nav.serviceWorker": "[object ServiceWorkerContainer]",
+  "nav.clipboard": "[object Object]",
+  "nav.credentials": "[object CredentialsContainer]",
+  "nav.keyboard": "[object Keyboard]",
+  "nav.locks": "[object Object]",
+  "nav.presentation": "undefined",
+  "nav.wakeLock": "[object Object]",
+  "nav.usb": "[object Object]",
+  "nav.bluetooth": "[object Bluetooth]",
+  "nav.hid": "[object Object]",
+  "nav.serial": "[object Object]",
+  "nav.virtualKeyboard": "[object VirtualKeyboard]",
+  "nav.devicePosture": "[object DevicePosture]",
+  "nav.windowControlsOverlay": "[object WindowControlsOverlay]",
+  "nav.mediaSession": "[object MediaSession]",
+  "nav.storage": "[object StorageManager]",
+  "nav.contacts": "undefined",
+  "nav.scheduling": "[object Object]",
+  "nav.xr": "undefined",
+  "nav.gpu": "[object Object]",
+  "nav.userAgentData": "[object Object]",
+  "nav.userAgentData.brands": "[{\"brand\":\"Google Chrome\",\"version\":\"147\"},{\"brand\":\"Chromium\",\"version\":\"147\"},{\"brand\":\"Not.A/Brand\",\"version\":\"24\"}]",
+  "nav.userAgentData.mobile": "false",
+  "nav.userAgentData.platform": "macOS",
+  "nav.getBattery": "function",
+  "global.caches": "object",
+  "global.cookieStore": "object",
+  "global.IdleDetector": "function",
+  "global.EyeDropper": "function",
+  "global.WebTransport": "function",
+  "crypto.subtle.typeof": "object",
+  "crypto.randomUUID.typeof": "function",
+  "Notification.permission": "default",
+  "descr.WindowProto.scrollX": "[\"get\",\"set\",\"enumerable\",\"configurable\"]",
+  "descr.win.scrollX": "undefined",
+  "NavProto.userAgent.descr": "{\"hasGet\":true,\"hasSet\":false,\"enumerable\":true,\"configurable\":true}",
+  "eventCounts.size": "0",
+  "eventCounts.first10keys": "[]",
+  "doc.characterSet": "UTF-8",
+  "doc.compatMode": "CSS1Compat",
+  "doc.visibilityState": "visible",
+  "doc.hasFocus": "true",
+  "window.ownPropertyNames.length": "369",
+  "screen.width": "1440",
+  "screen.height": "900",
+  "screen.availWidth": "1440",
+  "screen.availHeight": "875",
+  "screen.availLeft": "0",
+  "screen.availTop": "25",
+  "screen.colorDepth": "24",
+  "screen.pixelDepth": "24",
+  "screen.orientation.type": "landscape-primary",
+  "screen.orientation.angle": "0",
+  "webgl.VENDOR": "WebKit",
+  "webgl.RENDERER": "WebKit WebGL",
+  "webgl.VERSION": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+  "webgl.SHADING_LANGUAGE_VERSION": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+  "webgl.UNMASKED_VENDOR_WEBGL": "Google Inc. (Apple)",
+  "webgl.UNMASKED_RENDERER_WEBGL": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)",
+  "webgl.extensions.length": "36",
+  "mql.(prefers-color-scheme: light)": "true",
+  "mql.(prefers-color-scheme: dark)": "false",
+  "mql.(pointer: fine)": "true",
+  "mql.(pointer: coarse)": "false",
+  "mql.(hover: hover)": "true",
+  "mql.(forced-colors: none)": "true",
+  "mql.(orientation: landscape)": "true",
+  "mql.(min-width: 100px)": "true",
+  "chrome.runtime.in": "false",
+  "chrome.app.in": "true",
+  "chrome.csi.in": "true",
+  "chrome.loadTimes.in": "true",
+  "chrome.csi().keys": "[\"onloadT\",\"pageT\",\"startE\",\"tran\"]",
+  "chrome.loadTimes().keys": "[\"commitLoadTime\",\"connectionInfo\",\"finishDocumentLoadTime\",\"finishLoadTime\",\"firstPaintAfterLoadTime\",\"firstPaintTime\",\"navigationType\",\"npnNegotiatedProtocol\",\"requestTime\",\"startLoadTime\",\"wasAlternateProtocolAvailable\",\"wasFetchedViaSpdy\",\"wasNpnNegotiated\"]",
+  "Date.toString.epoch": "Wed Dec 31 1969 16:00:00 GMT-0800 (Pacific Standard Time)",
+  "battery.proto": "[object BatteryManager]",
+  "storage.estimate.quota": "128849018880",
+  "perm.geolocation.state": "prompt"
+}
+```
+
+## Appendix C — Full ordered side-by-side mismatch list (59 of 92 shared keys)
+
+Every shared probe key where oxide differs from `probe_mcp.json`
+(the real Chrome 147 macOS arm64 capture on `data:` URL). Format:
+`key | oxide | chrome-insecure | category`.
+
+| Key | Oxide | Chrome insecure | Cat |
+|---|---|---|---|
+| `isSecureContext` | true | false | **A (root)** |
+| `nav.mediaDevices` | `[object MediaDevices]` | undefined | A |
+| `nav.serviceWorker` | `[object ServiceWorkerContainer]` | undefined | A |
+| `nav.clipboard` | `[object Object]` | undefined | A |
+| `nav.credentials` | `[object CredentialsContainer]` | undefined | A |
+| `nav.keyboard` | `[object Keyboard]` | undefined | A |
+| `nav.locks` | `[object Object]` | undefined | A |
+| `nav.wakeLock` | `[object Object]` | undefined | A |
+| `nav.usb` | `[object Object]` | undefined | A |
+| `nav.bluetooth` | `[object Bluetooth]` | undefined | A |
+| `nav.hid` | `[object Object]` | undefined | A |
+| `nav.serial` | `[object Object]` | undefined | A |
+| `nav.virtualKeyboard` | `[object VirtualKeyboard]` | undefined | A |
+| `nav.devicePosture` | `[object DevicePosture]` | undefined | A |
+| `nav.storage` | `[object StorageManager]` | undefined | A |
+| `nav.gpu` | `[object Object]` | undefined | A |
+| `nav.deviceMemory` | 16 | undefined | A |
+| `nav.userAgentData` | `[object Object]` | undefined | A |
+| `nav.userAgentData.brands` | (3-brand list) | THROW: undefined | A |
+| `nav.userAgentData.mobile` | false | THROW | A |
+| `nav.userAgentData.platform` | macOS | THROW | A |
+| `nav.getBattery` | function | not-a-function | A |
+| `crypto.subtle.typeof` | object | undefined | A |
+| `crypto.randomUUID.typeof` | function | undefined | A |
+| `Notification.permission` | "default" | "denied" | A |
+| `global.caches` | object | undefined | A |
+| `global.cookieStore` | object | undefined | A |
+| `global.IdleDetector` | function | undefined | A |
+| `global.EyeDropper` | function | undefined | A |
+| `global.WebTransport` | function | undefined (THROW: ReferenceError) | A |
+| `perm.geolocation.state` | "prompt" | "denied" | A |
+| `descr.win.scrollX` | undefined | `[object Object]` | **B (D2 mistake)** |
+| `descr.WindowProto.scrollX` | `["get","set","enumerable","configurable"]` | `[]` | B (D2 mistake) |
+| `nav.geolocation` | `[object Object]` | `[object Geolocation]` | B |
+| `nav.scheduling` | `[object Object]` | `[object Scheduling]` | B |
+| `eventCounts.size` | 0 | 36 | C |
+| `eventCounts.first10keys` | `[]` | 10-keys | C |
+| `webgl.UNMASKED_RENDERER_WEBGL` | Apple M2 Pro | Apple M3 | C |
+| `webgl.extensions.length` | 36 | 39 | C |
+| `window.ownPropertyNames.length` | 369 | 980 | C |
+| `doc.characterSet` | UTF-8 | windows-1252 | C |
+| `nav.userAgentData.brands` (order + version) | `[GC147, Chromium147, Not.A/Brand 24]` | `[GC147, Not.A/Brand 8, Chromium147]` | C |
+| `nav.hardwareConcurrency` | 10 | 8 | C |
+| `screen.width` | 1440 | 1512 | C |
+| `screen.height` | 900 | 982 | C |
+| `screen.availWidth` | 1440 | 1512 | C |
+| `screen.availHeight` | 875 | 949 | C |
+| `screen.availTop` | 25 | 33 | C |
+| `screen.colorDepth` | 24 | 30 | C |
+| `screen.pixelDepth` | 24 | 30 | C |
+| `url` | `about:blank` | `data:text/html,...` | (probe artifact) |
+| (~9 more screen/url/profile preset deltas) | | | C |
+
+**Most screen.* mismatches are profile-preset issues** — our
+`chrome_130_macos()` preset shapes a 1440×900 @ colorDepth=24
+display, but real Chrome 147 on M3 macOS ships 1512×982 @
+colorDepth=30. Single-line profile change.
+
+## Appendix D — `/tmp/diff_probe.py` source
+
+```python
+#!/usr/bin/env python3
+"""Diff Phase 7 probe captures key by key."""
+import json, sys
+from pathlib import Path
+
+ROOT = Path("/Users/yfedoseev/Projects/browser_oxide/.playwright-mcp/captures")
+mcp = json.loads((ROOT / "probe_mcp.json").read_text())
+mcp_sec = json.loads((ROOT / "probe_mcp_secure.json").read_text())
+oxide = json.loads((ROOT / "probe_oxide.json").read_text())
+
+shared = sorted(set(mcp.keys()) & set(oxide.keys()))
+match = miss = 0
+for k in shared:
+    a, b = str(mcp[k]), str(oxide[k])
+    if a == b:
+        match += 1
+    else:
+        miss += 1
+        sec = mcp_sec.get(k, "<not-probed>")
+        print(f"DIFF | {k:50s} | oxide={b[:40]:42s} | chrome_insecure={a[:40]:42s} | chrome_secure={str(sec)[:40]}")
+print(f"\nshared={len(shared)}  match={match}  miss={miss}  ratio={match/len(shared)*100:.1f}%")
+print(f"oxide-only={sorted(set(oxide.keys()) - set(mcp.keys()))[:10]}")
+print(f"mcp-only-first-10={sorted(set(mcp.keys()) - set(oxide.keys()))[:10]}")
+```
+
+## Appendix E — Implementation roadmap (concrete, in priority order)
+
+1. **`isSecureContext` correctness** in `crates/browser/src/page.rs`
+   `from_html` / `from_url` paths — set the V8 binding to false for
+   `about:blank` / `data:` / `http:` / `file:` schemes, true for
+   `https:` / `wss:` / `file://` (with `allow_file_access_from_files`
+   policy match).
+2. **Conditional API exposure in `window_bootstrap.js`** — wrap each
+   of the 18 APIs in Category A in `if (isSecureContext) { ... }`,
+   then re-run `phase7_ab_probe_capture_oxide` and confirm those keys
+   become "undefined" matching real Chrome.
+3. **Revert Phase 6 D2** scrollX/Y/screenX/Y placement: move from
+   `Window.prototype` accessors back to own accessors on the window
+   instance. The MCP capture is authoritative.
+4. **Pre-populate `performance.eventCounts`** with the 36 keys real
+   Chrome 147 ships:
+   `["pointerdown","touchend","input","keydown","mouseleave","mouseenter",
+   "drop","beforeinput","pointerenter","dragend","dragstart","dragenter",
+   "dragover","dragleave","drag","pointerout","pointerleave",
+   "pointercancel","pointermove","pointerup","pointerover","wheel",
+   "click","auxclick","contextmenu","dblclick","mousedown","mouseup",
+   "mousemove","mouseout","mouseover","keyup","keypress","compositionstart",
+   "compositionupdate","compositionend"]`
+   (verified order from `probe_mcp_secure.json` first-10 + Chromium
+   source `EventTypeNames`).
+5. **userAgentData fix**: brand order
+   `[Google Chrome, Not.A/Brand, Chromium]`, GREASE version `"8"`
+   not `"24"`. Two-line edit in profile preset or window_bootstrap.
+6. **Symbol.toStringTag** on Geolocation (`"Geolocation"`),
+   Scheduling (`"Scheduling"`), Clipboard (`"Clipboard"`), USB
+   (`"USB"`), HID (`"HID"`), Serial (`"Serial"`), GPU (`"GPU"`),
+   LockManager (`"LockManager"`), WakeLock (`"WakeLock"`).
+7. **`doc.characterSet`** default to `"windows-1252"` for HTML docs
+   without explicit `<meta charset>`.
+8. **screen.* preset alignment** with current macOS arm64 hardware:
+   1512×982, colorDepth=30, availTop=33, M3 renderer string,
+   39-extension WebGL list (3 missing extensions to identify).
+9. **`window.ownPropertyNames.length`** structural gap (369 vs 980
+   insecure / 1231 secure) — needs investigation of which 600+
+   names are missing from our globalThis. Likely a pile of legacy
+   `webkit*` constructors and `WebGL*` interface objects we haven't
+   registered.
+
+After items 1-7: re-run Phase 7 probe. Expected: ≥85/92 shared
+keys match (up from 33/92), one structural gap (item 9) remaining.
