@@ -558,7 +558,17 @@
         value: "StorageManager", configurable: true,
     });
     StorageManager.prototype.estimate = function () {
-        return Promise.resolve({ quota: 1073741824, usage: 0 });
+        // Real Chrome on modern macOS/Windows desktops reports ~60% of
+        // free disk as quota. ~120 GB is a typical-disk plausible value
+        // — the previous 1 GB constant is a hard fingerprint tell because
+        // Chrome quota is always many tens of GB. Usage breakdown matches
+        // Chrome's documented `usageDetails` shape so iteration probes
+        // (e.g. `for (k in details)`) see the same key set.
+        return Promise.resolve({
+            quota: 128849018880,                 // ~120 GB
+            usage: 0,
+            usageDetails: { indexedDB: 0, caches: 0, serviceWorkerRegistrations: 0 },
+        });
     };
     StorageManager.prototype.persist = function () { return Promise.resolve(false); };
     StorageManager.prototype.persisted = function () { return Promise.resolve(false); };
@@ -712,13 +722,32 @@
             return false;
         }
     });
+    // BatteryManager — must be a real class extending EventTarget so
+    // `Object.getPrototypeOf(b).constructor.name === "BatteryManager"`
+    // and `b instanceof EventTarget` both hold. The previous plain-object
+    // implementation failed both checks; ScrapFly's PX guide and CreepJS
+    // both probe via the constructor.name path.
+    class BatteryManager extends EventTarget {
+        get charging() { return true; }
+        get chargingTime() { return 0; }
+        get dischargingTime() { return Infinity; }
+        get level() { return 1.0; }
+        get onchargingchange() { return null; }
+        set onchargingchange(_v) {}
+        get onchargingtimechange() { return null; }
+        set onchargingtimechange(_v) {}
+        get ondischargingtimechange() { return null; }
+        set ondischargingtimechange(_v) {}
+        get onlevelchange() { return null; }
+        set onlevelchange(_v) {}
+    }
+    Object.defineProperty(BatteryManager.prototype, Symbol.toStringTag, {
+        value: "BatteryManager", configurable: true,
+    });
+    globalThis.BatteryManager = BatteryManager;
+    const _batteryInstance = new BatteryManager();
     _defNavMethod('getBattery', function getBattery() {
-        return Promise.resolve({
-            charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1.0,
-            addEventListener() {}, removeEventListener() {},
-            onchargingchange: null, onchargingtimechange: null,
-            ondischargingtimechange: null, onlevelchange: null,
-        });
+        return Promise.resolve(_batteryInstance);
     });
     _defNavMethod('getUserMedia', function getUserMedia(constraints, success, error) {
         if (error) error(new Error("Permission denied"));
@@ -1188,12 +1217,12 @@
         const _makeLowBrands = () => Object.freeze(_shuffled([
             Object.freeze({ brand: "Chromium", version: _uaBrowserMajor() }),
             Object.freeze({ brand: "Google Chrome", version: _uaBrowserMajor() }),
-            Object.freeze({ brand: "Not-A.Brand", version: "24" }),
+            Object.freeze({ brand: "Not.A/Brand", version: "24" }),
         ]).map(Object.freeze));
         const _makeFullBrands = () => Object.freeze(_shuffled([
             Object.freeze({ brand: "Chromium", version: _uaBrowserFull() }),
             Object.freeze({ brand: "Google Chrome", version: _uaBrowserFull() }),
-            Object.freeze({ brand: "Not-A.Brand", version: "24.0.0.0" }),
+            Object.freeze({ brand: "Not.A/Brand", version: "24.0.0.0" }),
         ]).map(Object.freeze));
         // Chrome re-uses the same GREASE ordering across a userAgentData
         // object's lifetime; only randomized once per construction.
@@ -3795,11 +3824,37 @@
         }
         setLocalDescription(desc) {
             this.localDescription = desc;
-            // Fire empty ICE candidate (signals gathering complete without leaking IP)
+            // Real Chrome (since 2019, mDNS-anonymized) emits an mDNS host
+            // candidate followed by `null` to signal gathering complete.
+            // Returning ONLY `{candidate: null}` is itself a tell — every
+            // legitimate Chrome session yields at least one mDNS host.
+            // The `<uuid>.local` form is privacy-preserving (no real IP).
+            // CreepJS / FingerprintJS open-source both probe candidate
+            // length; one mDNS host closes the parity gap without leaking.
+            const _hex = (n) => Math.floor(Math.random() * 16).toString(16);
+            const _uuid4 = () => {
+                let s = '';
+                for (let i = 0; i < 36; i++) {
+                    if (i === 8 || i === 13 || i === 18 || i === 23) s += '-';
+                    else if (i === 14) s += '4';
+                    else if (i === 19) s += (8 + Math.floor(Math.random() * 4)).toString(16);
+                    else s += _hex();
+                }
+                return s;
+            };
+            const mdnsHost = _uuid4() + '.local';
+            const foundation = String(Math.floor(Math.random() * 4_000_000_000));
+            const candidate = `candidate:${foundation} 1 udp 2113937151 ${mdnsHost} ${1024 + Math.floor(Math.random() * 60000)} typ host generation 0 network-cost 999`;
+            const iceCandidate = new globalThis.RTCIceCandidate({
+                candidate, sdpMid: '0', sdpMLineIndex: 0,
+            });
             setTimeout(() => {
-                if (this.onicecandidate) this.onicecandidate({ candidate: null });
-                this.iceGatheringState = "complete";
-            }, 10);
+                if (this.onicecandidate) this.onicecandidate({ candidate: iceCandidate });
+                setTimeout(() => {
+                    if (this.onicecandidate) this.onicecandidate({ candidate: null });
+                    this.iceGatheringState = "complete";
+                }, 12);
+            }, 8);
             return Promise.resolve();
         }
         setRemoteDescription(desc) { this.remoteDescription = desc; return Promise.resolve(); }
@@ -3880,6 +3935,15 @@
     // Permissions API is defined at the top of this file (search for
     // _PERMISSION_STATE_MAP). That implementation is the single source of
     // truth — do not override navigator.permissions.query here.
+
+    // ================================================================
+    // Apple Pay — macOS-only window.ApplePaySession
+    // ================================================================
+    // ApplePaySession is installed POST-snapshot in cleanup_bootstrap.js
+    // because the V8 startup snapshot is built without a stealth profile,
+    // so a snapshot-time `_p("os_name")` would always read "Linux" and
+    // skip the install for every page. cleanup runs once per JsRuntime
+    // creation with the profile loaded, which is the correct gating point.
 
     // ================================================================
     // Battery API — realistic values (already exists but enhance)
@@ -4047,6 +4111,123 @@
     }
 
     // ================================================================
+    // VisualViewport — Chrome surface that fingerprinters probe to
+    // detect mobile vs desktop AND to detect headless absence. Real
+    // Chrome exposes a singleton instance accessible as
+    // `window.visualViewport`. Properties are layout-derived but for
+    // a stationary viewport without pinch-zoom they equal the layout
+    // viewport scaled by 1.0. Spec:
+    // https://www.w3.org/TR/visual-viewport/
+    // ================================================================
+    {
+        class VisualViewport extends EventTarget {
+            get offsetLeft() { return 0; }
+            get offsetTop() { return 0; }
+            get pageLeft() { return 0; }
+            get pageTop() { return 0; }
+            get width() { return _pInt("inner_width", 1920); }
+            get height() { return _pInt("inner_height", 1080); }
+            get scale() { return 1; }
+            get onresize() { return null; }
+            set onresize(_v) {}
+            get onscroll() { return null; }
+            set onscroll(_v) {}
+            get onscrollend() { return null; }
+            set onscrollend(_v) {}
+        }
+        Object.defineProperty(VisualViewport.prototype, Symbol.toStringTag, {
+            value: "VisualViewport", configurable: true,
+        });
+        globalThis.VisualViewport = VisualViewport;
+        const _vv = new VisualViewport();
+        Object.defineProperty(globalThis, 'visualViewport', {
+            get() { return _vv; }, configurable: true, enumerable: true,
+        });
+    }
+
+    // ================================================================
+    // InputDeviceCapabilities — present on UIEvent.sourceCapabilities
+    // in real Chrome. Sites probe `event.sourceCapabilities` on the
+    // first user-input event to confirm a real input device fired it.
+    // We define the constructor; integration with synthesized events
+    // is deferred to the input_ext humanization layer.
+    // ================================================================
+    {
+        class InputDeviceCapabilities {
+            constructor(init) {
+                this.firesTouchEvents = !!(init && init.firesTouchEvents);
+            }
+        }
+        Object.defineProperty(InputDeviceCapabilities.prototype, Symbol.toStringTag, {
+            value: "InputDeviceCapabilities", configurable: true,
+        });
+        globalThis.InputDeviceCapabilities = InputDeviceCapabilities;
+    }
+
+    // ================================================================
+    // MediaSession — `navigator.mediaSession` is a real `MediaSession`
+    // instance in Chrome, not a plain `{}`. Sites use its presence to
+    // gate playback-state UI and to drive system media controls.
+    // Spec: https://w3c.github.io/mediasession/
+    // ================================================================
+    {
+        const _validStates = new Set(["none", "playing", "paused"]);
+        class MediaMetadata {
+            constructor(init) {
+                init = init || {};
+                this.title = String(init.title || "");
+                this.artist = String(init.artist || "");
+                this.album = String(init.album || "");
+                this.artwork = Array.isArray(init.artwork) ? init.artwork.slice() : [];
+            }
+        }
+        Object.defineProperty(MediaMetadata.prototype, Symbol.toStringTag, {
+            value: "MediaMetadata", configurable: true,
+        });
+        globalThis.MediaMetadata = MediaMetadata;
+
+        class MediaSession {
+            constructor() {
+                this._playbackState = "none";
+                this._metadata = null;
+                this._handlers = new Map();
+            }
+            get playbackState() { return this._playbackState; }
+            set playbackState(v) {
+                const s = String(v);
+                if (_validStates.has(s)) this._playbackState = s;
+            }
+            get metadata() { return this._metadata; }
+            set metadata(v) {
+                this._metadata = v instanceof MediaMetadata ? v : null;
+            }
+            setActionHandler(action, handler) {
+                if (handler == null) {
+                    this._handlers.delete(String(action));
+                } else if (typeof handler === "function") {
+                    this._handlers.set(String(action), handler);
+                }
+            }
+            setPositionState(_state) { /* spec accepts {duration, position, playbackRate} */ }
+            setCameraActive(_active) { /* video conferencing extension */ }
+            setMicrophoneActive(_active) { /* video conferencing extension */ }
+        }
+        Object.defineProperty(MediaSession.prototype, Symbol.toStringTag, {
+            value: "MediaSession", configurable: true,
+        });
+        globalThis.MediaSession = MediaSession;
+        const _ms = new MediaSession();
+        // Override the placeholder navigator.mediaSession (was {}).
+        try {
+            Object.defineProperty(_NavProto, 'mediaSession', {
+                get() { return _ms; }, configurable: true, enumerable: true,
+            });
+        } catch (_) {
+            navigator.mediaSession = _ms;
+        }
+    }
+
+    // ================================================================
     // P2 STUBS: Emerging APIs that anti-bot scripts probe for existence
     // ================================================================
 
@@ -4205,6 +4386,7 @@
         };
         globalThis.Touch.prototype = Object.create(Object.prototype, {
             constructor: { value: globalThis.Touch, configurable: true, writable: true },
+            [Symbol.toStringTag]: { value: "Touch", configurable: true },
         });
         _maskAsNative(globalThis.Touch);
     }

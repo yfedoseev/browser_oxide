@@ -1,6 +1,73 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
 
+    // -- Canvas-based font detection support -----------------------------
+    // Akamai/Kasada/PerimeterX fingerprint sensors detect installed fonts
+    // by comparing measureText widths across candidate families: if
+    // measureText("...", "Arial") differs from measureText("...", "sans-serif")
+    // the family is reported as installed. Our font_database.rs aliases
+    // every Chrome-on-OS family to bundled Liberation Sans/Serif/Mono,
+    // so without this shim every probe collapses to identical widths and
+    // the sensor reports `fonts=null`. Inject a deterministic, sub-pixel
+    // family-derived delta so distinct family names produce distinct
+    // widths — exactly what real Chrome does naturally because each face
+    // ships with its own metrics.
+    const _fontProbeFnvHash = (str) => {
+        let h = 2166136261 >>> 0;
+        for (let i = 0; i < str.length; i++) {
+            h ^= str.charCodeAt(i);
+            h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+        }
+        return h;
+    };
+    // Mirror the fonts present on Chrome for each OS — keep in sync with
+    // `window_bootstrap.js` `Font enumeration spoofing` block.
+    const _FONT_LIST_BY_OS = {
+        "Windows": new Set([
+            "arial","arial black","calibri","cambria","comic sans ms","consolas",
+            "courier new","georgia","impact","lucida console","segoe ui","tahoma",
+            "times new roman","trebuchet ms","verdana",
+        ]),
+        "macOS": new Set([
+            "arial","arial black","courier new","georgia","helvetica",
+            "helvetica neue","lucida grande","menlo","monaco","sf pro",
+            "times new roman","trebuchet ms","verdana",
+        ]),
+        "Linux": new Set([
+            "arial","courier new","dejavu sans","dejavu sans mono","dejavu serif",
+            "liberation mono","liberation sans","liberation serif","noto sans",
+            "times new roman","ubuntu","verdana",
+        ]),
+    };
+    const _resolveInstalledFonts = () => {
+        try {
+            const has = ops.op_has_stealth_profile && ops.op_has_stealth_profile();
+            const os = has ? (ops.op_get_profile_value("os_name") || "Linux") : "Linux";
+            return _FONT_LIST_BY_OS[os] || _FONT_LIST_BY_OS["Linux"];
+        } catch (_e) {
+            return _FONT_LIST_BY_OS["Linux"];
+        }
+    };
+    const _GENERIC_FAMILIES = new Set(["sans-serif","serif","monospace","cursive","fantasy","system-ui","ui-sans-serif","ui-serif","ui-monospace"]);
+    const _primaryFontFamily = (fontStr) => {
+        if (!fontStr) return null;
+        // Strip CSS font shorthand prefix (style/variant/weight/stretch/size/line-height).
+        // The family list is everything after the last whitespace following the size token.
+        const sizeMatch = fontStr.match(/(\d+(?:\.\d+)?)(px|pt|em|rem|%|vh|vw)\s+(.+)$/);
+        const familyList = sizeMatch ? sizeMatch[3] : fontStr;
+        const first = familyList.split(",")[0] || "";
+        return first.replace(/["']/g, "").trim().toLowerCase();
+    };
+    // 0.0 .. ~3.5 px deterministic delta. Sub-character-width so layout
+    // stays stable, large enough to clear 1e-3 fingerprint comparisons.
+    const _fontFamilyWidthDelta = (family) => {
+        if (!family) return 0;
+        if (_GENERIC_FAMILIES.has(family)) return 0; // generics are baselines
+        if (!_resolveInstalledFonts().has(family)) return 0; // not installed on this OS
+        const h = _fontProbeFnvHash(family);
+        return (h % 7000) / 2000; // 0.0 .. 3.5 px
+    };
+
     // Parse CSS color to [r, g, b, a]
     function _parseColor(str) {
         const named = { red:[255,0,0,255], green:[0,128,0,255], blue:[0,0,255,255],
@@ -83,10 +150,16 @@
             // actualBoundingBox* come from the real glyph run, not a
             // derived ratio — this is what fingerprint sites probe.
             const m = ops.op_canvas_measure_text_full(this.#id, text);
+            // Per-family micro-delta so canvas-based font detection works.
+            // See `_fontFamilyWidthDelta` for rationale.
+            const fam = _primaryFontFamily(this._font);
+            const deltaPerChar = _fontFamilyWidthDelta(fam);
+            const len = (typeof text === "string") ? text.length : 0;
+            const widthDelta = deltaPerChar * Math.max(1, len) * 0.25;
             return {
-                width: m.width,
+                width: m.width + widthDelta,
                 actualBoundingBoxLeft: m.actual_bounding_box_left,
-                actualBoundingBoxRight: m.actual_bounding_box_right,
+                actualBoundingBoxRight: m.actual_bounding_box_right + widthDelta,
                 actualBoundingBoxAscent: m.actual_bounding_box_ascent,
                 actualBoundingBoxDescent: m.actual_bounding_box_descent,
                 fontBoundingBoxAscent: m.font_bounding_box_ascent,

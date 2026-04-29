@@ -1593,6 +1593,22 @@
     _tag(NodeList, "NodeList");
     _tag(DOMTokenList, "DOMTokenList");
 
+    // documentElement (HTMLHtmlElement) and body (HTMLBodyElement) layout
+    // dimensions in standards mode are viewport-clipped, NOT full document.
+    // Default Element getters return offsetWidth/Height = full document
+    // (e.g. 1914 × 28638 on walmart) which is a damning headless tell — see
+    // Akamai pixel POST `client` field and `sr.client` in sensor_data.
+    // Real Chrome returns innerWidth × innerHeight (1440 × 789 on a typical
+    // macOS 1440x900 viewport).
+    {
+        const _viewportW = () => (globalThis.innerWidth | 0) || 1440;
+        const _viewportH = () => (globalThis.innerHeight | 0) || 789;
+        Object.defineProperty(HTMLHtmlElement.prototype, 'clientWidth',  { get() { return _viewportW(); }, configurable: true });
+        Object.defineProperty(HTMLHtmlElement.prototype, 'clientHeight', { get() { return _viewportH(); }, configurable: true });
+        // documentElement.scrollWidth/Height are still full content size,
+        // so leave the inherited offset-based getters in place for those.
+    }
+
     globalThis.document = _document;
     globalThis.Document = Document;
     globalThis.HTMLDocument = Document;

@@ -76,4 +76,20 @@
             return Date.now() - startTime;
         };
     }
+
+    // Native-code masking — PerimeterX/HUMAN, Akamai, and others probe
+    // `Function.prototype.toString.call(setTimeout)` and friends. The
+    // expected serialization is `function setTimeout() { [native code] }`;
+    // a JS source body is a hard bot tell.
+    if (typeof _maskFunction === 'function') {
+        _maskFunction(globalThis.setTimeout, 'setTimeout');
+        _maskFunction(globalThis.setInterval, 'setInterval');
+        _maskFunction(globalThis.clearTimeout, 'clearTimeout');
+        _maskFunction(globalThis.clearInterval, 'clearInterval');
+        _maskFunction(globalThis.requestAnimationFrame, 'requestAnimationFrame');
+        _maskFunction(globalThis.cancelAnimationFrame, 'cancelAnimationFrame');
+        if (globalThis.performance && typeof globalThis.performance.now === 'function') {
+            _maskFunction(globalThis.performance.now, 'now');
+        }
+    }
 })(globalThis);

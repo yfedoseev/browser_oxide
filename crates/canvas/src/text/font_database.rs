@@ -123,15 +123,41 @@ impl FontDatabase {
         })
     }
 
+    /// Strict per-family lookup that does NOT fall back to sans-serif.
+    /// Used by `query_chain` so the user-supplied fallback chain is
+    /// honoured — `("Wingdings", "serif")` must reach `serif` instead of
+    /// short-circuiting on Wingdings's outer fallback.
+    fn query_strict(&self, family: &str, weight: u16, italic: bool) -> Option<ID> {
+        let style = if italic { Style::Italic } else { Style::Normal };
+        let families = resolve_family(family);
+        self.inner.query(&Query {
+            families: &families,
+            weight: Weight(weight),
+            stretch: Stretch::Normal,
+            style,
+        })
+    }
+
     /// First-match query across a family fallback chain. Tries each
-    /// family in order; the first one that resolves wins.
+    /// user-specified family in order; only after the entire chain is
+    /// exhausted does the global sans-serif fallback fire.
     pub fn query_chain(&self, families: &[String], weight: u16, italic: bool) -> Option<ID> {
         for fam in families {
-            if let Some(id) = self.query(fam, weight, italic) {
+            if let Some(id) = self.query_strict(fam, weight, italic) {
                 return Some(id);
             }
         }
-        None
+        // Whole chain unresolvable → final fallback to sans-serif so
+        // shaping still renders something plausible (e.g. all-emoji
+        // strings on a build without an emoji face).
+        let style = if italic { Style::Italic } else { Style::Normal };
+        let fallback = [Family::SansSerif];
+        self.inner.query(&Query {
+            families: &fallback,
+            weight: Weight(weight),
+            stretch: Stretch::Normal,
+            style,
+        })
     }
 
     /// Return the raw face bytes + face index for a given face ID.
@@ -154,6 +180,16 @@ impl FontDatabase {
 
 /// Resolve a CSS family name to a list of fontdb `Family` entries,
 /// handling generic keywords and Chrome-style aliases.
+///
+/// Unknown families return ONLY the literal name — no implicit
+/// `Family::SansSerif` fallback. The outer fallback path (in `query`)
+/// catches the case where the user-supplied chain is fully
+/// unresolvable; `query_chain` relies on the per-family failure to
+/// proceed to the user's next explicit fallback (e.g. `"Wingdings",
+/// serif` should resolve to a serif face, not silently to sans-serif).
+/// Without this, Akamai-style font detection probes
+/// (`Math.abs(measure("X, serif") - measure("serif")) > 0`) would
+/// register every unknown family as installed.
 fn resolve_family(name: &str) -> Vec<Family<'_>> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
@@ -162,13 +198,16 @@ fn resolve_family(name: &str) -> Vec<Family<'_>> {
         "monospace" => vec![Family::Monospace],
         "cursive" => vec![Family::Cursive],
         "fantasy" => vec![Family::Fantasy],
-        // Chrome substitution table for families we don't bundle.
+        // Chrome substitution table for families we don't bundle. The
+        // SansSerif tail keeps the ALIASED name resolvable even if the
+        // bundled face name changes; the unknown-name branch below has
+        // no such fallback.
         "arial" | "helvetica" | "helvetica neue" => {
             vec![Family::Name("Liberation Sans"), Family::SansSerif]
         }
         "times" | "times new roman" => vec![Family::Name("Liberation Serif"), Family::Serif],
         "courier" | "courier new" => vec![Family::Name("Liberation Mono"), Family::Monospace],
-        _ => vec![Family::Name(name), Family::SansSerif],
+        _ => vec![Family::Name(name)],
     }
 }
 

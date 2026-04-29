@@ -458,45 +458,171 @@ fn sites_list() -> Vec<(&'static str, &'static str, &'static str)> {
     ]
 }
 
+/// Classify a fetched page body. Distinguishes:
+/// - **L3-RENDERED** — actual content reached the user
+/// - **<vendor>-CHL** — interstitial / challenge page from a known vendor
+/// - **THIN-BODY** — empty or near-empty redirect dead-end
+/// - **BLOCKED** — explicit deny page
+///
+/// **Important — what is and isn't a challenge marker.** The Akamai BMP
+/// `<script src=".../akam/13/<hash>">` bootstrap loads on every
+/// Akamai-protected page (rendered or challenge). Its mere presence in
+/// the HTML is NOT a challenge indicator — real Chrome sees the same
+/// tag on a successfully-loaded walmart.com homepage. The actual
+/// challenge signal is **content substitution**: the page body is
+/// replaced with an interstitial (≤ 30 KB usually). Same for
+/// `_abck`/`_pxhd`/`_kpsdk` — these names appear in inline analytics
+/// JS on plenty of normal pages. The canonical interstitial-vs-content
+/// discriminator is **body size** + presence of the marker.
+///
+/// History: a "strong markers" rule that fired on `akam/13` /
+/// `_abck` / `_pxhd` regardless of body size used to incorrectly
+/// flag walmart, costco, disneyplus, hulu, uniqlo, weather, etc. as
+/// Akamai-CHL even when the page rendered with multi-MB content. See
+/// `docs/PHASE3_AUDIT_2026_04_29.md` for the per-site contexts that
+/// proved the false-positive pattern.
 fn classify(html: &str) -> String {
     let lower = html.to_lowercase();
     let len = html.len();
-    let strong: &[(&str, &str)] = &[
+
+    // Vendor-specific interstitial title strings. These appear ONLY on
+    // a real challenge page; they're never present on rendered content.
+    // Highest-confidence signals — fire at any size.
+    let interstitial_titles: &[(&str, &str)] = &[
         ("just a moment", "Cloudflare-CHL"),
         ("checking your browser", "Cloudflare-CHL"),
         ("cf-browser-verification", "Cloudflare-CHL"),
-        ("_kpsdk", "Kasada-CHL"),
-        ("ips.js", "Kasada-CHL"),
         ("/_sec/cp_challenge", "Akamai-sec-cpt-CHL"),
-        ("akam/13", "Akamai-CHL"),
-        ("_abck", "Akamai-CHL"),
-        ("captcha-delivery", "DataDome-CHL"),
+        ("captcha-delivery.com", "DataDome-CHL"),
         ("ddcaptchaencoded", "DataDome-CHL"),
         ("press &amp; hold", "PerimeterX-PaH"),
-        ("_pxhd", "PerimeterX-CHL"),
+        ("px-captcha", "PerimeterX-CHL"),
+        ("pardon our interruption", "Akamai-CHL"),
     ];
-    let weak: &[(&str, &str)] = &[
-        ("captcha", "captcha-CHL"),
-        ("403 forbidden", "BLOCKED"),
-        ("access denied", "BLOCKED"),
-        ("blocked", "BLOCKED"),
-    ];
-    for (n, t) in strong {
+    for (n, t) in interstitial_titles {
         if lower.contains(n) {
             return t.to_string();
         }
     }
-    if len < 100 * 1024 {
-        for (n, t) in weak {
+
+    // Vendor "fingerprint markers" — these appear in BOTH normal pages
+    // (as analytics/SDK references) and on challenge interstitials. They
+    // count as a challenge ONLY when the body is interstitial-sized,
+    // i.e. the content was replaced.
+    let interstitial_size_threshold = 30 * 1024; // 30 KB
+    let small_body_markers: &[(&str, &str)] = &[
+        ("akam/13", "Akamai-CHL"),
+        ("_abck", "Akamai-CHL"),
+        ("_kpsdk", "Kasada-CHL"),
+        ("ips.js", "Kasada-CHL"),
+        ("_pxhd", "PerimeterX-CHL"),
+        ("captcha", "captcha-CHL"),
+        ("403 forbidden", "BLOCKED"),
+        ("access denied", "BLOCKED"),
+    ];
+    if len < interstitial_size_threshold {
+        for (n, t) in small_body_markers {
             if lower.contains(n) {
                 return t.to_string();
             }
         }
     }
+
+    // "blocked" alone is too noisy — a normal page might use the word.
+    // Only count it under the small-body threshold.
+    if len < 5 * 1024 && lower.contains("blocked") {
+        return "BLOCKED".to_string();
+    }
+
     if len < 1000 {
         return "THIN-BODY".to_string();
     }
     "L3-RENDERED".to_string()
+}
+
+#[cfg(test)]
+mod classifier_tests {
+    use super::classify;
+
+    #[test]
+    fn akamai_bootstrap_tag_in_rendered_page_is_not_chl() {
+        // walmart.com homepage shape — multi-KB body containing the
+        // legitimate Akamai sensor bootstrap script. This must NOT be
+        // classified as Akamai-CHL.
+        let mut html = String::from(
+            r#"<!doctype html><html><head>
+            <script type="text/javascript" src="https://www.walmart.com/akam/13/3e35295b" defer></script>
+            </head><body>"#,
+        );
+        // Pad to over 30KB so we leave the small-body bucket.
+        for _ in 0..2000 {
+            html.push_str("<p>real content paragraph</p>");
+        }
+        html.push_str("</body></html>");
+        assert!(html.len() > 30 * 1024);
+        assert_eq!(classify(&html), "L3-RENDERED");
+    }
+
+    #[test]
+    fn akamai_interstitial_title_is_chl() {
+        let html = "<html><head><title>Pardon Our Interruption</title></head><body>...</body></html>";
+        assert_eq!(classify(html), "Akamai-CHL");
+    }
+
+    #[test]
+    fn small_body_with_akam13_is_chl() {
+        // <30 KB body that's only the akamai bootstrap and a sentinel form.
+        let html = r#"<html><head><script src="/akam/13/abc"></script></head>
+            <body><form id="bm-verify"></form></body></html>"#;
+        assert!(html.len() < 30 * 1024);
+        assert_eq!(classify(html), "Akamai-CHL");
+    }
+
+    #[test]
+    fn cloudflare_interstitial_is_chl() {
+        let html = "<html><body>Just a moment...</body></html>";
+        assert_eq!(classify(html), "Cloudflare-CHL");
+    }
+
+    #[test]
+    fn datadome_interstitial_is_chl() {
+        let html = r#"<html><body><script src="https://geo.captcha-delivery.com/captcha/check"></script></body></html>"#;
+        assert_eq!(classify(html), "DataDome-CHL");
+    }
+
+    #[test]
+    fn rendered_page_mentioning_grecaptcha_in_config_is_not_chl() {
+        // disneyplus / costco shape — multi-MB body that mentions
+        // recaptcha in config metadata. Must classify as L3-RENDERED.
+        let mut html = String::from("<html><body>");
+        html.push_str(r#"<script>window.__CONFIG = {"googleRecaptcha":{"siteKey":"6LfAbcXYZ"}};</script>"#);
+        for _ in 0..5000 {
+            html.push_str("<div>actual product card content here</div>");
+        }
+        html.push_str("</body></html>");
+        assert!(html.len() > 100 * 1024);
+        assert_eq!(classify(&html), "L3-RENDERED");
+    }
+
+    #[test]
+    fn empty_body_is_thin() {
+        assert_eq!(classify("<html></html>"), "THIN-BODY");
+    }
+
+    #[test]
+    fn medium_body_with_pxhd_substring_is_not_chl() {
+        // wayfair shape — 1 MB body with `_pxhd` mentioned in inline
+        // PerimeterX SDK code. Should NOT classify as PerimeterX-CHL
+        // unless the page is challenge-sized.
+        let mut html = String::from("<html><body>");
+        html.push_str(r#"<script>window._pxhd = "...some sdk init...";</script>"#);
+        for _ in 0..30000 {
+            html.push_str("<span>content</span>");
+        }
+        html.push_str("</body></html>");
+        assert!(html.len() > 100 * 1024);
+        assert_eq!(classify(&html), "L3-RENDERED");
+    }
 }
 
 /// Run all 126 sites concurrently across N workers (default 4, override
