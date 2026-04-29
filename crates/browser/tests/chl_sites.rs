@@ -28,9 +28,12 @@ async fn fetch_and_classify(url: &str) -> String {
     };
     let html = page.content();
 
-    // Simple challenge / block markers used by major vendors
+    // Same two-tier classifier as `holistic_sweep.rs` — strong (vendor)
+    // markers always trusted; weak (generic words) only consulted if body
+    // is small enough that a CMS footer wouldn't dominate the bytes.
     let lower = html.to_lowercase();
-    let markers: &[(&str, &str)] = &[
+    let len = html.len();
+    let strong_markers: &[(&str, &str)] = &[
         ("just a moment", "Cloudflare-CHL"),
         ("checking your browser", "Cloudflare-CHL"),
         ("cf-browser-verification", "Cloudflare-CHL"),
@@ -40,26 +43,32 @@ async fn fetch_and_classify(url: &str) -> String {
         ("akam/13", "Akamai-CHL"),
         ("_abck", "Akamai-CHL"),
         ("captcha-delivery", "DataDome-CHL"),
-        ("ddCaptchaEncoded", "DataDome-CHL"),
-        ("captcha", "captcha-CHL"),
+        ("ddcaptchaencoded", "DataDome-CHL"),
         ("press &amp; hold", "PerimeterX-PaH"),
         ("_pxhd", "PerimeterX-CHL"),
+    ];
+    let weak_markers: &[(&str, &str)] = &[
+        ("captcha", "captcha-CHL"),
         ("403 forbidden", "BLOCKED"),
         ("access denied", "BLOCKED"),
         ("blocked", "BLOCKED"),
     ];
-
-    for (needle, tag) in markers {
+    for (needle, tag) in strong_markers {
         if lower.contains(needle) {
-            return format!("{tag} (body len={})", html.len());
+            return format!("{tag} (body len={len})");
         }
     }
-
-    if html.len() < 1000 {
-        return format!("THIN-BODY (len={})", html.len());
+    if len < 100 * 1024 {
+        for (needle, tag) in weak_markers {
+            if lower.contains(needle) {
+                return format!("{tag} (body len={len})");
+            }
+        }
     }
-
-    format!("L3-RENDERED (len={})", html.len())
+    if len < 1000 {
+        return format!("THIN-BODY (len={len})");
+    }
+    format!("L3-RENDERED (len={len})")
 }
 
 // ================================================================

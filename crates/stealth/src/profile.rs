@@ -164,20 +164,28 @@ impl StealthProfile {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        // UA must contain the major version. Chrome's UA-reduction policy (since Chrome 110)
-        // freezes the UA string at `<Major>.0.0.0` while browser_version holds the full
-        // version (e.g. "147.0.7727.117") for use in sec-ch-ua-full-version-list.
+        // UA must contain the major version. Two formats are valid:
+        //   - Chrome's UA-reduction policy (since Chrome 110) freezes the
+        //     UA string at `<Major>.0.0.0` while browser_version holds the
+        //     full version (e.g. "147.0.7727.117") for use in
+        //     sec-ch-ua-full-version-list.
+        //   - Firefox publishes the full short version `<Major>.0` in the
+        //     UA (e.g. "Firefox/135.0"). It does NOT participate in
+        //     sec-ch-ua, so there's no separate full version to track.
         let ua_major: String = self
             .browser_version
             .split('.')
             .next()
             .unwrap_or("")
             .to_string();
-        let reduced_ua_version = format!("{}.0.0.0", ua_major);
-        if !self.user_agent.contains(&reduced_ua_version) {
+        let chrome_form = format!("{}.0.0.0", ua_major);
+        let firefox_form = format!("{}.0", ua_major);
+        let ua_ok = self.user_agent.contains(&chrome_form)
+            || self.user_agent.contains(&firefox_form);
+        if !ua_ok {
             errors.push(format!(
-                "UA '{}' doesn't contain reduced major version '{}'",
-                self.user_agent, reduced_ua_version
+                "UA '{}' doesn't contain reduced major version '{}' or '{}'",
+                self.user_agent, chrome_form, firefox_form
             ));
         }
 

@@ -563,20 +563,43 @@ impl Page {
         profile: stealth::StealthProfile,
         max_iterations: u8,
     ) -> Result<Self, deno_core::error::AnyError> {
+        // Phase F — humanization is default-on. Sensor-based detectors
+        // (Akamai BMP, DataDome, PerimeterX) score "zero user input in
+        // first 2 s" as a strong bot signal. Real Chrome sessions
+        // accumulate dozens of mousemove/scroll/click events before any
+        // sensor VM posts; headless runs see none unless we synthesize
+        // them. The cost is ~30 setTimeout dispatches over ~2 s of page
+        // life — negligible compared to the navigation budget — and the
+        // benefit is a measurable PASS bump on behaviorally-fingerprinted
+        // sites.
+        //
+        // Opt-out via `navigate_pure(url, profile, max_iter)` for
+        // deterministic snapshot tests where synthetic input would skew
+        // results.
+        let humanize = include_str!("js/humanize.js").to_string();
+        Self::navigate_with_init(url, profile, max_iterations, vec![humanize]).await
+    }
+
+    /// Pure navigation — no humanization, no synthetic events. Use for
+    /// deterministic snapshot tests, layout dump captures, or any
+    /// scenario where the test wants to assert about the page's *own*
+    /// behavior without injected mousemove/click activity.
+    pub async fn navigate_pure(
+        url: &str,
+        profile: stealth::StealthProfile,
+        max_iterations: u8,
+    ) -> Result<Self, deno_core::error::AnyError> {
         Self::navigate_with_init(url, profile, max_iterations, Vec::new()).await
     }
 
-    /// Like [`Page::navigate`], but also installs an input-humanizer init
-    /// script that dispatches mousemove/click/focus events on every
-    /// navigation. Opt-in because synthetic input is a workaround for
-    /// sensor-based detectors, not a semantic part of page loading.
+    /// Alias of [`Page::navigate`] preserved for backward compatibility.
+    /// `Page::navigate` is already humanized as of Phase F.
     pub async fn navigate_humanized(
         url: &str,
         profile: stealth::StealthProfile,
         max_iterations: u8,
     ) -> Result<Self, deno_core::error::AnyError> {
-        let humanize = include_str!("js/humanize.js").to_string();
-        Self::navigate_with_init(url, profile, max_iterations, vec![humanize]).await
+        Self::navigate(url, profile, max_iterations).await
     }
 
     /// Like [`Page::navigate`], but installs caller-supplied init scripts on
@@ -610,6 +633,28 @@ impl Page {
             .get_follow(url, 10)
             .await
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        // G.3 — log known anti-bot vendor response markers so post-run
+        // analysis can split CHL outcomes by protocol. Each marker also
+        // hints whether the site needs a vendor-specific solver
+        // (`memory/open_tasks.md#64` Akamai, etc.). No flow change yet —
+        // the adaptive budget from Phase A.1 already short-circuits when
+        // the body is small + readyState complete, so we don't burn the
+        // full 75 s on a 2 KB challenge stub.
+        if let Some(waf) = resp.headers.get("x-amzn-waf-action") {
+            eprintln!("[vendor-detect] aws-waf {} on {}", waf, resp.url);
+        }
+        if resp.headers.contains_key("x-datadome") {
+            eprintln!("[vendor-detect] datadome on {}", resp.url);
+        }
+        if resp.headers.contains_key("x-wbaas-token") {
+            eprintln!("[vendor-detect] wbaas on {}", resp.url);
+        }
+        // Akamai BMP marker: _abck cookie set. Use header parse.
+        if resp.headers.iter().any(|(k, v)| {
+            k.eq_ignore_ascii_case("set-cookie") && v.starts_with("_abck=")
+        }) {
+            eprintln!("[vendor-detect] akamai-bmp _abck set on {}", resp.url);
+        }
         let html = resp.text();
         let resp_url = resp.url.clone();
         Self::navigate_loop_internal(
@@ -680,11 +725,17 @@ impl Page {
         // (no challenge marker AND body > 50 KB), we extend the budget by
         // BOXIDE_NAV_BUDGET_EXTEND_MS (default 25 s) to allow heavy
         // legitimate sites (footlocker, walmart) to fully render.
+        // Default budget aggressively low (15 s) — most pages render their
+        // primary body well under that. Sites that legitimately need more
+        // time get the per-iteration extension below; sites that hit a CHL
+        // marker get retried with a fresh budget per iteration. The old
+        // 50 s default left 35 s on the table for fast sites, which
+        // dominated the holistic-sweep wall-clock (96 min for 126 sites).
         let mut nav_budget = Duration::from_millis(
             std::env::var("BOXIDE_NAV_BUDGET_MS")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(50_000),
+                .unwrap_or(15_000),
         );
         let nav_budget_extend = Duration::from_millis(
             std::env::var("BOXIDE_NAV_BUDGET_EXTEND_MS")
@@ -787,13 +838,21 @@ impl Page {
                 tracing::warn!(error = %e, "navigate event loop error");
             }
 
-            // Adaptive budget extension: on the FIRST iteration, if the
-            // page produced real content (no challenge marker AND body
-            // > 50 KB), the site is rendering legitimately — just heavy.
-            // Extend the budget once so sites like footlocker.com (50 s
-            // first-paint, 441 KB) and walmart.com (~60 s, 270 KB) can
-            // finish without sacrificing the tight bail-out for CHL pages.
-            if !budget_extended && iter == start_iter {
+            // Phase A.1 — Adaptive budget. Two paths after the first iteration:
+            //
+            // 1. FAST-EXIT — body > 50 KB AND no CHL marker AND readyState
+            //    "complete" → the site rendered cleanly, return it now.
+            //    Skips iter 1 and iter 2 entirely. Closes the dominant
+            //    fast-site stall in the holistic sweep (where every fast
+            //    page used to wait the full 50 s budget for nothing).
+            //
+            // 2. EXTEND — body > 50 KB but readyState still "loading"
+            //    (e.g. footlocker, walmart pre-paint). Give one extension.
+            //
+            // CHL markers always continue iterating (cookie-delta retry path
+            // below kicks in). Tiny-body responses also continue (challenges
+            // often start as <50 KB stubs).
+            if iter == start_iter {
                 let body_len: usize = page
                     .event_loop()
                     .execute_script(
@@ -803,14 +862,30 @@ impl Page {
                     .parse()
                     .unwrap_or(0);
                 let is_chl = page.is_anti_bot_challenge();
-                if !is_chl && body_len > 20 * 1024 {
-                    nav_budget += nav_budget_extend;
-                    budget_extended = true;
-                    eprintln!(
-                        "[navigate] budget extended +{}ms (body={}KB, no CHL marker)",
-                        nav_budget_extend.as_millis(),
-                        body_len / 1024
-                    );
+                if !is_chl && body_len > 50 * 1024 {
+                    let ready_state = page
+                        .event_loop()
+                        .execute_script("document.readyState")
+                        .unwrap_or_default();
+                    let ready_state = ready_state.trim().trim_matches('"');
+                    if ready_state == "complete" {
+                        eprintln!(
+                            "[navigate] fast-exit on iter={} (body={}KB, no CHL, readyState=complete)",
+                            iter,
+                            body_len / 1024
+                        );
+                        return Ok(page);
+                    }
+                    if !budget_extended {
+                        nav_budget += nav_budget_extend;
+                        budget_extended = true;
+                        eprintln!(
+                            "[navigate] budget extended +{}ms (body={}KB, no CHL marker, readyState={})",
+                            nav_budget_extend.as_millis(),
+                            body_len / 1024,
+                            ready_state
+                        );
+                    }
                 }
             }
 
@@ -1041,7 +1116,7 @@ impl Page {
                             // Reload-style headers + harvested x-kpsdk-*
                             // tokens on the retry GET.
                             let mut reload_hdrs =
-                                net::headers::chrome_headers_reload(&profile, &current_url);
+                                net::headers::nav_headers_reload(&profile, &current_url);
                             for (k, v) in &kpsdk {
                                 reload_hdrs.push((k.clone(), v.clone()));
                             }
@@ -1404,7 +1479,7 @@ impl Page {
                 let client = client.clone();
                 let profile = profile.clone();
                 Some(async move {
-                    let mut hdrs = net::headers::chrome_headers(&profile);
+                    let mut hdrs = net::headers::nav_headers(&profile, false);
                     hdrs.push(("referer".to_string(), url.to_string()));
                     hdrs.push(("accept".to_string(), "*/*".to_string()));
                     hdrs.push(("sec-fetch-dest".to_string(), "script".to_string()));

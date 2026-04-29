@@ -4,6 +4,7 @@
 //! Uses quinn+h3 for HTTP/3 (QUIC) with automatic Alt-Svc discovery and fallback.
 
 pub mod alt_svc;
+pub mod blocker;
 pub mod compression;
 pub mod cookies;
 pub mod error;
@@ -407,7 +408,7 @@ impl HttpClient {
         extra_headers: &[(String, String)],
         origin: Option<&str>,
     ) -> Result<Response, NetError> {
-        let mut hdrs = headers::chrome_headers_fetch(&self.profile, url, origin);
+        let mut hdrs = headers::nav_headers_fetch(&self.profile, url, origin);
         merge_headers(&mut hdrs, extra_headers);
         self.get_with_exact_headers(url, &hdrs).await
     }
@@ -420,7 +421,7 @@ impl HttpClient {
         extra_headers: &[(String, String)],
         origin: Option<&str>,
     ) -> Result<Response, NetError> {
-        let mut hdrs = headers::chrome_headers_fetch(&self.profile, url, origin);
+        let mut hdrs = headers::nav_headers_fetch(&self.profile, url, origin);
         merge_headers(&mut hdrs, extra_headers);
         self.post_bytes_exact_headers(url, body, &hdrs).await
     }
@@ -691,13 +692,11 @@ impl HttpClient {
             .ok_or_else(|| NetError::Http("no host in URL".into()))?;
         let port = parsed.port().unwrap_or(443);
 
-        // Upgrade to high-entropy Client Hints if this origin has sent Accept-CH.
-        let base_hdrs = if self.has_accept_ch(host).await {
-            headers::chrome_headers_with_accept_ch(&self.profile)
-        } else {
-            headers::chrome_headers(&self.profile)
-        };
-        let mut hdrs = base_hdrs;
+        // Browser-aware nav headers. For Chrome, may upgrade to high-entropy
+        // Client Hints if this origin has sent Accept-CH. Firefox profiles
+        // skip the upgrade (Firefox has no Client Hints).
+        let accept_ch_upgraded = self.has_accept_ch(host).await;
+        let mut hdrs = headers::nav_headers(&self.profile, accept_ch_upgraded);
         merge_headers(&mut hdrs, extra_headers);
 
         // Add cookies (unless caller already supplied one)
@@ -929,12 +928,10 @@ impl HttpClient {
             .ok_or_else(|| NetError::Http("no host in URL".into()))?;
         let port = parsed.port().unwrap_or(443);
 
-        let base_hdrs = if self.has_accept_ch(host).await {
-            headers::chrome_headers_with_accept_ch(&self.profile)
-        } else {
-            headers::chrome_headers(&self.profile)
-        };
-        let mut hdrs = base_hdrs;
+        // Browser-aware nav headers (Chrome may upgrade with high-entropy
+        // Client Hints if origin sent Accept-CH; Firefox profiles skip).
+        let accept_ch_upgraded = self.has_accept_ch(host).await;
+        let mut hdrs = headers::nav_headers(&self.profile, accept_ch_upgraded);
         merge_headers(&mut hdrs, extra_headers);
 
         // Env-gated POST body dump (for sensor-payload diffing). Writes one

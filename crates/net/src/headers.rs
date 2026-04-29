@@ -5,6 +5,46 @@
 
 use stealth::StealthProfile;
 
+/// Browser-aware nav header dispatch. Reads `profile.browser_name` and
+/// returns the right header set for that browser family. Centralizes the
+/// chrome-vs-firefox decision so callers (HttpClient, Page::navigate) don't
+/// each need to repeat the match.
+///
+/// `accept_ch_upgraded` should be `true` only on requests that follow an
+/// `Accept-CH` advertisement from the same origin. Chrome upgrades; Firefox
+/// has no Client Hints so the flag is ignored for Firefox profiles.
+pub fn nav_headers(profile: &StealthProfile, accept_ch_upgraded: bool) -> Vec<(String, String)> {
+    if profile.browser_name == "Firefox" {
+        firefox_headers(profile)
+    } else if accept_ch_upgraded {
+        chrome_headers_with_accept_ch(profile)
+    } else {
+        chrome_headers(profile)
+    }
+}
+
+/// Browser-aware reload nav header dispatch.
+pub fn nav_headers_reload(profile: &StealthProfile, referer: &str) -> Vec<(String, String)> {
+    if profile.browser_name == "Firefox" {
+        firefox_headers_reload(profile, referer)
+    } else {
+        chrome_headers_reload(profile, referer)
+    }
+}
+
+/// Browser-aware fetch (XHR/`window.fetch`) header dispatch.
+pub fn nav_headers_fetch(
+    profile: &StealthProfile,
+    target_url: &str,
+    origin: Option<&str>,
+) -> Vec<(String, String)> {
+    if profile.browser_name == "Firefox" {
+        firefox_headers_fetch(profile, target_url, origin)
+    } else {
+        chrome_headers_fetch(profile, target_url, origin)
+    }
+}
+
 /// Build ordered Chrome browser headers from a stealth profile.
 ///
 /// Returns headers as ordered (name, value) pairs matching the exact
@@ -344,6 +384,174 @@ fn build_sec_ch_ua(profile: &StealthProfile) -> String {
     )
 }
 
+// ============================================================================
+// Firefox 135 header builder
+// ----------------------------------------------------------------------------
+// Empirical Firefox 135 header order from the Camoufox network capture
+// (`/tmp/cam_capture/summary.txt`, 2026-04-28). Firefox sends a distinctly
+// different header set than Chrome:
+//   - NO sec-ch-ua / sec-ch-ua-mobile / sec-ch-ua-platform — these are
+//     Chrome-only (User Agent Client Hints aren't implemented in Firefox).
+//   - NO `priority` header.
+//   - `accept` is shorter: no avif/webp/apng/signed-exchange.
+//   - `accept-language` quality values: q=0.5 not q=0.9.
+//   - HTTP/1-style headers (`connection: keep-alive`, explicit `host:`)
+//     surface in Playwright's request capture; over the wire on H2 they
+//     become pseudo-headers that the HTTP/2 stack handles automatically.
+//
+// Header order (from capture, observed via Playwright):
+// 1. host
+// 2. user-agent
+// 3. accept
+// 4. accept-language
+// 5. accept-encoding
+// 6. connection
+// 7. upgrade-insecure-requests
+// 8. sec-fetch-dest
+// 9. sec-fetch-mode
+// 10. sec-fetch-site
+// 11. sec-fetch-user
+//
+// `host` and `connection` are connection-level — most HTTP/2 clients write
+// them as pseudo-headers, but listing them here ensures byte-equivalence
+// with Playwright's view if we ever serialize for diagnostic comparison.
+
+/// Build ordered Firefox 135 nav headers from a stealth profile.
+pub fn firefox_headers(profile: &StealthProfile) -> Vec<(String, String)> {
+    firefox_headers_impl(profile, "none", true)
+}
+
+/// Same-origin reload variant — sec-fetch-site flips to "same-origin" and
+/// sec-fetch-user is omitted (no user gesture).
+pub fn firefox_headers_reload(profile: &StealthProfile, referer: &str) -> Vec<(String, String)> {
+    let mut hdrs = firefox_headers_impl(profile, "same-origin", false);
+    hdrs.push(("referer".to_string(), referer.to_string()));
+    hdrs
+}
+
+/// Build headers for a `window.fetch()` request from JS (Firefox-class).
+pub fn firefox_headers_fetch(
+    profile: &StealthProfile,
+    target_url: &str,
+    origin: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut headers = Vec::with_capacity(10);
+
+    headers.push(("user-agent".to_string(), profile.user_agent.clone()));
+    headers.push(("accept".to_string(), "*/*".to_string()));
+    headers.push((
+        "accept-language".to_string(),
+        build_firefox_accept_language(&profile.languages),
+    ));
+    headers.push((
+        "accept-encoding".to_string(),
+        "gzip, deflate, br, zstd".to_string(),
+    ));
+
+    let site = match origin {
+        Some(origin) => {
+            let t = url::Url::parse(target_url).ok();
+            let o = url::Url::parse(origin).ok();
+            match (t, o) {
+                (Some(tu), Some(ou)) => {
+                    if tu.host_str() == ou.host_str() {
+                        "same-origin"
+                    } else if same_site(&tu, &ou) {
+                        "same-site"
+                    } else {
+                        "cross-site"
+                    }
+                }
+                _ => "cross-site",
+            }
+        }
+        None => "cross-site",
+    };
+    headers.push(("sec-fetch-dest".to_string(), "empty".to_string()));
+    headers.push(("sec-fetch-mode".to_string(), "cors".to_string()));
+    headers.push(("sec-fetch-site".to_string(), site.to_string()));
+
+    if let Some(o) = origin {
+        headers.push(("origin".to_string(), o.to_string()));
+        headers.push((
+            "referer".to_string(),
+            format!("{}/", o.trim_end_matches('/')),
+        ));
+    }
+
+    headers
+}
+
+fn firefox_headers_impl(
+    profile: &StealthProfile,
+    sec_fetch_site: &str,
+    include_sec_fetch_user: bool,
+) -> Vec<(String, String)> {
+    let mut headers = Vec::with_capacity(9);
+
+    // user-agent
+    headers.push(("user-agent".to_string(), profile.user_agent.clone()));
+
+    // accept — Firefox shorter form (no avif/webp/apng/signed-exchange)
+    headers.push((
+        "accept".to_string(),
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".to_string(),
+    ));
+
+    // accept-language — Firefox uses q=0.5 not q=0.9
+    headers.push((
+        "accept-language".to_string(),
+        build_firefox_accept_language(&profile.languages),
+    ));
+
+    // accept-encoding (Firefox 135+ includes zstd)
+    headers.push((
+        "accept-encoding".to_string(),
+        "gzip, deflate, br, zstd".to_string(),
+    ));
+
+    // NOTE: `connection: keep-alive` was emitted by Playwright in the
+    // Camoufox capture, but it's a connection-specific header forbidden in
+    // HTTP/2 (RFC 7540 §8.1.2.2). The HTTP/2 stack strips it before
+    // sending, but our http2 lib rejects it as malformed at insertion
+    // time. Omit it here. Same for `host` — pseudo-header on HTTP/2.
+
+    // upgrade-insecure-requests
+    headers.push(("upgrade-insecure-requests".to_string(), "1".to_string()));
+
+    // sec-fetch-* — Firefox supports these (added in v92).
+    headers.push(("sec-fetch-dest".to_string(), "document".to_string()));
+    headers.push(("sec-fetch-mode".to_string(), "navigate".to_string()));
+    headers.push(("sec-fetch-site".to_string(), sec_fetch_site.to_string()));
+    if include_sec_fetch_user {
+        headers.push(("sec-fetch-user".to_string(), "?1".to_string()));
+    }
+
+    headers
+}
+
+/// Build accept-language Firefox-style — q=0.5 step instead of q=0.9.
+/// Verified from real Firefox 135 capture.
+fn build_firefox_accept_language(languages: &[String]) -> String {
+    if languages.is_empty() {
+        return "en-US,en;q=0.5".to_string();
+    }
+    let mut parts = Vec::with_capacity(languages.len());
+    for (i, lang) in languages.iter().enumerate() {
+        if i == 0 {
+            parts.push(lang.clone());
+        } else {
+            // Firefox uses fixed q=0.5 for the first secondary, q=0.3 for
+            // the next, etc. — verified pattern from real Firefox 135.
+            let q = 0.5 - ((i - 1) as f64 * 0.2);
+            if q > 0.0 {
+                parts.push(format!("{};q={:.1}", lang, q));
+            }
+        }
+    }
+    parts.join(",")
+}
+
 /// Build accept-language with quality values.
 fn build_accept_language(languages: &[String]) -> String {
     if languages.is_empty() {
@@ -492,6 +700,57 @@ mod tests {
     fn accept_language_empty() {
         let result = build_accept_language(&[]);
         assert_eq!(result, "en-US,en;q=0.9");
+    }
+
+    #[test]
+    fn firefox_headers_have_no_sec_ch_ua() {
+        // Firefox doesn't implement User Agent Client Hints — no
+        // sec-ch-ua* headers should appear.
+        let profile = stealth::presets::firefox_135_macos();
+        let headers = firefox_headers(&profile);
+        for (k, _) in &headers {
+            assert!(
+                !k.starts_with("sec-ch-ua"),
+                "Firefox headers must not contain {k}"
+            );
+        }
+        // Also no `priority` header (Chrome-only).
+        assert!(
+            !headers.iter().any(|(k, _)| k == "priority"),
+            "Firefox should not emit `priority` header"
+        );
+    }
+
+    #[test]
+    fn firefox_headers_have_correct_accept() {
+        let profile = stealth::presets::firefox_135_macos();
+        let headers = firefox_headers(&profile);
+        let accept = headers.iter().find(|(k, _)| k == "accept").unwrap();
+        // Firefox's accept lacks avif/webp/apng/signed-exchange that Chrome includes.
+        assert_eq!(
+            accept.1,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        );
+    }
+
+    #[test]
+    fn firefox_accept_language_uses_q_05() {
+        let result = build_firefox_accept_language(&["en-US".to_string(), "en".to_string()]);
+        // Firefox uses q=0.5 for the secondary language, not q=0.9.
+        assert_eq!(result, "en-US,en;q=0.5");
+    }
+
+    #[test]
+    fn firefox_headers_count_is_nine() {
+        // 9 headers: user-agent, accept, accept-language, accept-encoding,
+        // upgrade-insecure-requests, sec-fetch-dest/mode/site/user.
+        // `host` and `connection` are HTTP/1-style — both are pseudo-headers
+        // / forbidden in HTTP/2 (RFC 7540 §8.1.2.2), the HTTP/2 stack
+        // handles them automatically. Omitting them avoids "malformed
+        // headers" errors at the http2 lib insertion layer.
+        let profile = stealth::presets::firefox_135_macos();
+        let headers = firefox_headers(&profile);
+        assert_eq!(headers.len(), 9);
     }
 
     #[test]

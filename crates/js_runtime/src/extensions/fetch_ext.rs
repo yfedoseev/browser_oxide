@@ -91,6 +91,22 @@ pub async fn op_fetch(
     #[serde] headers: HashMap<String, String>,
     #[string] body: String,
 ) -> Result<FetchResponse, deno_core::error::AnyError> {
+    // Resource blocker — short-circuit ad/tracker requests before TLS+JS.
+    // Empty source_url is OK; the JS layer doesn't currently pass the page
+    // origin here, but adblock's first-party rules degrade gracefully.
+    let request_type =
+        net::blocker::classify_request_type(&url, headers.get("x-boxide-request-type").map(|s| s.as_str()));
+    if net::blocker::should_block(&url, "", request_type) {
+        return Ok(FetchResponse {
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: HashMap::new(),
+            body: String::new(),
+            url: url.clone(),
+            ok: true,
+        });
+    }
+
     let default_client;
     let client = match FETCH_CLIENT.get() {
         Some(c) => c,
@@ -213,6 +229,14 @@ pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
 #[op2]
 #[string]
 pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> String {
+    // Resource blocker — return empty body for ad/tracker URLs without
+    // doing any HTTP work. Tracker JS that loads via <script src=…>
+    // (gtm.js, gpt.js, doubleclick) is the dominant time sink on
+    // news/store sites; blocking these saves 1-3 s per site on average.
+    if net::blocker::should_block(&url, &referer, net::blocker::classify_request_type(&url, Some("script"))) {
+        return String::new();
+    }
+
     // Per-page chain ceiling — see MAX_SYNC_FETCH_PER_PAGE.
     let n = SYNC_FETCH_COUNT.fetch_add(1, Ordering::Relaxed);
     if n >= MAX_SYNC_FETCH_PER_PAGE {

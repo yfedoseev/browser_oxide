@@ -25,6 +25,11 @@ flate2 = "1"
 brotli = "7"
 zstd = "0.13"
 
+# Resource blocker (Brave's Rust adblock engine — Adblock-Plus syntax,
+# parses EasyList/EasyPrivacy/uBlock rules). Uses default features so the
+# embedded domain resolver (publicsuffix list) is available out of the box.
+adblock = "0.12"
+
 # Core
 tokio = { version = "1", features = ["full"] }
 rand = "0.8"

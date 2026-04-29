@@ -365,6 +365,248 @@ pub fn chrome_130_jp() -> StealthProfile {
     p
 }
 
+// ===== Firefox 135 presets =====
+//
+// Per the Camoufox network capture (`/tmp/cam_capture/summary.txt`), real
+// Firefox 135 sends a distinctly different request shape than Chrome — no
+// `sec-ch-ua*` headers, different `accept` and `accept-language` quality
+// values, no `priority` header. Several anti-bot vendors (DataDome,
+// Disney+, Akamai-protected adidas) treat Firefox more leniently than
+// Chrome because Chrome is ~70% of bot traffic, so vendors invest
+// disproportionately in Chrome detection. Adding a Firefox profile lets
+// callers swap to it for sites where Chrome class is being detected.
+//
+// Firefox-specific spec details:
+// - `navigator.vendor === ""` (Chrome reports "Google Inc.")
+// - `navigator.productSub === "20100101"` (Firefox uses Gecko build date,
+//   Chrome uses "20030107")
+// - `webgl_vendor` / `webgl_renderer` masked to "Mozilla" / "Mozilla" by
+//   default (Firefox 113+ enables this for non-Nightly to reduce passive
+//   fingerprint surface)
+// - `tls_impersonate` is set to `firefox_135` here as a forward-compatible
+//   string; the actual TLS-class swap is gated by Phase B.3 (rquest's
+//   `Impersonate::Firefox*` enum). Until B.3 lands, the network layer
+//   falls back to the chrome_130 cipher suite — coherent for now since
+//   most sites that flip on Firefox UA do so based on the UA + headers,
+//   not TLS.
+
+/// Firefox 135 on macOS.
+pub fn firefox_135_macos() -> StealthProfile {
+    StealthProfile {
+        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+        browser_name: "Firefox".into(),
+        browser_version: "135.0".into(),
+        os_name: "macOS".into(),
+        os_version: "14.5".into(),
+        platform: "MacIntel".into(),
+        vendor: "".into(),
+        vendor_sub: "".into(),
+        product_sub: "20100101".into(),
+        app_version: "5.0 (Macintosh; Intel Mac OS X 14.5; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+
+        screen_width: 1440,
+        screen_height: 900,
+        screen_avail_width: 1440,
+        screen_avail_height: 875,
+        screen_avail_top: 25,
+        screen_color_depth: 30,
+        device_pixel_ratio: 2.0,
+        cpu_cores: 10,
+        device_memory: 16,
+        max_touch_points: 0,
+
+        // Firefox masks WebGL by default since v113 — both vendor and
+        // renderer report "Mozilla". Sites that fingerprint via WebGL get
+        // less entropy, which is the point.
+        webgl_vendor: "Mozilla".into(),
+        webgl_renderer: "Mozilla".into(),
+
+        language: "en-US".into(),
+        languages: vec!["en-US".into(), "en".into()],
+        timezone: "America/Los_Angeles".into(),
+
+        cpu_architecture: "arm".into(),
+        cpu_bitness: "64".into(),
+        platform_version: "14.5.0".into(),
+        ua_model: "".into(),
+        ua_wow64: false,
+
+        // String token — currently informational only. The actual TLS
+        // bytes are emitted by `crates/net` via boring2/BoringSSL with a
+        // Chrome-tuned ClientHello. A real Firefox JA4 swap requires
+        // reconfiguring boring2's cipher list / extension order to match
+        // NSS — substantial work tracked as a future item. Many sites
+        // (including the Camoufox-passing leboncoin/disneyplus) flip on
+        // UA+headers alone, so this gap is acceptable for Phase B.
+        tls_impersonate: "firefox_135".into(),
+        connection_effective_type: "4g".into(),
+        connection_rtt: 50,
+        connection_downlink: 10.0,
+
+        pdf_viewer_enabled: true,
+        plugins_count: 5,
+        mime_types_count: 2,
+
+        canvas_seed: 0xff0011_ff0022_ff0033_u128 as u64,
+        audio_seed: 0x88aa_bbcc_ddee_ff00,
+
+        has_platform_authenticator: true,
+        conditional_mediation: true,
+        allow_http3: false,
+
+        prefers_color_scheme: "light".into(),
+        pointer_type: "fine".into(),
+        hover_capability: "hover".into(),
+
+        inner_width: 1440,
+        inner_height: 789,
+        outer_width: 1440,
+        outer_height: 900,
+
+        proxy: None,
+        media_devices: default_media_devices("macos"),
+        gpu_profile: crate::gpu::apple_m2_pro_macos(),
+    }
+}
+
+/// Firefox 135 on Windows 10.
+pub fn firefox_135_windows() -> StealthProfile {
+    StealthProfile {
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+        browser_name: "Firefox".into(),
+        browser_version: "135.0".into(),
+        os_name: "Windows".into(),
+        os_version: "10.0".into(),
+        platform: "Win32".into(),
+        vendor: "".into(),
+        vendor_sub: "".into(),
+        product_sub: "20100101".into(),
+        app_version: "5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+
+        screen_width: 1920,
+        screen_height: 1080,
+        screen_avail_width: 1920,
+        screen_avail_height: 1040,
+        screen_avail_top: 0,
+        screen_color_depth: 24,
+        device_pixel_ratio: 1.0,
+        cpu_cores: 8,
+        device_memory: 8,
+        max_touch_points: 0,
+
+        webgl_vendor: "Mozilla".into(),
+        webgl_renderer: "Mozilla".into(),
+
+        language: "en-US".into(),
+        languages: vec!["en-US".into(), "en".into()],
+        timezone: "America/New_York".into(),
+
+        cpu_architecture: "x86".into(),
+        cpu_bitness: "64".into(),
+        platform_version: "15.0.0".into(),
+        ua_model: "".into(),
+        ua_wow64: false,
+
+        tls_impersonate: "firefox_135".into(),
+        connection_effective_type: "4g".into(),
+        connection_rtt: 50,
+        connection_downlink: 10.0,
+
+        pdf_viewer_enabled: true,
+        plugins_count: 5,
+        mime_types_count: 2,
+
+        canvas_seed: 0x1122_3344_5566_7788,
+        audio_seed: 0x99aa_bbcc_ddee_ff00,
+
+        has_platform_authenticator: true,
+        conditional_mediation: true,
+        allow_http3: false,
+
+        prefers_color_scheme: "light".into(),
+        pointer_type: "fine".into(),
+        hover_capability: "hover".into(),
+
+        inner_width: 1920,
+        inner_height: 969,
+        outer_width: 1920,
+        outer_height: 1080,
+
+        proxy: None,
+        media_devices: default_media_devices("windows"),
+        gpu_profile: crate::gpu::nvidia_rtx_3060_windows(),
+    }
+}
+
+/// Firefox 135 on Linux.
+pub fn firefox_135_linux() -> StealthProfile {
+    StealthProfile {
+        user_agent: "Mozilla/5.0 (X11; Linux x86_64; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+        browser_name: "Firefox".into(),
+        browser_version: "135.0".into(),
+        os_name: "Linux".into(),
+        os_version: "6.1".into(),
+        platform: "Linux x86_64".into(),
+        vendor: "".into(),
+        vendor_sub: "".into(),
+        product_sub: "20100101".into(),
+        app_version: "5.0 (X11; Linux x86_64; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+
+        screen_width: 1920,
+        screen_height: 1080,
+        screen_avail_width: 1920,
+        screen_avail_height: 1053,
+        screen_avail_top: 0,
+        screen_color_depth: 24,
+        device_pixel_ratio: 1.0,
+        cpu_cores: 8,
+        device_memory: 8,
+        max_touch_points: 0,
+
+        webgl_vendor: "Mozilla".into(),
+        webgl_renderer: "Mozilla".into(),
+
+        language: "en-US".into(),
+        languages: vec!["en-US".into(), "en".into()],
+        timezone: "America/Chicago".into(),
+
+        cpu_architecture: "x86".into(),
+        cpu_bitness: "64".into(),
+        platform_version: "".into(),
+        ua_model: "".into(),
+        ua_wow64: false,
+
+        tls_impersonate: "firefox_135".into(),
+        connection_effective_type: "4g".into(),
+        connection_rtt: 50,
+        connection_downlink: 10.0,
+
+        pdf_viewer_enabled: true,
+        plugins_count: 5,
+        mime_types_count: 2,
+
+        canvas_seed: 0xaaaa_bbbb_cccc_dddd,
+        audio_seed: 0xdddd_cccc_bbbb_aaaa,
+
+        has_platform_authenticator: false,
+        conditional_mediation: true,
+        allow_http3: false,
+
+        prefers_color_scheme: "light".into(),
+        pointer_type: "fine".into(),
+        hover_capability: "hover".into(),
+
+        inner_width: 1920,
+        inner_height: 969,
+        outer_width: 1920,
+        outer_height: 1080,
+
+        proxy: None,
+        media_devices: default_media_devices("linux"),
+        gpu_profile: crate::gpu::intel_uhd_630_linux(),
+    }
+}
+
 /// Create a profile with custom locale/timezone from a base profile.
 pub fn with_locale(
     mut base: StealthProfile,
@@ -417,6 +659,9 @@ mod tests {
             chrome_130_cn(),
             chrome_130_de(),
             chrome_130_jp(),
+            firefox_135_macos(),
+            firefox_135_windows(),
+            firefox_135_linux(),
         ] {
             assert!(
                 !profile.allow_http3,
@@ -436,6 +681,45 @@ mod tests {
     fn chrome_130_linux_validates() {
         let profile = chrome_130_linux();
         assert!(profile.validate().is_ok(), "{:?}", profile.validate());
+    }
+
+    #[test]
+    fn firefox_135_macos_validates() {
+        let profile = firefox_135_macos();
+        assert!(profile.validate().is_ok(), "{:?}", profile.validate());
+        assert_eq!(profile.browser_name, "Firefox");
+        assert_eq!(profile.vendor, "");
+        assert_eq!(profile.product_sub, "20100101");
+        assert!(profile.user_agent.contains("rv:135.0"));
+        assert!(profile.user_agent.contains("Firefox/135.0"));
+        assert!(!profile.user_agent.contains("Chrome"));
+        assert_eq!(profile.tls_impersonate, "firefox_135");
+    }
+
+    #[test]
+    fn firefox_135_windows_validates() {
+        let profile = firefox_135_windows();
+        assert!(profile.validate().is_ok(), "{:?}", profile.validate());
+        assert!(profile.user_agent.contains("Windows NT 10.0"));
+        assert!(profile.user_agent.contains("Firefox/135.0"));
+    }
+
+    #[test]
+    fn firefox_135_linux_validates() {
+        let profile = firefox_135_linux();
+        assert!(profile.validate().is_ok(), "{:?}", profile.validate());
+        assert!(profile.user_agent.contains("X11; Linux x86_64"));
+        assert!(profile.user_agent.contains("Firefox/135.0"));
+    }
+
+    #[test]
+    fn firefox_webgl_is_masked() {
+        // Firefox 113+ masks WebGL by default — both vendor and renderer
+        // report "Mozilla". This is a deliberate fingerprint reduction.
+        for profile in [firefox_135_macos(), firefox_135_windows(), firefox_135_linux()] {
+            assert_eq!(profile.webgl_vendor, "Mozilla");
+            assert_eq!(profile.webgl_renderer, "Mozilla");
+        }
     }
 
     #[test]
