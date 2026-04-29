@@ -168,6 +168,29 @@ async fn phase7_ab_probe_capture_oxide() {
     eprintln!("wrote {} keys to {path}", result.len());
 }
 
+/// Dump oxide's window.ownPropertyNames so we can diff against
+/// real Chrome's 980 (probe_mcp_global_names.json).
+#[tokio::test]
+#[ignore = "diagnostic"]
+async fn diag_dump_own_property_names() {
+    use browser::Page;
+    use stealth::presets::chrome_130_macos;
+    let mut p = Page::from_html(
+        "<!DOCTYPE html><html><body></body></html>",
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    let names = p
+        .evaluate("JSON.stringify(Object.getOwnPropertyNames(globalThis))")
+        .unwrap();
+    let path = "/Users/yfedoseev/Projects/browser_oxide/probe_oxide_global_names.json";
+    let cleaned = names.trim_matches('"').replace("\\\"", "\"");
+    std::fs::write(path, &cleaned).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
+    eprintln!("oxide globals: {}", parsed.as_array().unwrap().len());
+}
+
 /// Phase 7 D5 gate — document.characterSet is "windows-1252", the HTML
 /// legacy default that real Chrome reports for HTML docs without an
 /// explicit <meta charset>.

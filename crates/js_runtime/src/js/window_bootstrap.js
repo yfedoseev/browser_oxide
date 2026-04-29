@@ -5008,9 +5008,18 @@
         ]) {
             _ec._inner.set(k, 0);
         }
+        // Mount on Performance.prototype, not the instance — real Chrome
+        // exposes eventCounts as a prototype getter so
+        // Object.getOwnPropertyNames(performance) is empty. If we set it
+        // as an own property, fingerprint scripts that count
+        // performance's own props (CreepJS) flag it as "modified
+        // performance".
         try {
-            Object.defineProperty(globalThis.performance, "eventCounts", {
-                value: _ec, configurable: true, enumerable: true,
+            const _PerfProto = globalThis.Performance && globalThis.Performance.prototype
+                ? globalThis.Performance.prototype
+                : Object.getPrototypeOf(globalThis.performance);
+            Object.defineProperty(_PerfProto, "eventCounts", {
+                get: () => _ec, configurable: true, enumerable: true,
             });
         } catch (_e) {}
     }

@@ -171,10 +171,10 @@ const PROBE_HTML: &str = r#"<!doctype html>
 /// Read a single PX probe field as a plain string. Avoids the
 /// double-stringify escaping that breaks raw JSON parse.
 fn pull(page: &mut Page, expr: &str) -> String {
-    page.evaluate(&format!("String({expr})"))
-        .unwrap()
-        .trim_matches('"')
-        .to_string()
+    match page.evaluate(&format!("String({expr})")) {
+        Ok(s) => s.trim_matches('"').to_string(),
+        Err(e) => panic!("pull({:?}) failed: {}", expr, e),
+    }
 }
 
 #[tokio::test]
@@ -465,21 +465,27 @@ async fn perimeterx_surface_macos() {
 
     // scroll/page/screen position accessors must live on Window.prototype,
     // NOT as own data properties on globalThis.
-    let scroll_own = pull(
+    // Phase 7 — scrollX/Y/pageX/YOffset/screenX/Y are OWN accessors
+    // on the window instance (NOT on Window.prototype). The earlier
+    // Phase 6 D2 placed them on the prototype based on a misreading
+    // of the spec; Phase 7 verified against Playwright MCP that real
+    // Chrome puts them on the instance, with descriptor
+    // `{get,set,enumerable,configurable}`.
+    let scroll_own_get = pull(
         &mut page,
-        "String(Object.getOwnPropertyDescriptor(window, 'scrollX'))",
+        "String(typeof Object.getOwnPropertyDescriptor(window, 'scrollX').get)",
     );
-    let scroll_proto_has_get = pull(
+    let page_x_offset_own_get = pull(
         &mut page,
-        "String(typeof Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'scrollX').get)",
+        "String(typeof Object.getOwnPropertyDescriptor(window, 'pageXOffset').get)",
     );
-    let page_x_offset_proto = pull(
+    let screen_x_own_get = pull(
         &mut page,
-        "String(typeof Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'pageXOffset').get)",
+        "String(typeof Object.getOwnPropertyDescriptor(window, 'screenX').get)",
     );
-    let screen_x_proto = pull(
+    let scroll_proto_descr = pull(
         &mut page,
-        "String(typeof Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'screenX').get)",
+        "String(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'scrollX'))",
     );
     let scroll_initial = pull(&mut page, "String(window.scrollY)");
     let scroll_after = pull(
@@ -491,30 +497,30 @@ async fn perimeterx_surface_macos() {
         &mut page,
         "(() => { window.scrollBy(0, 50); return String(window.scrollY); })()",
     );
-    println!("\n--- Phase 6 D2: scrollX/Y/pageX/YOffset/screenX/Y as Window.prototype accessors ---");
-    println!("  own descriptor on window:        {scroll_own}");
-    println!("  proto descriptor.get is fn:      {scroll_proto_has_get}");
-    println!("  pageXOffset proto descriptor get: {page_x_offset_proto}");
-    println!("  screenX proto descriptor get:    {screen_x_proto}");
+    println!("\n--- Phase 7 D3: scrollX/Y/pageX/YOffset/screenX/Y as own-instance accessors ---");
+    println!("  scrollX own descriptor.get:      {scroll_own_get}");
+    println!("  pageXOffset own descriptor.get:  {page_x_offset_own_get}");
+    println!("  screenX own descriptor.get:      {screen_x_own_get}");
+    println!("  Window.prototype.scrollX descr:  {scroll_proto_descr}");
     println!("  scrollY initial:                 {scroll_initial}");
     println!("  scrollY after scrollTo(0,100):   {scroll_after}");
     println!("  pageYOffset after scrollTo:      {page_y_after}");
     println!("  scrollY after scrollBy(0,50):    {scroll_by_after}");
     assert_eq!(
-        scroll_own, "undefined",
-        "Object.getOwnPropertyDescriptor(window, 'scrollX') must be undefined (inherited from Window.prototype)"
+        scroll_own_get, "function",
+        "scrollX must be an own accessor on window with a getter"
     );
     assert_eq!(
-        scroll_proto_has_get, "function",
-        "Window.prototype.scrollX must be an accessor with a getter"
+        page_x_offset_own_get, "function",
+        "pageXOffset must be an own accessor on window"
     );
     assert_eq!(
-        page_x_offset_proto, "function",
-        "Window.prototype.pageXOffset must be an accessor"
+        screen_x_own_get, "function",
+        "screenX must be an own accessor on window"
     );
     assert_eq!(
-        screen_x_proto, "function",
-        "Window.prototype.screenX must be an accessor"
+        scroll_proto_descr, "undefined",
+        "scrollX must NOT be on Window.prototype (Phase 6 D2 mistake corrected in Phase 7)"
     );
     assert_eq!(scroll_initial, "0", "initial scrollY is 0");
     assert_eq!(scroll_after, "100", "scrollTo(0, 100) updates scrollY");
@@ -638,7 +644,9 @@ async fn perimeterx_surface_macos() {
     assert_eq!(cs_get_typeof, "function");
     assert_eq!(cs_is_event_target, "true");
     assert_eq!(ec_proto, "[object EventCounts]");
-    assert_eq!(ec_size, "0");
+    // Phase 7 — pre-populated with 36 known event-type keys to match
+    // real Chrome 147 (which ships with eventCounts.size > 0 from page load).
+    assert_eq!(ec_size, "36");
     assert_eq!(ec_get_typeof, "function");
     assert_eq!(n_perm, "default");
     assert_eq!(n_max, "2");

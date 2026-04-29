@@ -15,6 +15,39 @@
             for (const k of ['caches', 'cookieStore', 'IdleDetector', 'EyeDropper', 'WebTransport']) {
                 try { delete globalThis[k]; } catch (_e) {}
             }
+            // Phase 7 — also strip the constructor *interfaces* for the
+            // [SecureContext] APIs. Real Chrome 147 hides these from
+            // `Object.getOwnPropertyNames(window)` on insecure pages.
+            // Anti-bot scripts hash the global namespace.
+            // Also: ApplePaySession, SharedArrayBuffer, webkitAudioContext,
+            // DedicatedWorkerGlobalScope, WorkerGlobalScope, CSSPseudoElement
+            // are absent from Chrome 147's globalThis on insecure pages —
+            // verified via fresh Playwright MCP capture.
+            for (const k of [
+                "SharedArrayBuffer", "webkitAudioContext",
+                "DedicatedWorkerGlobalScope", "WorkerGlobalScope",
+                "CSSPseudoElement",
+                "ApplePaySession", "AuthenticatorAssertionResponse",
+                "AuthenticatorAttestationResponse", "AuthenticatorResponse",
+                "BatteryManager", "Bluetooth", "CacheStorage", "CookieStore",
+                "Credential", "CredentialsContainer", "DevicePosture",
+                "FederatedCredential", "FileSystemDirectoryHandle",
+                "FileSystemFileHandle", "FileSystemHandle",
+                "FileSystemWritableFileStream", "IdentityCredential",
+                "IdentityProvider", "Keyboard", "KeyboardLayoutMap",
+                "MediaDevices", "PasswordCredential", "PaymentRequest",
+                "Presentation", "PresentationConnection",
+                "PublicKeyCredential", "ServiceWorker",
+                "ServiceWorkerContainer", "StorageManager", "SubtleCrypto",
+                "VirtualKeyboard", "XRSession", "XRSystem",
+                // Generic Sensor API — also [SecureContext]
+                "Sensor", "Accelerometer", "AbsoluteOrientationSensor",
+                "GravitySensor", "Gyroscope", "LinearAccelerationSensor",
+                "Magnetometer", "OrientationSensor",
+                "RelativeOrientationSensor",
+            ]) {
+                try { delete globalThis[k]; } catch (_e) {}
+            }
             // crypto.subtle + crypto.randomUUID are [SecureContext]. They
             // come from deno_core's crypto extension and are non-configurable
             // own properties. `delete` fails — replace `globalThis.crypto`
@@ -61,12 +94,15 @@
             ? (_profileOps.op_get_profile_value("os_name") || "Linux")
             : "Linux";
 
-        // ApplePaySession — present only on macOS Chrome. Akamai's sensor
+        // ApplePaySession — present only on macOS Chrome AND only on
+        // secure contexts (Apple Pay requires https). Akamai's sensor
         // sends `ap=null` if the constructor is missing on a macOS UA;
         // that mismatch is one of the strongest single tells in the
         // pixel POST capture. Constructor + statics shaped to match
         // Chrome 147's ApplePaySession surface.
-        if (_osName === "macOS" && typeof globalThis.ApplePaySession === "undefined") {
+        const _ops2 = Deno && Deno.core && Deno.core.ops;
+        const _isSecureForAP = _ops2 && _ops2.op_is_secure_context && _ops2.op_is_secure_context();
+        if (_osName === "macOS" && _isSecureForAP && typeof globalThis.ApplePaySession === "undefined") {
             const _APP = function ApplePaySession(_version, _paymentRequest) {
                 this.onvalidatemerchant = null;
                 this.onpaymentauthorized = null;
@@ -121,10 +157,15 @@
         '__boxide',
         '__syncCookiesFromNet',
         '__documentReadyState',
+        '__drainCspViolations',
         // __onNodeInserted is a strong bot signal — real browsers don't expose
         // internal DOM mutation callbacks on globalThis.
         '__onNodeInserted',
-        '__errors'
+        '__errors',
+        // SharedArrayBuffer is exposed by V8 by default; real Chrome only
+        // exposes it when crossOriginIsolated. For non-COI pages, hide it.
+        // (deno_core may have it non-configurable; delete is best-effort.)
+        'SharedArrayBuffer',
         // __pendingNavigation intentionally kept: it is a signal for the
         // Rust navigation driver. Synchronous inline scripts (form.submit,
         // location.href = ...) set it during the same tick cleanup runs,

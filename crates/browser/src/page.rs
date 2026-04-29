@@ -353,8 +353,14 @@ impl Page {
         }
 
         // Set document.readyState = loading
+        // Non-enumerable own property so it doesn't leak into
+        // Object.keys(window) — defined here so subsequent
+        // `globalThis.__documentReadyState = ...` assignments preserve
+        // enumerable=false (writable=true, descriptor inherited).
         event_loop
-            .execute_script("globalThis.__documentReadyState = 'loading';")
+            .execute_script(
+                "Object.defineProperty(globalThis, '__documentReadyState', { value: 'loading', writable: true, configurable: true, enumerable: false });",
+            )
             .ok();
 
         // Fire DOMContentLoaded and load events — many scripts wait for these
@@ -2346,9 +2352,12 @@ mod tests {
     /// Regression-locks the macOS-conditional shim in window_bootstrap.
     #[tokio::test]
     async fn apple_pay_session_present_on_macos_profile() {
+        // Phase 7 — ApplePaySession is gated on isSecureContext so the
+        // page must be loaded over https:// for the macOS shim to install.
         let profile = stealth::presets::chrome_130_macos();
-        let mut page = Page::from_html(
+        let mut page = Page::from_html_with_url(
             "<html><head></head><body></body></html>",
+            "https://example.com/",
             Some(profile),
         )
         .await

@@ -2401,6 +2401,15 @@ async fn await_promise_with_profile(
 ) -> String {
     await_promise_inner(js, timeout_ms, Some(profile), false).await
 }
+/// Same as `await_promise_with_profile`, but loads over https://.
+/// Phase 7 — required for [SecureContext]-only APIs.
+async fn await_promise_with_profile_secure(
+    js: &str,
+    timeout_ms: u64,
+    profile: stealth::StealthProfile,
+) -> String {
+    await_promise_inner(js, timeout_ms, Some(profile), true).await
+}
 async fn await_promise_inner(
     js: &str,
     timeout_ms: u64,
@@ -2433,13 +2442,13 @@ async fn await_promise_inner(
 
 #[tokio::test]
 async fn webauthn_public_key_credential_exists() {
-    assert_eq!(check("typeof PublicKeyCredential").await, "function");
+    assert_eq!(check_secure("typeof PublicKeyCredential").await, "function");
 }
 
 #[tokio::test]
 async fn webauthn_public_key_credential_constructor_throws() {
     assert_eq!(
-        check("(() => { try { new PublicKeyCredential(); return 'no-throw'; } catch (e) { return e.message; } })()")
+        check_secure("(() => { try { new PublicKeyCredential(); return 'no-throw'; } catch (e) { return e.message; } })()")
             .await,
         "Illegal constructor"
     );
@@ -2447,13 +2456,13 @@ async fn webauthn_public_key_credential_constructor_throws() {
 
 #[tokio::test]
 async fn webauthn_authenticator_response_classes_exist() {
-    assert_eq!(check("typeof AuthenticatorResponse").await, "function");
+    assert_eq!(check_secure("typeof AuthenticatorResponse").await, "function");
     assert_eq!(
-        check("typeof AuthenticatorAttestationResponse").await,
+        check_secure("typeof AuthenticatorAttestationResponse").await,
         "function"
     );
     assert_eq!(
-        check("typeof AuthenticatorAssertionResponse").await,
+        check_secure("typeof AuthenticatorAssertionResponse").await,
         "function"
     );
 }
@@ -2461,7 +2470,7 @@ async fn webauthn_authenticator_response_classes_exist() {
 #[tokio::test]
 async fn webauthn_attestation_extends_response() {
     assert_eq!(
-        check("AuthenticatorAttestationResponse.prototype instanceof AuthenticatorResponse").await,
+        check_secure("AuthenticatorAttestationResponse.prototype instanceof AuthenticatorResponse").await,
         "true"
     );
 }
@@ -2469,7 +2478,7 @@ async fn webauthn_attestation_extends_response() {
 #[tokio::test]
 async fn webauthn_isuvpa_returns_promise() {
     assert_eq!(
-        check("PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable() instanceof Promise").await,
+        check_secure("PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable() instanceof Promise").await,
         "true"
     );
 }
@@ -2477,7 +2486,7 @@ async fn webauthn_isuvpa_returns_promise() {
 #[tokio::test]
 async fn webauthn_iscma_returns_promise() {
     assert_eq!(
-        check("PublicKeyCredential.isConditionalMediationAvailable() instanceof Promise").await,
+        check_secure("PublicKeyCredential.isConditionalMediationAvailable() instanceof Promise").await,
         "true"
     );
 }
@@ -2486,7 +2495,7 @@ async fn webauthn_iscma_returns_promise() {
 async fn webauthn_isuvpa_true_on_windows_profile() {
     let profile = stealth::presets::chrome_130_windows();
     assert_eq!(
-        await_promise_with_profile(
+        await_promise_with_profile_secure(
             "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()",
             50,
             profile,
@@ -2500,7 +2509,7 @@ async fn webauthn_isuvpa_true_on_windows_profile() {
 async fn webauthn_isuvpa_true_on_macos_profile() {
     let profile = stealth::presets::chrome_130_macos();
     assert_eq!(
-        await_promise_with_profile(
+        await_promise_with_profile_secure(
             "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()",
             50,
             profile,
@@ -2514,7 +2523,7 @@ async fn webauthn_isuvpa_true_on_macos_profile() {
 async fn webauthn_isuvpa_false_on_linux_profile() {
     let profile = stealth::presets::chrome_130_linux();
     assert_eq!(
-        await_promise_with_profile(
+        await_promise_with_profile_secure(
             "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()",
             50,
             profile,
@@ -2527,7 +2536,7 @@ async fn webauthn_isuvpa_false_on_linux_profile() {
 #[tokio::test]
 async fn webauthn_get_client_capabilities_shape() {
     assert_eq!(
-        await_promise(
+        await_promise_secure(
             "PublicKeyCredential.getClientCapabilities().then(c => \
              typeof c.userVerifyingPlatformAuthenticator === 'boolean' && \
              typeof c.conditionalGet === 'boolean' && \
@@ -2542,7 +2551,7 @@ async fn webauthn_get_client_capabilities_shape() {
 #[tokio::test]
 async fn webauthn_isuvpa_is_native() {
     assert_eq!(
-        check("PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable.toString().includes('[native code]')").await,
+        check_secure("PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable.toString().includes('[native code]')").await,
         "true"
     );
 }
@@ -2591,18 +2600,18 @@ async fn webauthn_navigator_credentials_is_credentials_container() {
 
 #[tokio::test]
 async fn fedcm_identity_credential_exists() {
-    assert_eq!(check("typeof IdentityCredential").await, "function");
+    assert_eq!(check_secure("typeof IdentityCredential").await, "function");
 }
 
 #[tokio::test]
 async fn fedcm_identity_provider_exists() {
-    assert_eq!(check("typeof IdentityProvider").await, "function");
+    assert_eq!(check_secure("typeof IdentityProvider").await, "function");
 }
 
 #[tokio::test]
 async fn fedcm_identity_credential_constructor_throws() {
     assert_eq!(
-        check("(() => { try { new IdentityCredential(); return 'no-throw'; } catch (e) { return e.message; } })()")
+        check_secure("(() => { try { new IdentityCredential(); return 'no-throw'; } catch (e) { return e.message; } })()")
             .await,
         "Illegal constructor"
     );
@@ -2611,7 +2620,7 @@ async fn fedcm_identity_credential_constructor_throws() {
 #[tokio::test]
 async fn fedcm_identity_provider_get_user_info_rejects() {
     assert_eq!(
-        await_promise(
+        await_promise_secure(
             "IdentityProvider.getUserInfo({configURL:'https://x/cfg.json',clientId:'a'})",
             50,
         )

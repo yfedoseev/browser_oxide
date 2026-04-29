@@ -1211,14 +1211,18 @@
     }
 
     class Document extends Node {
-        constructor() {
-            super();
+        constructor(nodeId) {
+            // Forward the document node id to Node so _getNodeId returns
+            // the real Rust-side Document. Without this, document.nodeType
+            // resolved to 0 (the "no such node" sentinel), which broke
+            // anything walking parentNode→isConnected. Phase 7 follow-up.
+            super(nodeId);
             if (!globalThis.__boxide) {
                 Object.defineProperty(globalThis, '__boxide', { value: {}, enumerable: false, configurable: true });
             }
             // Capture initial base URL from ops or a global hint
             globalThis.__boxide._baseUrl = ops.op_dom_get_base_url && ops.op_dom_get_base_url();
-            
+
             const all = new HTMLAllCollection(this);
             // Hide 'all' from enumeration but keep it truthy
             Object.defineProperty(this, 'all', {

@@ -103,12 +103,11 @@ pub fn nvidia_rtx_3060_windows() -> GpuProfile {
 
 /// Chrome 147 on macOS 15 with Apple M3.
 ///
-/// Phase 7 — verified against Playwright MCP capture from real Chrome
-/// 147 on M3 MacBook Pro. 39 extensions vs M2 Pro's 36 (adds
-/// `EXT_disjoint_timer_query`, `WEBGL_provoking_vertex`,
-/// `WEBGL_clip_cull_distance`). Order matches Chromium's
-/// `WebGLRenderingContextBase::EnabledWebGLExtensions` registration
-/// sequence.
+/// Phase 7 — extension list verified byte-exact against a fresh
+/// Playwright MCP capture from real Chrome 147 on M3 MacBook Pro
+/// (`.playwright-mcp/captures/probe_mcp.json`). 39 extensions in the
+/// exact registration order Chromium emits via
+/// `WebGLRenderingContextBase::getSupportedExtensions()`.
 pub fn apple_m3_macos() -> GpuProfile {
     GpuProfile {
         vendor: "WebKit".into(),
@@ -144,11 +143,11 @@ pub fn apple_m3_macos() -> GpuProfile {
             "OES_texture_half_float_linear".into(),
             "OES_vertex_array_object".into(),
             "WEBGL_blend_func_extended".into(),
-            "WEBGL_clip_cull_distance".into(),
             "WEBGL_color_buffer_float".into(),
             "WEBGL_compressed_texture_astc".into(),
             "WEBGL_compressed_texture_etc".into(),
             "WEBGL_compressed_texture_etc1".into(),
+            "WEBGL_compressed_texture_pvrtc".into(),
             "WEBGL_compressed_texture_s3tc".into(),
             "WEBGL_compressed_texture_s3tc_srgb".into(),
             "WEBGL_debug_renderer_info".into(),
@@ -157,7 +156,7 @@ pub fn apple_m3_macos() -> GpuProfile {
             "WEBGL_draw_buffers".into(),
             "WEBGL_lose_context".into(),
             "WEBGL_multi_draw".into(),
-            "WEBGL_provoking_vertex".into(),
+            "WEBGL_polygon_mode".into(),
         ],
         params: common_params_desktop(),
         shader_precision: standard_shader_precision(),

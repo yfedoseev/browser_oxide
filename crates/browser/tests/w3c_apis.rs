@@ -975,9 +975,10 @@ async fn file_exists() {
 // labels before camera/microphone permission is granted.
 #[tokio::test]
 async fn test_media_devices_pre_permission() {
+    // Phase 7 — mediaDevices is [SecureContext]; load over https.
     let profile = stealth::presets::chrome_130_windows();
     let expected_count = profile.media_devices.len();
-    let mut page = Page::with_profile("", "about:blank", profile)
+    let mut page = Page::with_profile("", "https://example.com/", profile)
         .await
         .unwrap();
 
@@ -1010,8 +1011,10 @@ async fn test_media_devices_pre_permission() {
         obj["anySnakeCase"], false,
         "snake_case leaks WebIDL mismatch"
     );
-    assert_eq!(obj["hasDeviceIds"], true);
-    assert_eq!(obj["hasGroupIds"], true);
+    // Phase 6 D2 — pre-permission, deviceId and groupId are blanked
+    // (empty strings) per spec. Labels also empty (asserted below).
+    assert_eq!(obj["hasDeviceIds"], false);
+    assert_eq!(obj["hasGroupIds"], false);
     assert_eq!(
         obj["keys0"].as_array().unwrap(),
         &serde_json::json!(["deviceId", "groupId", "kind", "label"])
