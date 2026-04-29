@@ -42,6 +42,13 @@ pub struct BrowserRuntimeOptions {
     /// workers — see `crates/net/src/headers.rs::is_cross_origin_isolated`
     /// and gap #30 in docs/GAPS.md. Default false (most pages are not COI).
     pub cross_origin_isolated: bool,
+    /// Whether the document URL is a secure context per WICG/secure-contexts
+    /// (https/wss/file or http://localhost). Drives `self.isSecureContext`
+    /// and gates the ~18 secure-context-only Web Platform APIs (mediaDevices,
+    /// serviceWorker, clipboard, credentials, usb, etc.) per the IDL
+    /// `[SecureContext]` extended attribute. Phase 7 fix. Default false —
+    /// callers (e.g. Page::from_html_with_url) classify the URL scheme.
+    pub is_secure_context: bool,
 }
 
 impl Default for BrowserRuntimeOptions {
@@ -54,6 +61,7 @@ impl Default for BrowserRuntimeOptions {
             storage: None,
             startup_snapshot: None,
             cross_origin_isolated: false,
+            is_secure_context: false,
         }
     }
 }
@@ -94,8 +102,11 @@ pub fn create_runtime_with_signals(
         None => FetchState::new(None),
     };
 
-    let stealth_state =
-        StealthState::new_with_coi(options.stealth_profile, options.cross_origin_isolated);
+    let stealth_state = StealthState::new_with_flags(
+        options.stealth_profile,
+        options.cross_origin_isolated,
+        options.is_secure_context,
+    );
 
     // Match Chrome 147's renderer heap budget. V8's default ~1.5 GB OOMs
     // on probe sites that build very large fingerprint payloads (creepjs

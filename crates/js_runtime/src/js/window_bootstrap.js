@@ -997,7 +997,15 @@
     globalThis.screen = Object.create(_ScreenProto);
 
     // Misc globals anti-bot checks for
-    globalThis.isSecureContext = true;
+    // isSecureContext: per-URL, computed from scheme on the Rust side
+    // (https/wss/file or http://localhost). Drives the ~18
+    // secure-context-only Web Platform APIs at IDL `[SecureContext]`.
+    // Phase 7 fix — see docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md.
+    Object.defineProperty(globalThis, 'isSecureContext', {
+        get: () => ops.op_is_secure_context(),
+        configurable: true,
+        enumerable: true,
+    });
     // crossOriginIsolated must reflect actual COOP+COEP state from the
     // response headers — see crates/net/src/headers.rs and gap #30.
     // Backed by an op so it's true iff the runtime was constructed with

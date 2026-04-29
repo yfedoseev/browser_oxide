@@ -167,3 +167,54 @@ async fn phase7_ab_probe_capture_oxide() {
     std::fs::write(&path, &json).unwrap();
     eprintln!("wrote {} keys to {path}", result.len());
 }
+
+/// Phase 7 D1 gate — `isSecureContext` is URL-scheme driven.
+/// Real Chrome reports false on `about:blank`/`data:`/`http:` and
+/// true on `https:`/`http://localhost`. Locks the bool against
+/// regression and is the gate that all the secure-context-API
+/// hides depend on (D2).
+#[tokio::test]
+async fn phase7_d1_is_secure_context_per_scheme() {
+    use browser::Page;
+    use stealth::presets::chrome_130_macos;
+
+    // about:blank — the default `from_html` URL — is insecure
+    let mut p = Page::from_html("<!doctype html><html></html>", Some(chrome_130_macos()))
+        .await
+        .unwrap();
+    assert_eq!(p.evaluate("String(isSecureContext)").unwrap().trim_matches('"'), "false",
+        "about:blank should be insecure");
+
+    // https:// is secure
+    let mut p = Page::from_html_with_url(
+        "<!doctype html><html></html>",
+        "https://example.com/",
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(p.evaluate("String(isSecureContext)").unwrap().trim_matches('"'), "true",
+        "https:// should be secure");
+
+    // http://localhost is the loopback exception → secure
+    let mut p = Page::from_html_with_url(
+        "<!doctype html><html></html>",
+        "http://localhost:3000/",
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(p.evaluate("String(isSecureContext)").unwrap().trim_matches('"'), "true",
+        "http://localhost should be secure");
+
+    // http://example.com is insecure
+    let mut p = Page::from_html_with_url(
+        "<!doctype html><html></html>",
+        "http://example.com/",
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(p.evaluate("String(isSecureContext)").unwrap().trim_matches('"'), "false",
+        "http://example.com should be insecure");
+}

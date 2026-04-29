@@ -83,7 +83,9 @@ async fn window_session_storage() {
 }
 #[tokio::test]
 async fn window_is_secure_context() {
-    assert_eq!(check("isSecureContext").await, "true");
+    // Default `from_html` URL is `about:blank` — insecure per WICG
+    // secure-contexts §3.2 (Phase 7 fix). Real Chrome agrees.
+    assert_eq!(check("isSecureContext").await, "false");
 }
 #[tokio::test]
 async fn window_inner_width() {

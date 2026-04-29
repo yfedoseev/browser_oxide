@@ -7,9 +7,17 @@ use stealth::StealthProfile;
 /// headers (COOP=same-origin AND COEP=require-corp|credentialless — see
 /// `net::headers::is_cross_origin_isolated`). It drives `self.crossOriginIsolated`
 /// and gates SAB postMessage transfer to workers (gap #30).
+///
+/// `is_secure_context` is a per-document flag derived from the document
+/// URL scheme (https/wss/file or http://localhost — see
+/// `crate::is_secure_url`). It drives `self.isSecureContext` and gates
+/// the ~18 secure-context-only Web Platform APIs (mediaDevices,
+/// serviceWorker, clipboard, credentials, usb, bluetooth, etc.) per
+/// the IDL `[SecureContext]` extended attribute. Phase 7 fix.
 pub struct StealthState {
     pub profile: Option<StealthProfile>,
     pub cross_origin_isolated: bool,
+    pub is_secure_context: bool,
 }
 
 impl StealthState {
@@ -17,12 +25,25 @@ impl StealthState {
         Self {
             profile,
             cross_origin_isolated: false,
+            is_secure_context: false,
         }
     }
     pub fn new_with_coi(profile: Option<StealthProfile>, cross_origin_isolated: bool) -> Self {
         Self {
             profile,
             cross_origin_isolated,
+            is_secure_context: false,
+        }
+    }
+    pub fn new_with_flags(
+        profile: Option<StealthProfile>,
+        cross_origin_isolated: bool,
+        is_secure_context: bool,
+    ) -> Self {
+        Self {
+            profile,
+            cross_origin_isolated,
+            is_secure_context,
         }
     }
 }
@@ -108,11 +129,21 @@ pub fn op_cross_origin_isolated(#[state] state: &StealthState) -> bool {
     state.cross_origin_isolated
 }
 
+/// Returns whether the document is in a secure context. Drives
+/// `self.isSecureContext` and gates the ~18 secure-context-only
+/// Web Platform APIs per the IDL `[SecureContext]` extended attribute.
+/// Phase 7 fix — see `docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md`.
+#[op2(fast)]
+pub fn op_is_secure_context(#[state] state: &StealthState) -> bool {
+    state.is_secure_context
+}
+
 deno_core::extension!(
     stealth_extension,
     ops = [
         op_get_profile_value,
         op_has_stealth_profile,
-        op_cross_origin_isolated
+        op_cross_origin_isolated,
+        op_is_secure_context
     ],
 );

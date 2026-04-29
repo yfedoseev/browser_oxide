@@ -10,6 +10,51 @@ use std::time::Duration;
 use stealth;
 use tracing;
 
+/// Whether a URL is a "secure context" per WICG/secure-contexts §3.2.
+/// Secure: https, wss, file, plus http://localhost / http://127.0.0.1 /
+/// http://[::1] / *.localhost loopback exceptions. Drives `isSecureContext`
+/// and gates the ~18 secure-context-only Web Platform APIs (Phase 7 fix —
+/// see `docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md`).
+pub(crate) fn is_secure_url(url: &str) -> bool {
+    let parsed = match url::Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    match parsed.scheme() {
+        "https" | "wss" | "file" => true,
+        "http" | "ws" => match parsed.host_str() {
+            Some(h) => {
+                h == "localhost"
+                    || h.ends_with(".localhost")
+                    || h == "127.0.0.1"
+                    || h == "[::1]"
+                    || h == "::1"
+            }
+            None => false,
+        },
+        _ => false, // about:, data:, blob:, javascript:, etc. — insecure
+    }
+}
+
+#[cfg(test)]
+mod is_secure_url_tests {
+    use super::is_secure_url;
+    #[test]
+    fn classifies_schemes() {
+        assert!(is_secure_url("https://example.com/"));
+        assert!(is_secure_url("wss://example.com/"));
+        assert!(is_secure_url("file:///etc/hosts"));
+        assert!(is_secure_url("http://localhost:3000/"));
+        assert!(is_secure_url("http://127.0.0.1/"));
+        assert!(is_secure_url("http://my-app.localhost/"));
+        assert!(!is_secure_url("http://example.com/"));
+        assert!(!is_secure_url("data:text/html,<p>x"));
+        assert!(!is_secure_url("about:blank"));
+        assert!(!is_secure_url("blob:https://example.com/x"));
+        assert!(!is_secure_url("javascript:void(0)"));
+    }
+}
+
 /// RAII guard that fires `terminate_execution` on the V8 isolate after
 /// a deadline expires, unless dropped first. Used by `navigate_with_init`
 /// to bound how long any single iteration can spin in CPU-bound JS — for
@@ -129,6 +174,7 @@ impl Page {
             BrowserRuntimeOptions {
                 stealth_profile: Some(profile.clone()),
                 stylesheets,
+                is_secure_context: is_secure_url(url),
                 ..Default::default()
             },
         );
@@ -248,6 +294,7 @@ impl Page {
             BrowserRuntimeOptions {
                 stealth_profile: profile.clone(),
                 stylesheets,
+                is_secure_context: is_secure_url(url),
                 ..Default::default()
             },
         );
@@ -1667,6 +1714,7 @@ impl Page {
                 stylesheets,
                 init_scripts: init_scripts.to_vec(),
                 storage,
+                is_secure_context: is_secure_url(url),
                 ..Default::default()
             },
         );

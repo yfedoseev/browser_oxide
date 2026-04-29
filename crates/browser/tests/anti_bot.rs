@@ -162,7 +162,9 @@ async fn performance_now_is_number() {
 
 #[tokio::test]
 async fn is_secure_context() {
-    assert_eq!(eval("isSecureContext").await, "true");
+    // Default `from_html` URL is `about:blank` — insecure per WICG
+    // secure-contexts §3.2 (Phase 7 fix). Real Chrome agrees.
+    assert_eq!(eval("isSecureContext").await, "false");
 }
 
 #[tokio::test]
