@@ -371,18 +371,24 @@
         }
     }
 
-    // Also make globalThis (window) an EventTarget
+    // Make globalThis (window) an EventTarget. Real Chrome puts these
+    // methods on EventTarget.prototype, inherited via the chain
+    // Window → WindowProperties → EventTarget. So
+    // `Object.getOwnPropertyNames(window)` does NOT include them.
+    // Mirror that: install on Object.getPrototypeOf(globalThis)
+    // (= Window.prototype in our V8 setup) so they're inherited, not
+    // own. Phase 7 follow-up.
     const _winAddListener = origNodeProto.addEventListener;
     const _winRemoveListener = origNodeProto.removeEventListener;
     const _winDispatch = origNodeProto.dispatchEvent;
 
-    globalThis.addEventListener = function addEventListener(type, callback, options) {
+    const _windowAdd = function addEventListener(type, callback, options) {
         _winAddListener.call(globalThis, type, callback, options);
     };
-    globalThis.removeEventListener = function removeEventListener(type, callback, options) {
+    const _windowRemove = function removeEventListener(type, callback, options) {
         _winRemoveListener.call(globalThis, type, callback, options);
     };
-    globalThis.dispatchEvent = function dispatchEvent(event) {
+    const _windowDispatch = function dispatchEvent(event) {
         return _winDispatch.call(globalThis, event);
     };
 
@@ -392,12 +398,31 @@
     // `function NAME() { [native code] }`; otherwise the JS source body
     // leaks and is a hard bot tell.
     if (typeof _maskFunction === 'function') {
-        _maskFunction(globalThis.addEventListener, 'addEventListener');
-        _maskFunction(globalThis.removeEventListener, 'removeEventListener');
-        _maskFunction(globalThis.dispatchEvent, 'dispatchEvent');
+        _maskFunction(_windowAdd, 'addEventListener');
+        _maskFunction(_windowRemove, 'removeEventListener');
+        _maskFunction(_windowDispatch, 'dispatchEvent');
         _maskFunction(origNodeProto.addEventListener, 'addEventListener');
         _maskFunction(origNodeProto.removeEventListener, 'removeEventListener');
         _maskFunction(origNodeProto.dispatchEvent, 'dispatchEvent');
+    }
+
+    const _winProto = Object.getPrototypeOf(globalThis);
+    if (_winProto && _winProto !== Object.prototype) {
+        Object.defineProperty(_winProto, 'addEventListener', {
+            value: _windowAdd, writable: true, enumerable: true, configurable: true,
+        });
+        Object.defineProperty(_winProto, 'removeEventListener', {
+            value: _windowRemove, writable: true, enumerable: true, configurable: true,
+        });
+        Object.defineProperty(_winProto, 'dispatchEvent', {
+            value: _windowDispatch, writable: true, enumerable: true, configurable: true,
+        });
+    } else {
+        // Fallback if there's no separate window prototype: leave the
+        // methods as own properties (less ideal but functional).
+        globalThis.addEventListener = _windowAdd;
+        globalThis.removeEventListener = _windowRemove;
+        globalThis.dispatchEvent = _windowDispatch;
     }
 
     // Export all event classes

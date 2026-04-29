@@ -116,7 +116,18 @@ globalThis.__P7_RESULT = null;
 </script></body></html>"#;
 
 async fn run_probe(_url_label: &str) -> HashMap<String, String> {
-    let mut page = Page::from_html(PROBE_HTML, Some(chrome_130_macos())).await.unwrap();
+    // Use the SAME data: URL the MCP probe captured against so the
+    // url field is byte-exact (and isSecureContext stays false to
+    // match Chrome's insecure-context capture). Phase 7 follow-up.
+    const PROBE_URL: &str =
+        "data:text/html,<!doctype html><html><head><title>probe</title></head><body><canvas id=c width=300 height=80></canvas><div id=test>x</div></body></html>";
+    let mut page = Page::from_html_with_url(
+        PROBE_HTML,
+        PROBE_URL,
+        Some(chrome_130_macos()),
+    )
+    .await
+    .unwrap();
     let _ = page
         .event_loop()
         .run_until_idle(std::time::Duration::from_secs(3))
