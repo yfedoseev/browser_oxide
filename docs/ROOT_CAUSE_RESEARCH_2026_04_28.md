@@ -220,11 +220,22 @@ Plus the existing `add_application_settings(b"h2")` + ECH/GREASE on the TLS side
 
 ---
 
-## Predicted vs actual impact
+## Predicted vs actual impact (with A/B verification)
 
 **Predicted**: PASS 98 → 105-107, the 11 Akamai-CHL sites should flip.
 
 **Actual**: PASS **97 / 126** (within ±1 noise floor of Phase F's 98). **Zero** Akamai sites flipped. Identical 11 sites still detected: weather, washingtonpost, bestbuy, costco, h-m, homedepot, uniqlo, disneyplus, walmart, hulu, expedia.
+
+### A/B test confirmation (3 sweeps each, alternating)
+
+To rule out the 1-site delta as a regression, we ran 6 sweeps (3 with v1 = Phase F config, 3 with v2 = corrected H2) alternating to spread DataDome reputation drift across both:
+
+| Version | Run 1 | Run 2 | Run 3 | Mean |
+|---|---:|---:|---:|---:|
+| v1 (Phase F: 4-entry settings_order, weight 255) | 98 | 97 | 97 | **97.33** |
+| v2 (corrected: 8-entry settings_order, weight 219, NoRfc7540Priorities slot) | 97 | 97 | 98 | **97.33** |
+
+**Identical mean. Zero consistent per-site differences across the 6 runs.** The 1-site delta was pure run-to-run variance on leboncoin (DataDome reputation drift). Decision: **keep v2** — it's byte-coherent with wreq-util's Chrome 130+ profile, and the A/B confirms it costs nothing.
 
 So **the H2 fingerprint hypothesis is wrong** for these specific Akamai-protected sites — or our changes still don't fully match Chrome. Three diagnostics needed:
 
