@@ -31,16 +31,14 @@ const HEADER_TABLE_SIZE: u32 = 65_536; // SETTINGS 1
 const ENABLE_PUSH: bool = false; // SETTINGS 2 = 0
 const INITIAL_STREAM_WINDOW_SIZE: u32 = 6_291_456; // SETTINGS 4 = 6 MB
 const MAX_HEADER_LIST_SIZE: u32 = 262_144; // SETTINGS 6 = 256 KB
-// Real Chrome 147 emits WINDOW_UPDATE = 15_663_105 bytes (NOT 15_728_640
-// = 15 MB even). The 65,535-byte delta corresponds to the
-// (initial_max_data - default_initial_window_size) calculation Chrome
-// does internally. Akamai-FP and other H2 fingerprint hashes include the
-// exact byte value of WINDOW_UPDATE; rounding to 15 MB lands us in a
-// non-Chrome bucket and triggers `_abck=~-1~...` (Akamai BMP "untrusted")
-// at the edge before the sensor JS even runs. Closes 9 retail-Akamai
-// sites (walmart, target, homedepot, costco, bestbuy, wayfair, h-m,
-// uniqlo, zara) per docs/GAP_DEEP_ANALYSIS_2026_04_28.md.
-const INITIAL_CONNECTION_WINDOW_SIZE: u32 = 15_663_105; // ~14.94 MB (WINDOW_UPDATE)
+// `initial_connection_window_size` is the lib's CONFIGURED target — the
+// http2 lib sends a WINDOW_UPDATE of (target - 65535) on the wire to
+// raise the connection window from the protocol default (65535) up to
+// the configured value. So 15_728_640 here → 15_663_105 on the wire,
+// which is what real Chrome 147 emits. Verified against wreq-util's
+// chrome profile (the gold-standard Rust impl,
+// `0x676e67/wreq-util/src/emulate/profile/chrome/http2.rs`).
+const INITIAL_CONNECTION_WINDOW_SIZE: u32 = 15_728_640; // → wire 15_663_105 = Chrome match
 
 /// Perform an HTTP/2 handshake over a TLS stream and return a sender + connection.
 ///
@@ -58,14 +56,31 @@ where
         .push(PseudoId::Path)
         .build();
 
-    // Chrome SETTINGS frame order: 1, 2, 4, 6 (only these four —
-    // SETTINGS 3 and 5 are NOT sent by Chrome, verified via
-    // tls.peet.ws capture of the developer's Chrome 146 browser).
+    // Chrome 130+ sends SETTINGS in a specific order on the wire. The lib
+    // uses this `SettingsOrder` to determine the position of each ID in
+    // the SETTINGS frame, regardless of which ones actually carry a value.
+    // wreq-util's chrome profile (`0x676e67/wreq-util/src/emulate/profile/chrome/http2.rs`)
+    // — gold-standard Rust impersonator — uses the 8-entry order below for
+    // Chrome v100 through v146+. macOS Chrome 130+ emits a SUBSET of these
+    // (typically 1, 2, 4, 6) but the order field still must include all 8
+    // for the SETTINGS frame layout to match Chrome's expectation when one
+    // of the larger entries gets sent (e.g. `0x9 NO_RFC7540_PRIORITIES`
+    // on Windows/Linux Chrome 130+, used by Akamai for bot detection).
+    //
+    // Earlier in this session we sent only [1, 2, 4, 6]. That matches
+    // mac Chrome 143+'s ON-WIRE values, BUT a different `SettingsOrder`
+    // configuration — specifically NOT including 3, 5, 8, 9 — produces a
+    // different Akamai-FP hash than real Chrome (which knows the order
+    // even if the values aren't sent).
     let settings_order = SettingsOrder::builder()
         .push(SettingId::HeaderTableSize)
         .push(SettingId::EnablePush)
+        .push(SettingId::MaxConcurrentStreams)
         .push(SettingId::InitialWindowSize)
+        .push(SettingId::MaxFrameSize)
         .push(SettingId::MaxHeaderListSize)
+        .push(SettingId::EnableConnectProtocol)
+        .push(SettingId::NoRfc7540Priorities)
         .build();
 
     let mut builder = Builder::new();
@@ -79,11 +94,12 @@ where
         .settings_order(settings_order)
         .headers_stream_dependency(StreamDependency::new(
             StreamId::zero(),
-            // Wire byte 255 represents HTTP/2 weight 256 (RFC 7540 §5.3 —
-            // "Add one to the value to obtain a weight between 1 and 256").
-            // Chrome 147's PRIORITY frame for the implicit headers stream
-            // has wire byte 255 = weight 256, exclusive=true.
-            255,
+            // Chrome 130+ shifted from wire byte 255 (weight 256) to wire
+            // byte 219 (weight 220) on its PRIORITY frame. wreq-util's
+            // chrome profile uses 219 for v100 through v146+ — verified
+            // gold standard. Earlier-Chrome-era libraries (curl-impersonate,
+            // older docs) still cite 255; that's stale.
+            219,
             true,
         ));
 
