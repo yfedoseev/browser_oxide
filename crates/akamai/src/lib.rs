@@ -52,9 +52,11 @@
 //! behavioural data; A5 integrates into `Page::navigate`; A6 verifies
 //! against bestbuy + homedepot in the holistic sweep.
 
+pub mod crypto;
 pub mod session;
 
-pub use session::{AkamaiSession, AkamaiSessionStore};
+pub use crypto::{build_v2_bestbuy, build_v2_dalphan, sha256_b64};
+pub use session::{AbckState, AkamaiSession, AkamaiSessionStore};
 
 use serde::{Deserialize, Serialize};
 
