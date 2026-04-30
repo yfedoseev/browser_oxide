@@ -53,10 +53,12 @@
 //! against bestbuy + homedepot in the holistic sweep.
 
 pub mod crypto;
+pub mod drain;
 pub mod payload;
 pub mod session;
 
 pub use crypto::{build_v2_bestbuy, build_v2_dalphan, sha256_b64};
+pub use drain::{parse_drained, Drained, DRAIN_JS};
 pub use payload::build_cleartext;
 pub use session::{AbckState, AkamaiSession, AkamaiSessionStore};
 

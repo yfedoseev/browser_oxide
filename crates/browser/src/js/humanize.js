@@ -41,6 +41,46 @@
     const body = document.body || document.documentElement;
     if (!body) return;
 
+    // ---- Akamai sensor_data behavioural tap (T3A-A4) -------------
+    // Each event we synthesise also gets recorded into a per-page
+    // buffer that `crates/akamai/src/payload.rs::field_mouse_trajectory`
+    // (and friends) consume when assembling sensor_data. The buffer
+    // lives on globalThis so the Rust HTTP client can drain it via
+    // `page.evaluate("globalThis.__akamai_events")` before scheduling
+    // the sensor_data POST.
+    if (!globalThis.__akamai_events) {
+        Object.defineProperty(globalThis, '__akamai_events', {
+            value: { mouse: [], key: [], touch: [], scroll: [], counters: { key: 0, mouse: 0, touch: 0, scroll: 0, accel: 0 } },
+            writable: true,
+            configurable: true,
+            enumerable: false,
+        });
+    }
+    const _akEvents = globalThis.__akamai_events;
+    const _akT0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    function _akT() {
+        const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        return Math.round(now - _akT0);
+    }
+    function _akRecMouse(x, y, kind, button) {
+        if (_akEvents.mouse.length < 200) {
+            _akEvents.mouse.push({ x: x|0, y: y|0, t: _akT(), kind: kind|0, button: button|0 });
+        }
+        _akEvents.counters.mouse++;
+    }
+    function _akRecKey(code, kind) {
+        if (_akEvents.key.length < 200) {
+            _akEvents.key.push({ code: String(code), t: _akT(), kind: kind|0 });
+        }
+        _akEvents.counters.key++;
+    }
+    function _akRecScroll(dy) {
+        if (_akEvents.scroll.length < 100) {
+            _akEvents.scroll.push({ dy: dy|0, t: _akT() });
+        }
+        _akEvents.counters.scroll++;
+    }
+
     // ---- Helpers --------------------------------------------------
 
     function _dispatch(target, event) {
@@ -133,6 +173,7 @@
         });
         _dispatch(document, ev);
         _dispatch(body, ev);
+        _akRecMouse(x, y, 0, 0); // 0 = move, button 0 = left
     }
 
     // Fire a `wheel` + `scroll` pair simulating a scroll-down step.
@@ -148,6 +189,7 @@
             window.scrollBy({ top: deltaY, behavior: 'instant' });
             _dispatch(document, new Event('scroll', { bubbles: true }));
             _dispatch(window, new Event('scroll', { bubbles: false }));
+            _akRecScroll(deltaY);
         } catch (e) {}
     }
 
@@ -218,6 +260,7 @@
                 clientX: x, clientY: y, button: 0, buttons: 1,
             });
             _dispatch(body, down);
+            _akRecMouse(x, y, 1, 0); // 1 = down
             setTimeout(() => {
                 const up = new MouseEvent('mouseup', {
                     bubbles: true, cancelable: true, view: window,
@@ -229,6 +272,7 @@
                 });
                 _dispatch(body, up);
                 _dispatch(body, click);
+                _akRecMouse(x, y, 2, 0); // 2 = up
             }, 50 + Math.random() * 25);
         } catch (e) {}
     }, clickAt);
@@ -239,10 +283,12 @@
             _dispatch(document, new KeyboardEvent('keydown', {
                 bubbles: true, key: 'Tab', code: 'Tab', keyCode: 9,
             }));
+            _akRecKey('Tab', 0); // 0 = down
             setTimeout(() => {
                 _dispatch(document, new KeyboardEvent('keyup', {
                     bubbles: true, key: 'Tab', code: 'Tab', keyCode: 9,
                 }));
+                _akRecKey('Tab', 1); // 1 = up
             }, 60);
         } catch (e) {}
     }, clickAt + 250);
