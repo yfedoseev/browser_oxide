@@ -8,6 +8,7 @@ description = "Stealth HTTP client with Chrome TLS/HTTP2 fingerprint impersonati
 
 [dependencies]
 stealth = { path = "../stealth" }
+akamai = { path = "../akamai" }
 
 # TLS (BoringSSL)
 boring2 = { version = "4.15", features = ["pq-experimental", "cert-compression"] }

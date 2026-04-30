@@ -1778,6 +1778,7 @@ name = "net"
 version = "0.1.0"
 dependencies = [
  "adblock",
+ "akamai",
  "base64",
  "boring2",
  "brotli 7.0.0",

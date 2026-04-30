@@ -127,6 +127,9 @@ pub struct HttpClient {
     /// Resolved proxy config. `BOXIDE_PROXY` env var overrides
     /// `profile.proxy`. None = direct connect (the existing path). T1C.
     proxy: Option<proxy::ProxyConfig>,
+    /// Per-host Akamai web sensor_data session state. Populated when
+    /// a response sets `_abck=`; consumed by `send_sensor_data`. T3A.
+    pub akamai_sessions: akamai::AkamaiSessionStore,
 }
 
 impl HttpClient {
@@ -176,6 +179,7 @@ impl HttpClient {
             quic_client,
             alt_svc_cache: AltSvcCache::new(),
             kasada_sessions: KasadaSessionStore::new(),
+            akamai_sessions: akamai::AkamaiSessionStore::new(),
             accept_ch_origins: Arc::new(Mutex::new(HashSet::new())),
             // Resolve proxy: BOXIDE_PROXY env override, then profile.proxy.
             // Bad proxy URLs are non-fatal — log and continue without proxy.
@@ -222,6 +226,102 @@ impl HttpClient {
                 .await
                 .insert(host.to_string());
         }
+    }
+
+    /// Learn Akamai web `_abck` state from response Set-Cookie. T3A.
+    /// The trust-state (Favorable / NeedsSensor / NeedsSecCpt /
+    /// NeedsPixel) is extracted from the cookie suffix; the consumer
+    /// (Page::navigate scheduler) decides whether to POST sensor_data.
+    async fn learn_abck(&self, host: &str, headers: &HashMap<String, String>) {
+        for (k, v) in headers {
+            if !k.eq_ignore_ascii_case("set-cookie") {
+                continue;
+            }
+            // `Set-Cookie: _abck=TOK==~0~-1~-1~; Path=/; Domain=...`
+            // Take the `_abck=` prefix and strip everything from the
+            // first `;` to leave just the value.
+            let trimmed = v.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("_abck=") {
+                let value = rest.split(';').next().unwrap_or("").trim();
+                if !value.is_empty() {
+                    let state = self
+                        .akamai_sessions
+                        .with_session(host, |s| s.observe_abck(value))
+                        .await;
+                    eprintln!(
+                        "[akamai] {host}: _abck observed (state={state:?})",
+                    );
+                }
+            } else if let Some(rest) = trimmed.strip_prefix("bm_sz=") {
+                let value = rest.split(';').next().unwrap_or("").trim();
+                if !value.is_empty() {
+                    self.akamai_sessions
+                        .with_session(host, |s| s.bm_sz = Some(value.to_string()))
+                        .await;
+                }
+            }
+        }
+    }
+
+    /// Build and POST a sensor_data body to upgrade `_abck` for `host`.
+    /// `drained_events` is the parsed output of `akamai::DRAIN_JS`
+    /// from the page (mouse / key trajectory captured by humanize.js).
+    /// `request_url` is the page URL the sensor_data is "for".
+    /// `tenant_seed` is the seed observed in the challenge JS for this
+    /// tenant (e.g. 3_224_113 for bestbuy); pass 0 if unknown.
+    /// Returns Ok(new_abck_state) on success.
+    pub async fn send_akamai_sensor_data(
+        &self,
+        host: &str,
+        request_url: &str,
+        post_path: &str,
+        tenant_seed: i64,
+        drained: akamai::Drained,
+    ) -> Result<akamai::AbckState, NetError> {
+        // Snapshot the session and build the body.
+        let body = self
+            .akamai_sessions
+            .with_session(host, |s| {
+                s.mouse_buf = drained.mouse;
+                s.key_buf = drained.key;
+                s.touch_buf = drained.touch;
+                s.key_count = drained.key_count;
+                s.mouse_count = drained.mouse_count;
+                s.touch_count = drained.touch_count;
+                s.scroll_count = drained.scroll_count;
+                s.accel_count = drained.accel_count;
+                s.sensor_counter = s.sensor_counter.saturating_add(1);
+                let sensor = akamai::build_sensor_data(
+                    &self.profile,
+                    s,
+                    request_url,
+                    tenant_seed,
+                );
+                format!("{{\"sensor_data\":\"{}\"}}", sensor)
+            })
+            .await;
+
+        // POST with the same Chrome 147 header set we use for any
+        // other request, plus content-type: text/plain (per the A0
+        // capture).
+        let url = format!("https://{host}{post_path}");
+        let mut headers = headers::chrome_headers(&self.profile);
+        headers.push(("content-type".into(), "text/plain;charset=UTF-8".into()));
+        headers.push(("origin".into(), format!("https://{host}")));
+        headers.push(("referer".into(), request_url.to_string()));
+        let resp = self.post_with_headers(&url, &body, &headers).await?;
+        // Re-learn _abck from the response.
+        self.learn_abck(host, &resp.headers).await;
+        let new_state = self
+            .akamai_sessions
+            .abck_state(host)
+            .await
+            .unwrap_or(akamai::AbckState::Unknown);
+        eprintln!(
+            "[akamai] sensor_data POST {url} → status={} new_abck={new_state:?}",
+            resp.status
+        );
+        Ok(new_state)
     }
 
     /// Return `true` if `host` has previously sent `Accept-CH`.
@@ -566,6 +666,7 @@ impl HttpClient {
         // Also kick off the /mfc fetch on stricter tenants — see
         // HttpClient::fetch_kasada_mfc_if_needed.
         self.learn_kasada(host, &response.headers, Some(url)).await;
+        self.learn_abck(host, &response.headers).await;
         self.learn_accept_ch(host, &response.headers).await;
         self.fetch_kasada_mfc_if_needed(host).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
@@ -674,6 +775,7 @@ impl HttpClient {
         };
         self.learn_alt_svc(url, &response.headers).await;
         self.learn_kasada(host, &response.headers, Some(url)).await;
+        self.learn_abck(host, &response.headers).await;
         self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
         Ok(response)
@@ -800,6 +902,7 @@ impl HttpClient {
 
         // Learn Kasada session from response (look for x-kpsdk-cr + x-kpsdk-st).
         self.learn_kasada(host, &response.headers, Some(url)).await;
+        self.learn_abck(host, &response.headers).await;
         self.learn_accept_ch(host, &response.headers).await;
 
         // Store Set-Cookie from response into jar
@@ -1089,6 +1192,7 @@ impl HttpClient {
         // Kasada sets KP_UIDz / akm_bmfp_b2 session cookies here.
         // Also learn Kasada session: the /tl POST returns x-kpsdk-cr/st here.
         self.learn_kasada(host, &response.headers, Some(url)).await;
+        self.learn_abck(host, &response.headers).await;
         self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
 
