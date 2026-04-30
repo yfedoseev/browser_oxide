@@ -1,0 +1,84 @@
+# Akamai sensor_data reference capture — bestbuy.com via Playwright MCP
+#
+# Captured 2026-04-29 from real Chrome 147 on macOS arm64.
+# Source: navigation to https://www.bestbuy.com/?intl=nosplash, three
+# POSTs observed during initial page load.
+#
+# IMPORTANT FINDING: bestbuy uses Akamai v2 (sensor_data prefix
+# `3;0;1;0;<int>;<sha256-b64>;<counter-tuple>;<scrambled-body>`),
+# NOT v3 (PRNG-shuffle + char-substitute). Our research doc emphasised
+# v3, but for bestbuy/homedepot we should target v2 instead. See
+# RESEARCH_AKAMAI_BMP_BYPASS_2026_04_29.md §2.1 (xiaoweigege has v2 +
+# v3 both).
+#
+# Endpoint URL pattern: the path is obfuscated/randomised per tenant —
+# bestbuy uses /iBo5C/hYh/7w3a/LoSr/yK3l/<tail>/<tail2>/<tail3>/<tail4>
+# Multiple POSTs per page (3 captured). All return 201 (or 200 for
+# what looks like a response-telemetry variant).
+#
+# Headers (verified byte-exact match for what we already send):
+#   sec-ch-ua-platform: "macOS"
+#   referer: https://www.bestbuy.com/?intl=nosplash
+#   user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36
+#   sec-ch-ua: "Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"
+#   content-type: text/plain;charset=UTF-8
+#   sec-ch-ua-mobile: ?0
+#
+# ============================================================
+# CAPTURE 1 (POST → 201, body 6,612 bytes after JSON wrapper)
+# URL: https://www.bestbuy.com/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B
+
+{"sensor_data":"3;0;1;0;3224113;edRZO4Kq79VFcKjp4YqulULWfgRmpbL3De7dS2XEcak=;16,0,0,0,0,0;\"Df=#P^bJ$R_Go8E{CO\"p\"<i7\"CJlEZ@eVsERsvq(cI\"3?j\"p!L\"G*,\"]\"Fk-]\"m\"V,q\"wb_\"LO0\"3wU\"6U 3\"J\"\"E\"[}`\";\"V+j2\">N}\"NDd\"r1S$D\"use\"NJ;t$\"9y\"z\"x8\"/\"OG1\"3)]0\"~T{*\"q\"\"/\"O!h\"^>(CDU@gzY:SRo<h\"Y}n\")%8tca~G\"UIY\"GwV:g\"%v>g\"j-_:t\"m9l)\"I/9N,\"A/~\"@.~B)8\"#|E?\"yK+a1qu:7e>\"Bo\"PDr6p\"lL)\"fuo-Iu!;,\"B(_\"DU\"YTj\"q;\"e\"o\"QjB\":]V\"D\"ZNF~|Y?B8Gk]bX1xmxo)((ULZm;^dua7}wM1Wx:$peai47RHV*3?CLOa1H#qw Kgc?8!Q4Awet>3/h6Pf43`_;Al**]6=l>jd@G=K;Fy<&V^~JJTAaa1?\"]v_\".d~\"8cYKWA`KZDD~QX K,%\".3k\"os$9)\";J&\"Q>(\"&F=\"g\"\"g\"{nB\" \"T%<q#JEY9*A_;~\"j%y\"9=<\"L&;IJ@XU}0U}D\"swD\"<Z|b4H@\"Cb!\"XaK:ZuqaokDO\"F1Ef\"d\"sQtXKw\"2Lhy:CRC\"A}a\"bdL\"u9#{K:OC{N`8!.8`^8D\"bvY\"a |s~} \"hF(\"a\"3bgh8w%<@x%j$LUp_j4\"i\"i1u\"Z\"oCxFifnEx~$EP{;!>mv<E\"q\"F2x\":\"U\"sW:\"v#~\"j\"j0F!C|Q ?YhiQ\"2\"V{r\"mBAmayVQ\"Bo3\"&;m\"`*n\"#}znC\"d%\"!\"\"2\"XU{\"2C$^sm\"[=sW\"2\"Kfmr6\"A~B\"uwe_x\"G\"\"I\"cq\"=G\"PYA}\".2?;}\"P*h\"s\"\"s\"Aof\"]U7\"T6Z\"MBab|\"l*\"E^t[0\"%r~\"J\"\"j\"64y\"7e%,_\"4,`8\"K\"9[&yWbZd^} !pRyLILk*}\"L\"i[Z\"D\"ZUGzG}xRk(TZxnwgeYt%>T6x2|hxxQ|4t7zp0t},Faz_\"h\"5qH\"(HipG\"0A2\"7[H\" -h\"]3\"Nnz\"r|t\"8e\"^)gXKX7RC\"}x\"VeiVv\"u>k\"C\"x54=J+H/Y@@gvq!PB4*]iard,tp36{f=Q^?A,t299AKHA#n_**|4d+\"4\"gt8\"Y\"\"Z\"jxn\":\"\"!\"]* \")\"\"#{U\"8.j\"[yEe3\" G\":\"Ix-(v?yOEk$nXVGA\"K\"h,L\"hFT>Z\"3IOA\"cU=\"AS~\"|;CcJ1j2\"l5N\"yZ)Yk!\"#.!`WD2IU\"&V~\"z%#RK+\",\"Wwhr\"P]v4ZL/7Yo.z:jX^$Am!IG!_G]eOxt1:j^$roD$!Hk\"&Eq\"p1P\"kk[Cz\"$Mj\"lZ8cI$(\"c\"E32\"GcC\"(\"\"B\"UO@\"ih;\"Otr\"5f`xbb\"P4GNnF*\"n-w}FQ;rT\"hP.n\"#km#1*\"%iM?a\"Q(l\".MD\"nr{oW\"}bI=\"U>=tmJYm$\"Ka \"_FzqNAp3Zn\"6k3\"|lLqU\":O7l\"/\"l(H\"b\"ro^\"?z?G^T/N%wo\"lozn\"$\"3h\"L~3\"S1#2\"4\"Q\"=\"|=p\"(\"Vp2ql\"<BY\"x&X\"3\"bI\"27v\"~BF`\"*;Q\"Tp~\"hym`=m[~8\"O>:%R\"_\"\"I*(\"M9:\"i\"-teALyO*.kN3XD=C=T8vritD+_sP& E#|5!b\"oLZ\";q\".!nffy*o_tJzD`az$*l0-F%+~P[H.APC}\";\";CZ\"(\"\"1fo\"/QE\""}
+
+# ============================================================
+# CAPTURE 2 (POST → 201, body ~7800 bytes — second sensor_data POST,
+# different counter tuple `5,18,0,0,1,323` showing actual events
+# captured this time)
+# URL: https://www.bestbuy.com/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B
+# (same URL as capture 1)
+
+{"sensor_data":"3;0;1;0;3224113;edRZO4Kq79VFcKjp4YqulULWfgRmpbL3De7dS2XEcak=;5,18,0,0,1,323;<...full body in file system, see capture session log...>"}
+
+# ============================================================
+# CAPTURE 3 (POST → 200, content-type: application/json instead of
+# text/plain — body wrapper is `{"body":"<scrambled>"}` not
+# `{"sensor_data":"..."}`. Different endpoint variant.)
+# URL: https://www.bestbuy.com/iBo5C/hYh/7w3a/LoSr/yK3l/SQuXcz9SiLaE/Y0QzWis/HlN-b/hhoT34RAg
+
+{"body":"<scrambled-and-escaped-string>"}
+
+# ============================================================
+# Decoded structure (per xiaoweigege/akamai2.0-sensor_data + Edioff):
+#
+# Field 1: "3"               — script version marker
+# Field 2: "0"               — ?
+# Field 3: "1"               — flags
+# Field 4: "0"               — ?
+# Field 5: "3224113"         — internal counter / seed
+# Field 6: SHA-256 base64    — signature/hash (32 bytes → 44 char b64
+#                              with =) over previous fields + body
+# Field 7: "16,0,0,0,0,0"    — counter tuple (first POST: empty/stub
+#                              telemetry; capture 2: "5,18,0,0,1,323"
+#                              shows actual mouse/key event counts)
+# Field 8+: scrambled body   — XOR-encoded fingerprint blob with
+#                              quoted segments. This is the part we
+#                              need to construct + encode.
+#
+# Fields 1-7 are easy. Field 8 is the bulk of the work — it's the
+# XOR-scrambled colon-delimited concatenation of ~58 sub-fields
+# covering canvas, WebGL, audio, navigator props, mouse trajectory,
+# key events, anti-debug timings.
+#
+# Cookies set during the session (relevant ones):
+#   bm_so, bm_lso, bm_sz, _abck, ak_bmsc (via akacd_PR_www_bestbuy_com)
+#   rxVisitor, rxvt (Dynatrace, separate)
+#
+# Note: cookie order on the page after load was:
+#   SID, CTT, bby_rdp, akacd_PR_www_bestbuy_com, bm_so, bby_cbc_lb,
+#   bm_lso, vt, intl_splash, bm_sz, rxVisitor, dtSa, lux_uid, rxvt,
+#   dtPC, dtCookie, _gcl_au, _abck, connectId, ltc, cto_bundle,
+#   __gads, __gpi, __eoi, AWSELB, AWSELBCORS, _cs_c, _cs_id, _cs_s
+#
+# So _abck IS set on the home page (we knew this), and bm_sz is
+# present BEFORE the sensor_data POST — so bm_sz must come from the
+# initial page response or an earlier request.
