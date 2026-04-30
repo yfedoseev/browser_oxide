@@ -3510,6 +3510,126 @@ async fn kasada_canadagoose_diagnostic() {
     .await;
 }
 
+/// T2C — capture the actual body of Kasada's error POST to
+/// `reporting.cdndex.io/error`. The 67 KB blob is what Kasada's
+/// JS-VM serialises when it can't complete the /tl handshake; it
+/// often encodes which environment probe failed. Decoding it tells
+/// us which JS API to fix.
+#[tokio::test]
+#[ignore = "network: kasada error-blob capture"]
+async fn kasada_error_blob_capture() {
+    use browser::Page;
+    use std::time::Duration;
+
+    // Init script that wraps fetch to capture POST bodies for
+    // *.cdndex.io and stash them as base64 globals.
+    let capture_init = r#"
+        (function() {
+            globalThis.__kasErrors = [];
+            const _origFetch = globalThis.fetch;
+            globalThis.fetch = function(input, init) {
+                try {
+                    const url = typeof input === 'string' ? input : (input && input.url) || '';
+                    if (url.indexOf('cdndex.io/error') !== -1 ||
+                        url.indexOf('cdndex.io/r') !== -1) {
+                        const body = init && init.body;
+                        let snapshot;
+                        if (typeof body === 'string') {
+                            snapshot = { kind: 'string', len: body.length, b64: btoa(body) };
+                        } else if (body instanceof ArrayBuffer) {
+                            const u8 = new Uint8Array(body);
+                            const chunks = [];
+                            for (let i = 0; i < u8.length; i += 8192) {
+                                chunks.push(String.fromCharCode.apply(null, u8.subarray(i, i + 8192)));
+                            }
+                            snapshot = { kind: 'arraybuffer', len: u8.length, b64: btoa(chunks.join('')) };
+                        } else if (body instanceof Uint8Array) {
+                            const chunks = [];
+                            for (let i = 0; i < body.length; i += 8192) {
+                                chunks.push(String.fromCharCode.apply(null, body.subarray(i, i + 8192)));
+                            }
+                            snapshot = { kind: 'uint8', len: body.length, b64: btoa(chunks.join('')) };
+                        } else if (body instanceof Blob) {
+                            // Blobs are async — kick off a read but don't block.
+                            snapshot = { kind: 'blob-pending', len: body.size, b64: '' };
+                            body.arrayBuffer().then((ab) => {
+                                const u8 = new Uint8Array(ab);
+                                const chunks = [];
+                                for (let i = 0; i < u8.length; i += 8192) {
+                                    chunks.push(String.fromCharCode.apply(null, u8.subarray(i, i + 8192)));
+                                }
+                                snapshot.kind = 'blob';
+                                snapshot.b64 = btoa(chunks.join(''));
+                            }).catch(() => {});
+                        } else {
+                            snapshot = { kind: typeof body, len: 0, b64: '' };
+                        }
+                        snapshot.url = url.slice(0, 200);
+                        snapshot.method = (init && init.method) || 'POST';
+                        globalThis.__kasErrors.push(snapshot);
+                    }
+                } catch (e) {
+                    globalThis.__kasErrors.push({ kind: 'err', err: String(e) });
+                }
+                return _origFetch.apply(this, arguments);
+            };
+        })();
+    "#;
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(60),
+        Page::navigate_with_init(
+            "https://www.canadagoose.com/",
+            stealth::presets::chrome_130_macos(),
+            2,
+            vec![capture_init.to_string()],
+        ),
+    )
+    .await;
+
+    match page {
+        Ok(Ok(mut p)) => {
+            // Pump the event loop a bit so deferred error reports flush.
+            for _ in 0..30 {
+                let _ = p.evaluate("0");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let n = p
+                .evaluate("(globalThis.__kasErrors || []).length")
+                .unwrap_or_default()
+                .trim_matches('"')
+                .parse::<usize>()
+                .unwrap_or(0);
+            println!("\n=== Kasada error blobs captured: {n} ===");
+            for i in 0..n {
+                let url = p
+                    .evaluate(&format!("globalThis.__kasErrors[{i}].url"))
+                    .unwrap_or_default();
+                let kind = p
+                    .evaluate(&format!("globalThis.__kasErrors[{i}].kind"))
+                    .unwrap_or_default();
+                let len = p
+                    .evaluate(&format!("globalThis.__kasErrors[{i}].len"))
+                    .unwrap_or_default();
+                let b64 = p
+                    .evaluate(&format!("globalThis.__kasErrors[{i}].b64"))
+                    .unwrap_or_default();
+                let url = url.trim_matches('"');
+                let kind = kind.trim_matches('"');
+                let len = len.trim_matches('"');
+                let b64 = b64.trim_matches('"');
+                println!("--- blob #{i}: kind={kind} len={len} url={url} ---");
+                let path =
+                    format!("/Users/yfedoseev/Projects/browser_oxide/.playwright-mcp/captures/kasada_error_{i}.b64");
+                std::fs::write(&path, b64).ok();
+                println!("    wrote {path}");
+            }
+        }
+        Ok(Err(e)) => println!("page err: {e}"),
+        Err(_) => println!("timeout"),
+    }
+}
+
 #[tokio::test]
 #[ignore = "network: WBAAS smoke against wildberries.ru with current pipeline"]
 async fn wbaas_wildberries_smoke() {

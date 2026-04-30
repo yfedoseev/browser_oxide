@@ -112,3 +112,48 @@ Either way, **the JS-VM bailing isn't the root cause** — it's a symptom. Even 
 T2B as defined (bisect Phase 7 commits) is unproductive — those commits aren't the root cause. **Replace with T2C: a 5-minute operational test using T1C proxy on a residential IP.** If that flips the 3 Kasada sites to PASS, the cold-start hypothesis is confirmed and the engineering deferral (full JS-VM solver) is the right call. If it doesn't, we have new data narrowing the search.
 
 The Phase 7 follow-up commits (`a0027ac`, `4be7eb4`) are NOT being reverted — they remain net-positive defense-in-depth (probe parity 35.9% → 99.0%, ownPropertyNames 372 → 985).
+
+---
+
+## Update 2026-04-29 (T2C — IP eliminated, captured Kasada error blobs)
+
+User observation: **Playwright MCP runs from the same machine and gets through canadagoose.** That eliminates the IP-reputation hypothesis entirely. Same source IP, same network, same outbound interface — only the runtime (Playwright Chrome vs oxide V8) differs. So the divergence is purely at the **JS-VM execution level**.
+
+### Captured the error blobs
+
+Built `kasada_error_blob_capture` test (`crates/browser/tests/chrome_compat.rs`) that wraps `globalThis.fetch` to base64-snapshot any POST body to `*cdndex.io*`. Captured 2 blobs from canadagoose:
+
+| File | Size | Note |
+|---|---:|---|
+| `.playwright-mcp/captures/kasada_error_0.b64` | 67,727 B | the verbose probe-anomaly serialisation |
+| `.playwright-mcp/captures/kasada_error_1.b64` | 335 B | a follow-up notification |
+
+Both are JSON `{"data": "<base64>"}`. The inner b64 decodes to bytes that look like XOR-encoded text (mostly low-byte / printable mix, byte histogram skewed toward 0x4F/0x4D/0x49/0x47/0x45 — characteristic of XOR'd ASCII).
+
+### Decoding attempts
+
+Tried the obvious single-byte XOR keys (0x00–0xFF) and rotating XOR with these candidate strings:
+- `KPSDK`, `kpsdk`, `kasada`, `ips.js`, `ips-2.js`, `j-1.2.386`
+- `reporting.cdndex.io`, `www.canadagoose.com`, `canadagoose.com`
+- The Kasada tenant UUIDs (`149e9513-…`, `2d206a39-…`)
+- `X-Kpsdk-Ct` header name
+
+**None decode to JSON or readable text.** Both blobs share `14 4F` at byte 0,1, suggesting common plaintext prefix (`{"…`?) but the byte at index 2 differs (`38` vs `13`), so the encoding has more state than a periodic XOR. This is consistent with public deobfuscation work showing Kasada uses a runtime-derived key from its VM register state — full decoding requires running their VM's `decoder` opcode against the captured ciphertext, which means standing up the public Kasada deobfuscation tools (`Humphryyy/Kasada-Deobfuscated` or similar). That's multi-day work.
+
+### What this changes vs T2B revision
+
+The previous "edge classifier / cold cookies" hypothesis is **wrong** — disproven by the user pointing out Playwright on the same machine works. The original T2A diagnosis (something in our JS environment trips a Kasada probe) is **correct**. The blob captures are the smoking gun, but they're encrypted and we don't have the key without significant reverse engineering.
+
+### Realistic path forward
+
+Three options, ranked by ROI:
+
+1. **Accept the 3 Kasada-CHL sites as a known limit.** Sweep stays at 114/126. We hit Kasada's deepest tier of bot detection — defeating it requires faithful emulation of their JS VM and probe surface, which is a closed-source rotating target. The Phase 7 work moved us from generic-fingerprint detection to vendor-specific JS-VM detection — meaningful progress, but the next step costs weeks not days.
+2. **Stand up `Humphryyy/Kasada-Deobfuscated`** (open-source Kasada VM deobfuscator) locally, decode the blobs, identify the failing probe, fix forward. Probably **2–5 days** if the deobfuscator is current with `j-1.2.386` (the version in our headers); longer if it's drifted. Recovers up to 3 sites.
+3. **Bisect by re-running the diagnostic** against `git checkout` of each pre-Phase-7 historical commit until the blob *disappears* (i.e. Kasada accepts the request). Only useful if any pre-Phase-7 commit ever passed Kasada — git history above suggests not. Likely a wild goose chase.
+
+### My recommendation
+
+**Option 1 today.** The Phase 7 + T1A/B/C foundation is shipped and stable at 114/126. Kasada's last 3 sites need a Kasada-specific solver, not generic fingerprint work — that's a separate stream worth opening when there's time for it (or when a customer specifically needs canadagoose/hyatt/realtor). The captured blobs and the error-blob diagnostic test are now committed for whoever picks this up.
+
+If the next stream is "best stealth engine" rather than "fix the last 3 Kasada sites", **shift attention to the bigger wins** still on the board: T3A Akamai sensor_data (recovers 2 sites with weeks of work), T3B DataDome handling (3 sites), and lateral improvements like behavioral-trust accumulation across runs.
