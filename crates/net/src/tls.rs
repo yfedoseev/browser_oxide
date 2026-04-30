@@ -1,9 +1,15 @@
-//! BoringSSL TLS configuration with Chrome 130 fingerprint.
+//! BoringSSL TLS configuration with Chrome 147 fingerprint.
 //!
-//! Configures TLS to produce a ClientHello identical to Chrome 130,
+//! Configures TLS to produce a ClientHello identical to Chrome 147,
 //! including cipher suites, curves, signature algorithms, extensions,
 //! and certificate compression — all in the exact order that produces
 //! the correct JA3/JA4 fingerprint.
+//!
+//! **Verified byte-for-byte against a fresh Chrome 147 capture** from
+//! Playwright MCP → `tls.peet.ws/api/all`, 2026-04-29: cipher list,
+//! signature algorithms, supported groups (curves), ALPN, and TLS
+//! version range all match exactly. JA3/JA4 hashes:
+//! `bc6f7cfa92f699f32c8ff5a4178b5cfa` / `t13d1516h2_8daaf6152771_d8a2da3f94cd`.
 
 use boring2::ssl::{
     CertCompressionAlgorithm, ConnectConfiguration, SslConnector, SslCurve, SslMethod, SslVersion,
@@ -15,7 +21,10 @@ use tokio_boring2::SslStream;
 
 use crate::error::NetError;
 
-/// Chrome 130 cipher suite list (order is critical for JA3 fingerprint).
+/// Chrome 147 cipher suite list (order is critical for JA3 fingerprint).
+/// Verified against fresh Chrome 147 capture 2026-04-29 — exact match
+/// to `tls.peet.ws/api/all` output. (Cipher list has been stable from
+/// Chrome 130 through 147; only the file label needed updating.)
 const CIPHER_LIST: &str = concat!(
     "TLS_AES_128_GCM_SHA256",
     ":TLS_AES_256_GCM_SHA384",
@@ -34,7 +43,8 @@ const CIPHER_LIST: &str = concat!(
     ":TLS_RSA_WITH_AES_256_CBC_SHA",
 );
 
-/// Chrome 130 signature algorithms (order matters).
+/// Chrome 147 signature algorithms (order matters).
+/// Verified against fresh Chrome 147 capture — same as Chrome 130, no change.
 const SIGALGS_LIST: &str = concat!(
     "ecdsa_secp256r1_sha256",
     ":rsa_pss_rsae_sha256",
@@ -48,12 +58,13 @@ const SIGALGS_LIST: &str = concat!(
 
 /// Chrome elliptic curves.
 ///
-/// **Verified against a real Chrome 146 capture** from the developer's
-/// machine: the post-quantum curve is `X25519MLKEM768 (4588)`, NOT the
-/// older `X25519_KYBER768_DRAFT00 (25497)`. Chrome 131+ replaced the
-/// KYBER draft with the standardised MLKEM.
+/// **Verified against a fresh Chrome 147 capture** (2026-04-29 via
+/// Playwright MCP → tls.peet.ws): the post-quantum curve is
+/// `X25519MLKEM768 (4588)`, NOT the older `X25519_KYBER768_DRAFT00
+/// (25497)`. Chrome 131+ replaced the KYBER draft with the standardised
+/// MLKEM and the order is unchanged through Chrome 147.
 ///
-/// Curve order and GREASE are from the same Chrome 146 capture:
+/// Curve order and GREASE from the Chrome 147 capture:
 /// `GREASE - X25519MLKEM768 - X25519 - SECP256R1 - SECP384R1`.
 const CURVES: &[SslCurve] = &[
     SslCurve::X25519_MLKEM768,
@@ -69,7 +80,7 @@ use std::sync::OnceLock;
 
 static CHROME_CONNECTOR: OnceLock<SslConnector> = OnceLock::new();
 
-/// Build an `SslConnector` configured with Chrome 130 TLS fingerprint.
+/// Build an `SslConnector` configured with Chrome 147 TLS fingerprint.
 ///
 /// This sets cipher suites, curves, signature algorithms, GREASE,
 /// extension permutation, OCSP stapling, SCT, certificate compression,
@@ -82,7 +93,7 @@ pub fn chrome_connector() -> Result<SslConnector, NetError> {
     let mut builder =
         SslConnector::builder(SslMethod::tls()).map_err(|e| NetError::Tls(e.to_string()))?;
 
-    // Cipher suites (exact Chrome 130 order)
+    // Cipher suites (exact Chrome 147 order)
     builder
         .set_cipher_list(CIPHER_LIST)
         .map_err(|e| NetError::Tls(e.to_string()))?;

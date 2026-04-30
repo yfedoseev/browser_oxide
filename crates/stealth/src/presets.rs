@@ -74,7 +74,7 @@ pub fn chrome_130_windows() -> StealthProfile {
         ua_model: "".into(),
         ua_wow64: false,
 
-        tls_impersonate: "chrome_130".into(),
+        tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 50,
         connection_downlink: 10.0,
@@ -107,8 +107,9 @@ pub fn chrome_130_windows() -> StealthProfile {
 
 /// Chrome 147 on macOS 15. (UA bumped 2026-04-27 — anti-bot vendors flag old Chrome
 /// versions. Real Chrome shipped 147 in mid-Apr 2026 per playwright's bundled chromium.
-/// TLS impersonation is still chrome_130 — verified byte-identical to Chrome 147 via
-/// tls.peet.ws JA4/Akamai-FP comparison (chrome_130 BoringSSL config tracks current).
+/// TLS impersonation is chrome_147 — verified byte-identical to Chrome 147 via
+/// tls.peet.ws JA4/Akamai-FP comparison (BoringSSL config relabeled 2026-04-29
+/// after T1B Chrome 147 capture; cipher list and curves were already current).
 ///
 /// **CRITICAL**: navigator.userAgent reports `Chrome/147.0.0.0` (FROZEN minor versions
 /// per Chrome's User-Agent reduction since March 2023 / Chrome 110+). The full version
@@ -159,7 +160,7 @@ pub fn chrome_130_macos() -> StealthProfile {
         ua_model: "".into(),
         ua_wow64: false,
 
-        tls_impersonate: "chrome_130".into(),
+        tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 50,
         connection_downlink: 10.0,
@@ -230,7 +231,7 @@ pub fn chrome_130_linux() -> StealthProfile {
         ua_model: "".into(),
         ua_wow64: false,
 
-        tls_impersonate: "chrome_130".into(),
+        tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 50,
         connection_downlink: 10.0,
@@ -291,7 +292,7 @@ pub fn chrome_130_ru() -> StealthProfile {
         platform_version: "15.0.0".into(),
         ua_model: "".into(),
         ua_wow64: false,
-        tls_impersonate: "chrome_130".into(),
+        tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 100, connection_downlink: 8.0,
         pdf_viewer_enabled: true, plugins_count: 5, mime_types_count: 2,
@@ -336,7 +337,7 @@ pub fn chrome_130_cn() -> StealthProfile {
         platform_version: "15.0.0".into(),
         ua_model: "".into(),
         ua_wow64: false,
-        tls_impersonate: "chrome_130".into(),
+        tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 150, connection_downlink: 6.0,
         pdf_viewer_enabled: true, plugins_count: 5, mime_types_count: 2,
@@ -395,7 +396,7 @@ pub fn chrome_130_jp() -> StealthProfile {
 // - `tls_impersonate` is set to `firefox_135` here as a forward-compatible
 //   string; the actual TLS-class swap is gated by Phase B.3 (rquest's
 //   `Impersonate::Firefox*` enum). Until B.3 lands, the network layer
-//   falls back to the chrome_130 cipher suite — coherent for now since
+//   falls back to the chrome_147 cipher suite — coherent for now since
 //   most sites that flip on Firefox UA do so based on the UA + headers,
 //   not TLS.
 

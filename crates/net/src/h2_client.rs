@@ -1,8 +1,16 @@
-//! HTTP/2 client with Chrome 130 SETTINGS fingerprint.
+//! HTTP/2 client with Chrome 147 SETTINGS fingerprint.
 //!
 //! Uses the `http2` crate (wreq's fork of h2) which supports custom
 //! SETTINGS order, pseudo-header order, and stream priority — all
 //! required for anti-bot fingerprint matching.
+//!
+//! Verified byte-for-byte against a fresh Chrome 147 (147.0.0.0)
+//! capture on macOS arm64 from `tls.peet.ws/api/all` via Playwright
+//! MCP, 2026-04-29:
+//! ```text
+//! akamai_fingerprint: "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+//! priority: { weight: 256, depends_on: 0, exclusive: 1 }
+//! ```
 
 use bytes::Bytes;
 use http2::client::{Builder, Connection, SendRequest};
@@ -13,8 +21,8 @@ use crate::error::NetError;
 
 /// Chrome HTTP/2 SETTINGS values.
 ///
-/// **Verified against a real Chrome 146 capture** from the developer's
-/// machine via `tls.peet.ws/api/all`:
+/// **Verified against a fresh Chrome 147 capture** from the developer's
+/// machine via Playwright MCP → `tls.peet.ws/api/all`, 2026-04-29:
 /// ```text
 /// 1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p
 /// ```
@@ -94,12 +102,14 @@ where
         .settings_order(settings_order)
         .headers_stream_dependency(StreamDependency::new(
             StreamId::zero(),
-            // Chrome 130+ shifted from wire byte 255 (weight 256) to wire
-            // byte 219 (weight 220) on its PRIORITY frame. wreq-util's
-            // chrome profile uses 219 for v100 through v146+ — verified
-            // gold standard. Earlier-Chrome-era libraries (curl-impersonate,
-            // older docs) still cite 255; that's stale.
-            219,
+            // Chrome 147 sends weight 256 (wire byte 255), exclusive=true,
+            // depends_on=0 — verified against the 2026-04-29 Chrome 147
+            // capture from `tls.peet.ws/api/all` (priority block:
+            // `weight: 256, depends_on: 0, exclusive: 1`). The earlier
+            // value 219 in this file was for Chrome 130–146 per
+            // wreq-util's gold-standard reference, but Chrome 147 reverts
+            // to weight 256.
+            255,
             true,
         ));
 

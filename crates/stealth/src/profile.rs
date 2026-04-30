@@ -83,7 +83,7 @@ pub struct StealthProfile {
     pub ua_wow64: bool,
 
     // === Network ===
-    /// rquest Impersonate variant (e.g., "chrome_130")
+    /// rquest Impersonate variant (e.g., "chrome_147")
     pub tls_impersonate: String,
     pub connection_effective_type: String,
     pub connection_rtt: u32,
