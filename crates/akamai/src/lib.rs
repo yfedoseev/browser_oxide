@@ -53,10 +53,42 @@
 //! against bestbuy + homedepot in the holistic sweep.
 
 pub mod crypto;
+pub mod payload;
 pub mod session;
 
 pub use crypto::{build_v2_bestbuy, build_v2_dalphan, sha256_b64};
+pub use payload::build_cleartext;
 pub use session::{AbckState, AkamaiSession, AkamaiSessionStore};
+
+/// High-level entry point: produce a complete sensor_data POST body
+/// for `host` ready to wrap in `{"sensor_data": "<v>"}`.
+///
+/// Tenant_seed is the seed observed in the challenge JS for this
+/// host (e.g. 3_224_113 for bestbuy). If unknown, pass 0 — Akamai
+/// may reject but we'll still see a parseable response.
+pub fn build_sensor_data(
+    profile: &stealth::StealthProfile,
+    session: &AkamaiSession,
+    request_url: &str,
+    tenant_seed: i64,
+) -> String {
+    let cleartext = build_cleartext(profile, session, request_url);
+    let counter = CounterTuple {
+        key_count: session.key_count,
+        mouse_count: session.mouse_count,
+        touch_count: session.touch_count,
+        scroll_count: session.scroll_count,
+        accel_count: session.accel_count,
+        orientation_count: 0,
+    };
+    build_v2_bestbuy(
+        &cleartext,
+        tenant_seed,
+        &counter.as_field7(),
+        3_289_904, // shuffle seed (DalphanDev default)
+        3_683_632, // substitute seed (DalphanDev default)
+    )
+}
 
 use serde::{Deserialize, Serialize};
 
@@ -142,4 +174,31 @@ mod tests {
     // The current as_field7() emits slot 0 = key_count twice (a
     // wrong-but-bounded placeholder); A3 will pin semantics by
     // reading xiaoweigege's akamai2.0.js source for the v2 format.
+
+    #[test]
+    fn end_to_end_build_produces_bestbuy_envelope() {
+        // Top-level integration: build_sensor_data() with the bestbuy
+        // tenant seed should produce a `3;0;1;0;<seed>;<sha>;<counter>;<body>`
+        // envelope that can be wrapped as `{"sensor_data": "<v>"}`.
+        let profile = stealth::presets::chrome_130_macos();
+        let session = AkamaiSession::default();
+        let body = crate::build_sensor_data(
+            &profile,
+            &session,
+            "https://www.bestbuy.com/?intl=nosplash",
+            3_224_113, // bestbuy tenant seed (from A0 capture)
+        );
+        let prefix_parts: Vec<&str> = body.splitn(8, ';').collect();
+        assert_eq!(prefix_parts.len(), 8, "envelope is 8 fields (3;0;1;0;seed;sha;counter;body)");
+        assert_eq!(prefix_parts[0], "3");
+        assert_eq!(prefix_parts[4], "3224113", "tenant seed in field 5");
+        // Field 5 is base64 SHA-256 (44 chars + '=')
+        assert_eq!(prefix_parts[5].len(), 44);
+        assert!(prefix_parts[5].ends_with('='));
+        // Body is non-empty
+        assert!(!prefix_parts[7].is_empty());
+        // Wrap as Akamai expects
+        let wrapped = format!("{{\"sensor_data\":\"{}\"}}", body);
+        assert!(wrapped.starts_with("{\"sensor_data\":\""));
+    }
 }
