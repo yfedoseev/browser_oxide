@@ -85,6 +85,32 @@ pub async fn connect(host: &str, port: u16, timeout: Duration) -> Result<TcpStre
     connect_with_cache(host, port, timeout, None).await
 }
 
+/// Connect to `host:port` via the configured proxy, if any. Falls back
+/// to a direct connect when `proxy` is `None`. Phase 7 follow-up T1C —
+/// gives `StealthProfile.proxy` a real implementation path.
+pub async fn connect_via_proxy(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+    dns_cache: Option<&DnsCache>,
+    proxy: Option<&crate::proxy::ProxyConfig>,
+) -> Result<TcpStream, NetError> {
+    if let Some(proxy) = proxy {
+        return tokio::time::timeout(
+            timeout,
+            crate::proxy::connect(host, port, timeout, dns_cache, proxy),
+        )
+        .await
+        .map_err(|_| {
+            NetError::Tcp(format!(
+                "proxy connect to {host}:{port} timed out (timeout={}s)",
+                timeout.as_secs()
+            ))
+        })?;
+    }
+    connect_with_cache(host, port, timeout, dns_cache).await
+}
+
 /// Connect with an optional DNS cache and OS-specific TCP settings.
 pub async fn connect_with_cache(
     host: &str,

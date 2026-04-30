@@ -20,6 +20,7 @@ pub mod headers;
 pub(crate) mod ja4h;
 pub mod kasada_session;
 pub mod pool;
+pub mod proxy;
 pub mod quic;
 pub mod tcp;
 pub mod tls;
@@ -123,6 +124,9 @@ pub struct HttpClient {
     /// which adds the full set of high-entropy Client Hints. Mirrors Chrome's
     /// behaviour: baseline 13 headers on first visit, full hints after opt-in.
     accept_ch_origins: Arc<Mutex<HashSet<String>>>,
+    /// Resolved proxy config. `BOXIDE_PROXY` env var overrides
+    /// `profile.proxy`. None = direct connect (the existing path). T1C.
+    proxy: Option<proxy::ProxyConfig>,
 }
 
 impl HttpClient {
@@ -173,6 +177,24 @@ impl HttpClient {
             alt_svc_cache: AltSvcCache::new(),
             kasada_sessions: KasadaSessionStore::new(),
             accept_ch_origins: Arc::new(Mutex::new(HashSet::new())),
+            // Resolve proxy: BOXIDE_PROXY env override, then profile.proxy.
+            // Bad proxy URLs are non-fatal — log and continue without proxy.
+            proxy: match proxy::ProxyConfig::resolve(profile.proxy.as_deref()) {
+                Ok(p) => {
+                    if let Some(ref pc) = p {
+                        eprintln!("[proxy] active: scheme={}", match pc {
+                            proxy::ProxyConfig::Http { tls: true, .. } => "https",
+                            proxy::ProxyConfig::Http { tls: false, .. } => "http",
+                            proxy::ProxyConfig::Socks5 { .. } => "socks5",
+                        });
+                    }
+                    p
+                }
+                Err(e) => {
+                    eprintln!("[proxy] WARN: failed to parse proxy URL: {e} (running direct)");
+                    None
+                }
+            },
         })
     }
 
@@ -333,11 +355,12 @@ impl HttpClient {
     /// Connect TCP+TLS and perform HTTP/2 handshake, returning a sender.
     /// Also spawns the connection driver task.
     async fn connect_h2(&self, host: &str, port: u16) -> Result<SendRequest<Bytes>, NetError> {
-        let tcp_stream = tcp::connect_with_cache(
+        let tcp_stream = tcp::connect_via_proxy(
             host,
             port,
             std::time::Duration::from_secs(10),
             Some(&self.dns_cache),
+            self.proxy.as_ref(),
         )
         .await?;
 
@@ -519,11 +542,12 @@ impl HttpClient {
         let response = match response {
             Some(r) => r,
             None => {
-                let tcp_stream = tcp::connect_with_cache(
+                let tcp_stream = tcp::connect_via_proxy(
                     host,
                     port,
                     std::time::Duration::from_secs(10),
                     Some(&self.dns_cache),
+                    self.proxy.as_ref(),
                 )
                 .await?;
                 let mut tls_stream =
@@ -629,11 +653,12 @@ impl HttpClient {
         let response = match response {
             Some(r) => r,
             None => {
-                let tcp_stream = tcp::connect_with_cache(
+                let tcp_stream = tcp::connect_via_proxy(
                     host,
                     port,
                     std::time::Duration::from_secs(10),
                     Some(&self.dns_cache),
+                    self.proxy.as_ref(),
                 )
                 .await?;
                 let mut tls_stream =
@@ -750,11 +775,12 @@ impl HttpClient {
             Some(r) => r,
             None => {
                 // HTTP/1.1 fallback
-                let tcp_stream = tcp::connect_with_cache(
+                let tcp_stream = tcp::connect_via_proxy(
                     host,
                     port,
                     std::time::Duration::from_secs(10),
                     Some(&self.dns_cache),
+                    self.proxy.as_ref(),
                 )
                 .await?;
                 let mut tls_stream =
@@ -1040,11 +1066,12 @@ impl HttpClient {
         let response = match response {
             Some(r) => r,
             None => {
-                let tcp_stream = tcp::connect_with_cache(
+                let tcp_stream = tcp::connect_via_proxy(
                     host,
                     port,
                     std::time::Duration::from_secs(10),
                     Some(&self.dns_cache),
+                    self.proxy.as_ref(),
                 )
                 .await?;
                 let mut tls_stream =

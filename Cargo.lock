@@ -1765,6 +1765,7 @@ name = "net"
 version = "0.1.0"
 dependencies = [
  "adblock",
+ "base64",
  "boring2",
  "brotli 7.0.0",
  "bytes",
@@ -1776,6 +1777,7 @@ dependencies = [
  "http",
  "http2",
  "httparse",
+ "percent-encoding",
  "quinn",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
