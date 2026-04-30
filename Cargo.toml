@@ -17,6 +17,7 @@ members = [
     "crates/workers",
     "crates/stealth",
     "crates/protocol",
+    "crates/akamai",
     # "crates/browser",
 ]
 
@@ -43,6 +44,7 @@ event_loop = { path = "crates/event_loop" }
 workers = { path = "crates/workers" }
 stealth = { path = "crates/stealth" }
 protocol = { path = "crates/protocol" }
+akamai = { path = "crates/akamai" }
 browser = { path = "crates/browser" }
 
 # JS Engine (V8)
