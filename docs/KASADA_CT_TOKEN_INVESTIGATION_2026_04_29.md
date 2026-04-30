@@ -70,4 +70,45 @@ Approach:
 
 ## Status
 
-T2A complete. T2B deferred — recommended but not required for the +1 mail-ru improvement we expect from T1A in the next sweep.
+T2A complete. T2B started, then **revised** based on cross-checks (next section).
+
+---
+
+## Update 2026-04-29 (T2B started, revised hypothesis)
+
+After approving T2B I cross-checked canadagoose via Playwright MCP and reviewed git history. Two findings invalidated the original "Phase 7 broke Kasada" hypothesis:
+
+### 1. Real Chrome 147 from Playwright MCP gets through canadagoose
+
+Final URL `/ca/en/home-page`, page rendered fully. Every API call carried both:
+- `x-kpsdk-ct: 03mRTMXkIlfwlOcna0DA2Rk0oKM5wSlpbrRWKNGb8pS0PcsWbG8Bv9UV7DUzgIeXusg9AmD8GN9uclmWF31gsIn6FIVA6wBuR1w45CNK2H50wl9OxvsQ4ZbMMDGJbrca9b1ZEQGdb5qA7f5Dx6GWsVZY1dkXnjK5ZHoNb16jfsKfkk` (session token)
+- `x-kpsdk-cd: {"workTime":1777510852166,"id":"124c57a1e483d45ddeff119c041392af","answers":[10,6],"duration":34.8,"d":-17,"st":1777495262983,"rst":1777495262966}` (PoW solution)
+
+So Kasada **is** active on canadagoose; real Chrome just sails through it.
+
+### 2. The 3 Kasada sites have failed since well before Phase 7
+
+Git history shows the holistic sweep at 114/126 with the same Kasada-CHL trio failing across many earlier checkpoints (`f683e4f` = 98/126; `afaaed3` = HTTP/2 priority fix; etc.). Phase 7 didn't introduce the failure; Phase 7 also didn't fix it.
+
+### Revised diagnosis: edge-classifier divergence, not JS-VM divergence
+
+The split happens **before JS runs**. Two scenarios fit the evidence:
+
+- **(a) Cold-cache visitor**: Real Chrome on this machine has populated KP_UIDz cookies from prior real-user browsing. Kasada's edge sees those and serves the homepage directly. Oxide starts fresh every test → Kasada serves the JS-VM challenge → our JS-VM doesn't pass it (Kasada deobfuscation is closed-source and rotating). The 67 KB error POST is incidental — what Kasada's bootstrap emits when it can't complete the handshake.
+- **(b) Residential vs datacenter IP reputation**: same machine, different sockets, possibly different edge-node verdicts. Less likely on a single home network.
+
+Either way, **the JS-VM bailing isn't the root cause** — it's a symptom. Even a perfect JS-VM solver wouldn't help if Kasada's edge already decided to challenge us.
+
+### What would actually help
+
+| Approach | Effort | Likelihood |
+|---|---|---|
+| Run T1C proxy (`BOXIDE_PROXY=socks5://...residential...`) and re-test the 3 Kasada sites | 5 min ops | **High** — many residential IPs are pre-trusted |
+| Persist cookies across runs via `BOXIDE_COOKIE_JAR=path` for the holistic sweep — re-run a few times to build trust | 15 min ops | Medium — slow accumulator |
+| Reverse-engineer Kasada's JS-VM and emit a valid `x-kpsdk-cd` PoW solution + correct challenge response | weeks | Required for cold-start without proxies |
+
+### Recommendation
+
+T2B as defined (bisect Phase 7 commits) is unproductive — those commits aren't the root cause. **Replace with T2C: a 5-minute operational test using T1C proxy on a residential IP.** If that flips the 3 Kasada sites to PASS, the cold-start hypothesis is confirmed and the engineering deferral (full JS-VM solver) is the right call. If it doesn't, we have new data narrowing the search.
+
+The Phase 7 follow-up commits (`a0027ac`, `4be7eb4`) are NOT being reverted — they remain net-positive defense-in-depth (probe parity 35.9% → 99.0%, ownPropertyNames 372 → 985).
