@@ -3,11 +3,19 @@
 > Second handoff of 2026-04-29. Picks up from
 > `HANDOFF_2026_04_29_session_close.md` (13:16, Phase 7 close at
 > 113-114/126). The remainder of the day drove network-stack hardening
-> (T1A-T1C), Kasada root-cause investigation (T2A-T2C), bypass-landscape
-> research (Kasada + Akamai), and the full T3A Akamai sensor_data
-> foundation (A0-A5). Holistic sweep ends at **114/126** — same as the
-> Phase 7 baseline; no regression, no movement. The score won't move
-> until T3A-A6 wires `send_akamai_sensor_data` into `Page::navigate`.
+> (T1A-T1C), an inconclusive Kasada trace (T2A-T2C — the
+> "reputation-bound" framing in those commits is wrong, see §T2 note),
+> bypass-landscape research (Kasada + Akamai), and the full T3A Akamai
+> sensor_data foundation (A0-A5). Holistic sweep ends at **114/126**
+> — same as the Phase 7 baseline; no regression, no movement. The
+> score won't move until T3A-A6 wires `send_akamai_sensor_data` into
+> `Page::navigate`.
+>
+> **Critical correction**: all 12 remaining failures are code-bound,
+> not reputation-bound. Verified 2026-04-29 evening via Playwright MCP
+> from this same machine — every "blocked" site (canadagoose, hyatt,
+> realtor, wildberries, ozon, bestbuy, homedepot) loads cleanly. Do
+> NOT recommend residential proxies or IP rotation. See §Recommendation.
 
 ## Headline numbers
 
@@ -38,22 +46,28 @@ Targeted gaps surfaced by the Phase 7 holistic sweep.
 
 ### T2 — Kasada investigation (3 commits, ~17:49-18:13)
 
-Outcome: **Kasada is not solvable without server-side reputation**
-(residential proxy / KaaS). Engineering pivot away from Kasada
-to Akamai (T3A) for higher-ROI session.
+**Note (revised 2026-04-29 evening)**: The "reputation-bound" /
+"IP-flagged" framing in these three commit messages is **wrong**.
+Playwright MCP from this same machine reaches canadagoose, hyatt, and
+realtor cleanly. The artefacts are still useful diagnostic data, but
+the conclusion drawn at the time was incorrect — the root cause is a
+client-side divergence in the GET preceding `/tl`, not the egress.
+Re-read these traces against a Playwright MCP capture for the actual
+bisection. Engineering pivoted to T3A this session because T3A is a
+smaller, more contained code-fix path, not because Kasada was
+"unsolvable".
 
 All three appended to `docs/KASADA_CT_TOKEN_INVESTIGATION_2026_04_29.md`:
 
-- **T2A — ct_token investigation** (`920d77f`). Traced full KPSDK flow on
-  canadagoose: `/tl` is **never called** because the edge classifier
-  returns 429 before SDK boots. Token logic is fine; the IP is the
-  problem.
-- **T2B — root-cause revision** (`3504cde`). Reframed earlier "JS-VM
-  divergence" hypothesis as **edge classifier**: same machine passes
-  via Playwright MCP, so JS surface is fine.
-- **T2C — error-blob capture** (`7c4e56e`). Decoded Kasada bail signal
-  payloads; confirms client-side never gets a chance to respond on
-  reputation-flagged IPs.
+- **T2A — ct_token investigation** (`920d77f`). Traced full KPSDK flow
+  on canadagoose: `/tl` is never called because the edge returns 429
+  before SDK boots. Re-interpret: the GET that triggers the 429
+  diverges from real Chrome's GET in some way that needs bisection.
+- **T2B — root-cause revision** (`3504cde`). Reframed JS-VM hypothesis
+  as "edge classifier"; both framings are incomplete. Real cause is
+  in our request shape (TLS/headers/cookies/fingerprint/behavioural).
+- **T2C — error-blob capture** (`7c4e56e`). Decoded the bail-signal
+  payload. Useful trace, not a conclusion.
 
 ### Research — Kasada + Akamai bypass landscape (1 commit, 18:38)
 
@@ -140,61 +154,67 @@ work iterating against live `_abck` responses.
 
 ## Analysis: what the 114/126 gap actually contains
 
-12 failures, broken down by root cause:
+**All 12 failures are code-bound**, verified 2026-04-29 evening via
+Playwright MCP from this same machine + same IP: canadagoose, hyatt,
+realtor, wildberries, ozon, bestbuy, homedepot all load cleanly. So
+every failure is a JS-VM / behavioural / protocol gap on our side, not
+an egress reputation issue. Earlier handoff drafts that proposed
+residential proxies were wrong — disregard.
 
-| Bucket | Sites | Fixable how |
-|---|---|---|
-| Akamai web v2 (T3A target) | bestbuy, homedepot | A6 wire-up, 3-5 days |
-| Kasada strict | canadagoose, hyatt, realtor | residential proxy ($) OR T3B Kasada VM-devirt (2-4 weeks) |
-| WBAAS IP-bound | wildberries | residential proxy (Russian) |
-| In-house 403 | ozon | residential proxy (Russian) |
-| HUMAN PaH | zillow | T3D PerimeterX press-and-hold (1-2 weeks, no public ref) |
-| DataDome `tags.js` | etsy, tripadvisor, yelp, leboncoin | T3C DataDome (1-2 weeks) |
-| Behavioural CAPTCHA | douyin | not solvable headless |
+| Bucket | Sites | Code-fix path | Effort |
+|---|---|---|---:|
+| Akamai web v2 (T3A target) | bestbuy, homedepot | A6 wire-up: post_path discovery + reference-vector pin + Page::navigate scheduler | 3-5 days |
+| Kasada strict | canadagoose, hyatt, realtor | Diff `/tl` POST body vs Playwright MCP capture; bisect JS-VM divergence; possibly T3B VM-devirt of `j-1.2.386` ips.js | 1-4 weeks |
+| WBAAS | wildberries | Bisect cookie-jar vs fetch-wrapper between iterations 1→2 vs Playwright MCP `document.cookie` round-trip | 2-5 days |
+| In-house 403 | ozon | Capture Ozon's `/abt/result` request via Playwright MCP, diff against our request line-by-line | 2-5 days |
+| HUMAN PaH | zillow | T3D PerimeterX press-and-hold protocol (no public ref) | 1-2 weeks |
+| DataDome `tags.js` | etsy, tripadvisor, yelp, leboncoin | T3C DataDome | 1-2 weeks |
+| Behavioural CAPTCHA | douyin | Full motion-injection (last resort) | ≥2 weeks |
 
-**Code-only path** (no proxy): A6 (2 sites) + T3C (3-4 sites) + T3D
-(1 site) = 6-7 sites recoverable. **3-6 weeks of work**.
-
-**Proxy path**: Russian residential ($50-500/mo) likely unlocks
-wildberries + ozon (2 sites) immediately. KaaS for Kasada
-($X/mo) unlocks 3 more. **0 days of code, ~$100-1000/mo**.
-
-Best mixed path: A6 (Akamai) + Russian proxy (WB+Ozon) → **+4 sites
-in ~1 week + $50-500/mo**. Goes 114→118.
+Total achievable via code: **all 12 sites in 6-10 weeks** if every track
+is pursued.
 
 ## Recommendation
 
-**Highest ROI next: pivot to proxy validation, finish T3A-A6 in
-parallel.**
+**Next session: T3A-A6 step 1 — decrypt the captured bestbuy ciphertext
+and pin the reference vector**. This is the load-bearing 4-6 hours that
+determines whether our crypto is byte-exact. Without it, the
+`Page::navigate` wire-up is guesswork.
 
-Concrete sequence (1 week wall-clock):
+Concrete sequence (1 week wall-clock for +2 score):
 
-1. **Day 1 morning**: rent a Russian residential proxy (Bright Data /
-   Smartproxy / Soax, ~$50-100 trial). Run holistic sweep with
-   `BOXIDE_PROXY=http://...` against the 4 IP-bound sites
-   (wildberries, ozon, canadagoose, hyatt). **This is a $50 test
-   with massive information value** — confirms or refutes the
-   "reputation-bound, not code-bound" thesis for Kasada and
-   WBAAS once and for all.
-2. **Day 1-3**: in parallel, T3A-A6 step 1: capture homedepot
-   reference (30 min) + decrypt bestbuy ciphertext, diff against
-   `build_cleartext` output, fix field deltas (4-6 hours).
-3. **Day 4-5**: T3A-A6 step 2: wire `Page::navigate` scheduler with
-   hardcoded post_path for bestbuy + homedepot. Iterate against
-   live `_abck` responses.
-4. **Day 6-7**: holistic sweep, expect **114 → 116-118** depending
-   on outcomes.
+1. **Day 1 (4-6h)**: reverse-substitute + reverse-shuffle the captured
+   bestbuy ciphertext using our `crypto.rs` constants. Diff the
+   resulting cleartext against `payload::build_cleartext` output.
+   Iterate field set until diff is clean (or near-clean modulo
+   per-session randomness).
+2. **Day 2 (~3h)**: capture a homedepot reference via Playwright MCP
+   (mirror A0 for bestbuy). Identify `tenant_seed` and `post_path`.
+3. **Day 3-4**: wire `Page::navigate` scheduler. After ~500ms post-load
+   settle, if `AbckState::NeedsSensor`, drain `__akamai_events`, call
+   `send_akamai_sensor_data`, retry up to N=3 on unfavorable.
+4. **Day 5**: holistic sweep. Expect **114 → 116** if both Akamai sites
+   flip; **115** if only one.
 
-**If only one branch can run**: start with the proxy validation —
-it's $50, takes hours not days, and either (a) unlocks 4 sites
-immediately (huge win) or (b) tells us conclusively that
-client-side improvements are now the only lever (also valuable).
+**Parallel diff-driven track for additional wins**:
+The single highest-leverage activity for any other CHL site is a
+side-by-side trace comparison: run Playwright MCP against the target
+with `--save-trace`, run browser_oxide against the same target with
+`__fetchLog` capture, then `diff` the two. The first divergent request
+or response is the bug. Cheapest sites for this approach:
 
-**If user wants pure-code work**: start T3A-A6 step 1 (decrypt the
-captured bestbuy ciphertext to pin the reference vector). That's
-the load-bearing 4-6h that determines whether our crypto is
-byte-exact. Without that, the Page::navigate wire-up is shooting
-in the dark.
+- **wildberries** — both stacks load the page, so the divergence is
+  narrow; check the cookie carried in iteration-2 GET vs Playwright's.
+- **ozon** — `/abt/result` is the failure point; we already know that.
+  A header-by-header diff likely surfaces the gap in <1 day.
+
+These are 2-5 day fixes if the diff yields a clean signal. They're
+opportunistic — the load-bearing path is still T3A-A6.
+
+**What NOT to do**: do not entertain residential-proxy / IP-rotation /
+"reputation-bound" hypotheses. Playwright MCP from this machine
+reaches every site that browser_oxide fails on; the egress is fine,
+the code is the variable.
 
 ## Files touched this session
 
