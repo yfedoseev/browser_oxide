@@ -109,7 +109,6 @@ impl AkamaiSession {
         Self::default()
     }
 
-    /// Parse a `_abck` cookie value and update session state.
     pub fn observe_abck(&mut self, raw: &str) -> AbckState {
         self.last_abck = Some(raw.to_string());
         AbckState::from_cookie_value(raw)

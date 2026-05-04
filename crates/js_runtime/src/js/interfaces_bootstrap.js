@@ -751,6 +751,10 @@
     _define("XPathEvaluator", _illegalCtor("XPathEvaluator"));
     _define("XPathExpression", _illegalCtor("XPathExpression"));
     _define("XPathResult", _illegalCtor("XPathResult"));
+    
+    _define("BarcodeDetector", _illegalCtor("BarcodeDetector"));
+    _define("FaceDetector", _illegalCtor("FaceDetector"));
+    _define("TextDetector", _illegalCtor("TextDetector"));
 
     // ---- Event handlers (120) ----
     // Event handlers — Chrome 147 exposes ~120 on* accessors on Window.

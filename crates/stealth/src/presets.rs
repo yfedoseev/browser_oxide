@@ -144,7 +144,7 @@ pub fn chrome_130_macos() -> StealthProfile {
         screen_color_depth: 30,
         device_pixel_ratio: 2.0,
         cpu_cores: 8,
-        device_memory: 16,
+        device_memory: 8,
         max_touch_points: 0,
 
         webgl_vendor: "Google Inc. (Apple)".into(),

@@ -140,6 +140,63 @@ pub fn substitute_chars(input: &str, seed: u32) -> String {
     String::from_utf8(out).expect("output is ASCII subset by construction")
 }
 
+/// Reverse substitution: map substituted characters back to their
+/// base index, then subtract the LCG shift.
+pub fn reverse_substitute(input: &str, seed: u32) -> String {
+    let mut lcg = Lcg::new(seed);
+    let mut out = Vec::with_capacity(input.len());
+    let alphabet_len = B6D.len() as i32;
+
+    let mut b6d_rev = [0usize; 256];
+    for (i, &b) in B6D.iter().enumerate() {
+        b6d_rev[b as usize] = i;
+    }
+
+    let mut inv_p6d = [0u8; 127];
+    for i in 0..127 {
+        if P6D[i] >= 0 {
+            inv_p6d[P6D[i] as usize] = i as u8;
+        }
+    }
+
+    for &b in input.as_bytes() {
+        let shift = ((lcg.state >> 8) & 0xFFFF) as i32;
+        lcg.step();
+
+        let b6d_idx = b6d_rev[b as usize] as i32;
+        let original_base = (b6d_idx - shift).rem_euclid(alphabet_len);
+        let original_char = inv_p6d[original_base as usize];
+        if original_char != 0 {
+            out.push(original_char);
+        } else {
+            out.push(b);
+        }
+    }
+    String::from_utf8(out).expect("output is ASCII")
+}
+
+/// Reverse Fisher-Yates shuffle.
+pub fn reverse_shuffle(input: &str, seed: u32) -> String {
+    let mut tokens: Vec<String> = input.split(',').map(|s| s.to_string()).collect();
+    let n = tokens.len();
+    if n == 0 {
+        return String::new();
+    }
+    // Re-generate the sequence of swaps
+    let mut lcg = Lcg::new(seed);
+    let mut swaps = Vec::with_capacity(n);
+    for _ in 0..n {
+        let m = ((lcg.step() >> 8) & 0xFFFF) as usize % n;
+        let c = ((lcg.step() >> 8) & 0xFFFF) as usize % n;
+        swaps.push((m, c));
+    }
+    // Apply swaps in reverse order
+    for (m, c) in swaps.into_iter().rev() {
+        tokens.swap(m, c);
+    }
+    tokens.join(",")
+}
+
 /// Compute the SHA-256 of `input` and return its base64 representation.
 /// This is field 6 of the bestbuy-variant `sensor_data` v2 (the
 /// stock DalphanDev v2 omits this field; it's a deployment-specific

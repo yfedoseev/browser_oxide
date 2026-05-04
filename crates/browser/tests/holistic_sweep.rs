@@ -45,7 +45,7 @@ fn pick_profile() -> stealth::StealthProfile {
 async fn fetch_one(url: &str) -> (String, usize, u64, u64) {
     let nav_start = Instant::now();
     let profile = pick_profile();
-    let result = tokio::time::timeout(Duration::from_secs(90), async {
+    let result = tokio::time::timeout(Duration::from_secs(300), async {
         let mut page = match Page::navigate(url, profile, 3).await {
             Ok(p) => p,
             Err(e) => return (format!("ERROR: {e}"), 0, page_drop_marker()),

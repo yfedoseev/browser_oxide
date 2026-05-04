@@ -4,6 +4,7 @@ use crate::stylesheet_collector;
 use dom::Dom;
 use event_loop::{BrowserEventLoop, IdleReason};
 use js_runtime::{runtime::BrowserRuntimeOptions, BrowserJsRuntime};
+use akamai;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -146,6 +147,67 @@ impl Page {
             || body.contains("human security")
             || body.contains("smartcaptcha")
             || body.contains("checkbox-captcha")
+    }
+
+    /// T3A-A5: Autonomous Akamai bypass. Detects `_abck` challenge state,
+    /// drains behavioural events (mouse/key) from JS, and POSTs sensor_data
+    /// via the provided client. Returns the new trust state.
+    pub async fn handle_akamai_flow(
+        &mut self,
+        client: &net::HttpClient,
+    ) -> Result<akamai::AbckState, deno_core::error::AnyError> {
+        let host = match url::Url::parse(&self.url) {
+            Ok(u) => u.host_str().unwrap_or("").to_string(),
+            Err(_) => return Ok(akamai::AbckState::Unknown),
+        };
+
+        // 1. Detect if this host is Akamai-protected and what its settings are.
+        let settings = match akamai::get_tenant_settings(&host) {
+            Some(s) => s,
+            None => {
+                // Fallback: check if _abck is in the jar for this host.
+                let state = client.akamai_sessions.abck_state(&host).await;
+                if state.is_none() {
+                    return Ok(akamai::AbckState::Unknown);
+                }
+                akamai::TenantSettings {
+                    tenant_seed: 0,
+                    post_path: "/akam/13/sensor_data",
+                }
+            }
+        };
+
+        // 2. Check if we actually NEED to send sensor_data.
+        let current_state = client
+            .akamai_sessions
+            .abck_state(&host)
+            .await
+            .unwrap_or(akamai::AbckState::NeedsSensor);
+
+        if current_state == akamai::AbckState::Favorable {
+            return Ok(akamai::AbckState::Favorable);
+        }
+
+        // 3. Drain behavioural events from the page.
+        let events_json = self
+            .event_loop
+            .execute_script(akamai::DRAIN_JS)
+            .unwrap_or_default();
+        let drained = akamai::parse_drained(&events_json);
+
+        // 4. Send the POST.
+        let new_state = client
+            .send_akamai_sensor_data(
+                &host,
+                &self.url,
+                settings.post_path,
+                settings.tenant_seed,
+                drained,
+            )
+            .await
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+
+        Ok(new_state)
     }
     /// Create a page from an HTML string. Parses HTML, executes inline scripts,
     /// and runs the event loop until idle (or 30s timeout).
@@ -921,6 +983,13 @@ impl Page {
                 break;
             }
 
+            // If we are re-using a page from a previous iteration that
+            // was terminated, cancel the termination now so we can run
+            // init scripts and other logic.
+            // Note: we don't have a 'page' yet on iter 0, but we do on retries.
+            // (The build_page_with_scripts... call below creates a fresh
+            // runtime anyway, but the loop logic might eventually change).
+
             tracing::info!(iter = iter, url = %current_url, "navigation loop start");
             if debug_nav {
                 eprintln!(
@@ -999,6 +1068,13 @@ impl Page {
                 tracing::warn!(error = %e, "navigate event loop error");
             }
 
+            // If the watcher fired (or if we reached idle naturally), ensure
+            // the isolate is ready for further script execution (draining
+            // events, classification, etc.).
+            page.event_loop()
+                .runtime_mut()
+                .cancel_terminate_execution();
+
             // Phase A.1 — Adaptive budget. Two paths after the first iteration:
             //
             // 1. FAST-EXIT — body > 50 KB AND no CHL marker AND readyState
@@ -1050,22 +1126,6 @@ impl Page {
                 }
             }
 
-            // If the watcher fired (i.e. we blew past the wall-clock
-            // budget), the V8 isolate is in a "terminated" state until
-            // we cancel it. Cancel here so we can extract the page DOM
-            // snapshot for whatever did render before termination.
-            if nav_t0.elapsed() >= nav_budget {
-                page.event_loop()
-                    .runtime_mut()
-                    .cancel_terminate_execution();
-                tracing::warn!(
-                    elapsed_ms = nav_t0.elapsed().as_millis() as u64,
-                    budget_ms = nav_budget.as_millis() as u64,
-                    "navigate budget exceeded — cancelling V8 termination and returning partial page"
-                );
-                return Ok(page);
-            }
-
             // Did a script request a re-navigation?
             let mut pending_info = page
                 .event_loop()
@@ -1081,10 +1141,7 @@ impl Page {
             // fixed 2s wait. Checks every 200ms for up to 10s total; exits early
             // on first hit.
             if pending_info.is_empty() && page.is_anti_bot_challenge() {
-                tracing::info!(
-                    "anti-bot challenge detected with no pending navigation, polling up to 5s..."
-                );
-                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                let deadline = std::time::Instant::now() + Duration::from_secs(90);
                 while std::time::Instant::now() < deadline {
                     let _ = page
                         .event_loop()
@@ -1095,11 +1152,28 @@ impl Page {
                         .execute_script(PENDING_NAV_JS)
                         .unwrap_or_default();
                     if !pending_info.is_empty() {
-                        tracing::info!(pending = %pending_info, "pending navigation found during poll");
                         break;
                     }
                 }
             }
+
+        // 3. Selective CSP bypass for known anti-bot challenge domains.
+        // Walmart / CanadaGoose CSPs often block their own Akamai/Kasada trackers
+        // in emulated environments due to origin/nonce mismatches.
+        if current_url.contains("walmart.com") || current_url.contains("canadagoose.com") {
+            tracing::info!(url = %current_url, "applying selective CSP bypass for anti-bot domain");
+            let mut rt = page.event_loop().runtime_mut();
+            let op_state = rt.op_state();
+            let mut state = op_state.borrow_mut();
+            if let Some(stealth_state) = state.try_borrow_mut::<js_runtime::extensions::stealth_ext::StealthState>() {
+                if let Some(profile) = &mut stealth_state.profile {
+                    profile.enforce_csp = false;
+                }
+            }
+        }
+
+        // Phase A.5 — Akamai sensor_data POST.
+        let akamai_state = page.handle_akamai_flow(&client).await.unwrap_or(akamai::AbckState::Unknown);
 
             if pending_info.is_empty() {
                 // Post-settle cookie-delta retry: if the cookie jar gained new
@@ -1114,16 +1188,16 @@ impl Page {
                     } else {
                         String::new()
                     };
-                    if debug_nav {
-                        eprintln!(
-                            "[navigate] iter={} cookies before={}b after={}b delta={}",
-                            iter,
-                            cookies_before.len(),
-                            cookies_after.len(),
-                            cookies_after != cookies_before
-                        );
+                    
+                    let mut should_retry = cookies_after != cookies_before && !cookies_after.is_empty();
+
+                    // Special case for Akamai: if we are already favorable, DON'T retry
+                    // just because the cookie value changed (it always does).
+                    if akamai_state == akamai::AbckState::Favorable {
+                        should_retry = false;
                     }
-                    if cookies_after != cookies_before && !cookies_after.is_empty() {
+
+                    if should_retry {
                         // Before launching the retry, check we have at least
                         // ~15s of nav budget left — a retry requires a fresh
                         // build + drain (~10-15s minimum). If the budget is
@@ -1326,13 +1400,7 @@ impl Page {
             // nav, then iter=1 bails before producing anything usable).
             const MIN_PENDING_NAV_BUDGET: Duration = Duration::from_secs(15);
             if nav_budget.saturating_sub(nav_t0.elapsed()) < MIN_PENDING_NAV_BUDGET {
-                eprintln!(
-                    "[navigate] iter={} skip pending-nav follow: only {}ms left of {}ms budget",
-                    iter,
-                    nav_budget.saturating_sub(nav_t0.elapsed()).as_millis(),
-                    nav_budget.as_millis()
-                );
-                return Ok(page);
+                nav_budget += Duration::from_secs(45);
             }
 
             // Harvest x-kpsdk-* headers from __fetchLog before dropping the

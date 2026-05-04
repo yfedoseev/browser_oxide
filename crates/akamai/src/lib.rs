@@ -62,6 +62,30 @@ pub use drain::{parse_drained, Drained, DRAIN_JS};
 pub use payload::build_cleartext;
 pub use session::{AbckState, AkamaiSession, AkamaiSessionStore};
 
+/// Static registry of known Akamai tenants and their magic constants.
+/// T3A-A6 milestone: autonomous bypass for BestBuy.
+pub struct TenantSettings {
+    pub tenant_seed: i64,
+    pub post_path: &'static str,
+}
+
+pub fn get_tenant_settings(host: &str) -> Option<TenantSettings> {
+    if host.contains("bestbuy.com") {
+        Some(TenantSettings {
+            tenant_seed: 3_224_113,
+            post_path: "/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B",
+        })
+    } else if host.contains("homedepot.com") {
+        // Placeholder for HomeDepot (captured in A0 follow-up)
+        Some(TenantSettings {
+            tenant_seed: 0, // TODO
+            post_path: "/akam/13/sensor_data", // standard v1.3 fallback
+        })
+    } else {
+        None
+    }
+}
+
 /// High-level entry point: produce a complete sensor_data POST body
 /// for `host` ready to wrap in `{"sensor_data": "<v>"}`.
 ///

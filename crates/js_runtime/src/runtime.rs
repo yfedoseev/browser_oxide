@@ -235,6 +235,7 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
             worker_extension::init_ops(),
             canvas_extension::init_ops(),
             stealth_extension::init_ops(),
+            perf_extension::init_ops(),
         ],
         ..Default::default()
     });

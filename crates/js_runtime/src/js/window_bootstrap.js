@@ -1410,7 +1410,17 @@
             if (s.startsWith('blob:')) {
                 try { return _wops.op_blob_fetch_text(s) || ''; } catch (e) { return ''; }
             }
-            // Non-blob URLs are not supported in the MVP.
+            if (s.startsWith('http:') || s.startsWith('https:')) {
+                try { return _wops.op_worker_sync_fetch(s) || ''; } catch (e) { return ''; }
+            }
+            // Fallback to relative URL resolution via base
+            if (!s.includes(':')) {
+                const base = (globalThis.__boxide && globalThis.__boxide._baseUrl) || '';
+                if (base.startsWith('http')) {
+                    const full = base.replace(/\/[^\/]*$/, '/') + s;
+                    try { return _wops.op_worker_sync_fetch(full) || ''; } catch (e) { return ''; }
+                }
+            }
             return '';
         }
 
@@ -4553,7 +4563,19 @@
         if (filtered.length === 0) {
             return err.toString() + '\n    at <anonymous>:1:1';
         }
-        return err.toString() + '\n' + filtered.map(f => '    at ' + f.toString()).join('\n');
+        return err.toString() + '\n' + filtered.map(f => {
+            const fn = f.getFunctionName() || f.getMethodName() || '<anonymous>';
+            const file = f.getFileName() || '<anonymous>';
+            const line = f.getLineNumber() || 0;
+            const col = f.getColumnNumber() || 0;
+            // Format: "    at functionName (filename:line:col)"
+            // or if no filename: "    at functionName (line:col)"
+            // or if no function name: "    at filename:line:col"
+            if (fn === '<anonymous>') {
+                return `    at ${file}:${line}:${col}`;
+            }
+            return `    at ${fn} (${file}:${line}:${col})`;
+        }).join('\n');
     };
 
     // ================================================================

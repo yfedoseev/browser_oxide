@@ -228,29 +228,29 @@ impl HttpClient {
         }
     }
 
-    /// Learn Akamai web `_abck` state from response Set-Cookie. T3A.
+    /// Learn Akamai web `_abck` state from response Set-Cookies. T3A.
     /// The trust-state (Favorable / NeedsSensor / NeedsSecCpt /
     /// NeedsPixel) is extracted from the cookie suffix; the consumer
     /// (Page::navigate scheduler) decides whether to POST sensor_data.
-    async fn learn_abck(&self, host: &str, headers: &HashMap<String, String>) {
-        for (k, v) in headers {
-            if !k.eq_ignore_ascii_case("set-cookie") {
-                continue;
-            }
-            // `Set-Cookie: _abck=TOK==~0~-1~-1~; Path=/; Domain=...`
+    async fn learn_abck(&self, host: &str, set_cookies: &[String]) {
+        for v in set_cookies {
+            // `_abck=TOK==~0~-1~-1~; Path=/; Domain=...`
             // Take the `_abck=` prefix and strip everything from the
             // first `;` to leave just the value.
             let trimmed = v.trim_start();
             if let Some(rest) = trimmed.strip_prefix("_abck=") {
                 let value = rest.split(';').next().unwrap_or("").trim();
                 if !value.is_empty() {
-                    let state = self
-                        .akamai_sessions
+                    self.akamai_sessions
                         .with_session(host, |s| s.observe_abck(value))
                         .await;
-                    eprintln!(
-                        "[akamai] {host}: _abck observed (state={state:?})",
-                    );
+                }
+            } else if let Some(rest) = trimmed.strip_prefix("akm_bmfp_b2=") {
+                let value = rest.split(';').next().unwrap_or("").trim();
+                if !value.is_empty() {
+                    self.akamai_sessions
+                        .with_session(host, |s| s.observe_abck(value))
+                        .await;
                 }
             } else if let Some(rest) = trimmed.strip_prefix("bm_sz=") {
                 let value = rest.split(';').next().unwrap_or("").trim();
@@ -311,7 +311,7 @@ impl HttpClient {
         headers.push(("referer".into(), request_url.to_string()));
         let resp = self.post_with_headers(&url, &body, &headers).await?;
         // Re-learn _abck from the response.
-        self.learn_abck(host, &resp.headers).await;
+        self.learn_abck(host, &resp.set_cookies).await;
         let new_state = self
             .akamai_sessions
             .abck_state(host)
@@ -666,7 +666,7 @@ impl HttpClient {
         // Also kick off the /mfc fetch on stricter tenants — see
         // HttpClient::fetch_kasada_mfc_if_needed.
         self.learn_kasada(host, &response.headers, Some(url)).await;
-        self.learn_abck(host, &response.headers).await;
+        self.learn_abck(host, &response.set_cookies).await;
         self.learn_accept_ch(host, &response.headers).await;
         self.fetch_kasada_mfc_if_needed(host).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
@@ -775,7 +775,7 @@ impl HttpClient {
         };
         self.learn_alt_svc(url, &response.headers).await;
         self.learn_kasada(host, &response.headers, Some(url)).await;
-        self.learn_abck(host, &response.headers).await;
+        self.learn_abck(host, &response.set_cookies).await;
         self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
         Ok(response)
@@ -902,7 +902,7 @@ impl HttpClient {
 
         // Learn Kasada session from response (look for x-kpsdk-cr + x-kpsdk-st).
         self.learn_kasada(host, &response.headers, Some(url)).await;
-        self.learn_abck(host, &response.headers).await;
+        self.learn_abck(host, &response.set_cookies).await;
         self.learn_accept_ch(host, &response.headers).await;
 
         // Store Set-Cookie from response into jar
@@ -1192,7 +1192,7 @@ impl HttpClient {
         // Kasada sets KP_UIDz / akm_bmfp_b2 session cookies here.
         // Also learn Kasada session: the /tl POST returns x-kpsdk-cr/st here.
         self.learn_kasada(host, &response.headers, Some(url)).await;
-        self.learn_abck(host, &response.headers).await;
+        self.learn_abck(host, &response.set_cookies).await;
         self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
 

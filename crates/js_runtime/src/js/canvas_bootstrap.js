@@ -541,135 +541,192 @@
     // AudioContext + OfflineAudioContext
     // Simulates the pipeline used by CreepJS/FingerprintJS for audio fingerprinting:
     //   OscillatorNode → DynamicsCompressorNode → destination
-    class AudioContext {
-        constructor() { this.sampleRate = 44100; this.state = "running"; this.currentTime = 0; }
-        createOscillator() {
-            return {
-                type: "sine", frequency: { value: 440 },
-                connect() {}, start() {}, stop() {},
-                addEventListener() {}, removeEventListener() {},
+    
+    class AudioNode extends EventTarget {
+        constructor() { super(); }
+        connect() {}
+        disconnect() {}
+    }
+
+    class AudioScheduledSourceNode extends AudioNode {
+        constructor() { super(); }
+        start() {}
+        stop() {}
+    }
+
+    class OscillatorNode extends AudioScheduledSourceNode {
+        _type = "sine";
+        constructor(context) {
+            super();
+            this._context = context;
+            this.frequency = {
+                _value: 440,
+                get value() { return this._value; },
+                set value(v) { this._value = v; if (context._setOscFreq) context._setOscFreq(v); }
             };
+            this.detune = { value: 0 };
         }
-        createDynamicsCompressor() {
-            return {
-                threshold: { value: -24 }, knee: { value: 30 },
-                ratio: { value: 12 }, attack: { value: 0.003 }, release: { value: 0.25 },
-                connect() {}, addEventListener() {}, removeEventListener() {},
-            };
+        get type() { return this._type; }
+        set type(v) { this._type = v; if (this._context._setOscType) this._context._setOscType(v); }
+    }
+
+    class AudioParam {
+        constructor(val, context, setter) {
+            this._value = val;
+            this._context = context;
+            this._setter = setter;
         }
-        createAnalyser() {
-            // Real Chrome AnalyserNode: fftSize, frequencyBinCount, smoothing
-            // and dB clamps are settable. Without a source connected the
-            // node sees silence — getFloatFrequencyData returns minDecibels.
-            // When time-domain data has been written by the graph (currently
-            // not plumbed for realtime; offline path uses op_offline_audio_render),
-            // op_audio_analyser_freq_data computes the FFT.
-            const node = {
-                fftSize: 2048,
-                get frequencyBinCount() { return this.fftSize / 2; },
-                smoothingTimeConstant: 0.8,
-                minDecibels: -100,
-                maxDecibels: -30,
-                _timeDomain: null,    // Float32Array, set by graph when connected
-                _prevFreq: null,       // Float32Array, smoothing carry-over
-                connect() {}, disconnect() {},
-                addEventListener() {}, removeEventListener() {},
-                getByteFrequencyData(arr) {
-                    const f = new Float32Array(this.frequencyBinCount);
-                    this.getFloatFrequencyData(f);
-                    const range = this.maxDecibels - this.minDecibels;
-                    const len = Math.min(arr.length, f.length);
-                    for (let i = 0; i < len; i++) {
-                        const norm = (f[i] - this.minDecibels) / range;
-                        arr[i] = Math.max(0, Math.min(255, Math.round(norm * 255)));
-                    }
-                },
-                getFloatFrequencyData(arr) {
-                    if (!this._timeDomain || this._timeDomain.length < this.fftSize) {
-                        // Unconnected analyser → silence → minDecibels.
-                        for (let i = 0; i < arr.length; i++) arr[i] = this.minDecibels;
-                        return;
-                    }
-                    const tdBytes = new Uint8Array(this._timeDomain.buffer, 0, this.fftSize * 4);
-                    const prevBytes = this._prevFreq
-                        ? new Uint8Array(this._prevFreq.buffer)
-                        : new Uint8Array(0);
-                    const out = ops.op_audio_analyser_freq_data(
-                        tdBytes, this.fftSize,
-                        Math.round(this.smoothingTimeConstant * 100),
-                        prevBytes
-                    );
-                    const result = new Float32Array(out.buffer, out.byteOffset, out.byteLength / 4);
-                    const len = Math.min(arr.length, result.length);
-                    for (let i = 0; i < len; i++) arr[i] = result[i];
-                    this._prevFreq = result.slice();
-                },
-                getByteTimeDomainData(arr) {
-                    if (!this._timeDomain) {
-                        for (let i = 0; i < arr.length; i++) arr[i] = 128;
-                        return;
-                    }
-                    const len = Math.min(arr.length, this._timeDomain.length);
-                    for (let i = 0; i < len; i++) {
-                        arr[i] = Math.max(0, Math.min(255, Math.round((this._timeDomain[i] + 1) * 127.5)));
-                    }
-                },
-                getFloatTimeDomainData(arr) {
-                    if (!this._timeDomain) {
-                        for (let i = 0; i < arr.length; i++) arr[i] = 0;
-                        return;
-                    }
-                    const len = Math.min(arr.length, this._timeDomain.length);
-                    for (let i = 0; i < len; i++) arr[i] = this._timeDomain[i];
-                },
-            };
-            return node;
+        get value() { return this._value; }
+        set value(v) { this._value = v; if (this._setter) this._setter(v); }
+        setValueAtTime() { return this; }
+        linearRampToValueAtTime() { return this; }
+        exponentialRampToValueAtTime() { return this; }
+        setTargetAtTime() { return this; }
+        setValueCurveAtTime() { return this; }
+        cancelScheduledValues() { return this; }
+        cancelAndHoldAtTime() { return this; }
+    }
+
+    class GainNode extends AudioNode {
+        constructor() {
+            super();
+            this.gain = new AudioParam(1);
         }
-        createGain() { return { connect() {}, disconnect() {}, gain: { value: 1 } }; }
-        createBiquadFilter() {
-            // Real BiquadFilterNode with closed-form getFrequencyResponse via
-            // op_audio_biquad_response. CreepJS calls this to fingerprint the
-            // filter math; spec tolerance is tight and deterministic, so a
-            // bilinear-transform implementation matches Blink to several
-            // decimal places (verified by direct port from §1.7.7).
+    }
+
+    class DynamicsCompressorNode extends AudioNode {
+        constructor(context) {
+            super();
+            this.threshold = new AudioParam(-24, context, v => { if (context._setCompThreshold) context._setCompThreshold(v); });
+            this.knee = new AudioParam(30, context, v => { if (context._setCompKnee) context._setCompKnee(v); });
+            this.ratio = new AudioParam(12, context, v => { if (context._setCompRatio) context._setCompRatio(v); });
+            this.attack = new AudioParam(0.003, context, v => { if (context._setCompAttack) context._setCompAttack(v); });
+            this.release = new AudioParam(0.25, context, v => { if (context._setCompRelease) context._setCompRelease(v); });
+        }
+    }
+
+    class BiquadFilterNode extends AudioNode {
+        constructor() {
+            super();
+            this.type = "lowpass";
+            this.frequency = new AudioParam(350);
+            this.detune = new AudioParam(0);
+            this.Q = new AudioParam(1);
+            this.gain = new AudioParam(0);
+        }
+        getFrequencyResponse(freqArr, magOut, phaseOut) {
+            if (!(freqArr instanceof Float32Array)) return;
             const _typeIds = {
                 lowpass: 0, highpass: 1, bandpass: 2, lowshelf: 3,
                 highshelf: 4, peaking: 5, notch: 6, allpass: 7,
             };
-            return {
-                type: "lowpass",
-                frequency: { value: 350 },
-                detune: { value: 0 },
-                Q: { value: 1 },
-                gain: { value: 0 },
-                connect() {}, disconnect() {},
-                addEventListener() {}, removeEventListener() {},
-                getFrequencyResponse(freqArr, magOut, phaseOut) {
-                    if (!(freqArr instanceof Float32Array)) return;
-                    const tid = _typeIds[this.type] ?? 0;
-                    const sr = (this._sampleRate || 44100);
-                    const inBytes = new Uint8Array(freqArr.buffer, freqArr.byteOffset, freqArr.byteLength);
-                    const out = ops.op_audio_biquad_response(
-                        inBytes, tid,
-                        this.frequency.value, this.Q.value,
-                        this.gain.value, sr
-                    );
-                    const result = new Float32Array(out.buffer, out.byteOffset, out.byteLength / 4);
-                    const n = freqArr.length;
-                    const lenM = Math.min(magOut.length, n);
-                    const lenP = Math.min(phaseOut.length, n);
-                    for (let i = 0; i < lenM; i++) magOut[i] = result[i];
-                    for (let i = 0; i < lenP; i++) phaseOut[i] = result[n + i];
-                },
-            };
+            const tid = _typeIds[this.type] ?? 0;
+            const sr = (this._sampleRate || 44100);
+            const inBytes = new Uint8Array(freqArr.buffer, freqArr.byteOffset, freqArr.byteLength);
+            const out = ops.op_audio_biquad_response(
+                inBytes, tid,
+                this.frequency.value, this.Q.value,
+                this.gain.value, sr
+            );
+            const result = new Float32Array(out.buffer, out.byteOffset, out.byteLength / 4);
+            const n = freqArr.length;
+            const lenM = Math.min(magOut.length, n);
+            const lenP = Math.min(phaseOut.length, n);
+            for (let i = 0; i < lenM; i++) magOut[i] = result[i];
+            for (let i = 0; i < lenP; i++) phaseOut[i] = result[n + i];
         }
-        createBufferSource() { return { connect() {}, start() {}, stop() {}, buffer: null, loop: false }; }
+    }
+
+    class AnalyserNode extends AudioNode {
+        constructor() {
+            super();
+            this.fftSize = 2048;
+            this.smoothingTimeConstant = 0.8;
+            this.minDecibels = -100;
+            this.maxDecibels = -30;
+            this._timeDomain = null;
+            this._prevFreq = null;
+        }
+        get frequencyBinCount() { return this.fftSize / 2; }
+        getByteFrequencyData(arr) {
+            const f = new Float32Array(this.frequencyBinCount);
+            this.getFloatFrequencyData(f);
+            const range = this.maxDecibels - this.minDecibels;
+            const len = Math.min(arr.length, f.length);
+            for (let i = 0; i < len; i++) {
+                const norm = (f[i] - this.minDecibels) / range;
+                arr[i] = Math.max(0, Math.min(255, Math.round(norm * 255)));
+            }
+        }
+        getFloatFrequencyData(arr) {
+            if (!this._timeDomain || this._timeDomain.length < this.fftSize) {
+                for (let i = 0; i < arr.length; i++) arr[i] = this.minDecibels;
+                return;
+            }
+            const tdBytes = new Uint8Array(this._timeDomain.buffer, 0, this.fftSize * 4);
+            const prevBytes = this._prevFreq
+                ? new Uint8Array(this._prevFreq.buffer)
+                : new Uint8Array(0);
+            const out = ops.op_audio_analyser_freq_data(
+                tdBytes, this.fftSize,
+                Math.round(this.smoothingTimeConstant * 100),
+                prevBytes
+            );
+            const result = new Float32Array(out.buffer, out.byteOffset, out.byteLength / 4);
+            const len = Math.min(arr.length, result.length);
+            for (let i = 0; i < len; i++) arr[i] = result[i];
+            this._prevFreq = result.slice();
+        }
+        getByteTimeDomainData(arr) {
+            if (!this._timeDomain) {
+                for (let i = 0; i < arr.length; i++) arr[i] = 128;
+                return;
+            }
+            const len = Math.min(arr.length, this._timeDomain.length);
+            for (let i = 0; i < len; i++) {
+                arr[i] = Math.max(0, Math.min(255, Math.round((this._timeDomain[i] + 1) * 127.5)));
+            }
+        }
+        getFloatTimeDomainData(arr) {
+            if (!this._timeDomain) {
+                for (let i = 0; i < arr.length; i++) arr[i] = 0;
+                return;
+            }
+            const len = Math.min(arr.length, this._timeDomain.length);
+            for (let i = 0; i < len; i++) arr[i] = this._timeDomain[i];
+        }
+    }
+
+    class AudioDestinationNode extends AudioNode {
+        constructor() { super(); this.maxChannelCount = 2; }
+    }
+
+    class AudioContext extends EventTarget {
+        constructor() {
+            super();
+            this.sampleRate = 44100;
+            this.state = "running";
+            this.currentTime = 0;
+            this.destination = new AudioDestinationNode();
+        }
+        createOscillator() { return new OscillatorNode(this); }
+        createDynamicsCompressor() { return new DynamicsCompressorNode(this); }
+        createAnalyser() { return new AnalyserNode(); }
+        createGain() { return new GainNode(); }
+        createBiquadFilter() { return new BiquadFilterNode(); }
+        createBufferSource() {
+             return { connect() {}, start() {}, stop() {}, buffer: null, loop: false };
+        }
         createBuffer(channels, length, sampleRate) {
             const bufs = [];
             for (let c = 0; c < channels; c++) bufs.push(new Float32Array(length));
-            return { numberOfChannels: channels, length, sampleRate, duration: length / sampleRate, getChannelData(c) { return bufs[c]; } };
+            return {
+                numberOfChannels: channels, length, sampleRate,
+                duration: length / sampleRate,
+                getChannelData(c) { return bufs[c]; }
+            };
         }
-        get destination() { return {}; }
+        decodeAudioData() { return Promise.resolve(); }
         close() { return Promise.resolve(); }
         resume() { return Promise.resolve(); }
         suspend() { return Promise.resolve(); }
@@ -681,9 +738,6 @@
             this._channels = channels || 1;
             this._length = length || 44100;
             this.sampleRate = sampleRate || 44100;
-            // Track connected nodes to determine oscillator params. Defaults
-            // match Blink's DynamicsCompressor initial values (see
-            // DynamicsCompressor::initializeParameters in WebKit / Chromium).
             this._oscType = "triangle";
             this._oscFreq = 10000;
             this._compThreshold = -24;
@@ -692,86 +746,58 @@
             this._compAttack = 0.003;
             this._compRelease = 0.25;
         }
-        createOscillator() {
-            const self = this;
-            const osc = {
-                _type: "sine",
-                get type() { return this._type; },
-                set type(v) { this._type = v; self._oscType = v; },
-                frequency: {
-                    _value: 440,
-                    get value() { return this._value; },
-                    set value(v) { this._value = v; self._oscFreq = v; },
-                },
-                connect() {}, start() {}, stop() {},
-                addEventListener() {}, removeEventListener() {},
-            };
-            return osc;
-        }
-        createDynamicsCompressor() {
-            const self = this;
-            return {
-                threshold: { get value() { return self._compThreshold; }, set value(v) { self._compThreshold = v; } },
-                knee: { get value() { return self._compKnee; }, set value(v) { self._compKnee = v; } },
-                ratio: { get value() { return self._compRatio; }, set value(v) { self._compRatio = v; } },
-                attack: { get value() { return self._compAttack; }, set value(v) { self._compAttack = v; } },
-                release: { get value() { return self._compRelease; }, set value(v) { self._compRelease = v; } },
-                connect() {}, addEventListener() {}, removeEventListener() {},
-            };
-        }
+        _setOscType(v) { this._oscType = v; }
+        _setOscFreq(v) { this._oscFreq = v; }
+        _setCompThreshold(v) { this._compThreshold = v; }
+        _setCompKnee(v) { this._compKnee = v; }
+        _setCompRatio(v) { this._compRatio = v; }
+        _setCompAttack(v) { this._compAttack = v; }
+        _setCompRelease(v) { this._compRelease = v; }
+
         startRendering() {
-            // Render via the Rust Blink-compatible DynamicsCompressor kernel.
-            // Output is a Float32Array of length = this._length.
-            const sr = this.sampleRate;
-            const len = this._length;
-            const freq = this._oscFreq;
-            const type = this._oscType;
-            const waveTypeId = type === "sine" ? 0
-                : type === "square" ? 2
-                : type === "sawtooth" ? 3
-                : 1; // triangle (default)
+            const self = this;
+            return new Promise((resolve) => {
+                const sr = self.sampleRate;
+                const len = self._length;
+                const freq = self._oscFreq;
+                const type = self._oscType;
+                const waveTypeId = type === "sine" ? 0
+                    : type === "square" ? 2
+                    : type === "sawtooth" ? 3
+                    : 1; // triangle
 
-            // Per-device audio seed. Try op_get_profile_value; fall back to 0.
-            let seed = 0;
-            try {
-                if (typeof Deno !== 'undefined' && Deno.core?.ops?.op_get_profile_value) {
-                    const raw = Deno.core.ops.op_get_profile_value("audio_seed");
-                    if (raw) {
-                        const parsed = parseInt(raw, 10);
-                        if (!Number.isNaN(parsed)) seed = parsed | 0;
+                let seed = 0;
+                try {
+                    if (typeof Deno !== 'undefined' && Deno.core?.ops?.op_get_profile_value) {
+                        const raw = Deno.core.ops.op_get_profile_value("audio_seed");
+                        if (raw) {
+                            const parsed = parseInt(raw, 10);
+                            if (!Number.isNaN(parsed)) seed = parsed | 0;
+                        }
                     }
+                } catch (e) {}
+
+                let data;
+                try {
+                    const bytes = ops.op_offline_audio_render(
+                        seed, sr | 0, len | 0, freq, waveTypeId,
+                        self._compThreshold, self._compKnee, self._compRatio,
+                        self._compAttack, self._compRelease,
+                    );
+                    data = new Float32Array(bytes.buffer, bytes.byteOffset, len);
+                } catch (e) {
+                    data = new Float32Array(len);
                 }
-            } catch (e) {}
 
-            let data;
-            try {
-                const bytes = ops.op_offline_audio_render(
-                    seed,
-                    sr | 0,
-                    len | 0,
-                    freq,
-                    waveTypeId,
-                    this._compThreshold,
-                    this._compKnee,
-                    this._compRatio,
-                    this._compAttack,
-                    this._compRelease,
-                );
-                // bytes is a Uint8Array; reinterpret as Float32Array.
-                data = new Float32Array(bytes.buffer, bytes.byteOffset, len);
-            } catch (e) {
-                // Fallback — silent buffer. Shouldn't happen in practice.
-                data = new Float32Array(len);
-            }
-
-            const buf = {
-                numberOfChannels: this._channels,
-                length: len,
-                sampleRate: sr,
-                duration: len / sr,
-                getChannelData() { return data; },
-            };
-            return Promise.resolve(buf);
+                const buf = {
+                    numberOfChannels: self._channels,
+                    length: len,
+                    sampleRate: sr,
+                    duration: len / sr,
+                    getChannelData() { return data; },
+                };
+                resolve(buf);
+            });
         }
     }
 

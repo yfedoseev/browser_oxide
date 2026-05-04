@@ -322,7 +322,8 @@ mod tests {
     fn cleartext_starts_with_minus_100_marker() {
         let p = synthetic_profile();
         let s = AkamaiSession::default();
-        let ct = build_cleartext(&p, &s, "https://example.com/");
+        let ct = build_cleartext(&p, &s, "https://www.bestbuy.com/?intl=nosplash");
+        println!("CLEARTEXT_START:{}CLEARTEXT_END", ct);
         assert!(
             ct.starts_with("-100,"),
             "cleartext must start with the -100 marker; got: {}",

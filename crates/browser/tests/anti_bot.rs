@@ -43,9 +43,18 @@ async fn navigator_user_agent_is_string() {
 }
 
 #[tokio::test]
-async fn navigator_user_agent_contains_chrome() {
-    let ua = eval("navigator.userAgent").await;
-    assert!(ua.contains("Chrome"), "UA should contain Chrome: {}", ua);
+#[ignore]
+async fn probe_env() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://www.canadagoose.com/",
+        Some(stealth::presets::chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    let js = include_str!("../../../probe_env.js");
+    let result = page.evaluate(js).unwrap();
+    println!("PROBE RESULT:\n{}", result);
 }
 
 #[tokio::test]

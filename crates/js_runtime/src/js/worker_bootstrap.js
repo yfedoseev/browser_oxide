@@ -54,11 +54,11 @@
     // --- WorkerNavigator (matches StealthProfile) ---
     if (!self.navigator) {
         const workerNavigator = {
-            userAgent: _p("user_agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
-            appVersion: _p("app_version", "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
+            userAgent: _p("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
+            appVersion: _p("app_version", "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
             language: _p("language", "en-US"),
             languages: _pJson("languages", ["en-US", "en"]),
-            platform: _p("platform", "Linux x86_64"),
+            platform: _p("platform", "Win32"),
             onLine: true,
             cookieEnabled: true,
             hardwareConcurrency: _pInt("hardware_concurrency", 8),
@@ -76,8 +76,17 @@
         self.navigator = workerNavigator;
     }
 
+    // --- performance.now() humanization (matches window_bootstrap) ---
+    if (!globalThis.performance) {
+        globalThis.performance = {
+            now() { return _wops.op_perf_now_humanized(); },
+        };
+    } else {
+        const _origNow = globalThis.performance.now.bind(globalThis.performance);
+        globalThis.performance.now = () => _wops.op_perf_now_humanized();
+    }
+
     // --- performance.memory jitter (matches window_bootstrap) ---
-    if (globalThis.performance) {
         Object.defineProperty(globalThis.performance, 'memory', {
             get() {
                 const jsHeapSizeLimit = 4294705152;
