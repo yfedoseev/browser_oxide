@@ -6,6 +6,7 @@ pub mod extensions;
 pub mod runtime;
 pub mod snapshot;
 pub mod state;
+pub mod utils;
 
 use deno_core::JsRuntime;
 use dom::Dom;
@@ -170,6 +171,7 @@ impl BrowserJsRuntime {
         // Replace DomState — ops will pick up the new DOM on next call
         let mut dom_state = DomState::new(dom);
         dom_state.stylesheets = stylesheets;
+        dom_state.update_cached_rules();
         state.put(dom_state);
         // Reset timer state (clear pending timers from old page)
         state.put(extensions::timer_ext::TimerState::new());

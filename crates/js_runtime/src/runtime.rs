@@ -92,6 +92,7 @@ pub fn create_runtime_with_signals(
     if let Some(url) = options.base_url {
         state = state.with_base_url(url);
     }
+    state.update_cached_rules();
 
     // Create fetch client from stealth profile if available
     let fetch_state = match &options.stealth_profile {

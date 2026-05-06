@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use crate::state::DomState;
+use crate::utils::tokens_to_string;
 use deno_core::op2;
 use dom::node::NodeId;
 use dom::DomElement;
@@ -716,12 +718,73 @@ pub fn op_dom_class_list_remove(
 /// Checks: 1) inline style attribute, 2) `<style>` block rules, 3) CSS defaults.
 /// Uses selector matching for style block rules. Higher specificity wins.
 #[op2]
+#[serde]
+pub fn op_dom_get_all_computed_styles(
+    #[state] state: &mut DomState,
+    #[smi] node_id: i32,
+) -> HashMap<String, String> {
+    if state.cached_rules.is_empty() && !state.stylesheets.is_empty() {
+        state.update_cached_rules();
+    }
+    let id = NodeId::from_raw(node_id as u32);
+    let dom_el = if let Some(el) = DomElement::new(&state.dom, id) {
+        el
+    } else {
+        return HashMap::new();
+    };
+
+    let mut declarations: HashMap<String, (u32, u32, String)> = HashMap::new();
+    let mut source_order: u32 = 0;
+
+    for rule in &state.cached_rules {
+        for sel in &rule.selectors {
+            if css_selectors::matches_selector(&dom_el, sel) {
+                let s = css_selectors::compute_specificity(sel);
+                let spec = s.a * 10000 + s.b * 100 + s.c;
+                for (name, val) in &rule.declarations {
+                    let entry = declarations
+                        .entry(name.clone())
+                        .or_insert((0, 0, String::new()));
+                    if spec > entry.0 || (spec == entry.0 && source_order >= entry.1) {
+                        *entry = (spec, source_order, val.clone());
+                    }
+                }
+            }
+        }
+        source_order += 1;
+    }
+
+    // Add inline styles (highest specificity)
+    if let Some(el) = state.dom.get(id).and_then(|n| n.as_element()) {
+        if let Some(style) = el
+            .attrs
+            .iter()
+            .find(|a| a.name.local.eq_ignore_ascii_case("style"))
+        {
+            for decl in style.value.split(';') {
+                if let Some(colon) = decl.find(':') {
+                    let name = decl[..colon].trim().to_string();
+                    let val = decl[colon + 1..].trim().to_string();
+                    declarations.insert(name, (999999, 999999, val));
+                }
+            }
+        }
+    }
+
+    let res: HashMap<String, String> = declarations.into_iter().map(|(k, v)| (k, v.2)).collect();
+    res
+}
+
+#[op2]
 #[string]
 pub fn op_dom_get_computed_style(
-    #[state] state: &DomState,
+    #[state] state: &mut DomState,
     #[smi] node_id: i32,
     #[string] property: &str,
 ) -> String {
+    if state.cached_rules.is_empty() && !state.stylesheets.is_empty() {
+        state.update_cached_rules();
+    }
     let id = NodeId::from_raw(node_id as u32);
 
     // 1. Check inline style (highest specificity)
@@ -822,47 +885,26 @@ fn get_stylesheet_value(state: &DomState, id: NodeId, property: &str) -> Option<
     let mut matches: Vec<(u32, u32, String)> = Vec::new();
     let mut source_order: u32 = 0;
 
-    for css_text in &state.stylesheets {
-        let (stylesheet, _errors) = css_parser::parse_stylesheet(css_text);
-        for rule in &stylesheet.rules {
-            if let css_parser::ast::Rule::Qualified(qr) = rule {
-                // Convert prelude tokens to selector string
-                let selector_str = tokens_to_string(&qr.prelude);
-                if selector_str.is_empty() {
-                    continue;
+    for rule in &state.cached_rules {
+        let mut matched = false;
+        let mut best_spec: u32 = 0;
+        for sel in &rule.selectors {
+            if css_selectors::matches_selector(&dom_el, sel) {
+                matched = true;
+                let s = css_selectors::compute_specificity(sel);
+                let spec = s.a * 10000 + s.b * 100 + s.c;
+                if spec > best_spec {
+                    best_spec = spec;
                 }
-
-                // Parse selector and check if it matches
-                let selectors = match css_selectors::parse_selector_list(&selector_str) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
-
-                let mut matched = false;
-                let mut best_spec: u32 = 0;
-                for sel in &selectors {
-                    if css_selectors::matches_selector(&dom_el, sel) {
-                        matched = true;
-                        let s = css_selectors::compute_specificity(sel);
-                        let spec = s.a * 10000 + s.b * 100 + s.c;
-                        if spec > best_spec {
-                            best_spec = spec;
-                        }
-                    }
-                }
-
-                if matched {
-                    // Check declarations for the requested property
-                    for decl in &qr.declarations {
-                        if decl.name.eq_ignore_ascii_case(property) {
-                            let val = tokens_to_string(&decl.value).trim().to_string();
-                            matches.push((best_spec, source_order, val));
-                        }
-                    }
-                }
-                source_order += 1;
             }
         }
+
+        if matched {
+            if let Some(val) = rule.declarations.get(property) {
+                matches.push((best_spec, source_order, val.clone()));
+            }
+        }
+        source_order += 1;
     }
 
     if matches.is_empty() {
@@ -874,61 +916,6 @@ fn get_stylesheet_value(state: &DomState, id: NodeId, property: &str) -> Option<
 
     // Winner is the last entry (highest specificity, latest source order)
     matches.last().map(|(_, _, val)| val.clone())
-}
-
-/// Convert CSS component values back to a string.
-fn tokens_to_string(values: &[css_parser::ast::ComponentValue]) -> String {
-    use css_parser::token::TokenKind;
-    let mut s = String::new();
-    for v in values {
-        match v {
-            css_parser::ast::ComponentValue::Token(t) => match &t.kind {
-                TokenKind::Ident(name) => s.push_str(name),
-                TokenKind::String(val) => {
-                    s.push('"');
-                    s.push_str(val);
-                    s.push('"');
-                }
-                TokenKind::Hash { value, .. } => {
-                    s.push('#');
-                    s.push_str(value);
-                }
-                TokenKind::Number { value, .. } => s.push_str(&value.to_string()),
-                TokenKind::Percentage { value, .. } => {
-                    s.push_str(&value.to_string());
-                    s.push('%');
-                }
-                TokenKind::Dimension { value, unit, .. } => {
-                    s.push_str(&value.to_string());
-                    s.push_str(unit);
-                }
-                TokenKind::Whitespace => s.push(' '),
-                TokenKind::Delim(c) => s.push(*c),
-                TokenKind::Colon => s.push(':'),
-                TokenKind::Semicolon => s.push(';'),
-                TokenKind::Comma => s.push(','),
-                TokenKind::OpenParen => s.push('('),
-                TokenKind::CloseParen => s.push(')'),
-                TokenKind::OpenSquare => s.push('['),
-                TokenKind::CloseSquare => s.push(']'),
-                TokenKind::Function(name) => {
-                    s.push_str(name);
-                    s.push('(');
-                }
-                _ => {}
-            },
-            css_parser::ast::ComponentValue::Function(f) => {
-                s.push_str(f.name);
-                s.push('(');
-                s.push_str(&tokens_to_string(&f.arguments));
-                s.push(')');
-            }
-            css_parser::ast::ComponentValue::SimpleBlock(b) => {
-                s.push_str(&tokens_to_string(&b.value));
-            }
-        }
-    }
-    s
 }
 
 // --- Shadow DOM ops ---
@@ -1122,6 +1109,7 @@ deno_core::extension!(
         op_dom_class_list_add,
         op_dom_class_list_remove,
         op_dom_get_computed_style,
+        op_dom_get_all_computed_styles,
         op_dom_get_stylesheet_count,
         op_dom_get_stylesheet_rules,
         op_dom_attach_shadow,

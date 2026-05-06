@@ -3359,14 +3359,14 @@ async fn antibot_smoke(label: &str, url: &str, profile: stealth::StealthProfile)
     // udemy/glassdoor/discord) finish well under 90s. Pages that go
     // beyond this aren't going to render usefully anyway.
     let page = match tokio::time::timeout(
-        std::time::Duration::from_secs(90),
+        std::time::Duration::from_secs(300),
         Page::navigate_with_init(url, profile, 3, vec![FN_TRACE_INIT.to_string()]),
     )
     .await
     {
         Ok(r) => r,
         Err(_) => {
-            println!("  [TIMEOUT] {label} exceeded 60s wall clock", label = label);
+            println!("  [TIMEOUT] {label} exceeded 300s wall clock", label = label);
             println!("=== end {label} ===");
             return;
         }

@@ -327,16 +327,12 @@
     //   EventTarget ← Node ← Element ← HTMLElement ← HTMLDivElement etc.
     // Anti-bot probes check `document instanceof EventTarget === true`
     // and walk Object.getPrototypeOf chains expecting this layout.
-    class EventTarget {
+    const EventTarget = globalThis.EventTarget || class EventTarget {
         constructor() {}
-        addEventListener(type, listener, options) {
-            // Override is installed on Node.prototype below; this base exists
-            // only to anchor the prototype chain so `x instanceof EventTarget`
-            // returns true for every DOM node.
-        }
+        addEventListener(type, listener, options) {}
         removeEventListener(type, listener, options) {}
         dispatchEvent(event) { return true; }
-    }
+    };
     globalThis.EventTarget = EventTarget;
 
     class Node extends EventTarget {
@@ -502,24 +498,19 @@
             ops.op_dom_set_attribute(nodeId, "style", parts.join("; "));
         }
         const toKebab = (p) => p.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
-        return new Proxy({
-            setProperty(name, value) { cache[name] = String(value); flush(); },
-            getPropertyValue(name) { return cache[name] || ""; },
-            removeProperty(name) { const old = cache[name] || ""; delete cache[name]; flush(); return old; },
-            get cssText() { return ops.op_dom_get_attribute(nodeId, "style") || ""; },
-            set cssText(val) {
-                for (const k in cache) delete cache[k];
-                for (const part of val.split(";")) {
-                    const idx = part.indexOf(":");
-                    if (idx > 0) cache[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
-                }
-                flush();
-            },
-        }, {
+        const style = Object.create(globalThis.CSSStyleDeclaration.prototype || Object.prototype);
+        return new Proxy(style, {
             get(target, prop) {
-                if (prop === "setProperty" || prop === "getPropertyValue" || prop === "removeProperty") return target[prop].bind(target);
+                if (prop === "setProperty") return (name, value) => { cache[name] = String(value); flush(); };
+                if (prop === "getPropertyValue") return (name) => cache[name] || "";
+                if (prop === "removeProperty") return (name) => { const old = cache[name] || ""; delete cache[name]; flush(); return old; };
                 if (prop === "cssText") return ops.op_dom_get_attribute(nodeId, "style") || "";
-                if (typeof prop === "string") return cache[toKebab(prop)] || "";
+                if (prop === "length") return Object.keys(cache).length;
+                if (prop === Symbol.toStringTag) return "CSSStyleDeclaration";
+                if (typeof prop === "string") {
+                    if (/^\d+$/.test(prop)) return Object.keys(cache)[parseInt(prop, 10)];
+                    return cache[toKebab(prop)] || "";
+                }
                 return undefined;
             },
             set(target, prop, value) {
@@ -635,7 +626,8 @@
         }
         // Layout APIs (wired to taffy via layout_ext ops)
         getBoundingClientRect() {
-            return ops.op_layout_get_bounding_rect(_getNodeId(this));
+            const r = ops.op_layout_get_bounding_rect(_getNodeId(this));
+            return new DOMRect(r.x, r.y, r.width, r.height);
         }
         getClientRects() { return [this.getBoundingClientRect()]; }
         get offsetWidth() { return ops.op_layout_get_offset_width(_getNodeId(this)); }
@@ -1273,7 +1265,30 @@
             return new NodeList(ops.op_dom_query_selector_all(ops.op_dom_document_node(), sel));
         }
         createElement(tag) {
-            return _wrapNode(ops.op_dom_create_element(tag));
+            const el = _wrapNode(ops.op_dom_create_element(tag));
+            if (tag.toLowerCase() === "script") {
+                let _src = "";
+                // Capture the real descriptor to avoid infinite recursion
+                const proto = Object.getPrototypeOf(el);
+                const origSrc = Object.getOwnPropertyDescriptor(proto, 'src');
+
+                Object.defineProperty(el, "src", {
+                    get: () => _src,
+                    set: (v) => {
+                        _src = v;
+                        if (v.includes("akam") || v.includes("ips.js") || v.includes("kpsdk")) {
+                            console.log(`[DOM] dynamic script: ${v}`);
+                        }
+                        if (origSrc && origSrc.set) {
+                            origSrc.set.call(el, v);
+                        } else {
+                            el.setAttribute("src", v);
+                        }
+                    },
+                    configurable: true,
+                });
+            }
+            return el;
         }
         createElementNS(ns, tag) {
             // For now, treat namespaced elements same as regular ones.

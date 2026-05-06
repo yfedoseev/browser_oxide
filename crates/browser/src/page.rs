@@ -2053,6 +2053,30 @@ impl Page {
 
             // Flush logs for this script
             {
+                if let Some(src) = &script.src {
+                    if src.contains("akam") || src.contains("ips.js") || src.contains("kpsdk") {
+                        eprintln!("[JS LOG] script found: {}", src);
+
+                        // Extract Kasada tenant prefix (e.g. /149e9513-.../2d206a39-...)
+                        if src.contains("/ips.js") {
+                            let parts: Vec<&str> = src.split("/ips.js").collect();
+                            if !parts[0].is_empty() {
+                                if let Ok(u) = url::Url::parse(url) {
+                                    if let Some(host) = u.host_str() {
+                                        let client_clone = client.clone();
+                                        let host_str = host.to_string();
+                                        let prefix_str = parts[0].to_string();
+                                        tokio::spawn(async move {
+                                            client_clone.learn_kasada_prefix(&host_str, &prefix_str).await;
+                                            // Trigger /mfc fetch if needed
+                                            client_clone.fetch_kasada_mfc_if_needed(&host_str).await;
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 let logs = {
                     let runtime = event_loop.runtime_mut().inner();
                     let state = runtime.op_state();

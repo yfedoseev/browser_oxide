@@ -37,27 +37,31 @@ pub fn op_layout_get_bounding_rect(
 }
 
 #[op2(fast)]
-pub fn op_layout_get_offset_width(#[state] state: &mut DomState, #[smi] node_id: i32) -> f64 {
+#[smi]
+pub fn op_layout_get_offset_width(#[state] state: &mut DomState, #[smi] node_id: i32) -> i32 {
     let nid = NodeId::from_raw(node_id as u32);
-    state.layout_engine.get_offset_width(&state.dom, nid)
+    state.layout_engine.get_offset_width(&state.dom, nid).round() as i32
 }
 
 #[op2(fast)]
-pub fn op_layout_get_offset_height(#[state] state: &mut DomState, #[smi] node_id: i32) -> f64 {
+#[smi]
+pub fn op_layout_get_offset_height(#[state] state: &mut DomState, #[smi] node_id: i32) -> i32 {
     let nid = NodeId::from_raw(node_id as u32);
-    state.layout_engine.get_offset_height(&state.dom, nid)
+    state.layout_engine.get_offset_height(&state.dom, nid).round() as i32
 }
 
 #[op2(fast)]
-pub fn op_layout_get_offset_top(#[state] state: &mut DomState, #[smi] node_id: i32) -> f64 {
+#[smi]
+pub fn op_layout_get_offset_top(#[state] state: &mut DomState, #[smi] node_id: i32) -> i32 {
     let nid = NodeId::from_raw(node_id as u32);
-    state.layout_engine.get_offset_top(&state.dom, nid)
+    state.layout_engine.get_offset_top(&state.dom, nid).round() as i32
 }
 
 #[op2(fast)]
-pub fn op_layout_get_offset_left(#[state] state: &mut DomState, #[smi] node_id: i32) -> f64 {
+#[smi]
+pub fn op_layout_get_offset_left(#[state] state: &mut DomState, #[smi] node_id: i32) -> i32 {
     let nid = NodeId::from_raw(node_id as u32);
-    state.layout_engine.get_offset_left(&state.dom, nid)
+    state.layout_engine.get_offset_left(&state.dom, nid).round() as i32
 }
 
 /// Get computed style — reads from inline style attribute first, falls back to defaults.

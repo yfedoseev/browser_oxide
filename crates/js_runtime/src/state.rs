@@ -14,6 +14,8 @@ pub struct DomState {
     pub storage: HashMap<String, HashMap<String, String>>,
     /// CSS from `<style>` blocks, used by getComputedStyle
     pub stylesheets: Vec<String>,
+    /// Parsed and simplified CSS rules for fast lookup
+    pub cached_rules: Vec<CachedRule>,
     pub stealth_profile: Option<stealth::StealthProfile>,
     /// Active Content Security Policy. Built from the response
     /// `Content-Security-Policy` header(s) plus any
@@ -27,6 +29,13 @@ pub struct DomState {
     /// the document's origin (scheme + host + port of the navigated
     /// URL). None for opaque/about:blank documents — those bypass CSP.
     pub csp_origin: Option<url::Url>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedRule {
+    pub selector_str: String,
+    pub selectors: css_selectors::SelectorList,
+    pub declarations: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,9 +65,36 @@ impl DomState {
             console_output: Vec::new(),
             storage,
             stylesheets: Vec::new(),
+            cached_rules: Vec::new(),
             stealth_profile: None,
             csp_policy: None,
             csp_origin: None,
+        }
+    }
+
+    pub fn update_cached_rules(&mut self) {
+        use crate::utils::tokens_to_string;
+        self.cached_rules.clear();
+        for css_text in &self.stylesheets {
+            let (stylesheet, _errors) = css_parser::parse_stylesheet(css_text);
+            for rule in &stylesheet.rules {
+                if let css_parser::ast::Rule::Qualified(qr) = rule {
+                    let selector_str = tokens_to_string(&qr.prelude);
+                    if selector_str.is_empty() {
+                        continue;
+                    }
+                    let mut declarations = HashMap::new();
+                    for d in &qr.declarations {
+                        declarations.insert(d.name.to_string(), tokens_to_string(&d.value).trim().to_string());
+                    }
+                    let selectors = css_selectors::parse_selector_list(&selector_str).unwrap_or_default();
+                    self.cached_rules.push(CachedRule {
+                        selector_str,
+                        selectors,
+                        declarations,
+                    });
+                }
+            }
         }
     }
 

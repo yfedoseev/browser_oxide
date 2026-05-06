@@ -71,6 +71,25 @@ impl KasadaSessionStore {
     /// looks like a Kasada `/tl` endpoint (path ending in `/tl`), we
     /// extract the tenant prefix so we can later fetch `/mfc` on the
     /// same path.
+    pub async fn learn_prefix(&self, host: &str, prefix: &str) {
+        let mut store = self.inner.write().await;
+        let entry = store.entry(host.to_string()).or_insert_with(|| {
+            let mut rng = rand::thread_rng();
+            let mut id_rng = ChaCha20Rng::from_rng(rng).unwrap();
+            KasadaSession {
+                server_offset_ms: 0,
+                server_st_ms: 0,
+                id: generate_session_id(&mut id_rng),
+                fc_token: None,
+                ct_token: None,
+                tenant_prefix: None,
+            }
+        });
+        if entry.tenant_prefix.is_none() {
+            entry.tenant_prefix = Some(prefix.to_string());
+        }
+    }
+
     pub async fn learn(
         &self,
         host: &str,

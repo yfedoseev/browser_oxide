@@ -7,9 +7,14 @@
         if (globalThis[name]) {
             return;
         }
-        Object.defineProperty(cls.prototype, Symbol.toStringTag, {
-            value: name, configurable: true
-        });
+        if (cls && cls.prototype) {
+            Object.defineProperty(cls.prototype, Symbol.toStringTag, {
+                value: name, configurable: true
+            });
+        }
+        if (typeof _maskFunction === 'function' && typeof cls === 'function') {
+            _maskFunction(cls, name);
+        }
         Object.defineProperty(globalThis, name, {
             value: cls, configurable: true, writable: true, enumerable: false
         });
@@ -19,22 +24,57 @@
     _define("Location", class Location {});
     _define("History", class History {});
     _define("Screen", class Screen {});
-    _define("EventTarget", class EventTarget {});
-    _define("Event", class Event { constructor(type, init) { this.type = type; } });
-    _define("MessageEvent", class MessageEvent extends (globalThis.Event || class {}) {});
-    _define("CustomEvent", class CustomEvent extends (globalThis.Event || class {}) {});
-    _define("Performance", class Performance {});
+
+    // Canonical EventTarget — base for ~70% of the Web API surface.
+    // Must be defined ONCE and shared across all bootstraps to ensure
+    // `x instanceof EventTarget` holds for all inherited stubs.
+    const _EventTarget = class EventTarget {
+        constructor() {}
+    };
+    _define("EventTarget", _EventTarget);
+
+    // Canonical Event — base for all event types.
+    const _Event = class Event {
+        constructor(type, init = {}) {
+            this.type = String(type);
+            this.bubbles = !!init.bubbles;
+            this.cancelable = !!init.cancelable;
+            this.composed = !!init.composed;
+            this.defaultPrevented = false;
+            this.eventPhase = 0; // NONE
+            this.target = null;
+            this.currentTarget = null;
+            this.timeStamp = Date.now();
+            this.isTrusted = false;
+            this._stopped = false;
+            this._stoppedImmediate = false;
+        }
+        stopPropagation() { this._stopped = true; }
+        stopImmediatePropagation() { this._stopped = true; this._stoppedImmediate = true; }
+        preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
+    };
+    _define("Event", _Event);
+
+    _define("MessageEvent", class MessageEvent extends _Event {});
+    _define("CustomEvent", class CustomEvent extends _Event {
+        constructor(type, init = {}) {
+            super(type, init);
+            this.detail = init.detail || null;
+        }
+    });
+
+    _define("Performance", class Performance extends _EventTarget {});
     _define("PluginArray", class PluginArray {});
     _define("MimeTypeArray", class MimeTypeArray {});
     _define("Plugin", class Plugin {});
     _define("MimeType", class MimeType {});
-    _define("NetworkInformation", class NetworkInformation {});
-    _define("MediaDevices", class MediaDevices {});
-    _define("StorageManager", class StorageManager {});
-    _define("Bluetooth", class Bluetooth {});
-    _define("PermissionStatus", class PermissionStatus {});
+    _define("NetworkInformation", class NetworkInformation extends _EventTarget {});
+    _define("MediaDevices", class MediaDevices extends _EventTarget {});
+    _define("StorageManager", class StorageManager extends _EventTarget {});
+    _define("Bluetooth", class Bluetooth extends _EventTarget {});
+    _define("PermissionStatus", class PermissionStatus extends _EventTarget {});
     _define("Permissions", class Permissions {});
-    _define("ScreenOrientation", class ScreenOrientation {});
+    _define("ScreenOrientation", class ScreenOrientation extends _EventTarget {});
 
     // Chrome 147 constructor surface — anti-bot enumeration probes
     // (CreepJS features, fp-collect navigatorPrototype walk, BotD
@@ -42,25 +82,27 @@
     // constructor list. Each missing entry is a "this UA claims Chrome
     // 147 but doesn't ship X" tell. Stubs with Illegal-constructor
     // semantics match real Chrome behaviour for most of these.
-    function _illegalCtor(name) {
-        // Class with a thrown constructor mirrors Chrome's "Illegal
-        // constructor" pattern for interfaces only created internally.
-        const C = class {
+    function _stub(name, base = Object) {
+        // Many Chrome classes are stubs that throw "Illegal constructor"
+        // when called via `new`, but MUST have the correct prototype chain.
+        const C = class extends base {
             constructor() {
+                super();
                 throw new TypeError("Failed to construct '" + name + "': Illegal constructor");
             }
         };
+        // Ensure C.name is exactly correct (minifiers might mangle otherwise)
         Object.defineProperty(C, "name", { value: name, configurable: true });
         return C;
     }
 
     // CSS-related
-    _define("CSSStyleSheet", _illegalCtor("CSSStyleSheet"));
-    _define("CSSRule", _illegalCtor("CSSRule"));
-    _define("CSSStyleRule", _illegalCtor("CSSStyleRule"));
+    _define("CSSStyleSheet", _stub("CSSStyleSheet"));
+    _define("CSSRule", _stub("CSSRule"));
+    _define("CSSStyleRule", _stub("CSSStyleRule"));
     _define("Highlight", class Highlight { constructor(...ranges) { this._ranges = ranges; this.priority = 0; } });
-    _define("HighlightRegistry", _illegalCtor("HighlightRegistry"));
-    _define("CSSPseudoElement", _illegalCtor("CSSPseudoElement"));
+    _define("HighlightRegistry", _stub("HighlightRegistry"));
+    _define("CSSPseudoElement", _stub("CSSPseudoElement"));
 
     // DOM ranges and other interfaces
     _define("StaticRange", class StaticRange { constructor(init) { Object.assign(this, init || {}); } });
@@ -69,7 +111,7 @@
 
     // Newer Chrome API constructors
     _define("EditContext", class EditContext { constructor(init) { Object.assign(this, init || {}); } });
-    _define("CookieStore", _illegalCtor("CookieStore"));
+    _define("CookieStore", _stub("CookieStore"));
     // WebTransport — real Chrome's constructor returns successfully; the
     // `ready` and `closed` Promises reject asynchronously when the URL is
     // unreachable. Throwing synchronously is detectable by sites that
@@ -128,23 +170,23 @@
         createBidirectionalStream(_options) { return Promise.reject(new Error("WebTransport: connection failed")); }
         createUnidirectionalStream(_options) { return Promise.reject(new Error("WebTransport: connection failed")); }
     });
-    _define("LaunchQueue", _illegalCtor("LaunchQueue"));
+    _define("LaunchQueue", _stub("LaunchQueue"));
 
     // File system access
-    _define("FileSystemHandle", _illegalCtor("FileSystemHandle"));
-    _define("FileSystemFileHandle", _illegalCtor("FileSystemFileHandle"));
-    _define("FileSystemDirectoryHandle", _illegalCtor("FileSystemDirectoryHandle"));
-    _define("FileSystemWritableFileStream", _illegalCtor("FileSystemWritableFileStream"));
+    _define("FileSystemHandle", _stub("FileSystemHandle"));
+    _define("FileSystemFileHandle", _stub("FileSystemFileHandle"));
+    _define("FileSystemDirectoryHandle", _stub("FileSystemDirectoryHandle"));
+    _define("FileSystemWritableFileStream", _stub("FileSystemWritableFileStream"));
 
     // Push / background fetch
-    _define("PushManager", _illegalCtor("PushManager"));
-    _define("PushSubscription", _illegalCtor("PushSubscription"));
-    _define("BackgroundFetchManager", _illegalCtor("BackgroundFetchManager"));
+    _define("PushManager", _stub("PushManager"));
+    _define("PushSubscription", _stub("PushSubscription"));
+    _define("BackgroundFetchManager", _stub("BackgroundFetchManager"));
 
     // Payments / presentation
     _define("PaymentRequest", class PaymentRequest { constructor(_methods, _details) {} });
-    _define("PresentationConnection", _illegalCtor("PresentationConnection"));
-    _define("Presentation", _illegalCtor("Presentation"));
+    _define("PresentationConnection", _stub("PresentationConnection"));
+    _define("Presentation", _stub("Presentation"));
 
     // Sensors (DeviceMotion / DeviceOrientation API surface)
     const _sensor = (n) => {
@@ -154,21 +196,21 @@
         Object.defineProperty(C, "name", { value: n, configurable: true });
         return C;
     };
-    _define("Sensor", _illegalCtor("Sensor"));
+    _define("Sensor", _stub("Sensor"));
     _define("Accelerometer", _sensor("Accelerometer"));
     _define("LinearAccelerationSensor", _sensor("LinearAccelerationSensor"));
     _define("GravitySensor", _sensor("GravitySensor"));
     _define("Gyroscope", _sensor("Gyroscope"));
     _define("Magnetometer", _sensor("Magnetometer"));
-    _define("OrientationSensor", _illegalCtor("OrientationSensor"));
+    _define("OrientationSensor", _stub("OrientationSensor"));
     _define("AbsoluteOrientationSensor", _sensor("AbsoluteOrientationSensor"));
     _define("RelativeOrientationSensor", _sensor("RelativeOrientationSensor"));
 
     // Battery / Geolocation / WebXR
-    _define("BatteryManager", _illegalCtor("BatteryManager"));
-    _define("Geolocation", _illegalCtor("Geolocation"));
-    _define("XRSystem", _illegalCtor("XRSystem"));
-    _define("XRSession", _illegalCtor("XRSession"));
+    _define("BatteryManager", _stub("BatteryManager"));
+    _define("Geolocation", _stub("Geolocation"));
+    _define("XRSystem", _stub("XRSystem"));
+    _define("XRSession", _stub("XRSession"));
 
     // Streams (newer)
     if (typeof globalThis.TextDecoderStream === "undefined") {
@@ -180,8 +222,8 @@
 
     // Privacy Sandbox / FedCM-adjacent (shape-only — present in Chrome 147 even
     // though Topics/Protected Audience were retired in 2026).
-    _define("CredentialsContainer", _illegalCtor("CredentialsContainer"));
-    _define("Credential", _illegalCtor("Credential"));
+    _define("CredentialsContainer", _stub("CredentialsContainer"));
+    _define("Credential", _stub("Credential"));
     _define("PasswordCredential", class PasswordCredential { constructor(_init) {} });
     _define("FederatedCredential", class FederatedCredential { constructor(_init) {} });
 
@@ -253,553 +295,557 @@
     // ============================================================
 
     // ---- Constructors (498) ----
-    _define("AbstractRange", _illegalCtor("AbstractRange"));
-    _define("AnalyserNode", _illegalCtor("AnalyserNode"));
-    _define("Animation", _illegalCtor("Animation"));
-    _define("AnimationEffect", _illegalCtor("AnimationEffect"));
-    _define("AnimationPlaybackEvent", _illegalCtor("AnimationPlaybackEvent"));
-    _define("AnimationTimeline", _illegalCtor("AnimationTimeline"));
-    _define("AnimationTrigger", _illegalCtor("AnimationTrigger"));
-    _define("AsyncDisposableStack", _illegalCtor("AsyncDisposableStack"));
-    _define("Attr", _illegalCtor("Attr"));
-    _define("Audio", _illegalCtor("Audio"));
-    _define("AudioBuffer", _illegalCtor("AudioBuffer"));
-    _define("AudioBufferSourceNode", _illegalCtor("AudioBufferSourceNode"));
-    _define("AudioData", _illegalCtor("AudioData"));
-    _define("AudioDestinationNode", _illegalCtor("AudioDestinationNode"));
-    _define("AudioListener", _illegalCtor("AudioListener"));
-    _define("AudioNode", _illegalCtor("AudioNode"));
-    _define("AudioParam", _illegalCtor("AudioParam"));
-    _define("AudioParamMap", _illegalCtor("AudioParamMap"));
-    _define("AudioProcessingEvent", _illegalCtor("AudioProcessingEvent"));
-    _define("AudioScheduledSourceNode", _illegalCtor("AudioScheduledSourceNode"));
-    _define("AudioSinkInfo", _illegalCtor("AudioSinkInfo"));
-    _define("AudioWorkletNode", _illegalCtor("AudioWorkletNode"));
-    _define("BackgroundFetchRecord", _illegalCtor("BackgroundFetchRecord"));
-    _define("BackgroundFetchRegistration", _illegalCtor("BackgroundFetchRegistration"));
-    _define("BarProp", _illegalCtor("BarProp"));
-    _define("BaseAudioContext", _illegalCtor("BaseAudioContext"));
-    _define("BeforeInstallPromptEvent", _illegalCtor("BeforeInstallPromptEvent"));
-    _define("BiquadFilterNode", _illegalCtor("BiquadFilterNode"));
-    _define("BlobEvent", _illegalCtor("BlobEvent"));
-    _define("BluetoothUUID", _illegalCtor("BluetoothUUID"));
-    _define("BrowserCaptureMediaStreamTrack", _illegalCtor("BrowserCaptureMediaStreamTrack"));
-    _define("ByteLengthQueuingStrategy", _illegalCtor("ByteLengthQueuingStrategy"));
-    _define("CDATASection", _illegalCtor("CDATASection"));
-    _define("CSPViolationReportBody", _illegalCtor("CSPViolationReportBody"));
-    _define("CSSAnimation", _illegalCtor("CSSAnimation"));
-    _define("CSSConditionRule", _illegalCtor("CSSConditionRule"));
-    _define("CSSContainerRule", _illegalCtor("CSSContainerRule"));
-    _define("CSSCounterStyleRule", _illegalCtor("CSSCounterStyleRule"));
-    _define("CSSFontFaceRule", _illegalCtor("CSSFontFaceRule"));
-    _define("CSSFontFeatureValuesRule", _illegalCtor("CSSFontFeatureValuesRule"));
-    _define("CSSFontPaletteValuesRule", _illegalCtor("CSSFontPaletteValuesRule"));
-    _define("CSSFunctionDeclarations", _illegalCtor("CSSFunctionDeclarations"));
-    _define("CSSFunctionDescriptors", _illegalCtor("CSSFunctionDescriptors"));
-    _define("CSSFunctionRule", _illegalCtor("CSSFunctionRule"));
-    _define("CSSGroupingRule", _illegalCtor("CSSGroupingRule"));
-    _define("CSSImageValue", _illegalCtor("CSSImageValue"));
-    _define("CSSImportRule", _illegalCtor("CSSImportRule"));
-    _define("CSSKeyframeRule", _illegalCtor("CSSKeyframeRule"));
-    _define("CSSKeyframesRule", _illegalCtor("CSSKeyframesRule"));
-    _define("CSSKeywordValue", _illegalCtor("CSSKeywordValue"));
-    _define("CSSLayerBlockRule", _illegalCtor("CSSLayerBlockRule"));
-    _define("CSSLayerStatementRule", _illegalCtor("CSSLayerStatementRule"));
-    _define("CSSMarginRule", _illegalCtor("CSSMarginRule"));
-    _define("CSSMathClamp", _illegalCtor("CSSMathClamp"));
-    _define("CSSMathInvert", _illegalCtor("CSSMathInvert"));
-    _define("CSSMathMax", _illegalCtor("CSSMathMax"));
-    _define("CSSMathMin", _illegalCtor("CSSMathMin"));
-    _define("CSSMathNegate", _illegalCtor("CSSMathNegate"));
-    _define("CSSMathProduct", _illegalCtor("CSSMathProduct"));
-    _define("CSSMathSum", _illegalCtor("CSSMathSum"));
-    _define("CSSMathValue", _illegalCtor("CSSMathValue"));
-    _define("CSSMatrixComponent", _illegalCtor("CSSMatrixComponent"));
-    _define("CSSMediaRule", _illegalCtor("CSSMediaRule"));
-    _define("CSSNamespaceRule", _illegalCtor("CSSNamespaceRule"));
-    _define("CSSNestedDeclarations", _illegalCtor("CSSNestedDeclarations"));
-    _define("CSSNumericArray", _illegalCtor("CSSNumericArray"));
-    _define("CSSNumericValue", _illegalCtor("CSSNumericValue"));
-    _define("CSSPageRule", _illegalCtor("CSSPageRule"));
-    _define("CSSPerspective", _illegalCtor("CSSPerspective"));
-    _define("CSSPositionTryDescriptors", _illegalCtor("CSSPositionTryDescriptors"));
-    _define("CSSPositionTryRule", _illegalCtor("CSSPositionTryRule"));
-    _define("CSSPositionValue", _illegalCtor("CSSPositionValue"));
-    _define("CSSPropertyRule", _illegalCtor("CSSPropertyRule"));
-    _define("CSSRotate", _illegalCtor("CSSRotate"));
-    _define("CSSRuleList", _illegalCtor("CSSRuleList"));
-    _define("CSSScale", _illegalCtor("CSSScale"));
-    _define("CSSScopeRule", _illegalCtor("CSSScopeRule"));
-    _define("CSSSkew", _illegalCtor("CSSSkew"));
-    _define("CSSSkewX", _illegalCtor("CSSSkewX"));
-    _define("CSSSkewY", _illegalCtor("CSSSkewY"));
-    _define("CSSStartingStyleRule", _illegalCtor("CSSStartingStyleRule"));
-    _define("CSSStyleDeclaration", _illegalCtor("CSSStyleDeclaration"));
-    _define("CSSStyleValue", _illegalCtor("CSSStyleValue"));
-    _define("CSSSupportsRule", _illegalCtor("CSSSupportsRule"));
-    _define("CSSTransformComponent", _illegalCtor("CSSTransformComponent"));
-    _define("CSSTransformValue", _illegalCtor("CSSTransformValue"));
-    _define("CSSTransition", _illegalCtor("CSSTransition"));
-    _define("CSSTranslate", _illegalCtor("CSSTranslate"));
-    _define("CSSUnitValue", _illegalCtor("CSSUnitValue"));
-    _define("CSSUnparsedValue", _illegalCtor("CSSUnparsedValue"));
-    _define("CSSVariableReferenceValue", _illegalCtor("CSSVariableReferenceValue"));
-    _define("CSSViewTransitionRule", _illegalCtor("CSSViewTransitionRule"));
-    _define("CanvasCaptureMediaStreamTrack", _illegalCtor("CanvasCaptureMediaStreamTrack"));
-    _define("CanvasGradient", _illegalCtor("CanvasGradient"));
-    _define("CanvasPattern", _illegalCtor("CanvasPattern"));
-    _define("CaretPosition", _illegalCtor("CaretPosition"));
-    _define("ChannelMergerNode", _illegalCtor("ChannelMergerNode"));
-    _define("ChannelSplitterNode", _illegalCtor("ChannelSplitterNode"));
-    _define("ChapterInformation", _illegalCtor("ChapterInformation"));
-    _define("CharacterBoundsUpdateEvent", _illegalCtor("CharacterBoundsUpdateEvent"));
-    _define("CharacterData", _illegalCtor("CharacterData"));
-    _define("CloseWatcher", _illegalCtor("CloseWatcher"));
-    _define("CommandEvent", _illegalCtor("CommandEvent"));
-    _define("CompositionEvent", _illegalCtor("CompositionEvent"));
-    _define("ConstantSourceNode", _illegalCtor("ConstantSourceNode"));
-    _define("ContentVisibilityAutoStateChangeEvent", _illegalCtor("ContentVisibilityAutoStateChangeEvent"));
-    _define("ConvolverNode", _illegalCtor("ConvolverNode"));
-    _define("CountQueuingStrategy", _illegalCtor("CountQueuingStrategy"));
-    _define("CrashReportContext", _illegalCtor("CrashReportContext"));
-    _define("CropTarget", _illegalCtor("CropTarget"));
-    _define("CustomStateSet", _illegalCtor("CustomStateSet"));
-    _define("DOMError", _illegalCtor("DOMError"));
-    _define("DOMImplementation", _illegalCtor("DOMImplementation"));
-    _define("DOMQuad", _illegalCtor("DOMQuad"));
-    _define("DOMRectList", _illegalCtor("DOMRectList"));
-    _define("DOMStringList", _illegalCtor("DOMStringList"));
-    _define("DOMStringMap", _illegalCtor("DOMStringMap"));
-    _define("DataTransfer", _illegalCtor("DataTransfer"));
-    _define("DataTransferItem", _illegalCtor("DataTransferItem"));
-    _define("DataTransferItemList", _illegalCtor("DataTransferItemList"));
-    _define("DelayNode", _illegalCtor("DelayNode"));
-    _define("DelegatedInkTrailPresenter", _illegalCtor("DelegatedInkTrailPresenter"));
-    _define("DisposableStack", _illegalCtor("DisposableStack"));
-    _define("DocumentPictureInPictureEvent", _illegalCtor("DocumentPictureInPictureEvent"));
-    _define("DocumentTimeline", _illegalCtor("DocumentTimeline"));
-    _define("DocumentType", _illegalCtor("DocumentType"));
-    _define("DynamicsCompressorNode", _illegalCtor("DynamicsCompressorNode"));
-    _define("ElementInternals", _illegalCtor("ElementInternals"));
-    _define("EncodedAudioChunk", _illegalCtor("EncodedAudioChunk"));
-    _define("EncodedVideoChunk", _illegalCtor("EncodedVideoChunk"));
-    _define("External", _illegalCtor("External"));
-    _define("FeaturePolicy", _illegalCtor("FeaturePolicy"));
-    _define("Fence", _illegalCtor("Fence"));
-    _define("FencedFrameConfig", _illegalCtor("FencedFrameConfig"));
-    _define("FileList", _illegalCtor("FileList"));
-    _define("FontFaceSetLoadEvent", _illegalCtor("FontFaceSetLoadEvent"));
-    _define("FormDataEvent", _illegalCtor("FormDataEvent"));
-    _define("FragmentDirective", _illegalCtor("FragmentDirective"));
-    _define("GainNode", _illegalCtor("GainNode"));
-    _define("Gamepad", _illegalCtor("Gamepad"));
-    _define("GamepadButton", _illegalCtor("GamepadButton"));
-    _define("GamepadEvent", _illegalCtor("GamepadEvent"));
-    _define("GamepadHapticActuator", _illegalCtor("GamepadHapticActuator"));
-    _define("GeolocationCoordinates", _illegalCtor("GeolocationCoordinates"));
-    _define("GeolocationPosition", _illegalCtor("GeolocationPosition"));
-    _define("GeolocationPositionError", _illegalCtor("GeolocationPositionError"));
-    _define("HTMLAllCollection", _illegalCtor("HTMLAllCollection"));
-    _define("HTMLAreaElement", _illegalCtor("HTMLAreaElement"));
-    _define("HTMLBRElement", _illegalCtor("HTMLBRElement"));
-    _define("HTMLBaseElement", _illegalCtor("HTMLBaseElement"));
-    _define("HTMLCollection", _illegalCtor("HTMLCollection"));
-    _define("HTMLDListElement", _illegalCtor("HTMLDListElement"));
-    _define("HTMLDataElement", _illegalCtor("HTMLDataElement"));
-    _define("HTMLDataListElement", _illegalCtor("HTMLDataListElement"));
-    _define("HTMLDetailsElement", _illegalCtor("HTMLDetailsElement"));
-    _define("HTMLDialogElement", _illegalCtor("HTMLDialogElement"));
-    _define("HTMLDirectoryElement", _illegalCtor("HTMLDirectoryElement"));
-    _define("HTMLEmbedElement", _illegalCtor("HTMLEmbedElement"));
-    _define("HTMLFencedFrameElement", _illegalCtor("HTMLFencedFrameElement"));
-    _define("HTMLFieldSetElement", _illegalCtor("HTMLFieldSetElement"));
-    _define("HTMLFontElement", _illegalCtor("HTMLFontElement"));
-    _define("HTMLFormControlsCollection", _illegalCtor("HTMLFormControlsCollection"));
-    _define("HTMLFrameElement", _illegalCtor("HTMLFrameElement"));
-    _define("HTMLFrameSetElement", _illegalCtor("HTMLFrameSetElement"));
-    _define("HTMLGeolocationElement", _illegalCtor("HTMLGeolocationElement"));
-    _define("HTMLHRElement", _illegalCtor("HTMLHRElement"));
-    _define("HTMLLegendElement", _illegalCtor("HTMLLegendElement"));
-    _define("HTMLMapElement", _illegalCtor("HTMLMapElement"));
-    _define("HTMLMarqueeElement", _illegalCtor("HTMLMarqueeElement"));
-    _define("HTMLMediaElement", _illegalCtor("HTMLMediaElement"));
-    _define("HTMLMenuElement", _illegalCtor("HTMLMenuElement"));
-    _define("HTMLMeterElement", _illegalCtor("HTMLMeterElement"));
-    _define("HTMLModElement", _illegalCtor("HTMLModElement"));
-    _define("HTMLObjectElement", _illegalCtor("HTMLObjectElement"));
-    _define("HTMLOptGroupElement", _illegalCtor("HTMLOptGroupElement"));
-    _define("HTMLOptionsCollection", _illegalCtor("HTMLOptionsCollection"));
-    _define("HTMLOutputElement", _illegalCtor("HTMLOutputElement"));
-    _define("HTMLParamElement", _illegalCtor("HTMLParamElement"));
-    _define("HTMLPictureElement", _illegalCtor("HTMLPictureElement"));
-    _define("HTMLProgressElement", _illegalCtor("HTMLProgressElement"));
-    _define("HTMLSelectedContentElement", _illegalCtor("HTMLSelectedContentElement"));
-    _define("HTMLSlotElement", _illegalCtor("HTMLSlotElement"));
-    _define("HTMLSourceElement", _illegalCtor("HTMLSourceElement"));
-    _define("HTMLTableCaptionElement", _illegalCtor("HTMLTableCaptionElement"));
-    _define("HTMLTableColElement", _illegalCtor("HTMLTableColElement"));
-    _define("HTMLTimeElement", _illegalCtor("HTMLTimeElement"));
-    _define("HTMLTitleElement", _illegalCtor("HTMLTitleElement"));
-    _define("HTMLTrackElement", _illegalCtor("HTMLTrackElement"));
-    _define("HTMLUnknownElement", _illegalCtor("HTMLUnknownElement"));
-    _define("IDBCursorWithValue", _illegalCtor("IDBCursorWithValue"));
-    _define("IDBIndex", _illegalCtor("IDBIndex"));
-    _define("IDBRecord", _illegalCtor("IDBRecord"));
-    _define("IDBVersionChangeEvent", _illegalCtor("IDBVersionChangeEvent"));
-    _define("IIRFilterNode", _illegalCtor("IIRFilterNode"));
-    _define("IdleDeadline", _illegalCtor("IdleDeadline"));
-    _define("ImageBitmapRenderingContext", _illegalCtor("ImageBitmapRenderingContext"));
-    _define("ImageData", _illegalCtor("ImageData"));
-    _define("Ink", _illegalCtor("Ink"));
-    _define("InputDeviceInfo", _illegalCtor("InputDeviceInfo"));
-    _define("IntegrityViolationReportBody", _illegalCtor("IntegrityViolationReportBody"));
-    _define("InterestEvent", _illegalCtor("InterestEvent"));
-    _define("IntersectionObserverEntry", _illegalCtor("IntersectionObserverEntry"));
-    _define("KeyframeEffect", _illegalCtor("KeyframeEffect"));
-    _define("LargestContentfulPaint", _illegalCtor("LargestContentfulPaint"));
-    _define("LaunchParams", _illegalCtor("LaunchParams"));
-    _define("LayoutShift", _illegalCtor("LayoutShift"));
-    _define("LayoutShiftAttribution", _illegalCtor("LayoutShiftAttribution"));
-    _define("MathMLElement", _illegalCtor("MathMLElement"));
-    _define("MediaCapabilities", _illegalCtor("MediaCapabilities"));
-    _define("MediaElementAudioSourceNode", _illegalCtor("MediaElementAudioSourceNode"));
-    _define("MediaEncryptedEvent", _illegalCtor("MediaEncryptedEvent"));
-    _define("MediaError", _illegalCtor("MediaError"));
-    _define("MediaList", _illegalCtor("MediaList"));
-    _define("MediaQueryListEvent", _illegalCtor("MediaQueryListEvent"));
-    _define("MediaRecorder", _illegalCtor("MediaRecorder"));
-    _define("MediaSourceHandle", _illegalCtor("MediaSourceHandle"));
-    _define("MediaStream", _illegalCtor("MediaStream"));
-    _define("MediaStreamAudioDestinationNode", _illegalCtor("MediaStreamAudioDestinationNode"));
-    _define("MediaStreamAudioSourceNode", _illegalCtor("MediaStreamAudioSourceNode"));
-    _define("MediaStreamEvent", _illegalCtor("MediaStreamEvent"));
-    _define("MediaStreamTrack", _illegalCtor("MediaStreamTrack"));
-    _define("MediaStreamTrackAudioStats", _illegalCtor("MediaStreamTrackAudioStats"));
-    _define("MediaStreamTrackEvent", _illegalCtor("MediaStreamTrackEvent"));
-    _define("MediaStreamTrackGenerator", _illegalCtor("MediaStreamTrackGenerator"));
-    _define("MediaStreamTrackProcessor", _illegalCtor("MediaStreamTrackProcessor"));
-    _define("MediaStreamTrackVideoStats", _illegalCtor("MediaStreamTrackVideoStats"));
-    _define("NamedNodeMap", _illegalCtor("NamedNodeMap"));
-    _define("NavigateEvent", _illegalCtor("NavigateEvent"));
-    _define("Navigation", _illegalCtor("Navigation"));
-    _define("NavigationActivation", _illegalCtor("NavigationActivation"));
-    _define("NavigationCurrentEntryChangeEvent", _illegalCtor("NavigationCurrentEntryChangeEvent"));
-    _define("NavigationDestination", _illegalCtor("NavigationDestination"));
-    _define("NavigationHistoryEntry", _illegalCtor("NavigationHistoryEntry"));
-    _define("NavigationPrecommitController", _illegalCtor("NavigationPrecommitController"));
-    _define("NavigationTransition", _illegalCtor("NavigationTransition"));
-    _define("NavigatorUAData", _illegalCtor("NavigatorUAData"));
-    _define("NodeFilter", _illegalCtor("NodeFilter"));
-    _define("NodeIterator", _illegalCtor("NodeIterator"));
-    _define("NotRestoredReasonDetails", _illegalCtor("NotRestoredReasonDetails"));
-    _define("NotRestoredReasons", _illegalCtor("NotRestoredReasons"));
-    _define("Observable", _illegalCtor("Observable"));
-    _define("OfflineAudioCompletionEvent", _illegalCtor("OfflineAudioCompletionEvent"));
-    _define("OffscreenCanvasRenderingContext2D", _illegalCtor("OffscreenCanvasRenderingContext2D"));
-    _define("Option", _illegalCtor("Option"));
-    _define("Origin", _illegalCtor("Origin"));
-    _define("OscillatorNode", _illegalCtor("OscillatorNode"));
-    _define("OverconstrainedError", _illegalCtor("OverconstrainedError"));
-    _define("PageRevealEvent", _illegalCtor("PageRevealEvent"));
-    _define("PageSwapEvent", _illegalCtor("PageSwapEvent"));
-    _define("PannerNode", _illegalCtor("PannerNode"));
-    _define("Path2D", _illegalCtor("Path2D"));
-    _define("PerformanceElementTiming", _illegalCtor("PerformanceElementTiming"));
-    _define("PerformanceEventTiming", _illegalCtor("PerformanceEventTiming"));
-    _define("PerformanceLongAnimationFrameTiming", _illegalCtor("PerformanceLongAnimationFrameTiming"));
-    _define("PerformanceLongTaskTiming", _illegalCtor("PerformanceLongTaskTiming"));
-    _define("PerformanceMark", _illegalCtor("PerformanceMark"));
-    _define("PerformanceMeasure", _illegalCtor("PerformanceMeasure"));
-    _define("PerformanceNavigation", _illegalCtor("PerformanceNavigation"));
-    _define("PerformanceNavigationTiming", _illegalCtor("PerformanceNavigationTiming"));
-    _define("PerformanceObserverEntryList", _illegalCtor("PerformanceObserverEntryList"));
-    _define("PerformancePaintTiming", _illegalCtor("PerformancePaintTiming"));
-    _define("PerformanceResourceTiming", _illegalCtor("PerformanceResourceTiming"));
-    _define("PerformanceScriptTiming", _illegalCtor("PerformanceScriptTiming"));
-    _define("PerformanceServerTiming", _illegalCtor("PerformanceServerTiming"));
-    _define("PerformanceTiming", _illegalCtor("PerformanceTiming"));
-    _define("PerformanceTimingConfidence", _illegalCtor("PerformanceTimingConfidence"));
-    _define("PeriodicSyncManager", _illegalCtor("PeriodicSyncManager"));
-    _define("PeriodicWave", _illegalCtor("PeriodicWave"));
-    _define("PictureInPictureEvent", _illegalCtor("PictureInPictureEvent"));
-    _define("PictureInPictureWindow", _illegalCtor("PictureInPictureWindow"));
-    _define("ProcessingInstruction", _illegalCtor("ProcessingInstruction"));
-    _define("Profiler", _illegalCtor("Profiler"));
-    _define("PromiseRejectionEvent", _illegalCtor("PromiseRejectionEvent"));
-    _define("PushSubscriptionOptions", _illegalCtor("PushSubscriptionOptions"));
-    _define("QuotaExceededError", _illegalCtor("QuotaExceededError"));
-    _define("RTCCertificate", _illegalCtor("RTCCertificate"));
-    _define("RTCDTMFSender", _illegalCtor("RTCDTMFSender"));
-    _define("RTCDTMFToneChangeEvent", _illegalCtor("RTCDTMFToneChangeEvent"));
-    _define("RTCDataChannel", _illegalCtor("RTCDataChannel"));
-    _define("RTCDataChannelEvent", _illegalCtor("RTCDataChannelEvent"));
-    _define("RTCDtlsTransport", _illegalCtor("RTCDtlsTransport"));
-    _define("RTCEncodedAudioFrame", _illegalCtor("RTCEncodedAudioFrame"));
-    _define("RTCEncodedVideoFrame", _illegalCtor("RTCEncodedVideoFrame"));
-    _define("RTCError", _illegalCtor("RTCError"));
-    _define("RTCErrorEvent", _illegalCtor("RTCErrorEvent"));
-    _define("RTCIceTransport", _illegalCtor("RTCIceTransport"));
-    _define("RTCPeerConnectionIceErrorEvent", _illegalCtor("RTCPeerConnectionIceErrorEvent"));
-    _define("RTCPeerConnectionIceEvent", _illegalCtor("RTCPeerConnectionIceEvent"));
-    _define("RTCRtpReceiver", _illegalCtor("RTCRtpReceiver"));
-    _define("RTCRtpScriptTransform", _illegalCtor("RTCRtpScriptTransform"));
-    _define("RTCRtpSender", _illegalCtor("RTCRtpSender"));
-    _define("RTCRtpTransceiver", _illegalCtor("RTCRtpTransceiver"));
-    _define("RTCSctpTransport", _illegalCtor("RTCSctpTransport"));
-    _define("RTCStatsReport", _illegalCtor("RTCStatsReport"));
-    _define("RTCTrackEvent", _illegalCtor("RTCTrackEvent"));
-    _define("RadioNodeList", _illegalCtor("RadioNodeList"));
-    _define("ReadableByteStreamController", _illegalCtor("ReadableByteStreamController"));
-    _define("ReadableStreamBYOBReader", _illegalCtor("ReadableStreamBYOBReader"));
-    _define("ReadableStreamBYOBRequest", _illegalCtor("ReadableStreamBYOBRequest"));
-    _define("RemotePlayback", _illegalCtor("RemotePlayback"));
-    _define("ReportBody", _illegalCtor("ReportBody"));
-    _define("ResizeObserverEntry", _illegalCtor("ResizeObserverEntry"));
-    _define("ResizeObserverSize", _illegalCtor("ResizeObserverSize"));
-    _define("RestrictionTarget", _illegalCtor("RestrictionTarget"));
-    _define("SVGAElement", _illegalCtor("SVGAElement"));
-    _define("SVGAngle", _illegalCtor("SVGAngle"));
-    _define("SVGAnimateElement", _illegalCtor("SVGAnimateElement"));
-    _define("SVGAnimateMotionElement", _illegalCtor("SVGAnimateMotionElement"));
-    _define("SVGAnimateTransformElement", _illegalCtor("SVGAnimateTransformElement"));
-    _define("SVGAnimatedAngle", _illegalCtor("SVGAnimatedAngle"));
-    _define("SVGAnimatedBoolean", _illegalCtor("SVGAnimatedBoolean"));
-    _define("SVGAnimatedEnumeration", _illegalCtor("SVGAnimatedEnumeration"));
-    _define("SVGAnimatedInteger", _illegalCtor("SVGAnimatedInteger"));
-    _define("SVGAnimatedLength", _illegalCtor("SVGAnimatedLength"));
-    _define("SVGAnimatedLengthList", _illegalCtor("SVGAnimatedLengthList"));
-    _define("SVGAnimatedNumber", _illegalCtor("SVGAnimatedNumber"));
-    _define("SVGAnimatedNumberList", _illegalCtor("SVGAnimatedNumberList"));
-    _define("SVGAnimatedPreserveAspectRatio", _illegalCtor("SVGAnimatedPreserveAspectRatio"));
-    _define("SVGAnimatedRect", _illegalCtor("SVGAnimatedRect"));
-    _define("SVGAnimatedString", _illegalCtor("SVGAnimatedString"));
-    _define("SVGAnimatedTransformList", _illegalCtor("SVGAnimatedTransformList"));
-    _define("SVGAnimationElement", _illegalCtor("SVGAnimationElement"));
-    _define("SVGCircleElement", _illegalCtor("SVGCircleElement"));
-    _define("SVGClipPathElement", _illegalCtor("SVGClipPathElement"));
-    _define("SVGComponentTransferFunctionElement", _illegalCtor("SVGComponentTransferFunctionElement"));
-    _define("SVGDefsElement", _illegalCtor("SVGDefsElement"));
-    _define("SVGDescElement", _illegalCtor("SVGDescElement"));
-    _define("SVGEllipseElement", _illegalCtor("SVGEllipseElement"));
-    _define("SVGFEBlendElement", _illegalCtor("SVGFEBlendElement"));
-    _define("SVGFEColorMatrixElement", _illegalCtor("SVGFEColorMatrixElement"));
-    _define("SVGFEComponentTransferElement", _illegalCtor("SVGFEComponentTransferElement"));
-    _define("SVGFECompositeElement", _illegalCtor("SVGFECompositeElement"));
-    _define("SVGFEConvolveMatrixElement", _illegalCtor("SVGFEConvolveMatrixElement"));
-    _define("SVGFEDiffuseLightingElement", _illegalCtor("SVGFEDiffuseLightingElement"));
-    _define("SVGFEDisplacementMapElement", _illegalCtor("SVGFEDisplacementMapElement"));
-    _define("SVGFEDistantLightElement", _illegalCtor("SVGFEDistantLightElement"));
-    _define("SVGFEDropShadowElement", _illegalCtor("SVGFEDropShadowElement"));
-    _define("SVGFEFloodElement", _illegalCtor("SVGFEFloodElement"));
-    _define("SVGFEFuncAElement", _illegalCtor("SVGFEFuncAElement"));
-    _define("SVGFEFuncBElement", _illegalCtor("SVGFEFuncBElement"));
-    _define("SVGFEFuncGElement", _illegalCtor("SVGFEFuncGElement"));
-    _define("SVGFEFuncRElement", _illegalCtor("SVGFEFuncRElement"));
-    _define("SVGFEGaussianBlurElement", _illegalCtor("SVGFEGaussianBlurElement"));
-    _define("SVGFEImageElement", _illegalCtor("SVGFEImageElement"));
-    _define("SVGFEMergeElement", _illegalCtor("SVGFEMergeElement"));
-    _define("SVGFEMergeNodeElement", _illegalCtor("SVGFEMergeNodeElement"));
-    _define("SVGFEMorphologyElement", _illegalCtor("SVGFEMorphologyElement"));
-    _define("SVGFEOffsetElement", _illegalCtor("SVGFEOffsetElement"));
-    _define("SVGFEPointLightElement", _illegalCtor("SVGFEPointLightElement"));
-    _define("SVGFESpecularLightingElement", _illegalCtor("SVGFESpecularLightingElement"));
-    _define("SVGFESpotLightElement", _illegalCtor("SVGFESpotLightElement"));
-    _define("SVGFETileElement", _illegalCtor("SVGFETileElement"));
-    _define("SVGFETurbulenceElement", _illegalCtor("SVGFETurbulenceElement"));
-    _define("SVGFilterElement", _illegalCtor("SVGFilterElement"));
-    _define("SVGForeignObjectElement", _illegalCtor("SVGForeignObjectElement"));
-    _define("SVGGElement", _illegalCtor("SVGGElement"));
-    _define("SVGGeometryElement", _illegalCtor("SVGGeometryElement"));
-    _define("SVGGradientElement", _illegalCtor("SVGGradientElement"));
-    _define("SVGGraphicsElement", _illegalCtor("SVGGraphicsElement"));
-    _define("SVGImageElement", _illegalCtor("SVGImageElement"));
-    _define("SVGLength", _illegalCtor("SVGLength"));
-    _define("SVGLengthList", _illegalCtor("SVGLengthList"));
-    _define("SVGLineElement", _illegalCtor("SVGLineElement"));
-    _define("SVGLinearGradientElement", _illegalCtor("SVGLinearGradientElement"));
-    _define("SVGMPathElement", _illegalCtor("SVGMPathElement"));
-    _define("SVGMarkerElement", _illegalCtor("SVGMarkerElement"));
-    _define("SVGMaskElement", _illegalCtor("SVGMaskElement"));
-    _define("SVGMatrix", _illegalCtor("SVGMatrix"));
-    _define("SVGMetadataElement", _illegalCtor("SVGMetadataElement"));
-    _define("SVGNumber", _illegalCtor("SVGNumber"));
-    _define("SVGNumberList", _illegalCtor("SVGNumberList"));
-    _define("SVGPathElement", _illegalCtor("SVGPathElement"));
-    _define("SVGPatternElement", _illegalCtor("SVGPatternElement"));
-    _define("SVGPoint", _illegalCtor("SVGPoint"));
-    _define("SVGPointList", _illegalCtor("SVGPointList"));
-    _define("SVGPolygonElement", _illegalCtor("SVGPolygonElement"));
-    _define("SVGPolylineElement", _illegalCtor("SVGPolylineElement"));
-    _define("SVGPreserveAspectRatio", _illegalCtor("SVGPreserveAspectRatio"));
-    _define("SVGRadialGradientElement", _illegalCtor("SVGRadialGradientElement"));
-    _define("SVGRect", _illegalCtor("SVGRect"));
-    _define("SVGRectElement", _illegalCtor("SVGRectElement"));
-    _define("SVGSVGElement", _illegalCtor("SVGSVGElement"));
-    _define("SVGScriptElement", _illegalCtor("SVGScriptElement"));
-    _define("SVGSetElement", _illegalCtor("SVGSetElement"));
-    _define("SVGStopElement", _illegalCtor("SVGStopElement"));
-    _define("SVGStringList", _illegalCtor("SVGStringList"));
-    _define("SVGStyleElement", _illegalCtor("SVGStyleElement"));
-    _define("SVGSwitchElement", _illegalCtor("SVGSwitchElement"));
-    _define("SVGSymbolElement", _illegalCtor("SVGSymbolElement"));
-    _define("SVGTSpanElement", _illegalCtor("SVGTSpanElement"));
-    _define("SVGTextContentElement", _illegalCtor("SVGTextContentElement"));
-    _define("SVGTextElement", _illegalCtor("SVGTextElement"));
-    _define("SVGTextPathElement", _illegalCtor("SVGTextPathElement"));
-    _define("SVGTextPositioningElement", _illegalCtor("SVGTextPositioningElement"));
-    _define("SVGTitleElement", _illegalCtor("SVGTitleElement"));
-    _define("SVGTransform", _illegalCtor("SVGTransform"));
-    _define("SVGTransformList", _illegalCtor("SVGTransformList"));
-    _define("SVGUnitTypes", _illegalCtor("SVGUnitTypes"));
-    _define("SVGUseElement", _illegalCtor("SVGUseElement"));
-    _define("SVGViewElement", _illegalCtor("SVGViewElement"));
-    _define("Sanitizer", _illegalCtor("Sanitizer"));
-    _define("Scheduler", _illegalCtor("Scheduler"));
-    _define("Scheduling", _illegalCtor("Scheduling"));
-    _define("ScriptProcessorNode", _illegalCtor("ScriptProcessorNode"));
-    _define("ScrollTimeline", _illegalCtor("ScrollTimeline"));
-    _define("ShadowRoot", _illegalCtor("ShadowRoot"));
-    _define("SharedStorage", _illegalCtor("SharedStorage"));
-    _define("SharedStorageAppendMethod", _illegalCtor("SharedStorageAppendMethod"));
-    _define("SharedStorageClearMethod", _illegalCtor("SharedStorageClearMethod"));
-    _define("SharedStorageDeleteMethod", _illegalCtor("SharedStorageDeleteMethod"));
-    _define("SharedStorageModifierMethod", _illegalCtor("SharedStorageModifierMethod"));
-    _define("SharedStorageSetMethod", _illegalCtor("SharedStorageSetMethod"));
-    _define("SharedStorageWorklet", _illegalCtor("SharedStorageWorklet"));
-    _define("SnapEvent", _illegalCtor("SnapEvent"));
-    _define("SourceBuffer", _illegalCtor("SourceBuffer"));
-    _define("SourceBufferList", _illegalCtor("SourceBufferList"));
-    _define("SpeechGrammar", _illegalCtor("SpeechGrammar"));
-    _define("SpeechGrammarList", _illegalCtor("SpeechGrammarList"));
-    _define("SpeechRecognition", _illegalCtor("SpeechRecognition"));
-    _define("SpeechRecognitionErrorEvent", _illegalCtor("SpeechRecognitionErrorEvent"));
-    _define("SpeechRecognitionEvent", _illegalCtor("SpeechRecognitionEvent"));
-    _define("SpeechSynthesisErrorEvent", _illegalCtor("SpeechSynthesisErrorEvent"));
-    _define("SpeechSynthesisEvent", _illegalCtor("SpeechSynthesisEvent"));
-    _define("SpeechSynthesisUtterance", _illegalCtor("SpeechSynthesisUtterance"));
-    _define("SpeechSynthesisVoice", _illegalCtor("SpeechSynthesisVoice"));
-    _define("StereoPannerNode", _illegalCtor("StereoPannerNode"));
-    _define("Storage", _illegalCtor("Storage"));
-    _define("StylePropertyMap", _illegalCtor("StylePropertyMap"));
-    _define("StylePropertyMapReadOnly", _illegalCtor("StylePropertyMapReadOnly"));
-    _define("StyleSheet", _illegalCtor("StyleSheet"));
-    _define("StyleSheetList", _illegalCtor("StyleSheetList"));
-    _define("SubmitEvent", _illegalCtor("SubmitEvent"));
-    _define("Subscriber", _illegalCtor("Subscriber"));
-    _define("SuppressedError", _illegalCtor("SuppressedError"));
-    _define("SyncManager", _illegalCtor("SyncManager"));
-    _define("TaskAttributionTiming", _illegalCtor("TaskAttributionTiming"));
-    _define("TaskController", _illegalCtor("TaskController"));
-    _define("TaskPriorityChangeEvent", _illegalCtor("TaskPriorityChangeEvent"));
-    _define("TaskSignal", _illegalCtor("TaskSignal"));
-    _define("TextEvent", _illegalCtor("TextEvent"));
-    _define("TextFormat", _illegalCtor("TextFormat"));
-    _define("TextFormatUpdateEvent", _illegalCtor("TextFormatUpdateEvent"));
-    _define("TextMetrics", _illegalCtor("TextMetrics"));
-    _define("TextTrack", _illegalCtor("TextTrack"));
-    _define("TextTrackCue", _illegalCtor("TextTrackCue"));
-    _define("TextTrackCueList", _illegalCtor("TextTrackCueList"));
-    _define("TextTrackList", _illegalCtor("TextTrackList"));
-    _define("TextUpdateEvent", _illegalCtor("TextUpdateEvent"));
-    _define("TimeRanges", _illegalCtor("TimeRanges"));
-    _define("TimelineTrigger", _illegalCtor("TimelineTrigger"));
-    _define("TimelineTriggerRange", _illegalCtor("TimelineTriggerRange"));
-    _define("TimelineTriggerRangeList", _illegalCtor("TimelineTriggerRangeList"));
-    _define("ToggleEvent", _illegalCtor("ToggleEvent"));
-    _define("TrackEvent", _illegalCtor("TrackEvent"));
-    _define("TransformStreamDefaultController", _illegalCtor("TransformStreamDefaultController"));
-    _define("TreeWalker", _illegalCtor("TreeWalker"));
-    _define("TrustedTypePolicy", _illegalCtor("TrustedTypePolicy"));
-    _define("TrustedTypePolicyFactory", _illegalCtor("TrustedTypePolicyFactory"));
-    _define("URLPattern", _illegalCtor("URLPattern"));
-    _define("UserActivation", _illegalCtor("UserActivation"));
-    _define("VTTCue", _illegalCtor("VTTCue"));
-    _define("ValidityState", _illegalCtor("ValidityState"));
-    _define("VideoColorSpace", _illegalCtor("VideoColorSpace"));
-    _define("VideoFrame", _illegalCtor("VideoFrame"));
-    _define("VideoPlaybackQuality", _illegalCtor("VideoPlaybackQuality"));
-    _define("ViewTimeline", _illegalCtor("ViewTimeline"));
-    _define("ViewTransitionTypeSet", _illegalCtor("ViewTransitionTypeSet"));
-    _define("Viewport", _illegalCtor("Viewport"));
-    _define("VirtualKeyboardGeometryChangeEvent", _illegalCtor("VirtualKeyboardGeometryChangeEvent"));
-    _define("VisibilityStateEntry", _illegalCtor("VisibilityStateEntry"));
-    _define("WaveShaperNode", _illegalCtor("WaveShaperNode"));
-    _define("WebGLActiveInfo", _illegalCtor("WebGLActiveInfo"));
-    _define("WebGLBuffer", _illegalCtor("WebGLBuffer"));
-    _define("WebGLContextEvent", _illegalCtor("WebGLContextEvent"));
-    _define("WebGLFramebuffer", _illegalCtor("WebGLFramebuffer"));
-    _define("WebGLObject", _illegalCtor("WebGLObject"));
-    _define("WebGLProgram", _illegalCtor("WebGLProgram"));
-    _define("WebGLQuery", _illegalCtor("WebGLQuery"));
-    _define("WebGLRenderbuffer", _illegalCtor("WebGLRenderbuffer"));
-    _define("WebGLSampler", _illegalCtor("WebGLSampler"));
-    _define("WebGLShader", _illegalCtor("WebGLShader"));
-    _define("WebGLShaderPrecisionFormat", _illegalCtor("WebGLShaderPrecisionFormat"));
-    _define("WebGLSync", _illegalCtor("WebGLSync"));
-    _define("WebGLTexture", _illegalCtor("WebGLTexture"));
-    _define("WebGLTransformFeedback", _illegalCtor("WebGLTransformFeedback"));
-    _define("WebGLUniformLocation", _illegalCtor("WebGLUniformLocation"));
-    _define("WebGLVertexArrayObject", _illegalCtor("WebGLVertexArrayObject"));
-    _define("WebKitMutationObserver", _illegalCtor("WebKitMutationObserver"));
-    _define("WebSocketError", _illegalCtor("WebSocketError"));
-    _define("WebSocketStream", _illegalCtor("WebSocketStream"));
-    _define("Window", _illegalCtor("Window"));
-    _define("WindowControlsOverlayGeometryChangeEvent", _illegalCtor("WindowControlsOverlayGeometryChangeEvent"));
-    _define("XMLDocument", _illegalCtor("XMLDocument"));
-    _define("XMLHttpRequestEventTarget", _illegalCtor("XMLHttpRequestEventTarget"));
-    _define("XMLHttpRequestUpload", _illegalCtor("XMLHttpRequestUpload"));
-    _define("XPathEvaluator", _illegalCtor("XPathEvaluator"));
-    _define("XPathExpression", _illegalCtor("XPathExpression"));
-    _define("XPathResult", _illegalCtor("XPathResult"));
+    _define("AbstractRange", _stub("AbstractRange"));
+    _define("AnalyserNode", _stub("AnalyserNode"));
+    _define("Animation", _stub("Animation"));
+    _define("AnimationEffect", _stub("AnimationEffect"));
+    _define("AnimationPlaybackEvent", _stub("AnimationPlaybackEvent", _Event));
+    _define("AnimationTimeline", _stub("AnimationTimeline"));
+    _define("AnimationTrigger", _stub("AnimationTrigger"));
+    _define("AsyncDisposableStack", _stub("AsyncDisposableStack"));
+    _define("Attr", _stub("Attr"));
+    _define("Audio", _stub("Audio"));
+    _define("AudioBuffer", _stub("AudioBuffer"));
+    _define("AudioBufferSourceNode", _stub("AudioBufferSourceNode"));
+    _define("AudioData", _stub("AudioData"));
+    _define("AudioDestinationNode", _stub("AudioDestinationNode"));
+    _define("AudioListener", _stub("AudioListener"));
+    _define("AudioNode", _stub("AudioNode", _EventTarget));
+    _define("AudioParam", _stub("AudioParam"));
+    _define("AudioParamMap", _stub("AudioParamMap"));
+    _define("AudioProcessingEvent", _stub("AudioProcessingEvent"));
+    _define("AudioScheduledSourceNode", _stub("AudioScheduledSourceNode"));
+    _define("AudioSinkInfo", _stub("AudioSinkInfo"));
+    _define("AudioWorkletNode", _stub("AudioWorkletNode"));
+    _define("BackgroundFetchRecord", _stub("BackgroundFetchRecord"));
+    _define("BackgroundFetchRegistration", _stub("BackgroundFetchRegistration"));
+    _define("BarProp", _stub("BarProp"));
+    _define("BaseAudioContext", _stub("BaseAudioContext"));
+    _define("BeforeInstallPromptEvent", _stub("BeforeInstallPromptEvent"));
+    _define("BiquadFilterNode", _stub("BiquadFilterNode"));
+    _define("BlobEvent", _stub("BlobEvent", _Event));
+    _define("BluetoothUUID", _stub("BluetoothUUID"));
+    _define("BrowserCaptureMediaStreamTrack", _stub("BrowserCaptureMediaStreamTrack"));
+    _define("ByteLengthQueuingStrategy", _stub("ByteLengthQueuingStrategy"));
+    _define("CDATASection", _stub("CDATASection"));
+    _define("CSPViolationReportBody", _stub("CSPViolationReportBody"));
+    _define("CSSAnimation", _stub("CSSAnimation"));
+    _define("CSSConditionRule", _stub("CSSConditionRule"));
+    _define("CSSContainerRule", _stub("CSSContainerRule"));
+    _define("CSSCounterStyleRule", _stub("CSSCounterStyleRule"));
+    _define("CSSFontFaceRule", _stub("CSSFontFaceRule"));
+    _define("CSSFontFeatureValuesRule", _stub("CSSFontFeatureValuesRule"));
+    _define("CSSFontPaletteValuesRule", _stub("CSSFontPaletteValuesRule"));
+    _define("CSSFunctionDeclarations", _stub("CSSFunctionDeclarations"));
+    _define("CSSFunctionDescriptors", _stub("CSSFunctionDescriptors"));
+    _define("CSSFunctionRule", _stub("CSSFunctionRule"));
+    _define("CSSGroupingRule", _stub("CSSGroupingRule"));
+    _define("CSSImageValue", _stub("CSSImageValue"));
+    _define("CSSImportRule", _stub("CSSImportRule"));
+    _define("CSSKeyframeRule", _stub("CSSKeyframeRule"));
+    _define("CSSKeyframesRule", _stub("CSSKeyframesRule"));
+    _define("CSSKeywordValue", _stub("CSSKeywordValue"));
+    _define("CSSLayerBlockRule", _stub("CSSLayerBlockRule"));
+    _define("CSSLayerStatementRule", _stub("CSSLayerStatementRule"));
+    _define("CSSMarginRule", _stub("CSSMarginRule"));
+    _define("CSSMathClamp", _stub("CSSMathClamp"));
+    _define("CSSMathInvert", _stub("CSSMathInvert"));
+    _define("CSSMathMax", _stub("CSSMathMax"));
+    _define("CSSMathMin", _stub("CSSMathMin"));
+    _define("CSSMathNegate", _stub("CSSMathNegate"));
+    _define("CSSMathProduct", _stub("CSSMathProduct"));
+    _define("CSSMathSum", _stub("CSSMathSum"));
+    _define("CSSMathValue", _stub("CSSMathValue"));
+    _define("CSSMatrixComponent", _stub("CSSMatrixComponent"));
+    _define("CSSMediaRule", _stub("CSSMediaRule"));
+    _define("CSSNamespaceRule", _stub("CSSNamespaceRule"));
+    _define("CSSNestedDeclarations", _stub("CSSNestedDeclarations"));
+    _define("CSSNumericArray", _stub("CSSNumericArray"));
+    _define("CSSNumericValue", _stub("CSSNumericValue"));
+    _define("CSSPageRule", _stub("CSSPageRule"));
+    _define("CSSPerspective", _stub("CSSPerspective"));
+    _define("CSSPositionTryDescriptors", _stub("CSSPositionTryDescriptors"));
+    _define("CSSPositionTryRule", _stub("CSSPositionTryRule"));
+    _define("CSSPositionValue", _stub("CSSPositionValue"));
+    _define("CSSPropertyRule", _stub("CSSPropertyRule"));
+    _define("CSSRotate", _stub("CSSRotate"));
+    _define("CSSRuleList", _stub("CSSRuleList"));
+    _define("CSSScale", _stub("CSSScale"));
+    _define("CSSScopeRule", _stub("CSSScopeRule"));
+    _define("CSSSkew", _stub("CSSSkew"));
+    _define("CSSSkewX", _stub("CSSSkewX"));
+    _define("CSSSkewY", _stub("CSSSkewY"));
+    _define("CSSStartingStyleRule", _stub("CSSStartingStyleRule"));
+    _define("CSSStyleDeclaration", _stub("CSSStyleDeclaration"));
+    _define("CSSStyleValue", _stub("CSSStyleValue"));
+    _define("CSSSupportsRule", _stub("CSSSupportsRule"));
+    _define("CSSTransformComponent", _stub("CSSTransformComponent"));
+    _define("CSSTransformValue", _stub("CSSTransformValue"));
+    _define("CSSTransition", _stub("CSSTransition"));
+    _define("CSSTranslate", _stub("CSSTranslate"));
+    _define("CSSUnitValue", _stub("CSSUnitValue"));
+    _define("CSSUnparsedValue", _stub("CSSUnparsedValue"));
+    _define("CSSVariableReferenceValue", _stub("CSSVariableReferenceValue"));
+    _define("CSSViewTransitionRule", _stub("CSSViewTransitionRule"));
+    _define("CanvasCaptureMediaStreamTrack", _stub("CanvasCaptureMediaStreamTrack"));
+    _define("CanvasGradient", _stub("CanvasGradient"));
+    _define("CanvasPattern", _stub("CanvasPattern"));
+    _define("CaretPosition", _stub("CaretPosition"));
+    _define("ChannelMergerNode", _stub("ChannelMergerNode"));
+    _define("ChannelSplitterNode", _stub("ChannelSplitterNode"));
+    _define("ChapterInformation", _stub("ChapterInformation"));
+    _define("CharacterBoundsUpdateEvent", _stub("CharacterBoundsUpdateEvent"));
+    _define("CharacterData", _stub("CharacterData"));
+    _define("CloseWatcher", _stub("CloseWatcher"));
+    _define("CommandEvent", _stub("CommandEvent"));
+    _define("CompositionEvent", _stub("CompositionEvent"));
+    _define("ConstantSourceNode", _stub("ConstantSourceNode"));
+    _define("ContentVisibilityAutoStateChangeEvent", _stub("ContentVisibilityAutoStateChangeEvent"));
+    _define("ConvolverNode", _stub("ConvolverNode"));
+    _define("CountQueuingStrategy", _stub("CountQueuingStrategy"));
+    _define("CrashReportContext", _stub("CrashReportContext"));
+    _define("CropTarget", _stub("CropTarget"));
+    _define("CustomStateSet", _stub("CustomStateSet"));
+    _define("DOMError", _stub("DOMError"));
+    _define("DOMImplementation", _stub("DOMImplementation"));
+    _define("DOMQuad", _stub("DOMQuad"));
+    _define("DOMRectList", _stub("DOMRectList"));
+    _define("DOMStringList", _stub("DOMStringList"));
+    _define("DOMStringMap", _stub("DOMStringMap"));
+    _define("DataTransfer", _stub("DataTransfer"));
+    _define("DataTransferItem", _stub("DataTransferItem"));
+    _define("DataTransferItemList", _stub("DataTransferItemList"));
+    _define("DelayNode", _stub("DelayNode"));
+    _define("DelegatedInkTrailPresenter", _stub("DelegatedInkTrailPresenter"));
+    _define("DisposableStack", _stub("DisposableStack"));
+    _define("DocumentPictureInPictureEvent", _stub("DocumentPictureInPictureEvent"));
+    _define("DocumentTimeline", _stub("DocumentTimeline"));
+    _define("DocumentType", _stub("DocumentType"));
+    _define("DynamicsCompressorNode", _stub("DynamicsCompressorNode"));
+    _define("ElementInternals", _stub("ElementInternals"));
+    _define("EncodedAudioChunk", _stub("EncodedAudioChunk"));
+    _define("EncodedVideoChunk", _stub("EncodedVideoChunk"));
+    _define("External", _stub("External"));
+    _define("FeaturePolicy", _stub("FeaturePolicy"));
+    _define("Fence", _stub("Fence"));
+    _define("FencedFrameConfig", _stub("FencedFrameConfig"));
+    _define("FileList", _stub("FileList"));
+    _define("FontFaceSetLoadEvent", _stub("FontFaceSetLoadEvent"));
+    _define("FormDataEvent", _stub("FormDataEvent"));
+    _define("FragmentDirective", _stub("FragmentDirective"));
+    _define("GainNode", _stub("GainNode"));
+    _define("Gamepad", _stub("Gamepad"));
+    _define("GamepadButton", _stub("GamepadButton"));
+    _define("GamepadEvent", _stub("GamepadEvent"));
+    _define("GamepadHapticActuator", _stub("GamepadHapticActuator"));
+    _define("GeolocationCoordinates", _stub("GeolocationCoordinates"));
+    _define("GeolocationPosition", _stub("GeolocationPosition"));
+    _define("GeolocationPositionError", _stub("GeolocationPositionError"));
+    _define("HTMLAllCollection", _stub("HTMLAllCollection"));
+    _define("HTMLAreaElement", _stub("HTMLAreaElement"));
+    _define("HTMLBRElement", _stub("HTMLBRElement"));
+    _define("HTMLBaseElement", _stub("HTMLBaseElement"));
+    _define("HTMLCollection", _stub("HTMLCollection"));
+    _define("HTMLDListElement", _stub("HTMLDListElement"));
+    _define("HTMLDataElement", _stub("HTMLDataElement"));
+    _define("HTMLDataListElement", _stub("HTMLDataListElement"));
+    _define("HTMLDetailsElement", _stub("HTMLDetailsElement"));
+    _define("HTMLDialogElement", _stub("HTMLDialogElement"));
+    _define("HTMLDirectoryElement", _stub("HTMLDirectoryElement"));
+    _define("HTMLEmbedElement", _stub("HTMLEmbedElement"));
+    _define("HTMLFencedFrameElement", _stub("HTMLFencedFrameElement"));
+    _define("HTMLFieldSetElement", _stub("HTMLFieldSetElement"));
+    _define("HTMLFontElement", _stub("HTMLFontElement"));
+    _define("HTMLFormControlsCollection", _stub("HTMLFormControlsCollection"));
+    _define("HTMLFrameElement", _stub("HTMLFrameElement"));
+    _define("HTMLFrameSetElement", _stub("HTMLFrameSetElement"));
+    _define("HTMLGeolocationElement", _stub("HTMLGeolocationElement"));
+    _define("HTMLHRElement", _stub("HTMLHRElement"));
+    _define("HTMLLegendElement", _stub("HTMLLegendElement"));
+    _define("HTMLMapElement", _stub("HTMLMapElement"));
+    _define("HTMLMarqueeElement", _stub("HTMLMarqueeElement"));
+    _define("HTMLMediaElement", _stub("HTMLMediaElement"));
+    _define("HTMLMenuElement", _stub("HTMLMenuElement"));
+    _define("HTMLMeterElement", _stub("HTMLMeterElement"));
+    _define("HTMLModElement", _stub("HTMLModElement"));
+    _define("HTMLObjectElement", _stub("HTMLObjectElement"));
+    _define("HTMLOptGroupElement", _stub("HTMLOptGroupElement"));
+    _define("HTMLOptionsCollection", _stub("HTMLOptionsCollection"));
+    _define("HTMLOutputElement", _stub("HTMLOutputElement"));
+    _define("HTMLParamElement", _stub("HTMLParamElement"));
+    _define("HTMLPictureElement", _stub("HTMLPictureElement"));
+    _define("HTMLProgressElement", _stub("HTMLProgressElement"));
+    _define("HTMLSelectedContentElement", _stub("HTMLSelectedContentElement"));
+    _define("HTMLSlotElement", _stub("HTMLSlotElement"));
+    _define("HTMLSourceElement", _stub("HTMLSourceElement"));
+    _define("HTMLTableCaptionElement", _stub("HTMLTableCaptionElement"));
+    _define("HTMLTableColElement", _stub("HTMLTableColElement"));
+    _define("HTMLTimeElement", _stub("HTMLTimeElement"));
+    _define("HTMLTitleElement", _stub("HTMLTitleElement"));
+    _define("HTMLTrackElement", _stub("HTMLTrackElement"));
+    _define("HTMLUnknownElement", _stub("HTMLUnknownElement"));
+    _define("IDBCursorWithValue", _stub("IDBCursorWithValue"));
+    _define("IDBIndex", _stub("IDBIndex"));
+    _define("IDBRecord", _stub("IDBRecord"));
+    _define("IDBVersionChangeEvent", _stub("IDBVersionChangeEvent"));
+    _define("IIRFilterNode", _stub("IIRFilterNode"));
+    _define("IdleDeadline", _stub("IdleDeadline"));
+    _define("ImageBitmapRenderingContext", _stub("ImageBitmapRenderingContext"));
+    _define("ImageData", _stub("ImageData"));
+    _define("Ink", _stub("Ink"));
+    _define("InputDeviceInfo", _stub("InputDeviceInfo"));
+    _define("IntegrityViolationReportBody", _stub("IntegrityViolationReportBody"));
+    _define("InterestEvent", _stub("InterestEvent"));
+    _define("IntersectionObserverEntry", _stub("IntersectionObserverEntry"));
+    _define("KeyframeEffect", _stub("KeyframeEffect"));
+    _define("LargestContentfulPaint", _stub("LargestContentfulPaint"));
+    _define("LaunchParams", _stub("LaunchParams"));
+    _define("LayoutShift", _stub("LayoutShift"));
+    _define("LayoutShiftAttribution", _stub("LayoutShiftAttribution"));
+    _define("MathMLElement", _stub("MathMLElement"));
+    _define("MediaCapabilities", _stub("MediaCapabilities"));
+    _define("MediaElementAudioSourceNode", _stub("MediaElementAudioSourceNode"));
+    _define("MediaEncryptedEvent", _stub("MediaEncryptedEvent"));
+    _define("MediaError", _stub("MediaError"));
+    _define("MediaList", _stub("MediaList"));
+    _define("MediaQueryListEvent", _stub("MediaQueryListEvent"));
+    _define("MediaRecorder", _stub("MediaRecorder"));
+    _define("MediaSourceHandle", _stub("MediaSourceHandle"));
+    _define("MediaStream", _stub("MediaStream"));
+    _define("MediaStreamAudioDestinationNode", _stub("MediaStreamAudioDestinationNode"));
+    _define("MediaStreamAudioSourceNode", _stub("MediaStreamAudioSourceNode"));
+    _define("MediaStreamEvent", _stub("MediaStreamEvent"));
+    _define("MediaStreamTrack", _stub("MediaStreamTrack"));
+    _define("MediaStreamTrackAudioStats", _stub("MediaStreamTrackAudioStats"));
+    _define("MediaStreamTrackEvent", _stub("MediaStreamTrackEvent"));
+    _define("MediaStreamTrackGenerator", _stub("MediaStreamTrackGenerator"));
+    _define("MediaStreamTrackProcessor", _stub("MediaStreamTrackProcessor"));
+    _define("MediaStreamTrackVideoStats", _stub("MediaStreamTrackVideoStats"));
+    _define("NamedNodeMap", _stub("NamedNodeMap"));
+    _define("NavigateEvent", _stub("NavigateEvent"));
+    _define("Navigation", _stub("Navigation"));
+    _define("NavigationActivation", _stub("NavigationActivation"));
+    _define("NavigationCurrentEntryChangeEvent", _stub("NavigationCurrentEntryChangeEvent"));
+    _define("NavigationDestination", _stub("NavigationDestination"));
+    _define("NavigationHistoryEntry", _stub("NavigationHistoryEntry"));
+    _define("NavigationPrecommitController", _stub("NavigationPrecommitController"));
+    _define("NavigationTransition", _stub("NavigationTransition"));
+    _define("NavigatorUAData", _stub("NavigatorUAData"));
+    _define("NodeFilter", _stub("NodeFilter"));
+    _define("NodeIterator", _stub("NodeIterator"));
+    _define("NotRestoredReasonDetails", _stub("NotRestoredReasonDetails"));
+    _define("NotRestoredReasons", _stub("NotRestoredReasons"));
+    _define("Observable", _stub("Observable"));
+    _define("OfflineAudioCompletionEvent", _stub("OfflineAudioCompletionEvent"));
+    _define("OffscreenCanvasRenderingContext2D", _stub("OffscreenCanvasRenderingContext2D"));
+    _define("Option", _stub("Option"));
+    _define("Origin", _stub("Origin"));
+    _define("OscillatorNode", _stub("OscillatorNode"));
+    _define("OverconstrainedError", _stub("OverconstrainedError"));
+    _define("PageRevealEvent", _stub("PageRevealEvent"));
+    _define("PageSwapEvent", _stub("PageSwapEvent"));
+    _define("PannerNode", _stub("PannerNode"));
+    _define("Path2D", _stub("Path2D"));
+    _define("PerformanceElementTiming", _stub("PerformanceElementTiming"));
+    _define("PerformanceEventTiming", _stub("PerformanceEventTiming"));
+    _define("PerformanceLongAnimationFrameTiming", _stub("PerformanceLongAnimationFrameTiming"));
+    _define("PerformanceLongTaskTiming", _stub("PerformanceLongTaskTiming"));
+    _define("PerformanceMark", _stub("PerformanceMark"));
+    _define("PerformanceMeasure", _stub("PerformanceMeasure"));
+    _define("PerformanceNavigation", _stub("PerformanceNavigation"));
+    _define("PerformanceNavigationTiming", _stub("PerformanceNavigationTiming"));
+    _define("PerformanceObserverEntryList", _stub("PerformanceObserverEntryList"));
+    _define("PerformancePaintTiming", _stub("PerformancePaintTiming"));
+    _define("PerformanceResourceTiming", _stub("PerformanceResourceTiming"));
+    _define("PerformanceScriptTiming", _stub("PerformanceScriptTiming"));
+    _define("PerformanceServerTiming", _stub("PerformanceServerTiming"));
+    _define("PerformanceTiming", _stub("PerformanceTiming"));
+    _define("PerformanceTimingConfidence", _stub("PerformanceTimingConfidence"));
+    _define("PeriodicSyncManager", _stub("PeriodicSyncManager"));
+    _define("PeriodicWave", _stub("PeriodicWave"));
+    _define("PictureInPictureEvent", _stub("PictureInPictureEvent"));
+    _define("PictureInPictureWindow", _stub("PictureInPictureWindow"));
+    _define("ProcessingInstruction", _stub("ProcessingInstruction"));
+    _define("Profiler", _stub("Profiler"));
+    _define("PromiseRejectionEvent", _stub("PromiseRejectionEvent"));
+    _define("PushSubscriptionOptions", _stub("PushSubscriptionOptions"));
+    _define("QuotaExceededError", _stub("QuotaExceededError"));
+    _define("RTCCertificate", _stub("RTCCertificate"));
+    _define("RTCDTMFSender", _stub("RTCDTMFSender"));
+    _define("RTCDTMFToneChangeEvent", _stub("RTCDTMFToneChangeEvent"));
+    _define("RTCDataChannel", _stub("RTCDataChannel"));
+    _define("RTCDataChannelEvent", _stub("RTCDataChannelEvent"));
+    _define("RTCDtlsTransport", _stub("RTCDtlsTransport"));
+    _define("RTCEncodedAudioFrame", _stub("RTCEncodedAudioFrame"));
+    _define("RTCEncodedVideoFrame", _stub("RTCEncodedVideoFrame"));
+    _define("RTCError", _stub("RTCError"));
+    _define("RTCErrorEvent", _stub("RTCErrorEvent"));
+    _define("RTCIceTransport", _stub("RTCIceTransport"));
+    _define("RTCPeerConnectionIceErrorEvent", _stub("RTCPeerConnectionIceErrorEvent"));
+    _define("RTCPeerConnectionIceEvent", _stub("RTCPeerConnectionIceEvent"));
+    _define("RTCRtpReceiver", _stub("RTCRtpReceiver"));
+    _define("RTCRtpScriptTransform", _stub("RTCRtpScriptTransform"));
+    _define("RTCRtpSender", _stub("RTCRtpSender"));
+    _define("RTCRtpTransceiver", _stub("RTCRtpTransceiver"));
+    _define("RTCSctpTransport", _stub("RTCSctpTransport"));
+    _define("RTCStatsReport", _stub("RTCStatsReport"));
+    _define("RTCTrackEvent", _stub("RTCTrackEvent"));
+    _define("RadioNodeList", _stub("RadioNodeList"));
+    _define("ReadableByteStreamController", _stub("ReadableByteStreamController"));
+    _define("ReadableStreamBYOBReader", _stub("ReadableStreamBYOBReader"));
+    _define("ReadableStreamBYOBRequest", _stub("ReadableStreamBYOBRequest"));
+    _define("RemotePlayback", _stub("RemotePlayback"));
+    _define("ReportBody", _stub("ReportBody"));
+    _define("ResizeObserverEntry", _stub("ResizeObserverEntry"));
+    _define("ResizeObserverSize", _stub("ResizeObserverSize"));
+    _define("RestrictionTarget", _stub("RestrictionTarget"));
+    _define("SVGAElement", _stub("SVGAElement"));
+    _define("SVGAngle", _stub("SVGAngle"));
+    _define("SVGAnimateElement", _stub("SVGAnimateElement"));
+    _define("SVGAnimateMotionElement", _stub("SVGAnimateMotionElement"));
+    _define("SVGAnimateTransformElement", _stub("SVGAnimateTransformElement"));
+    _define("SVGAnimatedAngle", _stub("SVGAnimatedAngle"));
+    _define("SVGAnimatedBoolean", _stub("SVGAnimatedBoolean"));
+    _define("SVGAnimatedEnumeration", _stub("SVGAnimatedEnumeration"));
+    _define("SVGAnimatedInteger", _stub("SVGAnimatedInteger"));
+    _define("SVGAnimatedLength", _stub("SVGAnimatedLength"));
+    _define("SVGAnimatedLengthList", _stub("SVGAnimatedLengthList"));
+    _define("SVGAnimatedNumber", _stub("SVGAnimatedNumber"));
+    _define("SVGAnimatedNumberList", _stub("SVGAnimatedNumberList"));
+    _define("SVGAnimatedPreserveAspectRatio", _stub("SVGAnimatedPreserveAspectRatio"));
+    _define("SVGAnimatedRect", _stub("SVGAnimatedRect"));
+    _define("SVGAnimatedString", _stub("SVGAnimatedString"));
+    _define("SVGAnimatedTransformList", _stub("SVGAnimatedTransformList"));
+    _define("SVGAnimationElement", _stub("SVGAnimationElement"));
+    _define("SVGCircleElement", _stub("SVGCircleElement"));
+    _define("SVGClipPathElement", _stub("SVGClipPathElement"));
+    _define("SVGComponentTransferFunctionElement", _stub("SVGComponentTransferFunctionElement"));
+    _define("SVGDefsElement", _stub("SVGDefsElement"));
+    _define("SVGDescElement", _stub("SVGDescElement"));
+    _define("SVGEllipseElement", _stub("SVGEllipseElement"));
+    _define("SVGFEBlendElement", _stub("SVGFEBlendElement"));
+    _define("SVGFEColorMatrixElement", _stub("SVGFEColorMatrixElement"));
+    _define("SVGFEComponentTransferElement", _stub("SVGFEComponentTransferElement"));
+    _define("SVGFECompositeElement", _stub("SVGFECompositeElement"));
+    _define("SVGFEConvolveMatrixElement", _stub("SVGFEConvolveMatrixElement"));
+    _define("SVGFEDiffuseLightingElement", _stub("SVGFEDiffuseLightingElement"));
+    _define("SVGFEDisplacementMapElement", _stub("SVGFEDisplacementMapElement"));
+    _define("SVGFEDistantLightElement", _stub("SVGFEDistantLightElement"));
+    _define("SVGFEDropShadowElement", _stub("SVGFEDropShadowElement"));
+    _define("SVGFEFloodElement", _stub("SVGFEFloodElement"));
+    _define("SVGFEFuncAElement", _stub("SVGFEFuncAElement"));
+    _define("SVGFEFuncBElement", _stub("SVGFEFuncBElement"));
+    _define("SVGFEFuncGElement", _stub("SVGFEFuncGElement"));
+    _define("SVGFEFuncRElement", _stub("SVGFEFuncRElement"));
+    _define("SVGFEGaussianBlurElement", _stub("SVGFEGaussianBlurElement"));
+    _define("SVGFEImageElement", _stub("SVGFEImageElement"));
+    _define("SVGFEMergeElement", _stub("SVGFEMergeElement"));
+    _define("SVGFEMergeNodeElement", _stub("SVGFEMergeNodeElement"));
+    _define("SVGFEMorphologyElement", _stub("SVGFEMorphologyElement"));
+    _define("SVGFEOffsetElement", _stub("SVGFEOffsetElement"));
+    _define("SVGFEPointLightElement", _stub("SVGFEPointLightElement"));
+    _define("SVGFESpecularLightingElement", _stub("SVGFESpecularLightingElement"));
+    _define("SVGFESpotLightElement", _stub("SVGFESpotLightElement"));
+    _define("SVGFETileElement", _stub("SVGFETileElement"));
+    _define("SVGFETurbulenceElement", _stub("SVGFETurbulenceElement"));
+    _define("SVGFilterElement", _stub("SVGFilterElement"));
+    _define("SVGForeignObjectElement", _stub("SVGForeignObjectElement"));
+    _define("SVGGElement", _stub("SVGGElement"));
+    _define("SVGGeometryElement", _stub("SVGGeometryElement"));
+    _define("SVGGradientElement", _stub("SVGGradientElement"));
+    _define("SVGGraphicsElement", _stub("SVGGraphicsElement"));
+    _define("SVGImageElement", _stub("SVGImageElement"));
+    _define("SVGLength", _stub("SVGLength"));
+    _define("SVGLengthList", _stub("SVGLengthList"));
+    _define("SVGLineElement", _stub("SVGLineElement"));
+    _define("SVGLinearGradientElement", _stub("SVGLinearGradientElement"));
+    _define("SVGMPathElement", _stub("SVGMPathElement"));
+    _define("SVGMarkerElement", _stub("SVGMarkerElement"));
+    _define("SVGMaskElement", _stub("SVGMaskElement"));
+    _define("SVGMatrix", _stub("SVGMatrix"));
+    _define("SVGMetadataElement", _stub("SVGMetadataElement"));
+    _define("SVGNumber", _stub("SVGNumber"));
+    _define("SVGNumberList", _stub("SVGNumberList"));
+    _define("SVGPathElement", _stub("SVGPathElement"));
+    _define("SVGPatternElement", _stub("SVGPatternElement"));
+    _define("SVGPoint", _stub("SVGPoint"));
+    _define("SVGPointList", _stub("SVGPointList"));
+    _define("SVGPolygonElement", _stub("SVGPolygonElement"));
+    _define("SVGPolylineElement", _stub("SVGPolylineElement"));
+    _define("SVGPreserveAspectRatio", _stub("SVGPreserveAspectRatio"));
+    _define("SVGRadialGradientElement", _stub("SVGRadialGradientElement"));
+    _define("SVGRect", _stub("SVGRect"));
+    _define("SVGRectElement", _stub("SVGRectElement"));
+    _define("SVGSVGElement", _stub("SVGSVGElement"));
+    _define("SVGScriptElement", _stub("SVGScriptElement"));
+    _define("SVGSetElement", _stub("SVGSetElement"));
+    _define("SVGStopElement", _stub("SVGStopElement"));
+    _define("SVGStringList", _stub("SVGStringList"));
+    _define("SVGStyleElement", _stub("SVGStyleElement"));
+    _define("SVGSwitchElement", _stub("SVGSwitchElement"));
+    _define("SVGSymbolElement", _stub("SVGSymbolElement"));
+    _define("SVGTSpanElement", _stub("SVGTSpanElement"));
+    _define("SVGTextContentElement", _stub("SVGTextContentElement"));
+    _define("SVGTextElement", _stub("SVGTextElement"));
+    _define("SVGTextPathElement", _stub("SVGTextPathElement"));
+    _define("SVGTextPositioningElement", _stub("SVGTextPositioningElement"));
+    _define("SVGTitleElement", _stub("SVGTitleElement"));
+    _define("SVGTransform", _stub("SVGTransform"));
+    _define("SVGTransformList", _stub("SVGTransformList"));
+    _define("SVGUnitTypes", _stub("SVGUnitTypes"));
+    _define("SVGUseElement", _stub("SVGUseElement"));
+    _define("SVGViewElement", _stub("SVGViewElement"));
+    _define("Sanitizer", _stub("Sanitizer"));
+    _define("Scheduler", _stub("Scheduler"));
+    _define("Scheduling", _stub("Scheduling"));
+    _define("ScriptProcessorNode", _stub("ScriptProcessorNode"));
+    _define("ScrollTimeline", _stub("ScrollTimeline"));
+    _define("ShadowRoot", _stub("ShadowRoot"));
+    _define("SharedStorage", _stub("SharedStorage"));
+    _define("SharedStorageAppendMethod", _stub("SharedStorageAppendMethod"));
+    _define("SharedStorageClearMethod", _stub("SharedStorageClearMethod"));
+    _define("SharedStorageDeleteMethod", _stub("SharedStorageDeleteMethod"));
+    _define("SharedStorageModifierMethod", _stub("SharedStorageModifierMethod"));
+    _define("SharedStorageSetMethod", _stub("SharedStorageSetMethod"));
+    _define("SharedStorageWorklet", _stub("SharedStorageWorklet"));
+    _define("SnapEvent", _stub("SnapEvent"));
+    _define("SourceBuffer", _stub("SourceBuffer"));
+    _define("SourceBufferList", _stub("SourceBufferList"));
+    _define("SpeechGrammar", _stub("SpeechGrammar"));
+    _define("SpeechGrammarList", _stub("SpeechGrammarList"));
+    _define("SpeechRecognition", _stub("SpeechRecognition"));
+    _define("SpeechRecognitionErrorEvent", _stub("SpeechRecognitionErrorEvent"));
+    _define("SpeechRecognitionEvent", _stub("SpeechRecognitionEvent"));
+    _define("SpeechSynthesisErrorEvent", _stub("SpeechSynthesisErrorEvent"));
+    _define("SpeechSynthesisEvent", _stub("SpeechSynthesisEvent"));
+    _define("SpeechSynthesisUtterance", _stub("SpeechSynthesisUtterance"));
+    _define("SpeechSynthesisVoice", _stub("SpeechSynthesisVoice"));
+    _define("StereoPannerNode", _stub("StereoPannerNode"));
+    _define("Storage", _stub("Storage"));
+    _define("StylePropertyMap", _stub("StylePropertyMap"));
+    _define("StylePropertyMapReadOnly", _stub("StylePropertyMapReadOnly"));
+    _define("StyleSheet", _stub("StyleSheet"));
+    _define("StyleSheetList", _stub("StyleSheetList"));
+    _define("SubmitEvent", _stub("SubmitEvent"));
+    _define("Subscriber", _stub("Subscriber"));
+    _define("SuppressedError", _stub("SuppressedError"));
+    _define("SyncManager", _stub("SyncManager"));
+    _define("TaskAttributionTiming", _stub("TaskAttributionTiming"));
+    _define("TaskController", _stub("TaskController"));
+    _define("TaskPriorityChangeEvent", _stub("TaskPriorityChangeEvent"));
+    _define("TaskSignal", _stub("TaskSignal"));
+    _define("TextEvent", _stub("TextEvent"));
+    _define("TextFormat", _stub("TextFormat"));
+    _define("TextFormatUpdateEvent", _stub("TextFormatUpdateEvent"));
+    _define("TextMetrics", _stub("TextMetrics"));
+    _define("TextTrack", _stub("TextTrack"));
+    _define("TextTrackCue", _stub("TextTrackCue"));
+    _define("TextTrackCueList", _stub("TextTrackCueList"));
+    _define("TextTrackList", _stub("TextTrackList"));
+    _define("TextUpdateEvent", _stub("TextUpdateEvent"));
+    _define("TimeRanges", _stub("TimeRanges"));
+    _define("TimelineTrigger", _stub("TimelineTrigger"));
+    _define("TimelineTriggerRange", _stub("TimelineTriggerRange"));
+    _define("TimelineTriggerRangeList", _stub("TimelineTriggerRangeList"));
+    _define("ToggleEvent", _stub("ToggleEvent"));
+    _define("TrackEvent", _stub("TrackEvent"));
+    _define("TransformStreamDefaultController", _stub("TransformStreamDefaultController"));
+    _define("TreeWalker", _stub("TreeWalker"));
+    _define("TrustedTypePolicy", _stub("TrustedTypePolicy"));
+    _define("TrustedTypePolicyFactory", _stub("TrustedTypePolicyFactory"));
+    _define("URLPattern", _stub("URLPattern"));
+    _define("UserActivation", _stub("UserActivation"));
+    _define("VTTCue", _stub("VTTCue"));
+    _define("ValidityState", _stub("ValidityState"));
+    _define("VideoColorSpace", _stub("VideoColorSpace"));
+    _define("VideoFrame", _stub("VideoFrame"));
+    _define("VideoPlaybackQuality", _stub("VideoPlaybackQuality"));
+    _define("ViewTimeline", _stub("ViewTimeline"));
+    _define("ViewTransitionTypeSet", _stub("ViewTransitionTypeSet"));
+    _define("Viewport", _stub("Viewport"));
+    _define("VirtualKeyboardGeometryChangeEvent", _stub("VirtualKeyboardGeometryChangeEvent"));
+    _define("VisibilityStateEntry", _stub("VisibilityStateEntry"));
+    _define("WaveShaperNode", _stub("WaveShaperNode"));
+    _define("WebGLActiveInfo", _stub("WebGLActiveInfo"));
+    _define("WebGLBuffer", _stub("WebGLBuffer"));
+    _define("WebGLContextEvent", _stub("WebGLContextEvent"));
+    _define("WebGLFramebuffer", _stub("WebGLFramebuffer"));
+    _define("WebGLObject", _stub("WebGLObject"));
+    _define("WebGLProgram", _stub("WebGLProgram"));
+    _define("WebGLQuery", _stub("WebGLQuery"));
+    _define("WebGLRenderbuffer", _stub("WebGLRenderbuffer"));
+    _define("WebGLSampler", _stub("WebGLSampler"));
+    _define("WebGLShader", _stub("WebGLShader"));
+    _define("WebGLShaderPrecisionFormat", _stub("WebGLShaderPrecisionFormat"));
+    _define("WebGLSync", _stub("WebGLSync"));
+    _define("WebGLTexture", _stub("WebGLTexture"));
+    _define("WebGLTransformFeedback", _stub("WebGLTransformFeedback"));
+    _define("WebGLUniformLocation", _stub("WebGLUniformLocation"));
+    _define("WebGLVertexArrayObject", _stub("WebGLVertexArrayObject"));
+    _define("WebKitMutationObserver", _stub("WebKitMutationObserver"));
+    _define("WebSocketError", _stub("WebSocketError"));
+    _define("WebSocketStream", _stub("WebSocketStream"));
+    _define("Window", _stub("Window"));
+    _define("WindowControlsOverlayGeometryChangeEvent", _stub("WindowControlsOverlayGeometryChangeEvent"));
+    _define("XMLDocument", _stub("XMLDocument"));
+    _define("XMLHttpRequestEventTarget", _stub("XMLHttpRequestEventTarget"));
+    _define("XMLHttpRequestUpload", _stub("XMLHttpRequestUpload"));
+    _define("XPathEvaluator", _stub("XPathEvaluator"));
+    _define("XPathExpression", _stub("XPathExpression"));
+    _define("XPathResult", _stub("XPathResult"));
     
-    _define("BarcodeDetector", _illegalCtor("BarcodeDetector"));
-    _define("FaceDetector", _illegalCtor("FaceDetector"));
-    _define("TextDetector", _illegalCtor("TextDetector"));
+    _define("BarcodeDetector", _stub("BarcodeDetector"));
+    _define("FaceDetector", _stub("FaceDetector"));
+    _define("TextDetector", _stub("TextDetector"));
 
     // ---- Event handlers (120) ----
     // Event handlers — Chrome 147 exposes ~120 on* accessors on Window.
     // All return null, no observable behaviour.
-    for (const _h of [
-        "onabort", "onafterprint", "onanimationcancel", "onanimationend",
-        "onanimationiteration", "onanimationstart", "onappinstalled", "onauxclick",
-        "onbeforeinput", "onbeforeinstallprompt", "onbeforematch", "onbeforeprint",
-        "onbeforetoggle", "onbeforeunload", "onbeforexrselect", "onblur",
-        "oncancel", "oncanplay", "oncanplaythrough", "onchange",
-        "onclick", "onclose", "oncommand", "oncontentvisibilityautostatechange",
-        "oncontextlost", "oncontextmenu", "oncontextrestored", "oncuechange",
-        "ondblclick", "ondrag", "ondragend", "ondragenter",
-        "ondragleave", "ondragover", "ondragstart", "ondrop",
-        "ondurationchange", "onemptied", "onended", "onfocus",
-        "onformdata", "ongamepadconnected", "ongamepaddisconnected", "ongotpointercapture",
-        "onhashchange", "oninput", "oninvalid", "onkeydown",
-        "onkeypress", "onkeyup", "onlanguagechange", "onload",
-        "onloadeddata", "onloadedmetadata", "onloadstart", "onlostpointercapture",
-        "onmessage", "onmessageerror", "onmousedown", "onmouseenter",
-        "onmouseleave", "onmousemove", "onmouseout", "onmouseover",
-        "onmouseup", "onmousewheel", "onoffline", "ononline",
-        "onpagehide", "onpagereveal", "onpageshow", "onpageswap",
-        "onpause", "onplay", "onplaying", "onpointercancel",
-        "onpointerdown", "onpointerenter", "onpointerleave", "onpointermove",
-        "onpointerout", "onpointerover", "onpointerup", "onpopstate",
-        "onprogress", "onratechange", "onrejectionhandled", "onreset",
-        "onresize", "onscroll", "onscrollend", "onscrollsnapchange",
-        "onscrollsnapchanging", "onsearch", "onsecuritypolicyviolation", "onseeked",
-        "onseeking", "onselect", "onselectionchange", "onselectstart",
-        "onslotchange", "onstalled", "onstorage", "onsubmit",
-        "onsuspend", "ontimeupdate", "ontoggle", "ontransitioncancel",
-        "ontransitionend", "ontransitionrun", "ontransitionstart", "onunhandledrejection",
-        "onunload", "onvolumechange", "onwaiting", "onwebkitanimationend",
-        "onwebkitanimationiteration", "onwebkitanimationstart", "onwebkittransitionend", "onwheel",
-    ]) {
-        if (!(_h in globalThis)) {
-            let _v = null;
-            Object.defineProperty(globalThis, _h, {
-                get: () => _v,
-                set: function(v) { _v = (typeof v === 'function' || v === null) ? v : null; },
-                configurable: true, enumerable: true,
-            });
+    (() => {
+        const proto = globalThis.Window ? globalThis.Window.prototype : globalThis;
+        for (const _h of [
+            "onabort", "onafterprint", "onanimationcancel", "onanimationend",
+            "onanimationiteration", "onanimationstart", "onappinstalled", "onauxclick",
+            "onbeforeinput", "onbeforeinstallprompt", "onbeforematch", "onbeforeprint",
+            "onbeforetoggle", "onbeforeunload", "onbeforexrselect", "onblur",
+            "oncancel", "oncanplay", "oncanplaythrough", "onchange",
+            "onclick", "onclose", "oncommand", "oncontentvisibilityautostatechange",
+            "oncontextlost", "oncontextmenu", "oncontextrestored", "oncuechange",
+            "ondblclick", "ondrag", "ondragend", "ondragenter",
+            "ondragleave", "ondragover", "ondragstart", "ondrop",
+            "ondurationchange", "onemptied", "onended", "onfocus",
+            "onformdata", "ongamepadconnected", "ongamepaddisconnected", "ongotpointercapture",
+            "onhashchange", "oninput", "oninvalid", "onkeydown",
+            "onkeypress", "onkeyup", "onlanguagechange", "onload",
+            "onloadeddata", "onloadedmetadata", "onloadstart", "onlostpointercapture",
+            "onmessage", "onmessageerror", "onmousedown", "onmouseenter",
+            "onmouseleave", "onmousemove", "onmouseout", "onmouseover",
+            "onmouseup", "onmousewheel", "onoffline", "ononline",
+            "onpagehide", "onpagereveal", "onpageshow", "onpageswap",
+            "onpause", "onplay", "onplaying", "onpointercancel",
+            "onpointerdown", "onpointerenter", "onpointerleave", "onpointermove",
+            "onpointerout", "onpointerover", "onpointerup", "onpopstate",
+            "onprogress", "onratechange", "onrejectionhandled", "onreset",
+            "onresize", "onscroll", "onscrollend", "onscrollsnapchange",
+            "onscrollsnapchanging", "onsearch", "onsecuritypolicyviolation", "onseeked",
+            "onseeking", "onselect", "onselectionchange", "onselectstart",
+            "onslotchange", "onstalled", "onstorage", "onsubmit",
+            "onsuspend", "ontimeupdate", "ontoggle", "ontransitioncancel",
+            "ontransitionend", "ontransitionrun", "ontransitionstart", "onunhandledrejection",
+            "onunload", "onvolumechange", "onwaiting", "onwebkitanimationend",
+            "onwebkitanimationiteration", "onwebkitanimationstart", "onwebkittransitionend", "onwheel",
+        ]) {
+            if (!(_h in proto)) {
+                let _v = null;
+                Object.defineProperty(proto, _h, {
+                    get: () => _v,
+                    set: function(v) { _v = (typeof v === 'function' || v === null) ? v : null; },
+                    configurable: true, enumerable: true,
+                });
+
+            }
         }
-    }
+    })();
 
     // ---- Other window props (43) ----
     // Misc Window data properties + bars + webkit aliases.
@@ -837,15 +883,15 @@
         "toolbar": { visible: true },
         "viewport": {},
         "webkitCancelAnimationFrame": globalThis.cancelAnimationFrame,
-        "webkitMediaStream": _illegalCtor('MediaStream'),
+        "webkitMediaStream": _stub('MediaStream'),
         "webkitRequestAnimationFrame": globalThis.requestAnimationFrame,
         "webkitRequestFileSystem": function webkitRequestFileSystem(){ return undefined; },
         "webkitResolveLocalFileSystemURL": function webkitResolveLocalFileSystemURL(){ return undefined; },
-        "webkitSpeechGrammar": _illegalCtor('SpeechGrammar'),
-        "webkitSpeechGrammarList": _illegalCtor('SpeechGrammarList'),
-        "webkitSpeechRecognition": _illegalCtor('SpeechRecognition'),
-        "webkitSpeechRecognitionError": _illegalCtor('SpeechRecognitionError'),
-        "webkitSpeechRecognitionEvent": _illegalCtor('SpeechRecognitionEvent'),
+        "webkitSpeechGrammar": _stub('SpeechGrammar'),
+        "webkitSpeechGrammarList": _stub('SpeechGrammarList'),
+        "webkitSpeechRecognition": _stub('SpeechRecognition'),
+        "webkitSpeechRecognitionError": _stub('SpeechRecognitionError'),
+        "webkitSpeechRecognitionEvent": _stub('SpeechRecognitionEvent'),
         "webkitURL": globalThis.URL,
     };
     for (const _k of Object.keys(_otherProps)) {

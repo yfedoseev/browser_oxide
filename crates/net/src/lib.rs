@@ -202,6 +202,10 @@ impl HttpClient {
         })
     }
 
+    pub async fn learn_kasada_prefix(&self, host: &str, prefix: &str) {
+        self.kasada_sessions.learn_prefix(host, prefix).await;
+    }
+
     /// Learn a Kasada session from response headers (called from response
     /// post-processing). If the response includes `x-kpsdk-cr: true` and
     /// `x-kpsdk-st`, we cache the server-time offset + a session id so
@@ -310,6 +314,9 @@ impl HttpClient {
         headers.push(("origin".into(), format!("https://{host}")));
         headers.push(("referer".into(), request_url.to_string()));
         let resp = self.post_with_headers(&url, &body, &headers).await?;
+        if resp.status == 429 {
+            eprintln!("[akamai] sensor_data POST 429 body: {}", String::from_utf8_lossy(&resp.body));
+        }
         // Re-learn _abck from the response.
         self.learn_abck(host, &resp.set_cookies).await;
         let new_state = self
@@ -332,27 +339,39 @@ impl HttpClient {
     /// Fetch the Kasada `/mfc` endpoint for `host` if we have a session
     /// with a known tenant prefix and don't yet have an fc token.
     /// On success, stores `x-kpsdk-fc` from the response in the session.
-    async fn fetch_kasada_mfc_if_needed(&self, host: &str) {
+    pub async fn fetch_kasada_mfc_if_needed(&self, host: &str) {
         let target = self.kasada_sessions.mfc_target(host).await;
         let Some((tenant_prefix, fc_already)) = target else {
+            eprintln!("[kasada] NO mfc target for {}", host);
             return;
         };
         if fc_already {
             return; // Already have it; no need to refetch.
         }
         let mfc_url = format!("https://{}{}/mfc", host, tenant_prefix);
+        eprintln!("[kasada] FETCHING /mfc: {}", mfc_url);
         // Use a single GET via the same HTTP/2 path. We deliberately call
         // get_with_headers (which auto-injects cookies + x-kpsdk-cd) so
         // /mfc gets the same context Kasada expects.
+        if mfc_url.contains("/mfc") {
+            let jar = self.cookies.lock().await;
+            let host_url = url::Url::parse(&mfc_url).unwrap();
+            let cks = jar.cookies_for(&host_url).unwrap_or_default();
+            eprintln!("[kasada] cookies for /mfc: {}", cks);
+        }
         let resp = match self.get_with_headers(&mfc_url, &[]).await {
             Ok(r) => r,
-            Err(_e) => {
+            Err(e) => {
+                eprintln!("[kasada] /mfc fetch failed: {}", e);
                 // /mfc fetch failed — fail open; subsequent requests omit fc.
                 return;
             }
         };
         if let Some(fc) = resp.headers.get("x-kpsdk-fc") {
+            eprintln!("[kasada] LEARNED x-kpsdk-fc for {} (len={})", host, fc.len());
             self.kasada_sessions.store_fc(host, fc.clone()).await;
+        } else {
+            eprintln!("[kasada] /mfc response MISSING x-kpsdk-fc (status={})", resp.status);
         }
     }
 

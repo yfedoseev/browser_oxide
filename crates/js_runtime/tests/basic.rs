@@ -295,6 +295,24 @@ fn stealth_profile_overrides_window_dims() {
 }
 
 #[test]
+fn get_computed_style_basic() {
+    let mut rt = create_test_runtime();
+    let result = rt
+        .execute_script("getComputedStyle(document.body).display", None)
+        .unwrap();
+    assert_eq!(result, "block");
+}
+
+#[test]
+fn get_computed_style_instanceof() {
+    let mut rt = create_test_runtime();
+    let result = rt
+        .execute_script("getComputedStyle(document.body) instanceof CSSStyleDeclaration", None)
+        .unwrap();
+    assert_eq!(result, "true");
+}
+
+#[test]
 fn no_profile_uses_defaults() {
     let mut rt = create_test_runtime(); // no profile
     let ua = rt.execute_script("navigator.userAgent", None).unwrap();

@@ -265,65 +265,79 @@
         }
     }
 
-    // --- EventTarget on Node.prototype ---
-    const origNodeProto = globalThis.Node.prototype;
+    // --- EventTarget core logic ---
+    const _nodeListeners = new Map(); // nodeId → Map<eventType, [{callback, capture, once}]>
+    const _objListeners = new WeakMap(); // object → Map<eventType, [{callback, capture, once}]>
 
-    // CAPTURE the node-id helper at bootstrap load time. cleanup_bootstrap.js
-    // deletes __boxide from globalThis before page scripts run, so
-    // per-call lookups would fall back to `nodeId = 0` — collapsing every
-    // node's listeners into a single shared bucket (the bug that broke
-    // event_stop_propagation / event_no_bubble_when_not_set).
-    const _getNodeIdOrZero = (globalThis.__boxide && globalThis.__boxide._getNodeId)
+    const _getNodeIdOrMinusOne = (globalThis.__boxide && globalThis.__boxide._getNodeId)
         ? globalThis.__boxide._getNodeId
-        : (() => 0);
+        : (() => -1);
 
-    function _getListeners(nodeId, type) {
-        let nodeMap = _listeners.get(nodeId);
-        if (!nodeMap) { nodeMap = new Map(); _listeners.set(nodeId, nodeMap); }
+    function _getListenersMap(target) {
+        const nodeId = _getNodeIdOrMinusOne(target);
+        // Node IDs: >0 for elements/text, 0 for document (sometimes), -999 for window.
+        // We use the Map for any node that has a stable ID.
+        if (nodeId !== -1) {
+            let m = _nodeListeners.get(nodeId);
+            if (!m) { m = new Map(); _nodeListeners.set(nodeId, m); }
+            return m;
+        } else {
+            let m = _objListeners.get(target);
+            if (!m) { m = new Map(); _objListeners.set(target, m); }
+            return m;
+        }
+    }
+
+    function _getListeners(target, type) {
+        const nodeMap = _getListenersMap(target);
         let arr = nodeMap.get(type);
         if (!arr) { arr = []; nodeMap.set(type, arr); }
         return arr;
     }
 
-    origNodeProto.addEventListener = function(type, callback, options) {
+    const _addEventListener = function addEventListener(type, callback, options) {
         if (typeof callback !== "function" && typeof callback !== "object") return;
-        const nodeId = _getNodeIdOrZero(this);
         const capture = typeof options === "boolean" ? options : !!(options && options.capture);
         const once = typeof options === "object" && options ? !!options.once : false;
         const passive = typeof options === "object" && options ? !!options.passive : false;
-        const listeners = _getListeners(nodeId, type);
+        const listeners = _getListeners(this, type);
         // Prevent duplicate
         if (listeners.some(l => l.callback === callback && l.capture === capture)) return;
         listeners.push({ callback, capture, once, passive });
     };
 
-    origNodeProto.removeEventListener = function(type, callback, options) {
-        const nodeId = _getNodeIdOrZero(this);
+    const _removeEventListener = function removeEventListener(type, callback, options) {
         const capture = typeof options === "boolean" ? options : !!(options && options.capture);
-        const listeners = _getListeners(nodeId, type);
+        const listeners = _getListeners(this, type);
         const idx = listeners.findIndex(l => l.callback === callback && l.capture === capture);
         if (idx !== -1) listeners.splice(idx, 1);
     };
 
-    origNodeProto.dispatchEvent = function(event) {
+    const _dispatchEvent = function dispatchEvent(event) {
+        if (!(event instanceof Event)) {
+            throw new TypeError("Failed to execute 'dispatchEvent' on 'EventTarget': parameter 1 is not of type 'Event'.");
+        }
         event.target = this;
-        const nodeId = _getNodeIdOrZero(this);
+        const nodeId = _getNodeIdOrMinusOne(this);
 
-        // Build propagation path (target → root)
+        // Build propagation path (target → root) if it's a DOM node.
+        // Real Chrome's EventTarget.prototype.dispatchEvent handles the
+        // tree-walk automatically if 'this' is a Node.
         const path = [];
-        let current = this;
-        while (current) {
-            path.push(current);
-            current = current.parentNode;
+        if (nodeId !== -1 && this.parentNode !== undefined) {
+            let current = this;
+            while (current) {
+                path.push(current);
+                current = current.parentNode;
+            }
         }
 
         // Capture phase (root → target)
-        if (!event._stopped) {
+        if (path.length > 0 && !event._stopped) {
             for (let i = path.length - 1; i > 0; i--) {
                 event.currentTarget = path[i];
                 event.eventPhase = 1;
-                const nid = _getNodeIdOrZero(path[i]);
-                _fireListeners(nid, event, true);
+                _fireListeners(path[i], event, true);
                 if (event._stopped) break;
             }
         }
@@ -332,17 +346,16 @@
         if (!event._stopped) {
             event.currentTarget = this;
             event.eventPhase = 2;
-            _fireListeners(nodeId, event, false);
-            _fireListeners(nodeId, event, true);
+            _fireListeners(this, event, false);
+            _fireListeners(this, event, true);
         }
 
         // Bubble phase (target → root)
-        if (!event._stopped && event.bubbles) {
+        if (path.length > 0 && !event._stopped && event.bubbles) {
             for (let i = 1; i < path.length; i++) {
                 event.currentTarget = path[i];
                 event.eventPhase = 3;
-                const nid = _getNodeIdOrZero(path[i]);
-                _fireListeners(nid, event, false);
+                _fireListeners(path[i], event, false);
                 if (event._stopped) break;
             }
         }
@@ -352,15 +365,29 @@
         return !event.defaultPrevented;
     };
 
-    function _fireListeners(nodeId, event, capturePhase) {
-        const listeners = _getListeners(nodeId, event.type);
+    function _fireListeners(target, event, capturePhase) {
+        // --- 1. Fire on* handler (Target phase only, not capture phase) ---
+        if (!capturePhase && !event._stoppedImmediate) {
+            const handlerName = `on${event.type}`;
+            const handler = target[handlerName];
+            if (typeof handler === "function") {
+                try {
+                    handler.call(target, event);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+        }
+
+        // --- 2. Fire registered listeners ---
+        const listeners = _getListeners(target, event.type);
         const toRemove = [];
         for (let i = 0; i < listeners.length; i++) {
             const l = listeners[i];
             if (l.capture !== capturePhase) continue;
             if (event._stoppedImmediate) break;
             if (typeof l.callback === "function") {
-                l.callback.call(event.currentTarget, event);
+                l.callback.call(target, event);
             } else if (l.callback && typeof l.callback.handleEvent === "function") {
                 l.callback.handleEvent(event);
             }
@@ -371,58 +398,67 @@
         }
     }
 
-    // Make globalThis (window) an EventTarget. Real Chrome puts these
-    // methods on EventTarget.prototype, inherited via the chain
-    // Window → WindowProperties → EventTarget. So
-    // `Object.getOwnPropertyNames(window)` does NOT include them.
-    // Mirror that: install on Object.getPrototypeOf(globalThis)
-    // (= Window.prototype in our V8 setup) so they're inherited, not
-    // own. Phase 7 follow-up.
-    const _winAddListener = origNodeProto.addEventListener;
-    const _winRemoveListener = origNodeProto.removeEventListener;
-    const _winDispatch = origNodeProto.dispatchEvent;
+    // Install on EventTarget.prototype — this is the canonical location.
+    // Real Chrome has them as configurable/writable/enumerable=true.
+    const _ET = globalThis.EventTarget;
+    if (_ET && _ET.prototype) {
+        const proto = _ET.prototype;
+        Object.defineProperty(proto, 'addEventListener', {
+            value: _addEventListener, writable: true, enumerable: true, configurable: true,
+        });
+        Object.defineProperty(proto, 'removeEventListener', {
+            value: _removeEventListener, writable: true, enumerable: true, configurable: true,
+        });
+        Object.defineProperty(proto, 'dispatchEvent', {
+            value: _dispatchEvent, writable: true, enumerable: true, configurable: true,
+        });
+    }
 
-    const _windowAdd = function addEventListener(type, callback, options) {
-        _winAddListener.call(globalThis, type, callback, options);
-    };
-    const _windowRemove = function removeEventListener(type, callback, options) {
-        _winRemoveListener.call(globalThis, type, callback, options);
-    };
-    const _windowDispatch = function dispatchEvent(event) {
-        return _winDispatch.call(globalThis, event);
-    };
+    // Ensure Node.prototype does NOT shadow these. Real Chrome's
+    // Node.prototype does not have its own addEventListener.
+    const origNodeProto = globalThis.Node.prototype;
+    if (origNodeProto) {
+        delete origNodeProto.addEventListener;
+        delete origNodeProto.removeEventListener;
+        delete origNodeProto.dispatchEvent;
+    }
 
     // Native-code masking — PerimeterX/HUMAN run
     // `Function.prototype.toString.call(addEventListener)` against both
     // window-level and prototype-level methods. Each must serialize as
-    // `function NAME() { [native code] }`; otherwise the JS source body
-    // leaks and is a hard bot tell.
+    // `function NAME() { [native code] }`.
     if (typeof _maskFunction === 'function') {
-        _maskFunction(_windowAdd, 'addEventListener');
-        _maskFunction(_windowRemove, 'removeEventListener');
-        _maskFunction(_windowDispatch, 'dispatchEvent');
-        _maskFunction(origNodeProto.addEventListener, 'addEventListener');
-        _maskFunction(origNodeProto.removeEventListener, 'removeEventListener');
-        _maskFunction(origNodeProto.dispatchEvent, 'dispatchEvent');
+        _maskFunction(_addEventListener, 'addEventListener');
+        _maskFunction(_removeEventListener, 'removeEventListener');
+        _maskFunction(_dispatchEvent, 'dispatchEvent');
     }
 
+    // Window (globalThis) inheritance: real Chrome's Window inherits from
+    // EventTarget via the prototype chain. Our Window setup (Window →
+    // WindowProperties → EventTarget) should already handle this, but
+    // we ensure the global aliases are correct.
     const _winProto = Object.getPrototypeOf(globalThis);
     if (_winProto && _winProto !== Object.prototype) {
-        Object.defineProperty(_winProto, 'addEventListener', {
-            value: _windowAdd, writable: true, enumerable: true, configurable: true,
-        });
-        Object.defineProperty(_winProto, 'removeEventListener', {
-            value: _windowRemove, writable: true, enumerable: true, configurable: true,
-        });
-        Object.defineProperty(_winProto, 'dispatchEvent', {
-            value: _windowDispatch, writable: true, enumerable: true, configurable: true,
-        });
+        // Just ensure they are there if not inherited.
+        if (!('addEventListener' in _winProto)) {
+            Object.defineProperty(_winProto, 'addEventListener', {
+                value: _addEventListener, writable: true, enumerable: true, configurable: true,
+            });
+        }
+        if (!('removeEventListener' in _winProto)) {
+            Object.defineProperty(_winProto, 'removeEventListener', {
+                value: _removeEventListener, writable: true, enumerable: true, configurable: true,
+            });
+        }
+        if (!('dispatchEvent' in _winProto)) {
+            Object.defineProperty(_winProto, 'dispatchEvent', {
+                value: _dispatchEvent, writable: true, enumerable: true, configurable: true,
+            });
+        }
     } else {
-        // Fallback if there's no separate window prototype: leave the
-        // methods as own properties (less ideal but functional).
-        globalThis.addEventListener = _windowAdd;
-        globalThis.removeEventListener = _windowRemove;
-        globalThis.dispatchEvent = _windowDispatch;
+        globalThis.addEventListener = _addEventListener;
+        globalThis.removeEventListener = _removeEventListener;
+        globalThis.dispatchEvent = _dispatchEvent;
     }
 
     // Export all event classes

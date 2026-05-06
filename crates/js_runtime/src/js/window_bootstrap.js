@@ -79,16 +79,15 @@
 
     // Stable-object references — object getters return the same reference
     // on every call, matching the behavior of real DOM-wrapped properties.
-    let NetworkInformation = globalThis.NetworkInformation || class NetworkInformation {};
+    let NetworkInformation = globalThis.NetworkInformation || class NetworkInformation extends EventTarget {
+        constructor() { super(); }
+    };
     const _navConnection = Object.create(NetworkInformation.prototype);
     Object.defineProperty(_navConnection, 'effectiveType', { get: () => _p("connection_effective_type", "4g"), enumerable: true });
     Object.defineProperty(_navConnection, 'rtt', { get: () => Math.round(_pInt("connection_rtt", 50) / 25) * 25, enumerable: true });
     Object.defineProperty(_navConnection, 'downlink', { get: () => Math.round(_pFloat("connection_downlink", 10) * 40) / 40, enumerable: true });
     Object.defineProperty(_navConnection, 'saveData', { get: () => false, enumerable: true });
     Object.defineProperty(_navConnection, 'downlinkMax', { get: () => Infinity, enumerable: true });
-    _navConnection.addEventListener = function addEventListener() {};
-    _navConnection.removeEventListener = function removeEventListener() {};
-    _navConnection.dispatchEvent = function dispatchEvent() { return true; };
     _navConnection.onchange = null;
 
     let PluginArray = globalThis.PluginArray || class PluginArray {};
@@ -350,8 +349,8 @@
         "nfc", "display-capture", "window-management",
     ]);
 
-    class PermissionStatus {
-        constructor(name) { this._name = name; }
+    class PermissionStatus extends EventTarget {
+        constructor(name) { super(); this._name = name; }
         get name() { return this._name; }
         get state() {
             if (!_secure() && _SC_GATED_PERMISSIONS.has(this._name)) {
@@ -361,9 +360,6 @@
         }
         get onchange() { return null; }
         set onchange(_v) {}
-        addEventListener() {}
-        removeEventListener() {}
-        dispatchEvent() { return true; }
     }
     Object.defineProperty(PermissionStatus.prototype, Symbol.toStringTag, {
         value: "PermissionStatus", configurable: true,
@@ -508,15 +504,14 @@
     _maskAsNative(IdentityProvider, 'getUserInfo');
     _maskAsNative(CredentialsContainer.prototype, 'create', 'get', 'store', 'preventSilentAccess');
 
-    class Bluetooth {}
+    class Bluetooth extends EventTarget {
+        constructor() { super(); }
+    }
     Object.defineProperty(Bluetooth.prototype, Symbol.toStringTag, {
         value: "Bluetooth", configurable: true,
     });
     Bluetooth.prototype.getAvailability = function () { return Promise.resolve(false); };
     Bluetooth.prototype.requestDevice = function () { return Promise.reject(new DOMException("User denied", "NotFoundError")); };
-    Bluetooth.prototype.addEventListener = function () {};
-    Bluetooth.prototype.removeEventListener = function () {};
-    Bluetooth.prototype.dispatchEvent = function () { return true; };
     globalThis.Bluetooth = Bluetooth;
     const _navBluetooth = Object.create(Bluetooth.prototype);
 
@@ -524,10 +519,45 @@
     // `Object.prototype.toString.call(navigator.usb)` returns
     // `[object USB]` (not `[object Object]`). Real Chrome's IDL gives
     // each one a class identity even when they're effectively stubs.
-    const _navUsb = {}; Object.defineProperty(_navUsb, Symbol.toStringTag, { value: "USB", configurable: true });
-    const _navSerial = {}; Object.defineProperty(_navSerial, Symbol.toStringTag, { value: "Serial", configurable: true });
-    const _navHid = {}; Object.defineProperty(_navHid, Symbol.toStringTag, { value: "HID", configurable: true });
-    const _navLocks = {}; Object.defineProperty(_navLocks, Symbol.toStringTag, { value: "LockManager", configurable: true });
+    const _navUsb = (() => {
+        const _UProto = globalThis.USB && globalThis.USB.prototype;
+        const u = _UProto ? Object.create(_UProto) : {};
+        u.getDevices = function getDevices() { return Promise.resolve([]); };
+        u.requestDevice = function requestDevice() { return Promise.reject(new DOMException("User denied", "NotFoundError")); };
+        u.onconnect = null;
+        u.ondisconnect = null;
+        return u;
+    })();
+    const _navSerial = (() => {
+        const _SProto = globalThis.Serial && globalThis.Serial.prototype;
+        const s = _SProto ? Object.create(_SProto) : {};
+        s.getPorts = function getPorts() { return Promise.resolve([]); };
+        s.requestPort = function requestPort() { return Promise.reject(new DOMException("User denied", "NotFoundError")); };
+        s.onconnect = null;
+        s.ondisconnect = null;
+        return s;
+    })();
+    const _navHid = (() => {
+        const _HProto = globalThis.HID && globalThis.HID.prototype;
+        const h = _HProto ? Object.create(_HProto) : {};
+        h.getDevices = function getDevices() { return Promise.resolve([]); };
+        h.requestDevice = function requestDevice() { return Promise.reject(new DOMException("User denied", "NotFoundError")); };
+        h.onconnect = null;
+        h.ondisconnect = null;
+        return h;
+    })();
+    const _navLocks = (() => {
+        const _LProto = globalThis.LockManager && globalThis.LockManager.prototype;
+        const l = _LProto ? Object.create(_LProto) : {};
+        l.query = function query() { return Promise.resolve({ held: [], pending: [] }); };
+        l.request = function request() { return new Promise(() => {}); };
+        return l;
+    })();
+
+    Object.defineProperty(_navUsb, Symbol.toStringTag, { value: "USB", configurable: true });
+    Object.defineProperty(_navSerial, Symbol.toStringTag, { value: "Serial", configurable: true });
+    Object.defineProperty(_navHid, Symbol.toStringTag, { value: "HID", configurable: true });
+    Object.defineProperty(_navLocks, Symbol.toStringTag, { value: "LockManager", configurable: true });
 
     // navigator.keyboard — Keyboard API (probed by CreepJS + DataDome).
     // Real Chrome exposes a Keyboard instance with getLayoutMap() returning a
@@ -609,8 +639,9 @@
     globalThis.StorageManager = StorageManager;
     const _navStorage = Object.create(StorageManager.prototype);
 
-    class ServiceWorkerContainer {
+    class ServiceWorkerContainer extends EventTarget {
         constructor() {
+            super();
             this.controller = null;
             this.oncontrollerchange = null;
             this.onmessage = null;
@@ -643,16 +674,49 @@
     ServiceWorkerContainer.prototype.removeEventListener = function () {};
     globalThis.ServiceWorkerContainer = ServiceWorkerContainer;
     const _navServiceWorker = new ServiceWorkerContainer();
-    const _navClipboard = { readText() { return Promise.resolve(""); }, writeText() { return Promise.resolve(); } };
+    const _navClipboard = (() => {
+        const _CProto = globalThis.Clipboard && globalThis.Clipboard.prototype;
+        const c = _CProto ? Object.create(_CProto) : {};
+        c.readText = function readText() { return Promise.resolve(""); };
+        c.writeText = function writeText() { return Promise.resolve(); };
+        return c;
+    })();
     Object.defineProperty(_navClipboard, Symbol.toStringTag, { value: "Clipboard", configurable: true });
-    const _navGeolocation = {};
+    const _navGeolocation = (() => {
+        const _GProto = globalThis.Geolocation && globalThis.Geolocation.prototype;
+        const g = _GProto ? Object.create(_GProto) : {};
+        g.getCurrentPosition = function getCurrentPosition(ok, err, options) {
+            if (typeof err === "function") setTimeout(() => err({ code: 1, message: "User denied Geolocation" }), 0);
+        };
+        g.watchPosition = function watchPosition(ok, err, options) {
+            if (typeof err === "function") setTimeout(() => err({ code: 1, message: "User denied Geolocation" }), 0);
+            return 0;
+        };
+        g.clearWatch = function clearWatch() {};
+        return g;
+    })();
     Object.defineProperty(_navGeolocation, Symbol.toStringTag, { value: "Geolocation", configurable: true });
     const _navWakeLock = {};
     Object.defineProperty(_navWakeLock, Symbol.toStringTag, { value: "WakeLock", configurable: true });
     const _navMediaSession = {};
-    const _navScheduling = { isInputPending() { return false; } };
+    const _navScheduling = (() => {
+        const _SProto = globalThis.Scheduling && globalThis.Scheduling.prototype;
+        const s = _SProto ? Object.create(_SProto) : {};
+        s.isInputPending = function isInputPending() { return false; };
+        return s;
+    })();
+
     Object.defineProperty(_navScheduling, Symbol.toStringTag, { value: "Scheduling", configurable: true });
-    const _navUserActivation = { isActive: false, hasBeenActive: false };
+    const _navUserActivation = (() => {
+        const _UAProto = globalThis.UserActivation && globalThis.UserActivation.prototype;
+        const u = _UAProto ? Object.create(_UAProto) : {};
+        Object.defineProperties(u, {
+            isActive: { get: () => false, enumerable: true },
+            hasBeenActive: { get: () => false, enumerable: true },
+        });
+        return u;
+    })();
+    Object.defineProperty(_navUserActivation, Symbol.toStringTag, { value: "UserActivation", configurable: true });
     // navigator.languages is CACHED per runtime — Chrome returns the same
     // frozen array reference on every access, so we memoize after the first
     // lazy read (bootstrap time has no profile; the cache must be deferred).
@@ -1009,11 +1073,15 @@
     }
 
     // Frame-tree globals: top/parent/frames/self all point to this window
-    // (we only emulate a single browsing context). Real browsers: when a page
-    // is not in a frame, top === parent === window.
-    globalThis.top = globalThis;
-    globalThis.parent = globalThis;
-    globalThis.frames = globalThis;
+    // window / self / frames / top / parent — self-references.
+    for (const key of ['window', 'self', 'frames', 'top', 'parent']) {
+        Object.defineProperty(globalThis, key, {
+            value: globalThis,
+            writable: false,
+            configurable: false,
+            enumerable: true
+        });
+    }
     globalThis.opener = null;
 
     // screen — prototype-backed so own-descriptor probe returns undefined.
@@ -1055,7 +1123,10 @@
         configurable: true,
         enumerable: true,
     });
-    globalThis.origin = "null";
+    Object.defineProperty(globalThis, 'origin', {
+        get() { return globalThis.location ? globalThis.location.origin : "null"; },
+        configurable: true, enumerable: true,
+    });
     // Window metrics must resolve LAZILY — bootstrap runs at V8-snapshot
     // build time with no profile installed; eager values get baked as
     // defaults and never update when the profile loads.
@@ -1224,7 +1295,7 @@
         // fresh unfrozen array each call, breaking nav_languages_is_frozen.)
         Object.defineProperty(_NavProto, 'webdriver', {
             get: () => false,
-            enumerable: false,
+            enumerable: true,
             configurable: true
         });
 
@@ -1344,11 +1415,15 @@
             "uaFullVersion", "wow64",
         ]);
 
-        const _navUaData = {
-            get brands() { return _lowCached(); },
-            get mobile() { return false; },
-            get platform() { return _uaPlatform(); },
-            getHighEntropyValues(hints) {
+        const _navUaData = (() => {
+            const _UAProto = globalThis.NavigatorUAData && globalThis.NavigatorUAData.prototype;
+            const u = _UAProto ? Object.create(_UAProto) : {};
+            Object.defineProperties(u, {
+                brands: { get: () => _lowCached(), enumerable: true },
+                mobile: { get: () => false, enumerable: true },
+                platform: { get: () => _uaPlatform(), enumerable: true },
+            });
+            u.getHighEntropyValues = function getHighEntropyValues(hints) {
                 // Chrome rejects with TypeError on non-array (or missing).
                 if (!Array.isArray(hints)) {
                     return Promise.reject(new TypeError(
@@ -1377,15 +1452,16 @@
                     }
                 }
                 return Promise.resolve(result);
-            },
-            toJSON() {
+            };
+            u.toJSON = function toJSON() {
                 return {
                     brands: _lowCached().map(b => ({ brand: b.brand, version: b.version })),
                     mobile: false,
                     platform: _uaPlatform(),
                 };
-            },
-        };
+            };
+            return u;
+        })();
         // userAgentData is [SecureContext] — return undefined on
         // insecure contexts so probes get a TypeError when reading
         // navigator.userAgentData.brands. Phase 7.
@@ -1599,16 +1675,14 @@
         };
     }
     if (!globalThis.ServiceWorker) {
-        globalThis.ServiceWorker = class ServiceWorker {
+        globalThis.ServiceWorker = class ServiceWorker extends EventTarget {
             constructor() {
+                super();
                 this.scriptURL = "";
                 this.state = "activated";
                 this.onstatechange = null;
             }
             postMessage() {}
-            addEventListener() {}
-            removeEventListener() {}
-            dispatchEvent() { return true; }
         };
     }
     if (!globalThis.WorkerGlobalScope) {
@@ -1631,11 +1705,12 @@
     // ================================================================
 
     if (!globalThis.FileReader) {
-        globalThis.FileReader = class FileReader {
+        globalThis.FileReader = class FileReader extends EventTarget {
             static EMPTY = 0;
             static LOADING = 1;
             static DONE = 2;
             constructor() {
+                super();
                 this.readyState = 0;
                 this.result = null;
                 this.error = null;
@@ -1651,9 +1726,6 @@
             readAsArrayBuffer(blob) { this.readyState = 2; this.result = new ArrayBuffer(0); if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
             readAsBinaryString(blob) { this.readyState = 2; this.result = ""; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
             abort() { this.readyState = 2; }
-            addEventListener() {}
-            removeEventListener() {}
-            dispatchEvent() { return true; }
         };
     }
 
@@ -1786,42 +1858,38 @@
     if (!globalThis.WritableStreamDefaultWriter) globalThis.WritableStreamDefaultWriter = class WritableStreamDefaultWriter {};
 
     if (!globalThis.BroadcastChannel) {
-        globalThis.BroadcastChannel = class BroadcastChannel {
-            constructor(name) { this.name = name; this.onmessage = null; this.onmessageerror = null; }
+        globalThis.BroadcastChannel = class BroadcastChannel extends EventTarget {
+            constructor(name) { super(); this.name = name; this.onmessage = null; this.onmessageerror = null; }
             postMessage() {}
             close() {}
-            addEventListener() {}
-            removeEventListener() {}
-            dispatchEvent() { return true; }
+        };
+    }
+
+    if (!globalThis.MessagePort) {
+        globalThis.MessagePort = class MessagePort extends EventTarget {
+            constructor() { super(); this.onmessage = null; this.onmessageerror = null; }
+            postMessage() {}
+            start() {}
+            close() {}
         };
     }
 
     if (!globalThis.MessageChannel) {
         globalThis.MessageChannel = class MessageChannel {
             constructor() {
-                this.port1 = { onmessage: null, postMessage() {}, start() {}, close() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } };
-                this.port2 = { onmessage: null, postMessage() {}, start() {}, close() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } };
+                this.port1 = new MessagePort();
+                this.port2 = new MessagePort();
             }
-        };
-    }
-    if (!globalThis.MessagePort) {
-        globalThis.MessagePort = class MessagePort {
-            constructor() { this.onmessage = null; this.onmessageerror = null; }
-            postMessage() {}
-            start() {}
-            close() {}
-            addEventListener() {}
-            removeEventListener() {}
-            dispatchEvent() { return true; }
         };
     }
 
     if (!globalThis.EventSource) {
-        globalThis.EventSource = class EventSource {
+        globalThis.EventSource = class EventSource extends EventTarget {
             static CONNECTING = 0;
             static OPEN = 1;
             static CLOSED = 2;
             constructor(url) {
+                super();
                 this.url = String(url);
                 this.readyState = 0;
                 this.withCredentials = false;
@@ -1830,9 +1898,6 @@
                 this.onerror = null;
             }
             close() { this.readyState = 2; }
-            addEventListener() {}
-            removeEventListener() {}
-            dispatchEvent() { return true; }
         };
     }
 
@@ -2828,27 +2893,61 @@
     // nodeId=0 (same bug that broke event_stop_propagation). This was why
     // every getComputedStyle() call returned the same root-element defaults
     // regardless of which element was passed.
+    const _compStyleCache = new WeakMap();
     const _getNodeIdForCompStyle = (globalThis.__boxide && globalThis.__boxide._getNodeId)
         ? globalThis.__boxide._getNodeId
         : (() => 0);
     globalThis.getComputedStyle = function(element, pseudoElt) {
+        if (!element) return null;
+        let styleProxy = _compStyleCache.get(element);
+        if (styleProxy) return styleProxy;
+
         const nodeId = _getNodeIdForCompStyle(element);
-        return new Proxy({}, {
+        // Create an instance of CSSStyleDeclaration.
+        const style = Object.create(globalThis.CSSStyleDeclaration.prototype || Object.prototype);
+        let cache = null;
+        let keys = null;
+        function ensureCache() {
+            if (cache === null) {
+                cache = ops.op_dom_get_all_computed_styles(nodeId);
+                keys = Object.keys(cache);
+            }
+            return cache;
+        }
+        styleProxy = new Proxy(style, {
             get(target, prop) {
                 if (prop === "getPropertyValue") {
-                    return (name) => ops.op_dom_get_computed_style(nodeId, name);
+                    return (name) => {
+                        const c = ensureCache();
+                        return c[name] || ops.op_dom_get_computed_style(nodeId, name);
+                    };
                 }
                 if (prop === "setProperty" || prop === "removeProperty") {
                     return () => {}; // read-only
                 }
+                if (prop === "length") {
+                    ensureCache();
+                    return keys.length;
+                }
+                if (prop === Symbol.toStringTag) return "CSSStyleDeclaration";
                 if (typeof prop === "string") {
+                    if (/^\d+$/.test(prop)) {
+                        ensureCache();
+                        return keys[parseInt(prop, 10)];
+                    }
                     const kebab = prop.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+                    const c = ensureCache();
+                    if (Object.prototype.hasOwnProperty.call(c, kebab)) return c[kebab];
+                    // Fallback to single-op for inheritance/defaults
                     return ops.op_dom_get_computed_style(nodeId, kebab);
                 }
                 return undefined;
             }
         });
+        _compStyleCache.set(element, styleProxy);
+        return styleProxy;
     };
+    _maskAsNative(globalThis, 'getComputedStyle');
 
     // XMLHttpRequest stub (built on fetch)
     // XMLHttpRequest — must extend EventTarget and expose the full Chrome
@@ -2887,7 +2986,7 @@
             this.ontimeout = null;
             this.onprogress = null;
             // upload — XMLHttpRequestUpload, also an EventTarget.
-            this.upload = new (class XMLHttpRequestUpload extends EventTarget {
+            const _XHRU = class XMLHttpRequestUpload extends EventTarget {
                 constructor() {
                     super();
                     this.onload = null;
@@ -2898,7 +2997,9 @@
                     this.ontimeout = null;
                     this.onprogress = null;
                 }
-            })();
+            };
+            Object.defineProperty(_XHRU.prototype, Symbol.toStringTag, { value: "XMLHttpRequestUpload", configurable: true });
+            this.upload = new _XHRU();
         }
         static UNSENT = 0;
         static OPENED = 1;
@@ -2906,6 +3007,7 @@
         static LOADING = 3;
         static DONE = 4;
         open(method, url, async = true, user, password) {
+            console.log(`[XHR] open ${method} ${url}`);
             this._method = String(method || "GET").toUpperCase();
             let urlStr = String(url || "");
             if (urlStr && !urlStr.startsWith('http') && !urlStr.startsWith('data:') && !urlStr.startsWith('blob:')) {
@@ -2941,6 +3043,7 @@
         }
         overrideMimeType(mime) { this._overrideMime = String(mime); }
         send(body) {
+            console.log(`[XHR] send ${this._method} ${this._url}`);
             const xhr = this;
             if (xhr._aborted) return;
             const fireEvent = (type) => {
@@ -3061,14 +3164,16 @@
                 .join("\r\n");
         }
     };
+    Object.defineProperty(globalThis.XMLHttpRequest.prototype, Symbol.toStringTag, { value: "XMLHttpRequest", configurable: true });
 
     // WebSocket — real connections via tokio-tungstenite ops
-    globalThis.WebSocket = class WebSocket {
+    globalThis.WebSocket = class WebSocket extends EventTarget {
         static CONNECTING = 0;
         static OPEN = 1;
         static CLOSING = 2;
         static CLOSED = 3;
         constructor(url, protocols) {
+            super();
             this.url = url;
             this.readyState = WebSocket.CONNECTING;
             this.onopen = null;
@@ -4271,8 +4376,14 @@
     // ================================================================
     // WebRTC leak prevention — block real IP exposure via ICE candidates
     // ================================================================
-    globalThis.RTCPeerConnection = class RTCPeerConnection {
+    globalThis.RTCDataChannel = class RTCDataChannel extends EventTarget {
+        constructor() { super(); this.label = ""; this.readyState = "connecting"; this.onopen = null; this.onmessage = null; this.onerror = null; this.onclose = null; }
+        send() {}
+        close() {}
+    };
+    globalThis.RTCPeerConnection = class RTCPeerConnection extends EventTarget {
         constructor(config) {
+            super();
             this.localDescription = null;
             this.remoteDescription = null;
             this.signalingState = "stable";
@@ -4287,7 +4398,8 @@
             this._channels = [];
         }
         createDataChannel(label, options) {
-            const ch = { label, readyState: "connecting", send() {}, close() {}, onopen: null, onmessage: null, onerror: null, onclose: null };
+            const ch = new RTCDataChannel();
+            ch.label = label;
             this._channels.push(ch);
             return ch;
         }
@@ -4820,20 +4932,24 @@
     // window.scheduler.postTask / scheduler.yield are checked by bot detectors.
     // ================================================================
     if (!globalThis.scheduler) {
-        globalThis.scheduler = {
-            postTask(callback, options) {
-                const delay = (options && options.delay) || 0;
-                return new Promise((resolve, reject) => {
-                    setTimeout(() => {
-                        try { resolve(callback()); } catch (e) { reject(e); }
-                    }, delay);
-                });
-            },
-            yield() {
-                return new Promise(resolve => setTimeout(resolve, 0));
-            },
-        };
-        _maskAsNative(globalThis.scheduler, 'postTask', 'yield');
+        const _SProto = globalThis.Scheduler && globalThis.Scheduler.prototype;
+        if (_SProto) {
+            globalThis.scheduler = Object.create(_SProto);
+            Object.assign(globalThis.scheduler, {
+                postTask(callback, options) {
+                    const delay = (options && options.delay) || 0;
+                    return new Promise((resolve, reject) => {
+                        setTimeout(() => {
+                            try { resolve(callback()); } catch (e) { reject(e); }
+                        }, delay);
+                    });
+                },
+                yield() {
+                    return new Promise(resolve => setTimeout(resolve, 0));
+                },
+            });
+            _maskAsNative(globalThis.scheduler, 'postTask', 'yield');
+        }
     }
 
     // ================================================================
@@ -5281,4 +5397,23 @@
     //   (snapshot bootstraps with is_secure_context=true) and then
     //   stripped per-page in cleanup_bootstrap.js when the actual page
     //   URL is insecure.
+    Object.defineProperty(globalThis, 'external', {
+        value: {
+            AddSearchProvider() {},
+            IsSearchProviderInstalled() {},
+        },
+        configurable: true, enumerable: true, writable: true,
+    });
+    globalThis.clientInformation = globalThis.navigator;
+    globalThis.offscreenBuffering = true;
+    globalThis.defaultStatus = "";
+    globalThis.defaultstatus = "";
+    if (globalThis.Window && globalThis.Window.prototype) {
+        Object.setPrototypeOf(globalThis, globalThis.Window.prototype);
+    }
+    globalThis.styleMedia = {
+        type: "screen",
+        matchMedium(m) { return globalThis.matchMedia(m).matches; }
+    };
+    Object.defineProperty(globalThis, Symbol.toStringTag, { value: "Window", configurable: true });
 })(globalThis);

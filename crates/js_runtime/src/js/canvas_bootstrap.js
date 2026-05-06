@@ -84,6 +84,22 @@
         return [0, 0, 0, 255];
     }
 
+    class ImageData {
+        constructor(data, width, height) {
+            if (arguments.length === 2) {
+                // constructor(width, height)
+                height = width;
+                width = data;
+                data = new Uint8ClampedArray(width * height * 4);
+            }
+            this.data = data;
+            this.width = width;
+            this.height = height;
+        }
+    }
+    globalThis.ImageData = ImageData;
+    _maskFunction(ImageData, 'ImageData');
+
     class CanvasRenderingContext2D {
         #id;
         constructor(id) { this.#id = id; }
@@ -194,12 +210,12 @@
         // Image data — real pixel ops
         getImageData(x, y, w, h) {
             const raw = ops.op_canvas_get_image_data(this.#id, x, y, w, h);
-            return { data: new Uint8ClampedArray(raw), width: w, height: h };
+            return new ImageData(new Uint8ClampedArray(raw), w, h);
         }
         putImageData(imageData, dx, dy) {
             ops.op_canvas_put_image_data(this.#id, imageData.data, dx, dy, imageData.width, imageData.height);
         }
-        createImageData(w, h) { return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h }; }
+        createImageData(w, h) { return new ImageData(w, h); }
         drawImage(source, dx, dy) {
             // source can be another canvas element — get its internal ID
             if (source && source._canvasId !== undefined) {
@@ -481,10 +497,12 @@
         createShader() { return { _id: 1 }; }
         shaderSource() {}
         compileShader() {}
+        getShaderInfoLog() { return ""; }
         getShaderParameter() { return true; }
         createProgram() { return { _id: 1 }; }
         attachShader() {}
         linkProgram() {}
+        getProgramInfoLog() { return ""; }
         getProgramParameter() { return true; }
         useProgram() {}
         getUniformLocation() { return { _id: 0 }; }
@@ -860,9 +878,16 @@
             if (i >= 0) this.childNodes.splice(i, 1);
             return child;
         }
-        addEventListener() {}
-        removeEventListener() {}
-        dispatchEvent() { return true; }
+        addEventListener(type, listener, options) {
+            // Inherit from Node -> EventTarget
+            return super.addEventListener(type, listener, options);
+        }
+        removeEventListener(type, listener, options) {
+            return super.removeEventListener(type, listener, options);
+        }
+        dispatchEvent(event) {
+            return super.dispatchEvent(event);
+        }
         // Clone / get bounding box — fingerprint probes may call these
         cloneNode() { return new HTMLCanvasElement(this.width, this.height); }
         getBoundingClientRect() {
@@ -884,9 +909,8 @@
     if (globalThis.HTMLCanvasElement) {
         Object.setPrototypeOf(HTMLCanvasElement.prototype, globalThis.HTMLCanvasElement.prototype);
         Object.setPrototypeOf(HTMLCanvasElement, globalThis.HTMLCanvasElement);
-    } else {
-        globalThis.HTMLCanvasElement = HTMLCanvasElement;
     }
+    globalThis.HTMLCanvasElement = HTMLCanvasElement;
     globalThis.CanvasRenderingContext2D = CanvasRenderingContext2D;
     globalThis.WebGLRenderingContext = WebGLRenderingContext;
     // Symbol.toStringTag — Akamai BMP v3 and DataDome check
@@ -1060,8 +1084,9 @@
     //
     // Anti-fingerprint sites probe this path via
     // `const ctx = new OffscreenCanvas(w, h).getContext('2d'); ctx.fillText(...)`.
-    class RealOffscreenCanvas {
+    class RealOffscreenCanvas extends EventTarget {
         constructor(width, height) {
+            super();
             this.width = width | 0;
             this.height = height | 0;
             this._canvasId = 0;
@@ -1137,10 +1162,14 @@
         
         // Also mask WebGL if available
         if (globalThis.WebGLRenderingContext) {
-            _maskAsNative(globalThis.WebGLRenderingContext.prototype, 'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter');
+            _maskAsNative(globalThis.WebGLRenderingContext.prototype, 
+                'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter',
+                'getShaderInfoLog', 'getProgramInfoLog');
         }
         if (globalThis.WebGL2RenderingContext) {
-            _maskAsNative(globalThis.WebGL2RenderingContext.prototype, 'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter');
+            _maskAsNative(globalThis.WebGL2RenderingContext.prototype, 
+                'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter',
+                'getShaderInfoLog', 'getProgramInfoLog');
         }
     }
 })(globalThis);
