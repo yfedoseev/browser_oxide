@@ -101,6 +101,12 @@ pub struct KasadaSolution {
     /// solving). Some deployments require this for replay-attack defense.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rst: Option<f64>,
+    /// Kasada version (typically 1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub v: Option<u32>,
+    /// Estimated clock drift (rst - st).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub d: Option<i64>,
 }
 
 impl KasadaSolution {
@@ -149,10 +155,15 @@ pub fn solve(
     let target_per_sub =
         challenge.difficulty as f64 / challenge.subchallenge_count.max(1) as f64;
 
-    // Initial seed: sha256("tp-v2-input, <workTime>, <id>")
+    // Initial seed: sha256("tp-v2-input, <alignedWorkTime>, <id>")
+    // Kasada ips.js uses Math.round(Date.now() / 18000081) * 10 as part of the seed.
+    // We match this alignment to ensure our PoW answers are valid for the current window.
+    let aligned_work_time =
+        (work_time_ms as f64 / 18000081.0).round() as i64 * 10;
+
     let mut jonta = sha256_hex(&format!(
         "{}, {}, {}",
-        challenge.platform_inputs, work_time_ms, id
+        challenge.platform_inputs, aligned_work_time, id
     ));
 
     let mut answers: Vec<u32> = Vec::with_capacity(challenge.subchallenge_count as usize);
@@ -189,6 +200,8 @@ pub fn solve(
         duration: Some(duration_ms),
         st: None,
         rst: None,
+        v: None,
+        d: None,
     }
 }
 
@@ -332,9 +345,12 @@ mod tests {
         let id = "abcdef0123456789abcdef0123456789";
         let sol = solve(&challenge, work_time, id);
 
+        let aligned_work_time =
+            (work_time as f64 / 18000081.0).round() as i64 * 10;
+
         let mut jonta = sha256_hex(&format!(
             "{}, {}, {}",
-            challenge.platform_inputs, work_time, id
+            challenge.platform_inputs, aligned_work_time, id
         ));
         let target = challenge.difficulty as f64 / challenge.subchallenge_count as f64;
         for &ans in &sol.answers {

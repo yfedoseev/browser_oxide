@@ -100,6 +100,45 @@
         }
     }
 
+    class DOMPointReadOnly {
+        constructor(x = 0, y = 0, z = 0, w = 1) {
+            this.x = x; this.y = y; this.z = z; this.w = w;
+        }
+        static fromPoint(p) { return new DOMPointReadOnly(p.x, p.y, p.z, p.w); }
+        toJSON() { return { x: this.x, y: this.y, z: this.z, w: this.w }; }
+    }
+    globalThis.DOMPointReadOnly = DOMPointReadOnly;
+
+    class DOMPoint extends DOMPointReadOnly {
+        constructor(x = 0, y = 0, z = 0, w = 1) { super(x, y, z, w); }
+    }
+    globalThis.DOMPoint = DOMPoint;
+
+    class DOMRectReadOnly {
+        constructor(x = 0, y = 0, width = 0, height = 0) {
+            this.x = x; this.y = y; this.width = width; this.height = height;
+        }
+        get top() { return this.y; }
+        get left() { return this.x; }
+        get right() { return this.x + this.width; }
+        get bottom() { return this.y + this.height; }
+        toJSON() { return { x: this.x, y: this.y, width: this.width, height: this.height, top: this.top, left: this.left, right: this.right, bottom: this.bottom }; }
+    }
+    globalThis.DOMRectReadOnly = DOMRectReadOnly;
+
+    class DOMRect extends DOMRectReadOnly {
+        constructor(x = 0, y = 0, width = 0, height = 0) { super(x, y, width, height); }
+        static fromRect(r) { return new DOMRect(r.x, r.y, r.width, r.height); }
+    }
+    globalThis.DOMRect = DOMRect;
+
+    if (typeof _maskFunction === 'function') {
+        _maskFunction(DOMPointReadOnly, 'DOMPointReadOnly');
+        _maskFunction(DOMPoint, 'DOMPoint');
+        _maskFunction(DOMRectReadOnly, 'DOMRectReadOnly');
+        _maskFunction(DOMRect, 'DOMRect');
+    }
+
     function _onNodeInsertedInner(child, sync = true) {
         // 1. Dynamic script loading
         const childTag = (child.tagName || child.nodeName || "").toLowerCase();
@@ -1500,18 +1539,6 @@
             }
             this.style = styleObj;
         }
-    }
-
-    // --- DOMRect ---
-    class DOMRect {
-        constructor(x = 0, y = 0, width = 0, height = 0) {
-            this.x = x; this.y = y; this.width = width; this.height = height;
-        }
-        get top() { return this.y; }
-        get left() { return this.x; }
-        get bottom() { return this.y + this.height; }
-        get right() { return this.x + this.width; }
-        toJSON() { return { x: this.x, y: this.y, width: this.width, height: this.height, top: this.top, left: this.left, bottom: this.bottom, right: this.right }; }
     }
 
     // --- Range (minimal) ---

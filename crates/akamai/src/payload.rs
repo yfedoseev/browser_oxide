@@ -54,6 +54,7 @@
 
 use crate::session::AkamaiSession;
 use crate::MouseEvent;
+use rand::Rng;
 use stealth::StealthProfile;
 
 /// Build the 58-element tAD array as a `,`-joined cleartext string.
@@ -109,7 +110,7 @@ pub fn build_cleartext(
 
     // -103 / X8D — opaque per-session string (placeholder)
     tad.push("-103".into());
-    tad.push("Varies".into());
+    tad.push("".into());
 
     // -106 / NAD
     tad.push("-106".into());
@@ -119,9 +120,15 @@ pub fn build_cleartext(
     tad.push("-115".into());
     tad.push(field_vrd(session));
 
-    // -112 / cAD — page URL
+    // -112 / cAD — page URL (without fragment)
     tad.push("-112".into());
-    tad.push(request_url.to_string());
+    let url_str = if let Ok(mut u) = url::Url::parse(request_url) {
+        u.set_fragment(None);
+        u.to_string()
+    } else {
+        request_url.to_string()
+    };
+    tad.push(url_str);
 
     // -119 / j8D
     tad.push("-119".into());
@@ -145,7 +152,13 @@ pub fn build_cleartext(
 
     // -127 / g8D — random digit string
     tad.push("-127".into());
-    tad.push("11321144241322243122".into());
+    let mut g8d = String::new();
+    let mut rng = rand::thread_rng();
+    use rand::Rng;
+    for _ in 0..20 {
+        g8d.push_str(&rng.gen_range(0..10).to_string());
+    }
+    tad.push(g8d);
 
     // -128 / NRD
     tad.push("-128".into());
@@ -219,13 +232,15 @@ fn field_mouse_trajectory(events: &[MouseEvent]) -> String {
 /// `0,<load_t>,-1,-1,-1,-1,-1,-1,-1,-1,-1;`. Currently a static
 /// placeholder; A4 will wire the real timer.
 fn field_z8d(_s: &AkamaiSession) -> String {
-    "0,286081,-1,-1,-1,-1,-1,-1,-1,-1,-1;".into()
+    let load_t = rand::thread_rng().gen_range(200000..500000);
+    format!("0,{load_t},-1,-1,-1,-1,-1,-1,-1,-1,-1;")
 }
 
 /// Field -111 / l8D: page-load timing tuple
 /// `0,<load_t>,-1,-1,-1;`. Static placeholder pending A4.
 fn field_l8d(_s: &AkamaiSession) -> String {
-    "0,286082,-1,-1,-1;".into()
+    let load_t = rand::thread_rng().gen_range(200000..500000);
+    format!("0,{load_t},-1,-1,-1;")
 }
 
 /// Field -115 / VRD: _abck echo + per-session counters. Real captures
@@ -234,8 +249,13 @@ fn field_l8d(_s: &AkamaiSession) -> String {
 /// with our own session's _abck if known.
 fn field_vrd(s: &AkamaiSession) -> String {
     let abck_echo = s.last_abck.as_deref().unwrap_or("");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let load_t = rand::thread_rng().gen_range(200000..500000);
     format!(
-        "1,4016774,32,286082,286081,0,4588905,23468869,0,1687036359055,7,18047,0,14,3007,0,0,23468870,4577207,0,{}",
+        "1,4016774,32,{load_t},{load_t},0,4588905,23468869,0,{now},7,18047,0,14,3007,0,0,23468870,4577207,0,{}",
         abck_echo
     )
 }

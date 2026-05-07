@@ -719,19 +719,20 @@
         constructor() { super(); this.maxChannelCount = 2; }
     }
 
-    class AudioContext extends EventTarget {
+    class BaseAudioContext extends EventTarget {
         constructor() {
             super();
             this.sampleRate = 44100;
             this.state = "running";
             this.currentTime = 0;
             this.destination = new AudioDestinationNode();
+            this.listener = {}; // AudioListener stub
         }
         createOscillator() { return new OscillatorNode(this); }
         createDynamicsCompressor() { return new DynamicsCompressorNode(this); }
-        createAnalyser() { return new AnalyserNode(); }
-        createGain() { return new GainNode(); }
-        createBiquadFilter() { return new BiquadFilterNode(); }
+        createAnalyser() { return new AnalyserNode(this); }
+        createGain() { return new GainNode(this); }
+        createBiquadFilter() { return new BiquadFilterNode(this); }
         createBufferSource() {
              return { connect() {}, start() {}, stop() {}, buffer: null, loop: false };
         }
@@ -745,12 +746,19 @@
             };
         }
         decodeAudioData() { return Promise.resolve(); }
-        close() { return Promise.resolve(); }
         resume() { return Promise.resolve(); }
+    }
+    globalThis.BaseAudioContext = BaseAudioContext;
+
+    class AudioContext extends BaseAudioContext {
+        constructor() {
+            super();
+        }
+        close() { return Promise.resolve(); }
         suspend() { return Promise.resolve(); }
     }
 
-    class OfflineAudioContext extends AudioContext {
+    class OfflineAudioContext extends BaseAudioContext {
         constructor(channels, length, sampleRate) {
             super();
             this._channels = channels || 1;
@@ -942,6 +950,7 @@
     globalThis.WebGL2RenderingContext = WebGLRenderingContext;
     globalThis.AudioContext = AudioContext;
     globalThis.OfflineAudioContext = OfflineAudioContext;
+    globalThis.BaseAudioContext = BaseAudioContext;
     globalThis.webkitAudioContext = AudioContext;
     // Symbol.toStringTag for audio contexts — DataDome probes these.
     try {
@@ -950,6 +959,9 @@
         });
         Object.defineProperty(OfflineAudioContext.prototype, Symbol.toStringTag, {
             value: "OfflineAudioContext", configurable: true,
+        });
+        Object.defineProperty(BaseAudioContext.prototype, Symbol.toStringTag, {
+            value: "BaseAudioContext", configurable: true,
         });
     } catch {}
 
@@ -1158,6 +1170,9 @@
         }
         if (globalThis.OfflineAudioContext) {
             _maskAsNative(OfflineAudioContext.prototype, 'startRendering');
+        }
+        if (globalThis.BaseAudioContext) {
+            _maskAsNative(BaseAudioContext.prototype, 'createOscillator', 'createDynamicsCompressor', 'createAnalyser', 'createGain', 'createBiquadFilter');
         }
         
         // Also mask WebGL if available

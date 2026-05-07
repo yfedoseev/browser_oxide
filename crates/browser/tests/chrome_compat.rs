@@ -3246,7 +3246,25 @@ const FN_TRACE_INIT: &str = r#"
                 const url = typeof input === 'string' ? input : (input && input.url) || String(input);
                 const method = (init && init.method) || (input && input.method) || 'GET';
                 const bodyLen = init && init.body ? (init.body.length || init.body.byteLength || 0) : 0;
-                const entry = { kind: 'fetch', url: String(url).slice(0, 300), method, body_len: bodyLen };
+                let bodySnippet = null;
+                if (init && init.body) {
+                    try {
+                        if (typeof init.body === 'string') bodySnippet = init.body.slice(0, 100);
+                        else if (init.body instanceof ArrayBuffer) bodySnippet = '<binary ' + init.body.byteLength + '>';
+                        else if (ArrayBuffer.isView(init.body)) bodySnippet = '<binary view ' + init.body.byteLength + '>';
+                    } catch {}
+                }
+                const req_hdrs = {};
+                if (init && init.headers) {
+                    if (init.headers instanceof Headers) {
+                        for (const [k, v] of init.headers.entries()) req_hdrs[k] = v;
+                    } else if (Array.isArray(init.headers)) {
+                        for (const [k, v] of init.headers) req_hdrs[k] = v;
+                    } else {
+                        for (const k in init.headers) req_hdrs[k] = init.headers[k];
+                    }
+                }
+                const entry = { kind: 'fetch', url: String(url).slice(0, 300), method, body_len: bodyLen, body_snippet: bodySnippet, req_headers: req_hdrs };
                 globalThis.__netTrace.push(entry);
                 const p = _origFetch.apply(this, arguments);
                 p.then((r) => {
@@ -3270,14 +3288,26 @@ const FN_TRACE_INIT: &str = r#"
     const _origSend = globalThis.XMLHttpRequest && globalThis.XMLHttpRequest.prototype.send;
     if (_origOpen && _origSend) {
         globalThis.XMLHttpRequest.prototype.open = function (method, url) {
-            this.__trace = { kind: 'xhr', method, url: String(url).slice(0, 300) };
+            this.__trace = { kind: 'xhr', method, url: String(url).slice(0, 300), req_headers: {} };
             globalThis.__netTrace.push(this.__trace);
             return _origOpen.apply(this, arguments);
         };
+        const _origSetHeader = globalThis.XMLHttpRequest.prototype.setRequestHeader;
+        if (_origSetHeader) {
+            globalThis.XMLHttpRequest.prototype.setRequestHeader = function(k, v) {
+                if (this.__trace) this.__trace.req_headers[k] = v;
+                return _origSetHeader.apply(this, arguments);
+            };
+        }
         globalThis.XMLHttpRequest.prototype.send = function (body) {
             try {
                 if (this.__trace) {
                     this.__trace.body_len = body ? (body.length || body.byteLength || 0) : 0;
+                    try {
+                        if (typeof body === 'string') this.__trace.body_snippet = body.slice(0, 100);
+                        else if (body instanceof ArrayBuffer) this.__trace.body_snippet = '<binary ' + body.byteLength + '>';
+                        else if (ArrayBuffer.isView(body)) this.__trace.body_snippet = '<binary view ' + body.byteLength + '>';
+                    } catch {}
                     const t = this.__trace;
                     this.addEventListener('load', () => {
                         try {
@@ -3501,6 +3531,16 @@ async fn antibot_smoke(label: &str, url: &str, profile: stealth::StealthProfile)
 #[tokio::test]
 #[ignore = "network: kasada-only diagnostic with Function trace"]
 async fn kasada_canadagoose_diagnostic() {
+    let url = "https://www.canadagoose.com/";
+    // Clear any existing Kasada session for this host to avoid stale 304 responses
+    if let Some(client) = js_runtime::extensions::fetch_ext::fetch_client() {
+        if let Ok(u) = url::Url::parse(url) {
+            if let Some(host) = u.host_str() {
+                client.evict_kasada_session(host).await;
+                println!("  [KASADA] Evicted session for {}", host);
+            }
+        }
+    }
     let profile = stealth::presets::chrome_130_macos();
     antibot_smoke(
         "KASADA-canadagoose-DIAG",
@@ -3526,6 +3566,46 @@ async fn kasada_error_blob_capture() {
     let capture_init = r#"
         (function() {
             globalThis.__kasErrors = [];
+            
+            // Intercept TextEncoder (to catch the report before encryption)
+            const oldEncode = TextEncoder.prototype.encode;
+            TextEncoder.prototype.encode = function(str) {
+                if (typeof str === 'string' && str.length > 500) {
+                     console.log('[KASADA-RAW-TEXT-SNIPPET] len=' + str.length + ' ' + str.substring(0, 300));
+                     globalThis.__kasErrors.push({
+                        kind: 'raw-text',
+                        len: str.length,
+                        text: str // Keep as string
+                    });
+                }
+                return oldEncode.apply(this, arguments);
+            };
+            
+            // Intercept XHR (Kasada often uses this for error reports)
+            const oldSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.send = function(body) {
+                if (this._url && (this._url.includes('cdndex.io/error') || this._url.includes('cdndex.io/r'))) {
+                    try {
+                        const snapshot = {
+                            kind: 'xhr',
+                            url: this._url,
+                            len: body ? body.length : 0,
+                            b64: body ? btoa(body) : '',
+                            raw: body // Store raw for possible non-string types
+                        };
+                        globalThis.__kasErrors.push(snapshot);
+                    } catch(e) {
+                        globalThis.__kasErrors.push({ kind: 'err-xhr', err: String(e) });
+                    }
+                }
+                return oldSend.apply(this, arguments);
+            };
+            const oldOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this._url = url;
+                return oldOpen.apply(this, arguments);
+            };
+
             const _origFetch = globalThis.fetch;
             globalThis.fetch = function(input, init) {
                 try {
@@ -3577,7 +3657,7 @@ async fn kasada_error_blob_capture() {
     "#;
 
     let page = tokio::time::timeout(
-        Duration::from_secs(60),
+        Duration::from_secs(120),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
             stealth::presets::chrome_130_macos(),
@@ -3619,8 +3699,7 @@ async fn kasada_error_blob_capture() {
                 let len = len.trim_matches('"');
                 let b64 = b64.trim_matches('"');
                 println!("--- blob #{i}: kind={kind} len={len} url={url} ---");
-                let path =
-                    format!("/Users/yfedoseev/Projects/browser_oxide/.playwright-mcp/captures/kasada_error_{i}.b64");
+                let path = format!("kasada_error_{i}.b64");
                 std::fs::write(&path, b64).ok();
                 println!("    wrote {path}");
             }

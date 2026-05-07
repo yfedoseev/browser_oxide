@@ -446,11 +446,25 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
     // with its own connection pool fully owned by the spawned runtime
     // sidesteps the deadlock. We DO read the profile from FETCH_CLIENT
     // so cookies + stealth settings are consistent.
-    let profile = FETCH_CLIENT
-        .get()
-        .map(|c| c.profile().clone())
-        .unwrap_or_else(stealth::presets::chrome_130_ru);
-    let client = match net::HttpClient::new(&profile) {
+    let (_profile, client_res) = match FETCH_CLIENT.get() {
+        Some(main) => (
+            main.profile().clone(),
+            net::HttpClient::new_with_shared_state(
+                main.profile(),
+                main.cookies(),
+                main.kasada_sessions(),
+                main.akamai_sessions(),
+                main.accept_ch_origins(),
+                main.dns_cache(),
+                main.alt_svc_cache(),
+            ),
+        ),
+        None => {
+            let p = stealth::presets::chrome_130_ru();
+            (p.clone(), net::HttpClient::new(&p))
+        }
+    };
+    let client = match client_res {
         Ok(c) => c,
         Err(_) => return String::new(),
     };
@@ -537,11 +551,6 @@ pub fn op_net_xhr_sync(
     #[string] body: String,
     #[string] origin: String,
 ) -> String {
-    let profile = FETCH_CLIENT
-        .get()
-        .map(|c| c.profile().clone())
-        .unwrap_or_else(stealth::presets::chrome_130_ru);
-
     // Parse extra headers provided by JS.
     let extra_headers: Vec<(String, String)> =
         serde_json::from_str(&headers_json).unwrap_or_default();
@@ -578,20 +587,24 @@ pub fn op_net_xhr_sync(
         };
         rt.block_on(async move {
             // Fresh client for sync execution (avoids H2 deadlock on FETCH_CLIENT).
-            let client = match net::HttpClient::new(&profile) {
-                Ok(c) => c,
-                Err(_) => return "{}".to_string(),
-            };
-            // Transfer cookies from FETCH_CLIENT into this fresh client.
-            if let Some(main) = FETCH_CLIENT.get() {
-                if let Ok(parsed) = url::Url::parse(&url_clone) {
-                    if let Some(ck) = main.cookies_for_url(&parsed).await {
-                        if !ck.is_empty() {
-                            let _ = client.set_cookie_str(&parsed, &ck).await;
-                        }
-                    }
+            // Shares all state (cookies, tokens, cache) with the main client.
+            let client = match FETCH_CLIENT.get() {
+                Some(main) => {
+                    net::HttpClient::new_with_shared_state(
+                        main.profile(),
+                        main.cookies(),
+                        main.kasada_sessions(),
+                        main.akamai_sessions(),
+                        main.accept_ch_origins(),
+                        main.dns_cache(),
+                        main.alt_svc_cache(),
+                    ).unwrap_or_else(|_| net::HttpClient::new(main.profile()).unwrap())
                 }
-            }
+                None => {
+                    let p = stealth::presets::chrome_130_ru();
+                    net::HttpClient::new(&p).unwrap()
+                }
+            };
 
             let resp_result = match method_upper.as_str() {
                 "GET" | "HEAD" => {
@@ -605,7 +618,7 @@ pub fn op_net_xhr_sync(
                     );
                     let mut merged = hdrs;
                     for h in &extra_headers { merged.push(h.clone()); }
-                    client.post_bytes_exact_headers(&url_clone, &body_bytes, &merged).await
+                    client.post_bytes_with_exact_headers(&url_clone, &body_bytes, &merged).await
                 }
             };
 

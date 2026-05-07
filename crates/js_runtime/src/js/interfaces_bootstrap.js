@@ -72,7 +72,6 @@
     _define("MediaDevices", class MediaDevices extends _EventTarget {});
     _define("StorageManager", class StorageManager extends _EventTarget {});
     _define("Bluetooth", class Bluetooth extends _EventTarget {});
-    _define("PermissionStatus", class PermissionStatus extends _EventTarget {});
     _define("Permissions", class Permissions {});
     _define("ScreenOrientation", class ScreenOrientation extends _EventTarget {});
 

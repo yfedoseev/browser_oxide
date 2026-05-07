@@ -51,6 +51,12 @@ struct KasadaSession {
     /// Tenant-prefix path discovered from the /tl POST URL — same prefix
     /// used for /mfc (e.g. `/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3`).
     tenant_prefix: Option<String>,
+    /// Header x-kpsdk-h
+    h_token: Option<String>,
+    /// Header x-kpsdk-v
+    v_token: Option<String>,
+    /// Header x-kpsdk-r
+    r_token: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -74,7 +80,7 @@ impl KasadaSessionStore {
     pub async fn learn_prefix(&self, host: &str, prefix: &str) {
         let mut store = self.inner.write().await;
         let entry = store.entry(host.to_string()).or_insert_with(|| {
-            let mut rng = rand::thread_rng();
+            let rng = rand::thread_rng();
             let mut id_rng = ChaCha20Rng::from_rng(rng).unwrap();
             KasadaSession {
                 server_offset_ms: 0,
@@ -83,6 +89,9 @@ impl KasadaSessionStore {
                 fc_token: None,
                 ct_token: None,
                 tenant_prefix: None,
+                h_token: None,
+                v_token: None,
+                r_token: None,
             }
         });
         if entry.tenant_prefix.is_none() {
@@ -100,9 +109,20 @@ impl KasadaSessionStore {
         // are stored lower-cased per the existing convention.
         let server_st = headers
             .get("x-kpsdk-st")
-            .and_then(|v| v.parse::<i64>().ok());
+            .and_then(|v| v.parse::<i64>().ok())
+            .or_else(|| {
+                // Fallback to Date header
+                headers.get("date").and_then(|d| {
+                    chrono::DateTime::parse_from_rfc2822(d)
+                        .ok()
+                        .map(|dt| dt.timestamp_millis())
+                })
+            });
         let cr = headers.get("x-kpsdk-cr").map(|v| v.as_str()).unwrap_or("");
-        if cr != "true" || server_st.is_none() {
+        let has_kasada = headers
+            .keys()
+            .any(|k| k.starts_with("x-kp") && k != "x-kpsdk-st" && k != "x-kpsdk-cr");
+        if (!cr.eq_ignore_ascii_case("true") && !has_kasada) || server_st.is_none() {
             return;
         }
         let server_ms = server_st.unwrap();
@@ -133,6 +153,9 @@ impl KasadaSessionStore {
                 fc_token: None,
                 ct_token: None,
                 tenant_prefix: None,
+                h_token: None,
+                v_token: None,
+                r_token: None,
             }
         });
         // Refresh on every observation — clocks drift, server time moves on.
@@ -141,6 +164,17 @@ impl KasadaSessionStore {
         if entry.tenant_prefix.is_none() {
             entry.tenant_prefix = extracted_tenant_prefix;
         }
+
+        if let Some(h) = headers.get("x-kpsdk-h") {
+            entry.h_token = Some(h.clone());
+        }
+        if let Some(v) = headers.get("x-kpsdk-v") {
+            entry.v_token = Some(v.clone());
+        }
+        if let Some(r) = headers.get("x-kpsdk-r") {
+            entry.r_token = Some(r.clone());
+        }
+
         // Cache x-kpsdk-ct (session token from /tl response). Required as
         // a request header on subsequent same-host navigations.
         if let Some(ct) = headers.get("x-kpsdk-ct") {
@@ -166,6 +200,33 @@ impl KasadaSessionStore {
             .get(host)
             .and_then(|s| s.ct_token.clone())
             .map(|ct| ("x-kpsdk-ct".to_string(), ct))
+    }
+
+    /// Returns the cached `x-kpsdk-h` session token for `host`, if any.
+    pub async fn h_header(&self, host: &str) -> Option<(String, String)> {
+        let store = self.inner.read().await;
+        store
+            .get(host)
+            .and_then(|s| s.h_token.clone())
+            .map(|h| ("x-kpsdk-h".to_string(), h))
+    }
+
+    /// Returns the cached `x-kpsdk-v` session token for `host`, if any.
+    pub async fn v_header(&self, host: &str) -> Option<(String, String)> {
+        let store = self.inner.read().await;
+        store
+            .get(host)
+            .and_then(|s| s.v_token.clone())
+            .map(|v| ("x-kpsdk-v".to_string(), v))
+    }
+
+    /// Returns the cached `x-kpsdk-r` session token for `host`, if any.
+    pub async fn r_header(&self, host: &str) -> Option<(String, String)> {
+        let store = self.inner.read().await;
+        store
+            .get(host)
+            .and_then(|s| s.r_token.clone())
+            .map(|r| ("x-kpsdk-r".to_string(), r))
     }
 
     /// Returns `(tenant_prefix, fc_already_known)` for a host so the HTTP
@@ -207,15 +268,21 @@ impl KasadaSessionStore {
     pub async fn compute_cd_header(&self, host: &str) -> Option<String> {
         let store = self.inner.read().await;
         let session = store.get(host)?;
+        let mut rng = rand::thread_rng();
         let work_time = now_unix_ms() + session.server_offset_ms;
-        // Use the base solver — it now measures real wall-clock duration.
-        let mut solution: KasadaSolution = solve_default(work_time, &session.id);
+
+        // Generate a fresh ID for this solve (matches ips.js behavior)
+        let id = generate_session_id(&mut rng);
+
+        // Use realistic duration to match human solve times (~1500ms).
+        let mut solution: KasadaSolution =
+            solve_with_realistic_duration(work_time, &id, &mut rng);
         solution.st = Some(session.server_st_ms);
-        // rst = server-time when client *sent* the protected request =
-        // st + duration (so far the time we spent solving).
-        if let Some(dur) = solution.duration {
-            solution.rst = Some((session.server_st_ms + dur as i64) as f64);
-        }
+        // rst = request start time (when solving BEGAN).
+        let rst = work_time as f64;
+        solution.rst = Some(rst);
+        solution.v = Some(1);
+        solution.d = Some((rst as i64) - session.server_st_ms);
         Some(solution.to_header_value())
     }
 
@@ -229,6 +296,24 @@ impl KasadaSessionStore {
         let work_time = now_unix_ms() + session.server_offset_ms;
         let solution: KasadaSolution = solve_default(work_time, &session.id);
         Some(solution.to_header_value())
+    }
+
+    /// Get the current ct_token for a host.
+    pub async fn ct_token(&self, host: &str) -> Option<String> {
+        let store = self.inner.read().await;
+        store.get(host).and_then(|s| s.ct_token.clone())
+    }
+
+    /// Get the current fc_token for a host.
+    pub async fn fc_token(&self, host: &str) -> Option<String> {
+        let store = self.inner.read().await;
+        store.get(host).and_then(|s| s.fc_token.clone())
+    }
+
+    /// Remove any session data for this host.
+    pub async fn evict(&self, host: &str) {
+        let mut store = self.inner.write().await;
+        store.remove(host);
     }
 
     /// Whether we have a Kasada session for this host.
@@ -273,6 +358,26 @@ mod tests {
         store.learn("www.canadagoose.com", &headers, None).await;
         assert!(store.has_session("www.canadagoose.com").await);
         assert_eq!(store.debug_session_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn learns_all_kasada_headers() {
+        let store = KasadaSessionStore::new();
+        let now_ms = now_unix_ms();
+        let headers = h(&[
+            ("x-kpsdk-cr", "true"),
+            ("x-kpsdk-st", &now_ms.to_string()),
+            ("x-kpsdk-ct", "ct-val"),
+            ("x-kpsdk-h", "h-val"),
+            ("x-kpsdk-v", "v-val"),
+            ("x-kpsdk-r", "r-val"),
+        ]);
+        store.learn("test.com", &headers, None).await;
+
+        assert_eq!(store.ct_header("test.com").await.unwrap().1, "ct-val");
+        assert_eq!(store.h_header("test.com").await.unwrap().1, "h-val");
+        assert_eq!(store.v_header("test.com").await.unwrap().1, "v-val");
+        assert_eq!(store.r_header("test.com").await.unwrap().1, "r-val");
     }
 
     #[tokio::test]
@@ -369,14 +474,13 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&cd).unwrap();
         // st = server timestamp echo
         assert_eq!(parsed["st"].as_i64().unwrap(), server_ms);
-        // rst = st + duration (request-send-time)
-        let dur = parsed["duration"].as_u64().unwrap() as f64;
+        // rst = work_time (request-start-time)
         let rst = parsed["rst"].as_f64().unwrap();
+        let work_time = parsed["workTime"].as_i64().unwrap() as f64;
         assert!(
-            (rst - (server_ms as f64 + dur)).abs() < 1.0,
-            "rst {rst} should ≈ st + duration ({} + {})",
-            server_ms,
-            dur
+            (rst - work_time).abs() < 1.0,
+            "rst {rst} should ≈ work_time ({})",
+            work_time
         );
     }
 }

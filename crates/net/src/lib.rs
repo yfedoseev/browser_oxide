@@ -142,6 +142,30 @@ impl HttpClient {
         &self.profile
     }
 
+    pub fn cookies(&self) -> Arc<Mutex<CookieJar>> {
+        self.cookies.clone()
+    }
+
+    pub fn kasada_sessions(&self) -> KasadaSessionStore {
+        self.kasada_sessions.clone()
+    }
+
+    pub fn akamai_sessions(&self) -> akamai::AkamaiSessionStore {
+        self.akamai_sessions.clone()
+    }
+
+    pub fn accept_ch_origins(&self) -> Arc<Mutex<HashSet<String>>> {
+        self.accept_ch_origins.clone()
+    }
+
+    pub fn dns_cache(&self) -> tcp::DnsCache {
+        self.dns_cache.clone()
+    }
+
+    pub fn alt_svc_cache(&self) -> AltSvcCache {
+        self.alt_svc_cache.clone()
+    }
+
     /// Create a new client with the given stealth profile.
     pub fn new(profile: &StealthProfile) -> Result<Self, NetError> {
         let connector = tls::chrome_connector()?;
@@ -202,6 +226,40 @@ impl HttpClient {
         })
     }
 
+    /// Create a new client that shares session state (cookies, Kasada/Akamai
+    /// tokens, DNS/H3 caches) with an existing one, but has its own
+    /// connection pool to avoid deadlocks in synchronous contexts.
+    pub fn new_with_shared_state(
+        profile: &StealthProfile,
+        cookies: Arc<Mutex<CookieJar>>,
+        kasada: KasadaSessionStore,
+        akamai: akamai::AkamaiSessionStore,
+        accept_ch: Arc<Mutex<HashSet<String>>>,
+        dns: tcp::DnsCache,
+        alt_svc: AltSvcCache,
+    ) -> Result<Self, NetError> {
+        let connector = tls::chrome_connector()?;
+        let quic_client = quic::QuicClient::new().ok();
+
+        Ok(Self {
+            tls_connector: Arc::new(connector),
+            profile: profile.clone(),
+            cookies,
+            pool: ConnectionPool::new(),
+            quic_pool: QuicPool::default(),
+            dns_cache: dns,
+            quic_client,
+            alt_svc_cache: alt_svc,
+            kasada_sessions: kasada,
+            akamai_sessions: akamai,
+            accept_ch_origins: accept_ch,
+            proxy: match proxy::ProxyConfig::resolve(profile.proxy.as_deref()) {
+                Ok(p) => p,
+                Err(_) => None,
+            },
+        })
+    }
+
     pub async fn learn_kasada_prefix(&self, host: &str, prefix: &str) {
         self.kasada_sessions.learn_prefix(host, prefix).await;
     }
@@ -216,6 +274,16 @@ impl HttpClient {
         headers: &HashMap<String, String>,
         request_url: Option<&str>,
     ) {
+        if headers.contains_key("x-kpsdk-ct") || headers.contains_key("x-kpsdk-st") {
+            eprintln!(
+                "[kasada] learning from headers for {}: {:?}",
+                host,
+                headers
+                    .keys()
+                    .filter(|k| k.starts_with("x-kp"))
+                    .collect::<Vec<_>>()
+            );
+        }
         self.kasada_sessions
             .learn(host, headers, request_url)
             .await;
@@ -238,19 +306,10 @@ impl HttpClient {
     /// (Page::navigate scheduler) decides whether to POST sensor_data.
     async fn learn_abck(&self, host: &str, set_cookies: &[String]) {
         for v in set_cookies {
-            // `_abck=TOK==~0~-1~-1~; Path=/; Domain=...`
-            // Take the `_abck=` prefix and strip everything from the
-            // first `;` to leave just the value.
             let trimmed = v.trim_start();
             if let Some(rest) = trimmed.strip_prefix("_abck=") {
                 let value = rest.split(';').next().unwrap_or("").trim();
-                if !value.is_empty() {
-                    self.akamai_sessions
-                        .with_session(host, |s| s.observe_abck(value))
-                        .await;
-                }
-            } else if let Some(rest) = trimmed.strip_prefix("akm_bmfp_b2=") {
-                let value = rest.split(';').next().unwrap_or("").trim();
+                eprintln!("[akamai] learn_abck: _abck={}", value);
                 if !value.is_empty() {
                     self.akamai_sessions
                         .with_session(host, |s| s.observe_abck(value))
@@ -258,6 +317,7 @@ impl HttpClient {
                 }
             } else if let Some(rest) = trimmed.strip_prefix("bm_sz=") {
                 let value = rest.split(';').next().unwrap_or("").trim();
+                eprintln!("[akamai] learn_abck: bm_sz={}", value);
                 if !value.is_empty() {
                     self.akamai_sessions
                         .with_session(host, |s| s.bm_sz = Some(value.to_string()))
@@ -359,8 +419,19 @@ impl HttpClient {
             let cks = jar.cookies_for(&host_url).unwrap_or_default();
             eprintln!("[kasada] cookies for /mfc: {}", cks);
         }
-        let resp = match self.get_with_headers(&mfc_url, &[]).await {
-            Ok(r) => r,
+        let headers = vec![];
+        eprintln!("[kasada] /mfc request headers: {:?}", headers);
+        let mut hdrs = headers::nav_headers_fetch(&self.profile, &mfc_url, Some(&format!("https://{}", host)));
+        hdrs.push(("cache-control".to_string(), "no-cache".to_string()));
+        hdrs.push(("pragma".to_string(), "no-cache".to_string()));
+        // Merge extra headers if needed
+        merge_headers(&mut hdrs, &headers);
+
+        let resp = match self.get_with_exact_headers(&mfc_url, &hdrs).await {
+            Ok(r) => {
+                eprintln!("[kasada] /mfc response status: {} headers: {:?}", r.status, r.headers);
+                r
+            },
             Err(e) => {
                 eprintln!("[kasada] /mfc fetch failed: {}", e);
                 // /mfc fetch failed — fail open; subsequent requests omit fc.
@@ -373,6 +444,10 @@ impl HttpClient {
         } else {
             eprintln!("[kasada] /mfc response MISSING x-kpsdk-fc (status={})", resp.status);
         }
+    }
+
+    pub async fn evict_kasada_session(&self, host: &str) {
+        self.kasada_sessions.evict(host).await;
     }
 
     /// Compute (and possibly inject) a Kasada `x-kpsdk-cd` header for an
@@ -566,131 +641,11 @@ impl HttpClient {
     ) -> Result<Response, NetError> {
         let mut hdrs = headers::nav_headers_fetch(&self.profile, url, origin);
         merge_headers(&mut hdrs, extra_headers);
-        self.post_bytes_exact_headers(url, body, &hdrs).await
+        self.post_bytes_with_exact_headers(url, body, &hdrs).await
     }
 
     /// POST with the caller's exact header set — NO chrome_headers overlay.
     /// Counterpart to `get_with_exact_headers` for JS fetch POSTs.
-    pub async fn post_bytes_exact_headers(
-        &self,
-        url: &str,
-        body: &[u8],
-        headers: &[(String, String)],
-    ) -> Result<Response, NetError> {
-        let parsed = Url::parse(url)?;
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
-        let port = parsed.port().unwrap_or(443);
-
-        let mut hdrs: Vec<(String, String)> = headers
-            .iter()
-            .filter(|(k, _)| {
-                let lower = k.to_ascii_lowercase();
-                !lower.starts_with(':') && lower != "host" && lower != "connection"
-            })
-            .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
-            .collect();
-
-        if !has_header(&hdrs, "cookie") {
-            let jar = self.cookies.lock().await;
-            if let Some(cookie_str) = jar.cookies_for(&parsed) {
-                hdrs.push(("cookie".to_string(), cookie_str));
-            }
-        }
-
-        // Env-gated POST body dump — preserved from post_bytes_with_headers.
-        if let Ok(dir) = std::env::var("BOXIDE_DUMP_POST_DIR") {
-            use std::io::Write;
-            let _ = std::fs::create_dir_all(&dir);
-            let counter_path = format!("{}/.counter", dir);
-            let next: usize = std::fs::read_to_string(&counter_path)
-                .ok()
-                .and_then(|s| s.trim().parse().ok())
-                .unwrap_or(0)
-                + 1;
-            let _ = std::fs::write(&counter_path, next.to_string());
-            let stem = format!("{}/{:03}", dir, next);
-            if let Ok(mut f) = std::fs::File::create(format!("{stem}.body")) {
-                let _ = f.write_all(body);
-            }
-            let mut meta = String::new();
-            meta.push_str("{\n");
-            meta.push_str(&format!(
-                "  \"url\": {},\n",
-                serde_json::to_string(url).unwrap_or_else(|_| "\"\"".into())
-            ));
-            meta.push_str(&format!("  \"body_len\": {},\n", body.len()));
-            meta.push_str("  \"headers\": {\n");
-            for (i, (k, v)) in hdrs.iter().enumerate() {
-                let trailing = if i + 1 == hdrs.len() { "" } else { "," };
-                meta.push_str(&format!(
-                    "    {}: {}{}\n",
-                    serde_json::to_string(k).unwrap_or_else(|_| "\"\"".into()),
-                    serde_json::to_string(v).unwrap_or_else(|_| "\"\"".into()),
-                    trailing
-                ));
-            }
-            meta.push_str("  }\n}\n");
-            let _ = std::fs::write(format!("{stem}.meta.json"), meta);
-        }
-
-        let response = 'h2: {
-            for attempt in 0..2 {
-                let sender_res = self.get_sender(host, port).await;
-                let mut sender = match sender_res {
-                    Ok(s) => s,
-                    Err(_) => break 'h2 None,
-                };
-                let uri = parsed.as_str();
-                match h2_client::send_post(&mut sender, uri, host, &hdrs, body).await {
-                    Ok((parts, resp_body)) => {
-                        let resp = self.build_response(parts, resp_body, url).await?;
-                        break 'h2 Some(resp);
-                    }
-                    Err(e) if attempt == 0 && is_stale_conn_error(&e) => {
-                        self.pool.evict(host, port).await;
-                        continue;
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-            None
-        };
-
-        let response = match response {
-            Some(r) => r,
-            None => {
-                let tcp_stream = tcp::connect_via_proxy(
-                    host,
-                    port,
-                    std::time::Duration::from_secs(10),
-                    Some(&self.dns_cache),
-                    self.proxy.as_ref(),
-                )
-                .await?;
-                let mut tls_stream =
-                    tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
-                let path = match parsed.query() {
-                    Some(q) => format!("{}?{}", parsed.path(), q),
-                    None => parsed.path().to_string(),
-                };
-                let raw = h1_client::send_post(&mut tls_stream, host, &path, &hdrs, body).await?;
-                self.build_response_from_raw(raw, url).await?
-            }
-        };
-
-        // Kasada's `/tl` POST returns x-kpsdk-cr/st on success — train the
-        // session store so the subsequent navigation GET attaches x-kpsdk-cd.
-        // Also kick off the /mfc fetch on stricter tenants — see
-        // HttpClient::fetch_kasada_mfc_if_needed.
-        self.learn_kasada(host, &response.headers, Some(url)).await;
-        self.learn_abck(host, &response.set_cookies).await;
-        self.learn_accept_ch(host, &response.headers).await;
-        self.fetch_kasada_mfc_if_needed(host).await;
-        self.store_set_cookies(&parsed, &response.set_cookies).await;
-        Ok(response)
-    }
 
     /// GET with the caller's exact header set — NO chrome_headers overlay.
     /// Used for "reload" flavors where sec-fetch-user must be omitted
@@ -747,15 +702,36 @@ impl HttpClient {
                 eprintln!("[kasada] no ct_token to inject for {}", host);
             }
         }
+        if !has_header(&hdrs, "x-kpsdk-h") {
+            if let Some((k, v)) = self.kasada_sessions.h_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
+        if !has_header(&hdrs, "x-kpsdk-v") {
+            if let Some((k, v)) = self.kasada_sessions.v_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
+        if !has_header(&hdrs, "x-kpsdk-r") {
+            if let Some((k, v)) = self.kasada_sessions.r_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
 
         let response = 'h2: {
             for attempt in 0..2 {
                 let sender_res = self.get_sender(host, port).await;
                 let mut sender = match sender_res {
                     Ok(s) => s,
-                    Err(_) => break 'h2 None,
+                    Err(e) => {
+                        eprintln!("[net] H2 connection failed for {}: {}", host, e);
+                        break 'h2 None;
+                    }
                 };
                 let uri = parsed.as_str();
+                if uri.contains("/mfc") || uri.contains("/akam/13") || uri.contains("/tl") || uri.contains("/r") {
+                    eprintln!("[net] sending request to {} with headers: {:?}", uri, hdrs);
+                }
                 match h2_client::send_get(&mut sender, uri, host, &hdrs).await {
                     Ok((parts, body)) => {
                         let resp = self.build_response(parts, body, url).await?;
@@ -788,6 +764,9 @@ impl HttpClient {
                 } else {
                     parsed.path().to_string()
                 };
+                if url.contains("/mfc") || url.contains("/akam/13") || url.contains("/tl") || url.contains("/r") {
+                    eprintln!("[net] sending H1 request to {} with headers: {:?}", url, hdrs);
+                }
                 let raw = h1_client::send_get(&mut tls_stream, host, &path, &hdrs).await?;
                 self.build_response_from_raw(raw, url).await?
             }
@@ -873,9 +852,15 @@ impl HttpClient {
                 let sender_res = self.get_sender(host, port).await;
                 let mut sender = match sender_res {
                     Ok(s) => s,
-                    Err(_) => break 'h2 None,
+                    Err(e) => {
+                        eprintln!("[net] H2 connection failed for {}: {}", host, e);
+                        break 'h2 None;
+                    }
                 };
                 let uri = parsed.as_str();
+                if uri.contains("/mfc") || uri.contains("/akam/13") || uri.contains("/tl") || uri.contains("/r") {
+                    eprintln!("[net] sending request to {} with headers: {:?}", uri, hdrs);
+                }
                 match h2_client::send_get(&mut sender, uri, host, &hdrs).await {
                     Ok((parts, body)) => {
                         let resp = self.build_response(parts, body, url).await?;
@@ -911,6 +896,9 @@ impl HttpClient {
                 } else {
                     parsed.path().to_string()
                 };
+                if url.contains("/mfc") || url.contains("/akam/13") || url.contains("/tl") || url.contains("/r") {
+                    eprintln!("[net] sending H1 request to {} with headers: {:?}", url, hdrs);
+                }
                 let raw = h1_client::send_get(&mut tls_stream, host, &path, &hdrs).await?;
                 self.build_response_from_raw(raw, url).await?
             }
@@ -1076,6 +1064,175 @@ impl HttpClient {
             .await
     }
 
+    /// POST with a raw byte body and ONLY the caller-provided headers plus cookies.
+    pub async fn post_bytes_with_exact_headers(
+        &self,
+        url: &str,
+        body: &[u8],
+        headers: &[(String, String)],
+    ) -> Result<Response, NetError> {
+        let parsed = Url::parse(url)?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
+        let port = parsed.port().unwrap_or(443);
+
+        let mut hdrs: Vec<(String, String)> = headers
+            .iter()
+            .filter(|(k, _)| {
+                let lower = k.to_ascii_lowercase();
+                !lower.starts_with(':') && lower != "host" && lower != "connection"
+            })
+            .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
+            .collect();
+
+        // Add cookies (unless already supplied)
+        if !has_header(&hdrs, "cookie") {
+            let jar = self.cookies.lock().await;
+            if let Some(cookie_str) = jar.cookies_for(&parsed) {
+                hdrs.push(("cookie".to_string(), cookie_str));
+            }
+        }
+
+        // Add Kasada headers
+        if let Some(ct) = self.kasada_sessions.ct_token(host).await {
+            if !has_header(&hdrs, "x-kpsdk-ct") {
+                hdrs.push(("x-kpsdk-ct".to_string(), ct));
+            }
+        }
+        if let Some(fc) = self.kasada_sessions.fc_token(host).await {
+            if !has_header(&hdrs, "x-kpsdk-fc") {
+                hdrs.push(("x-kpsdk-fc".to_string(), fc));
+            }
+        }
+        if !has_header(&hdrs, "x-kpsdk-h") {
+            if let Some((k, v)) = self.kasada_sessions.h_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
+        if !has_header(&hdrs, "x-kpsdk-v") {
+            if let Some((k, v)) = self.kasada_sessions.v_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
+        if !has_header(&hdrs, "x-kpsdk-r") {
+            if let Some((k, v)) = self.kasada_sessions.r_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
+        // Inject Kasada x-kpsdk-cd if we have a session for this host (gap #Kasada).
+        if !has_header(&hdrs, "x-kpsdk-cd") {
+            if let Some((k, v)) = self.kasada_cd_header(host).await {
+                hdrs.push((k, v));
+            }
+        }
+
+        // Env-gated POST body dump
+        if let Ok(dir) = std::env::var("BOXIDE_DUMP_POST_DIR") {
+            use std::io::Write;
+            let _ = std::fs::create_dir_all(&dir);
+            let counter_path = format!("{}/.counter", dir);
+            let next: usize = std::fs::read_to_string(&counter_path)
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0)
+                + 1;
+            let _ = std::fs::write(&counter_path, next.to_string());
+            let stem = format!("{}/{:03}", dir, next);
+            if let Ok(mut f) = std::fs::File::create(format!("{stem}.body")) {
+                let _ = f.write_all(body);
+            }
+            let mut meta = String::new();
+            meta.push_str("{\n");
+            meta.push_str(&format!(
+                "  \"url\": {},\n",
+                serde_json::to_string(url).unwrap_or_else(|_| "\"\"".into())
+            ));
+            meta.push_str(&format!("  \"body_len\": {},\n", body.len()));
+            meta.push_str("  \"headers\": {\n");
+            for (i, (k, v)) in hdrs.iter().enumerate() {
+                let trailing = if i + 1 == hdrs.len() { "" } else { "," };
+                meta.push_str(&format!(
+                    "    {}: {}{}\n",
+                    serde_json::to_string(k).unwrap_or_else(|_| "\"\"".into()),
+                    serde_json::to_string(v).unwrap_or_else(|_| "\"\"".into()),
+                    trailing
+                ));
+            }
+            meta.push_str("  }\n}\n");
+            let _ = std::fs::write(format!("{stem}.meta.json"), meta);
+        }
+
+        let response = 'h2: {
+            for attempt in 0..2 {
+                let sender_res = self.get_sender(host, port).await;
+                let mut sender = match sender_res {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("[net] H2 connection failed for {}: {}", host, e);
+                        break 'h2 None;
+                    }
+                };
+                let uri = parsed.as_str();
+                if uri.contains("/mfc") || uri.contains("/akam/13") || uri.contains("/tl") || uri.contains("/r") {
+                    eprintln!("[net] sending H2 request to {} with headers: {:?}", uri, hdrs);
+                }
+                match h2_client::send_post(&mut sender, uri, host, &hdrs, body).await {
+                    Ok((parts, resp_body)) => {
+                        let resp = self.build_response(parts, resp_body, url).await?;
+                        break 'h2 Some(resp);
+                    }
+                    Err(e) if attempt == 0 && is_stale_conn_error(&e) => {
+                        self.pool.evict(host, port).await;
+                        continue;
+                    }
+                    Err(e) => {
+                        eprintln!("[net] H2 POST failed for {}: {}", uri, e);
+                    }
+                }
+            }
+            None
+        };
+
+        let response = match response {
+            Some(r) => r,
+            None => {
+                let tcp_stream = tcp::connect_via_proxy(
+                    host,
+                    port,
+                    std::time::Duration::from_secs(10),
+                    Some(&self.dns_cache),
+                    self.proxy.as_ref(),
+                )
+                .await?;
+                let connector = tls::chrome_connector()?;
+                let mut tls_stream = tls::connect_tls(&connector, host, tcp_stream).await?;
+                let path = if parsed.query().is_some() {
+                    format!("{}?{}", parsed.path(), parsed.query().unwrap())
+                } else {
+                    parsed.path().to_string()
+                };
+                if url.contains("/mfc") || url.contains("/akam/13") || url.contains("/tl") || url.contains("/r") {
+                    eprintln!("[net] sending H1 request to {} with headers: {:?}", url, hdrs);
+                }
+                let raw = h1_client::send_post(&mut tls_stream, host, &path, &hdrs, body).await?;
+                self.build_response_from_raw(raw, url).await?
+            }
+        };
+
+        self.learn_kasada(host, &response.headers, Some(url)).await;
+        self.learn_abck(host, &response.set_cookies).await;
+        self.learn_accept_ch(host, &response.headers).await;
+        self.store_set_cookies(&parsed, &response.set_cookies).await;
+
+        // If this was a successful /tl, we might need to kick off /mfc
+        if url.contains("/tl") || url.contains("/r") {
+            self.fetch_kasada_mfc_if_needed(host).await;
+        }
+
+        Ok(response)
+    }
+
     /// POST with a raw byte body and caller-provided headers. This is the
     /// binary-safe path — Kasada's challenge solver sends
     /// `application/octet-stream` with a raw byte payload that must not be
@@ -1167,7 +1324,10 @@ impl HttpClient {
                 let sender_res = self.get_sender(host, port).await;
                 let mut sender = match sender_res {
                     Ok(s) => s,
-                    Err(_) => break 'h2 None,
+                    Err(e) => {
+                        eprintln!("[net] H2 connection failed for {}: {}", host, e);
+                        break 'h2 None;
+                    }
                 };
                 let uri = parsed.as_str();
                 match h2_client::send_post(&mut sender, uri, host, &hdrs, body).await {

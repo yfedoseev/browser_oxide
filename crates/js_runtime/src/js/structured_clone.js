@@ -289,7 +289,7 @@
             return c;
         }
         // DOM nodes / Windows / other host objects — DataCloneError.
-        // We detect the most common DOM types by name and refuse early.
+        // We detect the most common host types by name or internal slots.
         const ctorName = value.constructor && value.constructor.name;
         if (
             ctorName &&
@@ -297,10 +297,19 @@
                 ctorName === "Node" ||
                 ctorName === "Element" ||
                 ctorName === "Document" ||
-                ctorName === "Window")
+                ctorName === "Window" ||
+                ctorName === "PluginArray" ||
+                ctorName === "MimeTypeArray" ||
+                ctorName === "Plugin" ||
+                ctorName === "MimeType" ||
+                ctorName === "AudioContext" ||
+                ctorName === "OfflineAudioContext" ||
+                ctorName === "BaseAudioContext" ||
+                ctorName === "AudioNode" ||
+                ctorName === "AudioParam")
         ) {
             throw _dataCloneError(
-                "DOM objects cannot be serialized by structuredClone"
+                `Failed to execute 'structuredClone' on 'Window': ${ctorName} object could not be cloned.`
             );
         }
         // Plain object — enumerable own string keys, in insertion order

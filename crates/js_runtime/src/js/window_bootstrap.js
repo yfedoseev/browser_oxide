@@ -57,7 +57,7 @@
         Object.defineProperty(proto, name, {
             get: getter,
             set: setter,
-            enumerable: true,
+            enumerable: false,
             configurable: true,
         });
         _maskFunction(getter, `get ${name}`);
@@ -65,7 +65,7 @@
     };
     const _defProtoMethod = (proto, name, fn) => {
         Object.defineProperty(proto, name, {
-            value: fn, writable: true, enumerable: true, configurable: true,
+            value: fn, writable: true, enumerable: false, configurable: true,
         });
         _maskFunction(fn, name);
     };
@@ -183,7 +183,7 @@
     // 2. Setup PluginArray.prototype — length + item() dispatch via live count.
     const _PluginArrayProto = PluginArray.prototype;
     Object.defineProperty(_PluginArrayProto, Symbol.toStringTag, { value: "PluginArray", enumerable: false, configurable: true });
-    Object.defineProperty(_PluginArrayProto, 'length', { get: () => _pluginsLen(), enumerable: true, configurable: true });
+    Object.defineProperty(_PluginArrayProto, 'length', { get: () => _pluginsLen(), enumerable: false, configurable: true });
     _defProtoMethod(_PluginArrayProto, 'item', function item(i) {
         const n = _pluginsLen();
         return (i >= 0 && i < n) ? _allPlugins[i] : null;
@@ -206,7 +206,7 @@
     // Setup MimeTypeArray.prototype — same pattern.
     const _MimeTypeArrayProto = MimeTypeArray.prototype;
     Object.defineProperty(_MimeTypeArrayProto, Symbol.toStringTag, { value: "MimeTypeArray", enumerable: false, configurable: true });
-    Object.defineProperty(_MimeTypeArrayProto, 'length', { get: () => _mimesLen(), enumerable: true, configurable: true });
+    Object.defineProperty(_MimeTypeArrayProto, 'length', { get: () => _mimesLen(), enumerable: false, configurable: true });
     _defProtoMethod(_MimeTypeArrayProto, 'item', function item(i) {
         const n = _mimesLen();
         return (i >= 0 && i < n) ? _allMimes[i] : null;
@@ -224,7 +224,7 @@
         configurable: true,
     });
 
-    // Instance: install numeric index accessors that gate on live count.
+    // Instance: install index accessors that gate on live count.
     const _navPlugins = Object.create(_PluginArrayProto);
     _allPlugins.forEach((p, i) => {
         Object.defineProperty(_navPlugins, i, {
@@ -232,11 +232,29 @@
             enumerable: true,
             configurable: true,
         });
+        // Named getter for plugin name
+        Object.defineProperty(_navPlugins, p.name, {
+            get: () => (i < _pluginsLen() ? p : undefined),
+            enumerable: false,
+            configurable: true,
+        });
     });
 
     // Plugin instance behaves like a MimeTypeArray over its mime types.
     _allPlugins.forEach(p => {
-        Object.defineProperty(p, 'length', { get: () => _mimesLen(), enumerable: true, configurable: true });
+        Object.defineProperty(p, 'length', { get: () => _mimesLen(), enumerable: false, configurable: true });
+        p._mimeTypes.forEach((m, i) => {
+             Object.defineProperty(p, i, {
+                get: () => (i < _mimesLen() ? m : undefined),
+                enumerable: true,
+                configurable: true,
+            });
+            Object.defineProperty(p, m.type, {
+                get: () => (i < _mimesLen() ? m : undefined),
+                enumerable: false,
+                configurable: true,
+            });
+        });
         Object.defineProperty(p, 'item', {
             value: function item(i) {
                 const n = _mimesLen();
@@ -252,19 +270,20 @@
             },
             enumerable: false, configurable: true,
         });
-        p._mimeTypes.forEach((m, i) => {
-            Object.defineProperty(p, i, {
-                get: () => (i < _mimesLen() ? m : undefined),
-                enumerable: true, configurable: true,
-            });
-        });
     });
 
     const _navMimeTypes = Object.create(_MimeTypeArrayProto);
     _allMimes.forEach((m, i) => {
         Object.defineProperty(_navMimeTypes, i, {
             get: () => (i < _mimesLen() ? m : undefined),
-            enumerable: true, configurable: true,
+            enumerable: true,
+            configurable: true,
+        });
+        // Named getter for mime type
+        Object.defineProperty(_navMimeTypes, m.type, {
+            get: () => (i < _mimesLen() ? m : undefined),
+            enumerable: false,
+            configurable: true,
         });
     });
 
@@ -370,7 +389,7 @@
     Object.defineProperty(Permissions.prototype, Symbol.toStringTag, {
         value: "Permissions", configurable: true,
     });
-    Permissions.prototype.query = function query(desc) {
+    _defProtoMethod(Permissions.prototype, 'query', function query(desc) {
         if (desc == null || typeof desc !== 'object') {
             return Promise.reject(new TypeError(
                 "Failed to execute 'query' on 'Permissions': parameter 1 is not of type 'PermissionDescriptor'."
@@ -384,7 +403,7 @@
             ));
         }
         return Promise.resolve(new PermissionStatus(name));
-    };
+    });
     globalThis.Permissions = Permissions;
     const _navPermissions = Object.create(Permissions.prototype);
 
@@ -756,27 +775,27 @@
     _defNav('sayswho', () => undefined);
 
     // Object getters — stable references.
-    Object.defineProperty(_NavProto, 'connection', { get: () => _navConnection, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'plugins', { get: () => _navPlugins, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'mimeTypes', { get: () => _navMimeTypes, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'connection', { get: () => _navConnection, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'plugins', { get: () => _navPlugins, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'mimeTypes', { get: () => _navMimeTypes, enumerable: false, configurable: true });
     // Navigator getters. Properties marked /* SC */ are
     // [SecureContext]-only per their IDL — return undefined on
     // insecure contexts so the surface matches real Chrome on
     // data:/http:/about:blank URLs. Phase 7 fix.
-    Object.defineProperty(_NavProto, 'mediaDevices', { get: () => _secure() ? _navMediaDevices : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'permissions', { get: () => _navPermissions, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'credentials', { get: () => _secure() ? _navCredentials : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'bluetooth', { get: () => _secure() ? _navBluetooth : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'usb', { get: () => _secure() ? _navUsb : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'serial', { get: () => _secure() ? _navSerial : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'hid', { get: () => _secure() ? _navHid : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'keyboard', { get: () => _secure() ? _navKeyboard : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'locks', { get: () => _secure() ? _navLocks : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'storage', { get: () => _secure() ? _navStorage : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'serviceWorker', { get: () => _secure() ? _navServiceWorker : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'clipboard', { get: () => _secure() ? _navClipboard : undefined, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'geolocation', { get: () => _navGeolocation, enumerable: true, configurable: true });
-    Object.defineProperty(_NavProto, 'wakeLock', { get: () => _secure() ? _navWakeLock : undefined, enumerable: true, configurable: true });
+    Object.defineProperty(_NavProto, 'mediaDevices', { get: () => _secure() ? _navMediaDevices : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'permissions', { get: () => _navPermissions, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'credentials', { get: () => _secure() ? _navCredentials : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'bluetooth', { get: () => _secure() ? _navBluetooth : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'usb', { get: () => _secure() ? _navUsb : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'serial', { get: () => _secure() ? _navSerial : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'hid', { get: () => _secure() ? _navHid : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'keyboard', { get: () => _secure() ? _navKeyboard : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'locks', { get: () => _secure() ? _navLocks : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'storage', { get: () => _secure() ? _navStorage : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'serviceWorker', { get: () => _secure() ? _navServiceWorker : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'clipboard', { get: () => _secure() ? _navClipboard : undefined, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'geolocation', { get: () => _navGeolocation, enumerable: false, configurable: true });
+    Object.defineProperty(_NavProto, 'wakeLock', { get: () => _secure() ? _navWakeLock : undefined, enumerable: false, configurable: true });
 
     // Apply native masking to all getters
     _maskAsNative(_NavProto, 'userAgent', 'platform', 'vendor', 'vendorSub', 'productSub', 
@@ -832,26 +851,54 @@
     });
     // BatteryManager — must be a real class extending EventTarget so
     // `Object.getPrototypeOf(b).constructor.name === "BatteryManager"`
-    // and `b instanceof EventTarget` both hold. The previous plain-object
-    // implementation failed both checks; ScrapFly's PX guide and CreepJS
-    // both probe via the constructor.name path.
+    // and `b instanceof EventTarget` both hold.
     class BatteryManager extends EventTarget {
-        get charging() { return true; }
-        get chargingTime() { return 0; }
-        get dischargingTime() { return Infinity; }
-        get level() { return 1.0; }
-        get onchargingchange() { return null; }
-        set onchargingchange(_v) {}
-        get onchargingtimechange() { return null; }
-        set onchargingtimechange(_v) {}
-        get ondischargingtimechange() { return null; }
-        set ondischargingtimechange(_v) {}
-        get onlevelchange() { return null; }
-        set onlevelchange(_v) {}
+        constructor() {
+            super();
+        }
     }
     Object.defineProperty(BatteryManager.prototype, Symbol.toStringTag, {
         value: "BatteryManager", configurable: true,
     });
+
+    // Akamai's for..in probe (bt field) requires these to be enumerable.
+    // Standard WebIDL members are non-enumerable, but Akamai's custom
+    // sensor traversal expects to see these values. Moving them to 
+    // the prototype as enumerable getters satisfies both:
+    // 1. Instance has 0 own properties (parity).
+    // 2. for..in on instance still finds them (Akamai parity).
+    const _defBatGetter = (name, val) => {
+        const getter = function() { return val; };
+        Object.defineProperty(BatteryManager.prototype, name, {
+            get: getter,
+            enumerable: true,
+            configurable: true,
+        });
+        _maskFunction(getter, `get ${name}`);
+    };
+    const _defBatProp = (name) => {
+        let _val = null;
+        const getter = function() { return _val; };
+        const setter = function(v) { _val = v; };
+        Object.defineProperty(BatteryManager.prototype, name, {
+            get: getter,
+            set: setter,
+            enumerable: true,
+            configurable: true,
+        });
+        _maskFunction(getter, `get ${name}`);
+        _maskFunction(setter, `set ${name}`);
+    };
+
+    _defBatGetter('charging', true);
+    _defBatGetter('chargingTime', 0);
+    _defBatGetter('dischargingTime', Infinity);
+    _defBatGetter('level', 1.0);
+    _defBatProp('onchargingchange');
+    _defBatProp('onchargingtimechange');
+    _defBatProp('ondischargingtimechange');
+    _defBatProp('onlevelchange');
+
     globalThis.BatteryManager = BatteryManager;
     const _batteryInstance = new BatteryManager();
     // getBattery is [SecureContext] — exists only on https/wss/file/
@@ -1282,10 +1329,10 @@
     };
 
     // --- Document visibility/hidden stubs ---
-    Object.defineProperty(Document.prototype, 'visibilityState', { get() { return 'visible'; }, enumerable: true, configurable: true });
-    Object.defineProperty(Document.prototype, 'hidden', { get() { return false; }, enumerable: true, configurable: true });
-    Object.defineProperty(Document.prototype, 'webkitVisibilityState', { get() { return 'visible'; }, enumerable: true, configurable: true });
-    Object.defineProperty(Document.prototype, 'webkitHidden', { get() { return false; }, enumerable: true, configurable: true });
+    Object.defineProperty(Document.prototype, 'visibilityState', { get() { return 'visible'; }, enumerable: false, configurable: true });
+    Object.defineProperty(Document.prototype, 'hidden', { get() { return false; }, enumerable: false, configurable: true });
+    Object.defineProperty(Document.prototype, 'webkitVisibilityState', { get() { return 'visible'; }, enumerable: false, configurable: true });
+    Object.defineProperty(Document.prototype, 'webkitHidden', { get() { return false; }, enumerable: false, configurable: true });
 
     if (globalThis.navigator) {
         // Match Chrome's exact descriptor for webdriver: false, non-enumerable.
@@ -1295,7 +1342,7 @@
         // fresh unfrozen array each call, breaking nav_languages_is_frozen.)
         Object.defineProperty(_NavProto, 'webdriver', {
             get: () => false,
-            enumerable: true,
+            enumerable: false,
             configurable: true
         });
 
@@ -3495,10 +3542,21 @@
     globalThis.open = function(url, target, features) { return null; };
     globalThis.close = function() {};
     globalThis.postMessage = function(message, targetOrigin, transfer) {
+        // Use structuredClone if available to match browser behavior.
+        // If not available (e.g. during very early bootstrap), fall back to reference.
+        let cloned = message;
+        try {
+            if (typeof globalThis.structuredClone === 'function') {
+                cloned = globalThis.structuredClone(message, { transfer });
+            }
+        } catch (e) {
+            // DataCloneError — propagate as-is (matches Chrome)
+            throw e;
+        }
         // Fire message event asynchronously
         Promise.resolve().then(() => {
             const event = new MessageEvent("message", {
-                data: message,
+                data: cloned,
                 origin: targetOrigin || globalThis.location?.origin || "",
             });
             globalThis.dispatchEvent(event);
@@ -5407,13 +5465,5 @@
     globalThis.clientInformation = globalThis.navigator;
     globalThis.offscreenBuffering = true;
     globalThis.defaultStatus = "";
-    globalThis.defaultstatus = "";
-    if (globalThis.Window && globalThis.Window.prototype) {
-        Object.setPrototypeOf(globalThis, globalThis.Window.prototype);
-    }
-    globalThis.styleMedia = {
-        type: "screen",
-        matchMedium(m) { return globalThis.matchMedia(m).matches; }
-    };
     Object.defineProperty(globalThis, Symbol.toStringTag, { value: "Window", configurable: true });
 })(globalThis);

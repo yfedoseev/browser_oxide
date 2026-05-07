@@ -193,103 +193,56 @@
         } catch (e) {}
     }
 
-    // ---- Plan: focus → mouse path → scroll → click → tab ---------
+    // ---- Execution -----------------------------------------------
 
-    // 1) Focus + visibility (≈180 ms in)
-    setTimeout(() => {
+    function runCycle() {
+        // 1) Focus + visibility
         try { _dispatch(window, new Event('focus', { bubbles: false })); } catch (e) {}
         try { _dispatch(document, new Event('visibilitychange', { bubbles: true })); } catch (e) {}
-    }, 180);
 
-    // 2) Mouse motion — sigma-lognormal velocity, 2-stroke
-    //
-    // Two strokes between three anchor points:
-    //   (120, 380) → midA → (820, 240) → midB → (1180, 420)
-    // with brief micro-pause (60-120 ms) between strokes.
-    const anchors = [
-        [120 + Math.random() * 30,   380 + Math.random() * 30],
-        [820 + Math.random() * 60,   240 + Math.random() * 80],
-        [1180 + Math.random() * 30,  420 + Math.random() * 30],
-    ];
-    const strokeDurations = [900 + Math.random() * 220, 720 + Math.random() * 220];
-    const samplesPerStroke = 18;
-    const microPause = 60 + Math.random() * 60;
+        // 2) Mouse motion — sigma-lognormal velocity, 2-stroke
+        const anchors = [
+            [100 + Math.random() * 200,   200 + Math.random() * 300],
+            [600 + Math.random() * 300,   100 + Math.random() * 400],
+            [1000 + Math.random() * 200,  300 + Math.random() * 300],
+        ];
+        const strokeDurations = [800 + Math.random() * 300, 600 + Math.random() * 300];
+        const samplesPerStroke = 15;
+        const microPause = 50 + Math.random() * 100;
 
-    let mouseT = 240; // ms
-    let prev = null;
-    for (let s = 0; s < anchors.length - 1; s++) {
-        const a = anchors[s];
-        const b = anchors[s + 1];
-        const dur = strokeDurations[s];
-        const taus = _sigmaLognormalTimes(samplesPerStroke);
-        for (let i = 0; i < taus.length; i++) {
-            const tau = taus[i];
-            const [x, y] = _lerp(a, b, tau);
-            // Add small Gaussian jitter perpendicular to direction —
-            // real cursor traces have ~1-3 px tremor.
-            const jx = _gauss() * 0.8;
-            const jy = _gauss() * 0.8;
-            const at = mouseT + Math.round(tau * dur);
-            const px = x + jx, py = y + jy;
-            const prevSnapshot = prev ? prev.slice() : null;
-            setTimeout(() => _fireMove(px, py, prevSnapshot), at);
-            prev = [px, py];
+        let mouseT = 50; 
+        let prev = null;
+        for (let s = 0; s < anchors.length - 1; s++) {
+            const a = anchors[s];
+            const b = anchors[s + 1];
+            const dur = strokeDurations[s];
+            const taus = _sigmaLognormalTimes(samplesPerStroke);
+            for (let i = 0; i < taus.length; i++) {
+                const tau = taus[i];
+                const [x, y] = _lerp(a, b, tau);
+                const jx = _gauss() * 0.8;
+                const jy = _gauss() * 0.8;
+                const at = mouseT + Math.round(tau * dur);
+                const px = x + jx, py = y + jy;
+                const prevSnapshot = prev ? prev.slice() : null;
+                setTimeout(() => _fireMove(px, py, prevSnapshot), at);
+                prev = [px, py];
+            }
+            mouseT += dur + microPause;
         }
-        mouseT += dur + microPause;
+
+        // 3) Scroll-down
+        const scStartT = mouseT + 100;
+        const steps = [80 + Math.random() * 40, 60 + Math.random() * 30];
+        let curScT = scStartT;
+        for (const step of steps) {
+            setTimeout(() => _fireScrollStep(step), curScT);
+            curScT += 100 + Math.random() * 100;
+        }
     }
 
-    // 3) Scroll-down — 4 wheel steps with realistic decel
-    const scrollStartT = mouseT + 50;
-    const scrollSteps = [110, 90, 60, 40]; // px, decreasing
-    let scT = scrollStartT;
-    for (const step of scrollSteps) {
-        const stepT = scT;
-        setTimeout(() => _fireScrollStep(step), stepT);
-        scT += 80 + Math.random() * 60;
-    }
-
-    // 4) Click on body — at one of the anchor points (so it lands
-    //    where the mouse "is" when the click fires)
-    const clickAt = scT + 120;
-    const clickPos = anchors[anchors.length - 1];
-    setTimeout(() => {
-        try {
-            const [x, y] = clickPos;
-            const down = new MouseEvent('mousedown', {
-                bubbles: true, cancelable: true, view: window,
-                clientX: x, clientY: y, button: 0, buttons: 1,
-            });
-            _dispatch(body, down);
-            _akRecMouse(x, y, 1, 0); // 1 = down
-            setTimeout(() => {
-                const up = new MouseEvent('mouseup', {
-                    bubbles: true, cancelable: true, view: window,
-                    clientX: x, clientY: y, button: 0, buttons: 0,
-                });
-                const click = new MouseEvent('click', {
-                    bubbles: true, cancelable: true, view: window,
-                    clientX: x, clientY: y, button: 0, buttons: 0,
-                });
-                _dispatch(body, up);
-                _dispatch(body, click);
-                _akRecMouse(x, y, 2, 0); // 2 = up
-            }, 50 + Math.random() * 25);
-        } catch (e) {}
-    }, clickAt);
-
-    // 5) Tab keypress — typical "user tabbing through" signal
-    setTimeout(() => {
-        try {
-            _dispatch(document, new KeyboardEvent('keydown', {
-                bubbles: true, key: 'Tab', code: 'Tab', keyCode: 9,
-            }));
-            _akRecKey('Tab', 0); // 0 = down
-            setTimeout(() => {
-                _dispatch(document, new KeyboardEvent('keyup', {
-                    bubbles: true, key: 'Tab', code: 'Tab', keyCode: 9,
-                }));
-                _akRecKey('Tab', 1); // 1 = up
-            }, 60);
-        } catch (e) {}
-    }, clickAt + 250);
+    // Run first cycle immediately
+    runCycle();
+    // Then every 4 seconds to keep the "human" active during long builds
+    setInterval(runCycle, 4000);
 })();

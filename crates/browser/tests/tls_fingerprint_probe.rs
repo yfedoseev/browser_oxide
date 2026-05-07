@@ -18,6 +18,7 @@ async fn probe_tls_peet_ws() {
         .await
         .expect("fetch");
     let body = resp.text();
+    std::fs::write("probe_raw.json", &body).unwrap();
     eprintln!("status={} size={}", resp.status, body.len());
     // Extract only the hash fields — much less noise than dumping JSON.
     for field in &[
@@ -51,6 +52,7 @@ async fn probe_example_com_sanity() {
     let client = HttpClient::new(&chrome_130_macos()).unwrap();
     let resp = client.get("https://example.com").await.expect("fetch");
     let body = resp.text();
+    std::fs::write("probe_raw.json", &body).unwrap();
     eprintln!("status={} size={}", resp.status, body.len());
     eprintln!(
         "\n=== example.com first 500 chars ===\n{}",
@@ -67,6 +69,7 @@ async fn probe_httpbin_headers() {
         .await
         .expect("fetch");
     let body = resp.text();
+    std::fs::write("probe_raw.json", &body).unwrap();
     eprintln!("status={} size={}", resp.status, body.len());
     eprintln!("\n=== httpbin.org/headers response ===\n{body}");
 }

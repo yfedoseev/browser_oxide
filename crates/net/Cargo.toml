@@ -12,6 +12,7 @@ akamai = { path = "../akamai" }
 
 # TLS (BoringSSL)
 boring2 = { version = "4.15", features = ["pq-experimental", "cert-compression"] }
+boring-sys2 = "4.15"
 tokio-boring2 = "4.15"
 webpki-root-certs = "0.26"
 
@@ -33,6 +34,8 @@ adblock = "0.12"
 
 # Core
 tokio = { version = "1", features = ["full"] }
+foreign-types = "0.5"
+chrono = "0.4"
 rand = "0.8"
 rand_chacha = "0.3"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }

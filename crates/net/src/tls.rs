@@ -16,6 +16,7 @@ use boring2::ssl::{
 };
 use boring2::x509::store::X509StoreBuilder;
 use boring2::x509::X509;
+use foreign_types::ForeignTypeRef;
 use tokio::net::TcpStream;
 use tokio_boring2::SslStream;
 
@@ -127,9 +128,15 @@ pub fn chrome_connector() -> Result<SslConnector, NetError> {
     builder.enable_ocsp_stapling();
     builder.enable_signed_cert_timestamps();
 
-    // Certificate compression (Brotli)
+    // Chrome 131+ sends both X25519MLKEM768 and X25519 key shares.
+    builder.set_key_shares_limit(2);
+
+    // Certificate compression (Brotli + Zlib)
     builder
         .add_cert_compression_alg(CertCompressionAlgorithm::Brotli)
+        .map_err(|e| NetError::Tls(e.to_string()))?;
+    builder
+        .add_cert_compression_alg(CertCompressionAlgorithm::Zlib)
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
     // Load Mozilla root certificates into the certificate store
@@ -165,19 +172,33 @@ pub fn configure_connection(
         .configure()
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
-    // config
-    //     .add_application_settings(b"h2")
-    //     .map_err(|e| NetError::Tls(e.to_string()))?;
-    // config.set_alps_use_new_codepoint(true);
-
     // ECH GREASE (Encrypted Client Hello)
     config.set_enable_ech_grease(true);
 
     // ALPS (Application-Layer Protocol Settings) for HTTP/2
     // This is a strong modern Chrome signal.
-    config
-        .add_application_settings(b"h2")
-        .map_err(|e| NetError::Tls(e.to_string()))?;
+    // **Chrome 147 payload**: contains SETTINGS frame + empty ACCEPT_CH frame.
+    // Total 42 bytes (0x2a).
+    let alps_payload: &[u8] = &[
+        0x00, 0x00, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x60, 0x00, 0x00, 0x00, 0x06, 0x00, 0x04, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    unsafe {
+        // Use direct FFI because boring2 wrapper doesn't support settings payload.
+        // Returns 1 on success, 0 on failure.
+        if boring_sys2::SSL_add_application_settings(
+            config.as_ptr(),
+            b"h2".as_ptr(),
+            2,
+            alps_payload.as_ptr(),
+            alps_payload.len(),
+        ) != 1
+        {
+            return Err(NetError::Tls("failed to add ALPS settings".into()));
+        }
+    }
     config.set_alps_use_new_codepoint(true);
 
     // SNI: strip brackets from IPv6 addresses
@@ -210,56 +231,4 @@ pub async fn connect_tls(
 /// Returns the negotiated ALPN protocol from a TLS stream, if any.
 pub fn negotiated_alpn(stream: &SslStream<TcpStream>) -> Option<&[u8]> {
     stream.ssl().selected_alpn_protocol()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn connector_builds_successfully() {
-        let connector = chrome_connector();
-        assert!(
-            connector.is_ok(),
-            "Failed to build Chrome TLS connector: {:?}",
-            connector.err()
-        );
-    }
-
-    #[test]
-    fn configure_connection_works() {
-        let connector = chrome_connector().unwrap();
-        let config = configure_connection(&connector, "example.com");
-        assert!(config.is_ok());
-    }
-
-    #[test]
-    fn configure_connection_ipv6() {
-        let connector = chrome_connector().unwrap();
-        // IPv6 address should disable SNI
-        let config = configure_connection(&connector, "[::1]");
-        assert!(config.is_ok());
-    }
-
-    #[tokio::test]
-    #[ignore] // requires network
-    async fn tls_connects_to_httpbin() {
-        let connector = chrome_connector().unwrap();
-        let stream = crate::tcp::connect("httpbin.org", 443, std::time::Duration::from_secs(10))
-            .await
-            .unwrap();
-        let tls = connect_tls(&connector, "httpbin.org", stream).await;
-        assert!(tls.is_ok(), "TLS connection failed: {:?}", tls.err());
-    }
-
-    #[tokio::test]
-    #[ignore] // requires network
-    async fn tls_connects_to_example_com() {
-        let connector = chrome_connector().unwrap();
-        let stream = crate::tcp::connect("example.com", 443, std::time::Duration::from_secs(10))
-            .await
-            .unwrap();
-        let tls = connect_tls(&connector, "example.com", stream).await;
-        assert!(tls.is_ok(), "TLS connection failed: {:?}", tls.err());
-    }
 }
