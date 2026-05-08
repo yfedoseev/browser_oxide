@@ -790,6 +790,13 @@ impl Page {
             .get_follow(url, 10)
             .await
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+
+        if resp.status == 498 || resp.status == 403 || resp.status == 429 {
+            eprintln!("[navigate] Initial challenge response headers ({}):", resp.status);
+            for (k, v) in &resp.headers {
+                eprintln!("  {}: {}", k, v);
+            }
+        }
         // G.3 — log known anti-bot vendor response markers so post-run
         // analysis can split CHL outcomes by protocol. Each marker also
         // hints whether the site needs a vendor-specific solver
@@ -1593,10 +1600,18 @@ impl Page {
                     for (k, v) in &harvested_kpsdk {
                         reload_hdrs.push((k.clone(), v.clone()));
                     }
-                    client
+                    let resp = client
                         .get_follow_exact_headers(&next_url, &reload_hdrs, 10)
                         .await
-                        .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?
+                        .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+
+                    if resp.status == 498 || resp.status == 403 || resp.status == 429 {
+                        eprintln!("[navigate] reload response headers ({}):", resp.status);
+                        for (k, v) in &resp.headers {
+                            eprintln!("  {}: {}", k, v);
+                        }
+                    }
+                    resp
                 } else {
                     client
                         .get_follow(&next_url, 10)

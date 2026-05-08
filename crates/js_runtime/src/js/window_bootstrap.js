@@ -2334,11 +2334,13 @@
             TYPE_RESERVED: 255,
         };
 
-        let _resourceEntries = null;
+        globalThis.__perfResourceEntries = globalThis.__perfResourceEntries || [];
         const _buildResourceEntries = () => {
-            if (_resourceEntries) return _resourceEntries;
-            const base = _perfNav.fetchStart;
+            const entries = [];
             const origin = globalThis.location?.origin || "https://example.com";
+            const base = _perfNav.fetchStart;
+            let offset = 10;
+
             const mk = (name, startOffset, duration, type, size) => ({
                 name,
                 entryType: "resource",
@@ -2364,18 +2366,69 @@
                 serverTiming: [],
                 renderBlockingStatus: "non-blocking",
             });
-            _resourceEntries = [
-                mk(`${origin}/favicon.ico`, 25, 42, "img", 1024),
-                mk(`${origin}/static/main.css`, 30, 55, "link", 12500),
-                mk(`${origin}/static/main.js`, 35, 88, "script", 48600),
-                mk(`${origin}/static/vendor.js`, 40, 142, "script", 185400),
-                mk(`${origin}/static/fonts/Inter.woff2`, 60, 32, "css", 24800),
-            ];
-            return _resourceEntries;
+
+            if (globalThis.document) {
+                const scripts = globalThis.document.scripts || [];
+                for (let i = 0; i < scripts.length; i++) {
+                    if (scripts[i].src) {
+                        entries.push(mk(scripts[i].src, offset, 50, "script", 48600));
+                        offset += 15;
+                    }
+                }
+                const links = globalThis.document.getElementsByTagName('link') || [];
+                for (let i = 0; i < links.length; i++) {
+                    if (links[i].rel === 'stylesheet' && links[i].href) {
+                        entries.push(mk(links[i].href, offset, 30, "link", 12500));
+                        offset += 10;
+                    }
+                }
+                const images = globalThis.document.images || [];
+                for (let i = 0; i < images.length; i++) {
+                    if (images[i].src) {
+                        entries.push(mk(images[i].src, offset, 80, "img", 25000));
+                        offset += 20;
+                    }
+                }
+            }
+
+            for (const req of globalThis.__perfResourceEntries) {
+                const sTime = req.startTime || (base + offset);
+                const e = mk(req.url, sTime - base, req.duration || 100, req.type || "xmlhttprequest", req.size || 1024);
+                e.startTime = sTime;
+                e.fetchStart = sTime;
+                e.domainLookupStart = sTime;
+                e.domainLookupEnd = sTime;
+                e.connectStart = sTime;
+                e.connectEnd = sTime;
+                e.secureConnectionStart = sTime;
+                e.requestStart = sTime + 5;
+                e.responseStart = sTime + (req.duration || 100) - 15;
+                e.responseEnd = sTime + (req.duration || 100);
+                entries.push(e);
+                offset += Math.max(10, (req.duration || 100) * 0.1);
+            }
+
+            if (entries.length === 0) {
+                entries.push(mk(`${origin}/favicon.ico`, 25, 42, "img", 1024));
+            }
+            return entries;
         };
         const _navEntry = () => {
-            _perfNav.duration = Math.max(performance.now(), _perfNav.loadEventEnd);
-            return _perfNav;
+            const entry = Object.assign({}, _perfNav);
+            entry.duration = performance.now();
+            
+            if (globalThis.document && globalThis.document.readyState !== 'complete') {
+                entry.domComplete = 0;
+                entry.loadEventStart = 0;
+                entry.loadEventEnd = 0;
+            }
+            if (globalThis.document && globalThis.document.readyState === 'loading') {
+                entry.domInteractive = 0;
+                entry.domContentLoadedEventStart = 0;
+                entry.domContentLoadedEventEnd = 0;
+            }
+            
+            return entry;
         };
 
         // ================================================================
@@ -2407,7 +2460,20 @@
                 usedJSHeapSize,
             };
         });
-        _defProtoGetter(_PerfProto, 'timing', () => _perfTiming);
+        _defProtoGetter(_PerfProto, 'timing', () => {
+            const timing = Object.assign({}, _perfTiming);
+            if (globalThis.document && globalThis.document.readyState !== 'complete') {
+                timing.domComplete = 0;
+                timing.loadEventStart = 0;
+                timing.loadEventEnd = 0;
+            }
+            if (globalThis.document && globalThis.document.readyState === 'loading') {
+                timing.domInteractive = 0;
+                timing.domContentLoadedEventStart = 0;
+                timing.domContentLoadedEventEnd = 0;
+            }
+            return timing;
+        });
         _defProtoGetter(_PerfProto, 'timeOrigin', () => _perfTimingStart);
         _defProtoGetter(_PerfProto, 'navigation', () => _perfNavigation);
         _defProtoGetter(_PerfProto, 'onresourcetimingbufferfull', () => null);
@@ -2415,30 +2481,30 @@
         _defProtoMethod(_PerfProto, 'getEntries', function getEntries() {
             const entries = [_navEntry(), ..._buildResourceEntries()];
             const origin = globalThis.location ? globalThis.location.origin : "";
-            const qratorUrl = `${origin}/__qrator/qauth_utm_v2d_v9118.js`;
             
-            if (!entries.some(e => e.name.includes('qauth'))) {
-                const start = 10 + (Math.random() * 5);
-                const dur = 40 + (Math.random() * 20);
+            // Add Qrator/WBAAS fallback if not present
+            if (!entries.some(e => e.name.includes('qauth') || e.name.includes('wbaas'))) {
+                const start = 12.5;
+                const dur = 45.2;
                 entries.push({
-                    name: qratorUrl,
+                    name: `${origin}/__qrator/qauth_utm_v2d_v9118.js`,
                     entryType: 'resource',
-                    startTime: Number(start.toFixed(13)),
-                    duration: Number(dur.toFixed(13)),
+                    startTime: start,
+                    duration: dur,
                     initiatorType: 'script',
                     nextHopProtocol: 'h2',
                     workerStart: 0,
                     redirectStart: 0,
                     redirectEnd: 0,
-                    fetchStart: Number(start.toFixed(13)),
-                    domainLookupStart: Number(start.toFixed(13)),
-                    domainLookupEnd: Number(start.toFixed(13)),
-                    connectStart: Number(start.toFixed(13)),
-                    connectEnd: Number(start.toFixed(13)),
-                    secureConnectionStart: Number(start.toFixed(13)),
-                    requestStart: Number((start + 1).toFixed(13)),
-                    responseStart: Number((start + 5).toFixed(13)),
-                    responseEnd: Number((start + dur).toFixed(13)),
+                    fetchStart: start,
+                    domainLookupStart: start,
+                    domainLookupEnd: start,
+                    connectStart: start,
+                    connectEnd: start,
+                    secureConnectionStart: start,
+                    requestStart: start + 1,
+                    responseStart: start + 5,
+                    responseEnd: start + dur,
                     transferSize: 349878,
                     encodedBodySize: 349800,
                     decodedBodySize: 349800,
@@ -2450,18 +2516,7 @@
         _defProtoMethod(_PerfProto, 'getEntriesByType', function getEntriesByType(type) {
             if (type === "navigation") return [_navEntry()];
             if (type === "resource") {
-                const entries = _buildResourceEntries();
-                const origin = globalThis.location ? globalThis.location.origin : "";
-                entries.push({
-                    name: `${origin}/__qrator/qauth_utm_v2d_v9118.js`,
-                    entryType: 'resource',
-                    startTime: 12.5,
-                    duration: 45.2,
-                    initiatorType: 'script',
-                    transferSize: 349878,
-                    nextHopProtocol: 'h2'
-                });
-                return entries;
+                return globalThis.performance.getEntries().filter(e => e.entryType === 'resource');
             }
             if (type === "mark" || type === "measure") return [];
             if (type === "paint") {
@@ -2486,7 +2541,7 @@
         _defProtoMethod(_PerfProto, 'clearMarks', function clearMarks() {});
         _defProtoMethod(_PerfProto, 'clearMeasures', function clearMeasures() {});
         _defProtoMethod(_PerfProto, 'clearResourceTimings', function clearResourceTimings() {
-            _resourceEntries = null;
+            // No-op for now, as we dynamically fetch from document.
         });
         _defProtoMethod(_PerfProto, 'setResourceTimingBufferSize', function setResourceTimingBufferSize() {});
         _defProtoMethod(_PerfProto, 'toJSON', function toJSON() {
@@ -3122,6 +3177,7 @@
             // after send() returns. The async fetch() path can never satisfy this because
             // it requires V8 to yield, which doesn't happen when a PoW busy-wait is running.
             if (!xhr._async && typeof ops !== 'undefined' && typeof ops.op_net_xhr_sync === 'function') {
+                const startTime = performance.now();
                 try {
                     const origin = (globalThis.location && globalThis.location.origin !== 'null')
                         ? globalThis.location.origin : '';
@@ -3132,6 +3188,11 @@
                         xhr._url, xhr._method, headersJson, bodyEncoded, origin
                     );
                     const result = JSON.parse(resultJson);
+                    
+                    if (globalThis.__perfResourceEntries) {
+                        globalThis.__perfResourceEntries.push({ url: xhr._url, type: "xmlhttprequest", startTime, duration: performance.now() - startTime, size: result.body ? result.body.length : 0 });
+                    }
+                    
                     xhr.status = result.status || 0;
                     xhr.statusText = '';
                     xhr.responseURL = result.url || xhr._url;
@@ -3165,6 +3226,9 @@
                 credentials: xhr.withCredentials ? 'include' : 'same-origin',
             })
                 .then(async (resp) => {
+                    if (globalThis.__perfResourceEntries && globalThis.__perfResourceEntries.length > 0) {
+                        globalThis.__perfResourceEntries[globalThis.__perfResourceEntries.length - 1].type = "xmlhttprequest";
+                    }
                     if (xhr._aborted) return;
                     xhr.status = resp.status;
                     xhr.statusText = resp.statusText || "";

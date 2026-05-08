@@ -3129,14 +3129,14 @@ async fn sab_constructor_exists() {
 #[tokio::test]
 #[ignore = "SAB only available with cross-origin isolation (COOP+COEP headers)"]
 async fn sab_constructible_with_byte_length() {
-    assert_eq!(check("new SharedArrayBuffer(8).byteLength").await, "8");
+    assert_eq!(coi_check(true, "new SharedArrayBuffer(8).byteLength"), "8");
 }
 
 #[tokio::test]
 #[ignore = "SAB only available with cross-origin isolation (COOP+COEP headers)"]
 async fn sab_instance_is_shared_array_buffer() {
     assert_eq!(
-        check("new SharedArrayBuffer(4) instanceof SharedArrayBuffer").await,
+        coi_check(true, "new SharedArrayBuffer(4) instanceof SharedArrayBuffer"),
         "true"
     );
 }
@@ -3159,7 +3159,7 @@ async fn atomics_wait_returns_timed_out_synchronously() {
     // "timed-out" (or "ok"/"not-equal" on edge cases) — proves SAB+Atomics
     // are functional, not just present.
     assert_eq!(
-        check("Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1)").await,
+        coi_check(true, "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1)"),
         "timed-out"
     );
 }
@@ -3575,6 +3575,7 @@ async fn kasada_error_blob_capture() {
                      globalThis.__kasErrors.push({
                         kind: 'raw-text',
                         len: str.length,
+                        b64: btoa(unescape(encodeURIComponent(str))),
                         text: str // Keep as string
                     });
                 }

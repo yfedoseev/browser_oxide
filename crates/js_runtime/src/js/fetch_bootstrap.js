@@ -276,11 +276,16 @@
         } catch {}
 
         try {
+            const startTime = performance.now();
             const result = await ops.op_fetch(url, method, headers, body);
             
             // Log for audit
             globalThis.__fetchLog = globalThis.__fetchLog || [];
             globalThis.__fetchLog.push({ method, url, status: result.status });
+
+            if (globalThis.__perfResourceEntries) {
+                globalThis.__perfResourceEntries.push({ url, type: "fetch", startTime, duration: performance.now() - startTime, size: result.body ? result.body.length : 0 });
+            }
 
             // Sync cookies from the net jar into document.cookie so subsequent JS
             // reads (including the WBAAS challenge polling loop) see Set-Cookie

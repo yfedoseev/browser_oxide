@@ -1,4 +1,5 @@
 ((globalThis) => {
+    const ops = Deno && Deno.core && Deno.core.ops;
     // -- Per-page secure-context gating (Phase 7) --------------------
     // The V8 snapshot bootstraps with is_secure_context=true so all
     // [SecureContext]-only Web Platform APIs are baked in. On insecure
@@ -88,10 +89,9 @@
     // stealth profile is loaded and op-based reads return real values.
     // (Snapshot-time bootstraps see profile=None and would mis-gate.)
     try {
-        const _profileOps = Deno && Deno.core && Deno.core.ops;
-        const _hasProfile = _profileOps && _profileOps.op_has_stealth_profile && _profileOps.op_has_stealth_profile();
-        const _osName = (_hasProfile && _profileOps.op_get_profile_value)
-            ? (_profileOps.op_get_profile_value("os_name") || "Linux")
+        const _hasProfile = ops && ops.op_has_stealth_profile && ops.op_has_stealth_profile();
+        const _osName = (_hasProfile && ops.op_get_profile_value)
+            ? (ops.op_get_profile_value("os_name") || "Linux")
             : "Linux";
 
         // ApplePaySession — present only on macOS Chrome AND only on
@@ -162,17 +162,11 @@
         // internal DOM mutation callbacks on globalThis.
         '__onNodeInserted',
         '__errors',
-        // SharedArrayBuffer is exposed by V8 by default; real Chrome only
-        // exposes it when crossOriginIsolated. For non-COI pages, hide it.
-        // (deno_core may have it non-configurable; delete is best-effort.)
-        'SharedArrayBuffer',
-        // __pendingNavigation intentionally kept: it is a signal for the
-        // Rust navigation driver. Synchronous inline scripts (form.submit,
-        // location.href = ...) set it during the same tick cleanup runs,
-        // so deleting it here loses the signal before run_until_idle and
-        // the driver check. It is defined non-enumerable in
-        // window_bootstrap.js so it does not leak via Object.keys.
     ];
+
+    if (ops && ops.op_cross_origin_isolated && !ops.op_cross_origin_isolated()) {
+        internals.push('SharedArrayBuffer');
+    }
 
     for (const name of internals) {
         [globalThis, globalThis.window].forEach(obj => {

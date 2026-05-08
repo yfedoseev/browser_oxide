@@ -496,7 +496,7 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
         };
         rt.block_on(async move {
             match tokio::time::timeout(
-                std::time::Duration::from_secs(5),
+                std::time::Duration::from_secs(30),
                 client.get_with_headers(&url_clone, &extra_headers),
             )
             .await
@@ -508,6 +508,10 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
                             "[op_net_fetch_sync] empty body for {} (status={})",
                             url_clone, resp.status
                         );
+                    } else if url_clone.ends_with(".js") && body.len() > 10000 {
+                        let filename = format!("/tmp/fetched_script_{}.js", body.len());
+                        let _ = std::fs::write(&filename, &body);
+                        eprintln!("[op_net_fetch_sync] saved script to {}", filename);
                     }
                     body
                 }
