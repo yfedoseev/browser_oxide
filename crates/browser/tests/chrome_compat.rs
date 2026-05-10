@@ -5178,3 +5178,102 @@ async fn datadome_diagnostic_capture() {
         Err(_) => println!("timeout"),
     }
 }
+
+/// W4a-deeper — instrument eval to capture the source string for every
+/// unjzomuy probe Kasada fires. Adds a globalThis.__evalLog array that
+/// records every eval'd string containing the obfuscated property name.
+/// Also records the surrounding 200 chars of the throw site via Error
+/// stack inspection.
+#[tokio::test]
+#[ignore = "network: kasada eval-source capture for unjzomuy probes"]
+async fn kasada_eval_source_capture() {
+    use browser::Page;
+    use std::time::Duration;
+
+    let capture_init = r#"
+        (function() {
+            globalThis.__evalLog = [];
+            const _origEval = globalThis.eval;
+            globalThis.eval = function(src) {
+                if (typeof src === 'string' && src.length > 0) {
+                    // Capture every eval'd string. Filter later by content.
+                    try {
+                        globalThis.__evalLog.push({
+                            len: src.length,
+                            src: src.length > 1500 ? src.substring(0, 1500) + '...[TRUNC]' : src,
+                            ts: Date.now(),
+                        });
+                    } catch (_) {}
+                }
+                return _origEval.call(this, src);
+            };
+            // Also patch Function constructor (Kasada uses both)
+            const _OrigFunction = globalThis.Function;
+            globalThis.Function = new Proxy(_OrigFunction, {
+                construct(target, args) {
+                    if (args.length > 0) {
+                        const body = args[args.length - 1];
+                        if (typeof body === 'string' && body.length > 0) {
+                            try {
+                                globalThis.__evalLog.push({
+                                    len: body.length,
+                                    src: 'function(' + args.slice(0, -1).join(',') + ') { ' +
+                                        (body.length > 1500 ? body.substring(0, 1500) + '...[TRUNC]' : body) + ' }',
+                                    ts: Date.now(),
+                                });
+                            } catch (_) {}
+                        }
+                    }
+                    return Reflect.construct(target, args);
+                }
+            });
+        })();
+    "#;
+
+    println!("\n=== Kasada eval-source capture: canadagoose.com ===\n");
+    let page = tokio::time::timeout(
+        Duration::from_secs(120),
+        Page::navigate_with_init(
+            "https://www.canadagoose.com/",
+            stealth::presets::chrome_130_macos(),
+            2,
+            vec![capture_init.to_string()],
+        ),
+    )
+    .await;
+
+    match page {
+        Ok(Ok(mut p)) => {
+            for _ in 0..30 {
+                let _ = p.evaluate("0");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            // Filter: only show evals containing "unjzomuy" OR very short
+            // expressions (likely the probe call itself).
+            let unj = p.evaluate(
+                "(globalThis.__evalLog || []).filter(e => e.src.includes('unjzomuy')).length"
+            ).unwrap_or_default().trim_matches('"').parse::<usize>().unwrap_or(0);
+            let total = p.evaluate(
+                "(globalThis.__evalLog || []).length"
+            ).unwrap_or_default().trim_matches('"').parse::<usize>().unwrap_or(0);
+            println!("\n=== Total evals: {total}, unjzomuy-bearing: {unj} ===\n");
+            // Dump all unjzomuy evals
+            for i in 0..total.min(2000) {
+                let has = p.evaluate(&format!(
+                    "(function(){{ var e = globalThis.__evalLog[{i}]; return e && e.src && e.src.includes('unjzomuy') ? '1' : '0'; }})()"
+                )).unwrap_or_default();
+                if has.trim_matches('"') == "1" {
+                    let src = p.evaluate(&format!(
+                        "globalThis.__evalLog[{i}].src"
+                    )).unwrap_or_default();
+                    println!("--- eval #{i} (unjzomuy) ---");
+                    let s = src.trim_matches('"');
+                    println!("{}", s.chars().take(800).collect::<String>());
+                    println!();
+                }
+            }
+        }
+        Ok(Err(e)) => println!("page err: {e}"),
+        Err(_) => println!("timeout"),
+    }
+}
