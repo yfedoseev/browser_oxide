@@ -1629,6 +1629,7 @@ mod tests {
             body: b"Hello world".to_vec(),
             url: "https://example.com".into(),
             accept_ch_upgrade: false,
+            timings: TimingStats::default(),
         };
         assert_eq!(resp.text(), "Hello world");
         assert!(resp.ok());
@@ -1644,6 +1645,7 @@ mod tests {
             body: vec![],
             url: "https://example.com/missing".into(),
             accept_ch_upgrade: false,
+            timings: TimingStats::default(),
         };
         assert!(!resp.ok());
     }
