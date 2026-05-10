@@ -1406,13 +1406,22 @@ impl Page {
                         // anti-bot content markers. Otherwise fall back to a
                         // Rust-side GET (cookie-only flow — works for simpler
                         // engines that upgrade on any authenticated request).
+                        // Coverage of the marker set must mirror
+                        // is_anti_bot_challenge() — otherwise a vendor we
+                        // detect at the top of the loop is silently accepted
+                        // here, breaking the retry chain. Caught for
+                        // DataDome (yelp/etsy/leboncoin/wsj) on 2026-05-10.
                         let v8_html_is_real = !v8_html.is_empty()
                             && v8_html.len() > current_html.len()
                             && !v8_html.contains("/ips.js")
                             && !v8_html.contains("/149e9513-")
                             && !v8_html.contains("kpsdk")
                             && !v8_html.contains("_abck")
-                            && !v8_html.contains("bm_sz");
+                            && !v8_html.contains("bm_sz")
+                            && !v8_html.contains("captcha-delivery.com")
+                            && !v8_html.contains("dd-script")
+                            && !v8_html.contains("dd_engagement")
+                            && !v8_html.contains("/cdn-cgi/challenge-platform/");
 
                         // Extract any challenge-engine session headers that
                         // scripts collected during solves. For Kasada: the
