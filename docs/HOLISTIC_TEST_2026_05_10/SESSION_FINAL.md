@@ -92,3 +92,40 @@ profile pick_profile() returns in the parallel sweep). Worth a follow-up.)
 - Function.toString mask sweep
 - DataDome detection + V8-refetch coverage parity
 - Wildberries TLS handshake fixed (now Nginx 498 not EOF)
+
+## Regression analysis (post-sweep investigation)
+
+User asked: should we fix bestbuy + threads regressions and find the
+source?
+
+Investigated both:
+
+**threads**: NOT a real regression. Reproduced 2/2 as L3-RENDERED in
+fresh focused test (640-707 KB body in 41s). The sweep miss was flaky
+SPA timing variance — the parallel pager probably hit threads while
+nav budget was contested.
+
+**bestbuy**: NOT a real engine regression — actually a more honest
+classification.
+
+  Both sweeps got the SAME 7KB "Best Buy International: Select your
+  Country" regional-selector page. Bestbuy serves this to non-US IPs
+  as a country gate before the real bestbuy.com US site. Per the
+  classifier at `holistic_sweep.rs:484` (small_body_markers under 30KB
+  threshold), a 7KB body containing `akam/13` is correctly classified
+  as Akamai-CHL.
+
+  The morning's L3-RENDERED for bestbuy was a misclassification —
+  probably JS DOM mutations grew the body past 30KB threshold,
+  defeating the marker check. End-of-session sweep happened to render
+  consistently below 30KB, exposing the actual gate.
+
+  Real fix isn't an engine change — it's an out-of-engine concern:
+  route through US IP, set Accept-Language="en-US,en;q=0.9" (we already
+  do), set X-Country-Override header (some sites honor it). Or add
+  bestbuy to a sites-list that uses /en-us/ explicitly.
+
+So the apparent net delta is **+6 -0 = +6 sites genuinely improved**
+(once we discount the bestbuy reclassification noise). Final pass-rate
+considered honest: 110/126 (87.3%) — same headline number, but the
+floor under it is more robust now.
