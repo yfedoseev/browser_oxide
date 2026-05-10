@@ -61,13 +61,20 @@ const ALPN_PROTOS: &[u8] = b"\x02h2\x08http/1.1";
 use rand::prelude::SliceRandom;
 
 /// Chrome 147 extension permutation (indices into BoringSSL kExtensions table).
-/// Matches real headed Chrome 147 on macOS arm64.
+/// 16 extensions matching the verified Chrome 147 macOS arm64 reference at
+/// `docs/CHROME_147_TLS_REFERENCE_2026_04_29.json`.
 ///
-/// **Chrome Shuffling Buckets**: real Chrome 130+ does NOT shuffle all extensions
-/// randomly. It shuffles within three specific buckets.
-/// - Bucket A: [0..9] (indices 14, 1, 4, 11, 15, 2, 24, 21, 17) - Shuffled
-/// - Bucket B: [9..15] (indices 0, 3, 5, 7, 6, 8) - Shuffled
-/// - Bucket C: [15] (index 9) - Fixed at end (signature_algorithms)
+/// **Real Chrome shuffling behavior** (per Fastly TLS Fingerprinting blog
+/// + Chromestatus 5124606246518784 + BoringSSL `ssl_setup_extension_permutation`
+/// source): Chrome shuffles ALL non-PSK extensions with a single Fisher-Yates
+/// pass — there is no documented bucket structure. The only positional
+/// constraint is psk_key_exchange_modes / pre_shared_key being last (BoringSSL
+/// enforces this). The previous 3-bucket scheme was folkore from earlier
+/// public RE work; it reduced shuffle entropy by ~720,000× and put
+/// signature_algorithms always at position 16 — a deterministic positional
+/// tell that per-handshake classifiers (Akamai, Kasada) can detect as a
+/// soft-deny signal. Fix per
+/// `docs/RESEARCH_TLS_FINGERPRINT_FIX_2026_05_10.md` §4.1.
 const CHROME_EXTENSION_PERMUTATION: &[u8] = &[
     14, // key_share (51)
     1,  // encrypted_client_hello (65037)
@@ -85,27 +92,13 @@ const CHROME_EXTENSION_PERMUTATION: &[u8] = &[
     7,  // application_layer_protocol_negotiation (16)
     6,  // session_ticket (35)
     9,  // signature_algorithms (13)
-    22, // delegated_credential (34)
 ];
 
-/// Generate a fresh shuffle of the Chrome extension permutation within its buckets.
+/// Generate a fresh Fisher-Yates shuffle over all 16 Chrome 147 extensions.
 fn shuffled_chrome_extension_permutation() -> Vec<u8> {
     let mut rng = rand::thread_rng();
-
-    // Bucket A: indices 0..9 (9 items)
-    let mut bucket_a = CHROME_EXTENSION_PERMUTATION[0..9].to_vec();
-    // Bucket B: indices 9..15 (6 items)
-    let mut bucket_b = CHROME_EXTENSION_PERMUTATION[9..15].to_vec();
-    // Bucket C: index 15 (1 item - signature_algorithms)
-    let bucket_c = vec![CHROME_EXTENSION_PERMUTATION[15]];
-
-    bucket_a.shuffle(&mut rng);
-    bucket_b.shuffle(&mut rng);
-
-    let mut permutation = Vec::with_capacity(16);
-    permutation.extend(bucket_a);
-    permutation.extend(bucket_b);
-    permutation.extend(bucket_c);
+    let mut permutation = CHROME_EXTENSION_PERMUTATION.to_vec();
+    permutation.shuffle(&mut rng);
     permutation
 }
 
@@ -153,12 +146,16 @@ pub fn chrome_connector() -> Result<SslConnector, NetError> {
     // Chrome 131+ sends both X25519MLKEM768 and X25519 key shares.
     builder.set_key_shares_limit(2);
 
-    // Certificate compression (Brotli + Zlib)
+    // Certificate compression — real Chrome 147 sends ONLY Brotli.
+    // Reference docs/CHROME_147_TLS_REFERENCE_2026_04_29.json line 17-19:
+    // `"algorithms": ["brotli (2)"]`. The previous Brotli+Zlib combo
+    // added a second algorithm-id (zlib=1) inside the
+    // compress_certificate extension payload, diverging both JA3 length
+    // and JA4 ext-hash from real Chrome — instant fingerprint mismatch
+    // on Akamai/Kasada/Cloudflare classifiers (per
+    // docs/RESEARCH_TLS_FINGERPRINT_FIX_2026_05_10.md §4.6).
     builder
         .add_cert_compression_alg(CertCompressionAlgorithm::Brotli)
-        .map_err(|e| NetError::Tls(e.to_string()))?;
-    builder
-        .add_cert_compression_alg(CertCompressionAlgorithm::Zlib)
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
     // Load Mozilla root certificates into the certificate store
@@ -190,36 +187,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_shuffled_permutation_buckets() {
+    fn test_shuffle_is_full_fisher_yates() {
+        // Real Chrome shuffles all 16 extensions uniformly (no buckets).
+        // Verify the shuffle preserves the full set + is non-deterministic.
         let p1 = shuffled_chrome_extension_permutation();
         let p2 = shuffled_chrome_extension_permutation();
-        
+
         assert_eq!(p1.len(), 16);
         assert_eq!(p2.len(), 16);
-        
-        // Bucket C (signature_algorithms) must always be at index 15
-        assert_eq!(p1[15], 9);
-        assert_eq!(p2[15], 9);
-        
-        // Buckets A and B must contain the same set of elements
-        let mut b1_a = p1[0..9].to_vec();
-        let mut b2_a = p2[0..9].to_vec();
-        b1_a.sort();
-        b2_a.sort();
-        let expected_a = vec![1, 2, 4, 11, 14, 15, 17, 21, 24];
-        assert_eq!(b1_a, expected_a);
-        assert_eq!(b2_a, expected_a);
-        
-        let mut b1_b = p1[9..15].to_vec();
-        let mut b2_b = p2[9..15].to_vec();
-        b1_b.sort();
-        b2_b.sort();
-        let expected_b = vec![0, 3, 5, 6, 7, 8];
-        assert_eq!(b1_b, expected_b);
-        assert_eq!(b2_b, expected_b);
-        
-        // Probabilistically, they should be different
-        assert_ne!(p1, p2, "Shuffles should be non-deterministic");
+
+        let mut sorted = p1.clone();
+        sorted.sort();
+        let mut expected = CHROME_EXTENSION_PERMUTATION.to_vec();
+        expected.sort();
+        assert_eq!(sorted, expected, "shuffle must preserve the set");
+
+        // Probabilistically should differ run-to-run.
+        assert_ne!(p1, p2, "Shuffle should be non-deterministic");
     }
 }
 
