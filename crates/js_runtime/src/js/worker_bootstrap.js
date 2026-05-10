@@ -53,6 +53,58 @@
 
     // --- WorkerNavigator (matches StealthProfile) ---
     if (!self.navigator) {
+        // navigator.userAgentData — must be present in Worker realm AND
+        // return values consistent with the main thread. Per W6a research
+        // (docs/W6a_DATADOME_PROBE_GAP_MATRIX_2026_05_10.md): DataDome's
+        // tags.js v5.6.3 spawns a Worker that reads
+        // `navigator.userAgentData ? .mobile : "NA"`. Main returns false,
+        // worker previously returned "NA" — a cross-realm contradiction
+        // DataDome scores against. Now both return false.
+        const _osName = _p("os_name", "Windows");
+        const _browserMajor = _p("browser_version", "147.0.7727.117").split(".")[0];
+        const _browserFull = _p("browser_version", "147.0.7727.117");
+        const _brands = [
+            { brand: "Google Chrome", version: _browserMajor },
+            { brand: "Not.A/Brand", version: "8" },
+            { brand: "Chromium", version: _browserMajor },
+        ];
+        const _fullVersionList = [
+            { brand: "Google Chrome", version: _browserFull },
+            { brand: "Not.A/Brand", version: "8.0.0.0" },
+            { brand: "Chromium", version: _browserFull },
+        ];
+        class WorkerNavigatorUAData {
+            get brands() { return _brands.slice(); }
+            get mobile() { return false; }
+            get platform() { return _osName; }
+            getHighEntropyValues(hints) {
+                if (!Array.isArray(hints)) {
+                    return Promise.reject(new TypeError(
+                        "Failed to execute 'getHighEntropyValues' on 'NavigatorUAData': The provided value cannot be converted to a sequence."
+                    ));
+                }
+                const out = { brands: _brands.slice(), mobile: false, platform: _osName };
+                for (const h of hints) {
+                    switch (h) {
+                        case "architecture": out.architecture = _p("cpu_architecture", "x86"); break;
+                        case "bitness": out.bitness = _p("cpu_bitness", "64"); break;
+                        case "model": out.model = _p("ua_model", ""); break;
+                        case "platformVersion": out.platformVersion = _p("platform_version", ""); break;
+                        case "uaFullVersion": out.uaFullVersion = _browserFull; break;
+                        case "fullVersionList": out.fullVersionList = _fullVersionList.slice(); break;
+                        case "wow64": out.wow64 = _p("ua_wow64", "false") === "true"; break;
+                        case "formFactors": out.formFactors = ["Desktop"]; break;
+                        default: /* ignore unknown hints — Chrome silently drops */ break;
+                    }
+                }
+                return Promise.resolve(out);
+            }
+            toJSON() { return { brands: _brands.slice(), mobile: false, platform: _osName }; }
+        }
+        Object.defineProperty(WorkerNavigatorUAData.prototype, Symbol.toStringTag, {
+            value: "NavigatorUAData", configurable: true,
+        });
+
         const workerNavigator = {
             userAgent: _p("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
             appVersion: _p("app_version", "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
@@ -71,6 +123,7 @@
             doNotTrack: null,
             pdfViewerEnabled: _p("pdf_viewer_enabled", "true") === "true",
             webdriver: false,
+            userAgentData: new WorkerNavigatorUAData(),
         };
         Object.defineProperty(workerNavigator, Symbol.toStringTag, { value: "WorkerNavigator", configurable: true });
         self.navigator = workerNavigator;
