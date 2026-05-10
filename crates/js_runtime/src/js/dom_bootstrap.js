@@ -954,7 +954,11 @@
         attachShadow(init = {}) {
             const mode = init.mode || "open";
             const shadowId = ops.op_dom_attach_shadow(_getNodeId(this), mode);
-            const shadowRoot = _wrap(shadowId);
+            // Use _wrapNode — _wrap is not a defined helper. Was a stale
+            // reference that threw `ReferenceError: _wrap is not defined`
+            // whenever attachShadow was actually called. Caught by
+            // Kasada's `sdt.c` field (decrypted blob 0, 2026-05-10).
+            const shadowRoot = _wrapNode(shadowId);
             // ShadowRoot inherits Node methods (appendChild, querySelector, etc.)
             Object.defineProperties(shadowRoot, {
                 mode: { value: mode, enumerable: true },
@@ -2249,6 +2253,105 @@
         }
         return el;
     };
+
+    // ================================================================
+    // Native-code mask sweep for every JS-defined Web API method.
+    //
+    // Without this, Function.prototype.toString called on attachShadow,
+    // queueMicrotask, Document.createElement, etc. returns the literal
+    // JS source — including our deno_core op names like
+    // `op_dom_attach_shadow`. Real Chrome returns
+    // `function NAME() { [native code] }`. Kasada's `sfc` and `sdt`
+    // probes (decrypted blob 0, 2026-05-10) catch us on this.
+    //
+    // Strategy: walk every named own property of every Web API
+    // prototype we define, find any function-typed values + getters +
+    // setters, and apply _maskFunction. Idempotent — re-masking a
+    // tagged function is a no-op.
+    if (typeof globalThis._maskFunction === 'function') {
+        const _mask = globalThis._maskFunction;
+        const _walkProto = (ctor, ctorName) => {
+            if (!ctor) return;
+            try { _mask(ctor, ctorName); } catch (_) {}
+            const proto = ctor.prototype;
+            if (!proto) return;
+            for (const key of Object.getOwnPropertyNames(proto)) {
+                if (key === 'constructor') continue;
+                const desc = Object.getOwnPropertyDescriptor(proto, key);
+                if (!desc) continue;
+                try {
+                    if (typeof desc.value === 'function') _mask(desc.value, key);
+                    if (typeof desc.get === 'function') _mask(desc.get, `get ${key}`);
+                    if (typeof desc.set === 'function') _mask(desc.set, `set ${key}`);
+                } catch (_) {}
+            }
+        };
+        // Every JS-defined Web API class in this bootstrap, plus
+        // siblings from window_bootstrap, fetch_bootstrap,
+        // canvas_bootstrap, etc. Listed by name so the sweep is
+        // conservative — only masks what we've verified exists.
+        const _toMask = [
+            'EventTarget', 'Node', 'Element', 'HTMLElement',
+            'Document', 'HTMLDocument', 'DocumentFragment',
+            'ShadowRoot', 'Text', 'Comment', 'Attr',
+            'NodeList', 'HTMLCollection', 'NamedNodeMap',
+            'DOMTokenList', 'CSSStyleDeclaration',
+            // Window-bootstrap-defined classes that previously leaked
+            // their JS source via Function.prototype.toString.
+            'Bluetooth', 'StorageManager', 'SharedWorker',
+            'WorkerGlobalScope', 'NetworkInformation', 'MediaDevices',
+            'ServiceWorkerContainer', 'Permissions', 'PermissionStatus',
+            'Notification', 'Clipboard', 'CredentialsContainer',
+            'PresentationConnection', 'XRSystem', 'GPUAdapter',
+            // Canvas/Audio
+            'AudioContext', 'BaseAudioContext', 'OfflineAudioContext',
+            'AudioWorkletNode', 'OscillatorNode', 'GainNode',
+            'AnalyserNode', 'BiquadFilterNode', 'DynamicsCompressorNode',
+            // Workers
+            'Worker', 'BroadcastChannel', 'MessageChannel', 'MessagePort',
+            // HTML element subclasses (mostly empty markers, but their
+            // class source still leaks via toString without masking).
+            'HTMLDivElement', 'HTMLSpanElement', 'HTMLParagraphElement',
+            'HTMLAnchorElement', 'HTMLImageElement', 'HTMLCanvasElement',
+            'HTMLScriptElement', 'HTMLStyleElement', 'HTMLLinkElement',
+            'HTMLMetaElement', 'HTMLTableElement', 'HTMLIFrameElement',
+            'HTMLBodyElement', 'HTMLHtmlElement', 'HTMLHeadElement',
+            'HTMLInputElement', 'HTMLButtonElement', 'HTMLSelectElement',
+            'HTMLTextAreaElement', 'HTMLFormElement', 'HTMLLabelElement',
+            'HTMLOptionElement', 'HTMLUListElement', 'HTMLOListElement',
+            'HTMLLIElement', 'HTMLHeadingElement', 'HTMLHRElement',
+            'HTMLBRElement', 'HTMLPreElement', 'HTMLBlockquoteElement',
+            'HTMLVideoElement', 'HTMLAudioElement', 'HTMLMediaElement',
+            'HTMLSourceElement', 'HTMLTrackElement', 'HTMLPictureElement',
+            'HTMLTemplateElement', 'HTMLSlotElement', 'HTMLDialogElement',
+            'HTMLDetailsElement', 'HTMLProgressElement', 'HTMLMeterElement',
+        ];
+        for (const name of _toMask) {
+            const ctor = globalThis[name];
+            if (typeof ctor === 'function') _walkProto(ctor, name);
+        }
+
+        // Top-level globalThis function-typed members that should be
+        // native. queueMicrotask + fetch were the worst offenders in
+        // the captured Kasada error report — both leaked their literal
+        // JS source via Function.prototype.toString.
+        const _topLevelFns = [
+            'queueMicrotask', 'fetch', 'setTimeout', 'clearTimeout',
+            'setInterval', 'clearInterval', 'requestAnimationFrame',
+            'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback',
+            'structuredClone', 'reportError',
+            'getComputedStyle', 'matchMedia', 'scroll', 'scrollTo', 'scrollBy',
+            'alert', 'confirm', 'prompt', 'open', 'close', 'focus', 'blur',
+            'postMessage', 'addEventListener', 'removeEventListener',
+            'dispatchEvent',
+        ];
+        for (const name of _topLevelFns) {
+            const fn = globalThis[name];
+            if (typeof fn === 'function') {
+                try { _mask(fn, name); } catch (_) {}
+            }
+        }
+    }
 
     // Minimal window stub
     globalThis.window = globalThis;

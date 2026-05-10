@@ -4762,6 +4762,13 @@
             "audio/webm", 'audio/webm; codecs="opus"', 'audio/webm; codecs="vorbis"',
             "audio/mpeg", "audio/ogg", 'audio/ogg; codecs="vorbis"', 'audio/ogg; codecs="opus"',
             "audio/wav", 'audio/wav; codecs="1"', "audio/flac",
+            // Chrome accepts these codec MIME aliases too. The Kasada
+            // smc probe (decrypted blob 0, 2026-05-10) tests audio/x-m4a
+            // and audio/aac (sic — they wrote "acc" too) and reads the
+            // verdict from MediaSource.isTypeSupported. Without these
+            // entries we return false where Chrome returns true.
+            "audio/x-m4a", "audio/aac", "audio/acc",
+            "audio/mp3", "audio/x-wav",
         ]);
 
         globalThis.MediaSource = class MediaSource {
