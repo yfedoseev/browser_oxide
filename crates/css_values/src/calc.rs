@@ -497,3 +497,184 @@ mod tests {
         approx(parse_calc("sin(0.25turn)").evaluate(&ctx), 1.0);
     }
 }
+
+// =====================================================================
+// Top-level entry point used by getComputedStyle resolution: take a
+// raw property-value string (as it appears in the cascade), detect
+// math functions, evaluate them, and return the resolved string in
+// Chrome's serialization format. Used by `op_dom_get_computed_style`.
+// =====================================================================
+
+use crate::types::length::CalcContext;
+
+/// Resolve any top-level math-function call in `value` to a single
+/// numeric+unit string (e.g. `"calc(1px * sin(pi/2))"` → `"1px"`).
+/// Returns the input unchanged if it doesn't begin with a math function
+/// or if parsing fails — preserves backward compatibility with values
+/// that don't need resolution.
+///
+/// This matches Chrome's getComputedStyle behaviour: math functions are
+/// resolved to their used pixel value at access time, not echoed back
+/// as the original calc tree.
+pub fn resolve_computed_value(value: &str, ctx: &CalcContext) -> String {
+    let trimmed = value.trim();
+    // Cheap rejection — if it doesn't look like a math fn, skip.
+    if !looks_like_math_function(trimmed) {
+        return value.to_string();
+    }
+    // Wrap in a synthetic declaration so the css_parser entry point
+    // accepts it. We only care about the first ComponentValue.
+    let css = format!("__:{};", trimmed);
+    let (decls, _errs) = css_parser::parse_declaration_list(&css);
+    let Some(decl) = decls.first() else {
+        return value.to_string();
+    };
+    // We only resolve when the value is *exactly* one top-level math
+    // function (with optional surrounding whitespace). A value like
+    // `pow(2, 5) * 1px` is invalid CSS — Chrome rejects it — so we
+    // pass it through unchanged rather than partially evaluating.
+    let non_ws: Vec<&ComponentValue<'_>> = decl
+        .value
+        .iter()
+        .filter(|cv| {
+            !matches!(
+                cv,
+                ComponentValue::Token(Token {
+                    kind: TokenKind::Whitespace,
+                    ..
+                })
+            )
+        })
+        .collect();
+    if non_ws.len() != 1 {
+        return value.to_string();
+    }
+    if let ComponentValue::Function(f) = non_ws[0] {
+        match parse_math_function(f) {
+            Ok(Some(expr)) => {
+                let v = expr.evaluate(ctx);
+                return format_resolved_value(v, trimmed);
+            }
+            _ => return value.to_string(),
+        }
+    }
+    value.to_string()
+}
+
+fn looks_like_math_function(s: &str) -> bool {
+    // Top-level fn-call check. Cheap heuristic: starts with one of the
+    // math-function names followed by `(`. Avoids paying the parser
+    // cost on the 99% of values that are plain dimensions.
+    const NAMES: &[&str] = &[
+        "calc(", "min(", "max(", "clamp(", "round(", "mod(", "rem(",
+        "sin(", "cos(", "tan(", "asin(", "acos(", "atan(", "atan2(",
+        "pow(", "sqrt(", "hypot(", "log(", "exp(", "abs(", "sign(",
+    ];
+    let lower = s.to_ascii_lowercase();
+    NAMES.iter().any(|n| lower.starts_with(n))
+}
+
+/// Format an evaluated f64 with a unit suffix derived from the input.
+/// We pick `"px"` by default since most layout-resolved properties are
+/// pixel-typed (Chrome serializes width/margin/etc. as `"NNpx"`).
+/// `1px → "1px"`, `1.5px → "1.5px"`, `0 → "0px"`.
+fn format_resolved_value(v: f64, original: &str) -> String {
+    let unit = guess_output_unit(original);
+    if v.fract() == 0.0 && v.is_finite() {
+        format!("{}{}", v as i64, unit)
+    } else {
+        // Match Chrome's truncation to ~6 significant digits.
+        let formatted = format!("{:.6}", v);
+        // Strip trailing zeros after a decimal point.
+        let trimmed = formatted
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string();
+        format!("{trimmed}{unit}")
+    }
+}
+
+fn guess_output_unit(original: &str) -> &'static str {
+    // Look for any dimension token (number-followed-by-unit) in the
+    // source. Substring matching alone is broken — `sin(...)` would
+    // match `in` for example. So tokenize via the css_parser and look
+    // for a Dimension token; if any present, output is px.
+    let css = format!("__:{};", original);
+    let (decls, _) = css_parser::parse_declaration_list(&css);
+    let Some(decl) = decls.first() else { return ""; };
+    fn has_dim(values: &[ComponentValue<'_>]) -> bool {
+        for cv in values {
+            match cv {
+                ComponentValue::Token(Token { kind: TokenKind::Dimension { .. }, .. }) => {
+                    return true;
+                }
+                ComponentValue::Function(f) => {
+                    if has_dim(&f.arguments) {
+                        return true;
+                    }
+                }
+                ComponentValue::SimpleBlock(b) => {
+                    if has_dim(&b.value) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+    if has_dim(&decl.value) { "px" } else { "" }
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::*;
+
+    fn ctx() -> CalcContext {
+        CalcContext::default()
+    }
+
+    #[test]
+    fn passes_through_plain_values() {
+        assert_eq!(resolve_computed_value("12px", &ctx()), "12px");
+        assert_eq!(resolve_computed_value("auto", &ctx()), "auto");
+        assert_eq!(resolve_computed_value("rgb(0,0,0)", &ctx()), "rgb(0,0,0)");
+    }
+
+    #[test]
+    fn resolves_basic_calc() {
+        assert_eq!(resolve_computed_value("calc(10px + 5px)", &ctx()), "15px");
+        assert_eq!(resolve_computed_value("calc(2 * 8px)", &ctx()), "16px");
+    }
+
+    #[test]
+    fn resolves_math_functions() {
+        assert_eq!(resolve_computed_value("min(10px, 5px)", &ctx()), "5px");
+        assert_eq!(resolve_computed_value("max(10px, 5px)", &ctx()), "10px");
+        // sin(0) → 0 → "0" (no px since input had none)
+        assert_eq!(resolve_computed_value("sin(0)", &ctx()), "0");
+    }
+
+    #[test]
+    fn resolves_kasada_style_nested() {
+        // The shape Kasada injects: calc(1px * (...))
+        let v = resolve_computed_value(
+            "calc(1px * (2.71828 * 0.5 + sin(pi / 2)))",
+            &ctx(),
+        );
+        // 2.71828 * 0.5 + 1 = 2.35914
+        // Format with up to 6 decimals, trailing-zeros stripped.
+        assert_eq!(v, "2.35914px");
+    }
+
+    #[test]
+    fn integer_results_serialize_without_decimals() {
+        assert_eq!(resolve_computed_value("calc(2px + 3px)", &ctx()), "5px");
+        // `pow(2, 5) * 1px` is invalid CSS (math fn followed by extra
+        // tokens) — Chrome rejects it. We pass through.
+        assert_eq!(
+            resolve_computed_value("pow(2, 5) * 1px", &ctx()),
+            "pow(2, 5) * 1px"
+        );
+    }
+}

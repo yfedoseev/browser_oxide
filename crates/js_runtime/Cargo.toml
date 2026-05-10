@@ -18,6 +18,7 @@ dom = { path = "../dom" }
 html_parser = { path = "../html_parser" }
 css_selectors = { path = "../css_selectors" }
 css_parser = { path = "../css_parser" }
+css_values = { path = "../css_values" }
 stealth = { path = "../stealth" }
 net = { path = "../net" }
 canvas = { path = "../canvas" }

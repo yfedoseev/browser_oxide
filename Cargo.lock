@@ -1609,6 +1609,7 @@ dependencies = [
  "canvas",
  "css_parser",
  "css_selectors",
+ "css_values",
  "deno_core",
  "dom",
  "futures-util",

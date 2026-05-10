@@ -43,21 +43,6 @@ async fn navigator_user_agent_is_string() {
 }
 
 #[tokio::test]
-#[ignore]
-async fn probe_env() {
-    let mut page = Page::from_html_with_url(
-        &html(""),
-        "https://www.canadagoose.com/",
-        Some(stealth::presets::chrome_130_macos()),
-    )
-    .await
-    .unwrap();
-    let js = include_str!("../../../probe_env.js");
-    let result = page.evaluate(js).unwrap();
-    println!("PROBE RESULT:\n{}", result);
-}
-
-#[tokio::test]
 async fn navigator_platform_exists() {
     let platform = eval("navigator.platform").await;
     assert!(!platform.is_empty(), "platform should not be empty");

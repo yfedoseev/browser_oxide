@@ -1,9 +1,29 @@
 use std::collections::HashMap;
 use crate::state::DomState;
 use crate::utils::tokens_to_string;
+use css_values::calc::resolve_computed_value;
+use css_values::types::length::CalcContext;
 use deno_core::op2;
 use dom::node::NodeId;
 use dom::DomElement;
+
+/// Build a `CalcContext` from the current DOM state's stealth profile.
+/// Provides viewport + font-size + container dimensions so calc()
+/// math functions can resolve relative units (vw, em, etc.) correctly
+/// for `getComputedStyle` resolution.
+fn calc_context_from(state: &DomState) -> CalcContext {
+    let mut ctx = CalcContext::default();
+    if let Some(p) = state.stealth_profile.as_ref() {
+        ctx.viewport_w = p.inner_width as f64;
+        ctx.viewport_h = p.inner_height as f64;
+        ctx.container_w = p.inner_width as f64;
+        ctx.container_h = p.inner_height as f64;
+        // 16px is Chrome's default; profiles don't currently override.
+        ctx.root_font_size_px = 16.0;
+        ctx.font_size_px = 16.0;
+    }
+    ctx
+}
 
 // Convention: ops that return "nullable NodeId" return i64.
 // -1 means null/not found. JS bootstrap converts -1 → null.
@@ -771,7 +791,17 @@ pub fn op_dom_get_all_computed_styles(
         }
     }
 
-    let res: HashMap<String, String> = declarations.into_iter().map(|(k, v)| (k, v.2)).collect();
+    // Resolve calc() and CSS Values 4 math functions to their used
+    // pixel value before returning — Chrome's getComputedStyle does
+    // this. Otherwise antibot probes that compute via calc(... sin(pi)
+    // ...) and read the result back (e.g. Kasada's CSS calc precision
+    // probe — see docs/CANADA_GOOSE_DIAGNOSIS_2026_05_10.md) catch us
+    // returning the unresolved expression text.
+    let ctx = calc_context_from(state);
+    let res: HashMap<String, String> = declarations
+        .into_iter()
+        .map(|(k, v)| (k, resolve_computed_value(&v.2, &ctx)))
+        .collect();
     res
 }
 
@@ -786,18 +816,19 @@ pub fn op_dom_get_computed_style(
         state.update_cached_rules();
     }
     let id = NodeId::from_raw(node_id as u32);
+    let ctx = calc_context_from(state);
 
     // 1. Check inline style (highest specificity)
     let inline_val = get_inline_style_value(&state.dom, id, property);
     if let Some(val) = &inline_val {
         if !val.is_empty() {
-            return val.clone();
+            return resolve_computed_value(val, &ctx);
         }
     }
 
     // 2. Check <style> block rules (matched by selector)
     if let Some(val) = get_stylesheet_value(state, id, property) {
-        return val;
+        return resolve_computed_value(&val, &ctx);
     }
 
     // 3. CSS inheritance — walk up the DOM for inherited properties
@@ -837,11 +868,11 @@ pub fn op_dom_get_computed_style(
         while let Some(parent_id) = state.dom.get(current).and_then(|n| n.parent) {
             if let Some(val) = get_inline_style_value(&state.dom, parent_id, property) {
                 if !val.is_empty() {
-                    return val;
+                    return resolve_computed_value(&val, &ctx);
                 }
             }
             if let Some(val) = get_stylesheet_value(state, parent_id, property) {
-                return val;
+                return resolve_computed_value(&val, &ctx);
             }
             current = parent_id;
         }
