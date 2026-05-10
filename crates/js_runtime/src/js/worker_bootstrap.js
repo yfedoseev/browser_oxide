@@ -79,14 +79,14 @@
     // --- performance.now() humanization (matches window_bootstrap) ---
     if (!globalThis.performance) {
         globalThis.performance = {
-            now() { return _wops.op_perf_now_humanized(); },
+            now() { return ops.op_perf_now_humanized(); },
         };
     } else {
-        const _origNow = globalThis.performance.now.bind(globalThis.performance);
-        globalThis.performance.now = () => _wops.op_perf_now_humanized();
+        globalThis.performance.now = () => ops.op_perf_now_humanized();
     }
 
     // --- performance.memory jitter (matches window_bootstrap) ---
+    if (globalThis.performance) {
         Object.defineProperty(globalThis.performance, 'memory', {
             get() {
                 const jsHeapSizeLimit = 4294705152;
@@ -100,67 +100,6 @@
             enumerable: true
         });
     }
-
-    // --- atob / btoa spec-compliant fixes ---
-    if (!self.atob) {
-        self.atob = function atob(s) {
-            if (arguments.length === 0) throw new TypeError("1 argument required");
-            const input = String(s).replace(/[\t\n\f\r ]/g, "");
-            if (input.length === 0) return "";
-            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-            let out = "";
-            for (let i = 0; i < input.length; i += 4) {
-                const a = chars.indexOf(input[i]), b = chars.indexOf(input[i+1]);
-                const c = chars.indexOf(input[i+2]), d = chars.indexOf(input[i+3]);
-                out += String.fromCharCode((a << 2) | (b >> 4));
-                if (c !== -1 && c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
-                if (d !== -1 && d !== 64) out += String.fromCharCode(((c & 3) << 6) | d);
-            }
-            return out;
-        };
-    }
-    if (!self.btoa) {
-        self.btoa = function btoa(s) {
-            if (arguments.length === 0) throw new TypeError("1 argument required");
-            const str = String(s);
-            for (let i = 0; i < str.length; i++) {
-                if (str.charCodeAt(i) > 255) throw new DOMException("InvalidCharacterError");
-            }
-            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-            let out = "";
-            for (let i = 0; i < str.length; i += 3) {
-                const a = str.charCodeAt(i), b = str.charCodeAt(i+1), c = str.charCodeAt(i+2);
-                out += chars[a >> 2] + chars[((a & 3) << 4) | (b >> 4)];
-                out += (isNaN(b) ? "=" : chars[((b & 15) << 2) | (c >> 6)]);
-                out += (isNaN(c) ? "=" : chars[c & 63]);
-            }
-            return out;
-        };
-    }
-
-    // --- EventTarget for the worker global scope ---
-    const _wListeners = {};
-    self.addEventListener = function addEventListener(type, fn) {
-        if (!_wListeners[type]) _wListeners[type] = [];
-        if (!_wListeners[type].includes(fn)) _wListeners[type].push(fn);
-    };
-    self.removeEventListener = function removeEventListener(type, fn) {
-        if (_wListeners[type]) {
-            _wListeners[type] = _wListeners[type].filter(f => f !== fn);
-        }
-    };
-    self.dispatchEvent = function dispatchEvent(event) {
-        const type = event && event.type;
-        const arr = _wListeners[type] || [];
-        for (const fn of arr.slice()) {
-            try { fn.call(self, event); } catch (_) {}
-        }
-        const on = self['on' + type];
-        if (typeof on === 'function') {
-            try { on.call(self, event); } catch (_) {}
-        }
-        return true;
-    };
 
     // --- postMessage: send a message to the parent thread ---
     self.postMessage = function (message, transfer) {
@@ -228,7 +167,9 @@
                 ports: [],
                 timeStamp: Date.now(),
             };
-            self.dispatchEvent(event);
+            // Use Event constructor from interfaces_bootstrap
+            const ev = new MessageEvent("message", { data });
+            self.dispatchEvent(ev);
         }
     }
     // Prime the pump every 5ms. In a later pass this can be driven by the
@@ -236,30 +177,16 @@
     setInterval(drainOnce, 5);
 
     // --- importScripts: classic-worker synchronous script loader ---
-    //
-    // Per spec, `importScripts(...urls)` blocks the worker thread, fetches
-    // each URL in order, and eval'd each result in the worker global scope.
-    // Supports `http(s):`, `blob:`, and `data:` URLs. Errors propagate to
-    // the caller as thrown `NetworkError`-shaped exceptions.
     self.importScripts = function importScripts(...urls) {
         for (const raw of urls) {
             const url = String(raw);
             let source;
             if (url.startsWith("blob:")) {
-                // Fast path: blob registry is shared across threads via the
-                // process-global BlobRegistry.
                 source = ops.op_blob_fetch_text(url);
-                if (!source) {
-                    throw new Error(
-                        "importScripts failed to load blob URL " + url
-                    );
-                }
+                if (!source) throw new Error("importScripts failed to load blob URL " + url);
             } else if (url.startsWith("data:")) {
-                // RFC 2397 data URL. Parse `data:[<mediatype>][;base64],<data>`.
                 const comma = url.indexOf(",");
-                if (comma < 0) {
-                    throw new Error("importScripts: malformed data URL");
-                }
+                if (comma < 0) throw new Error("importScripts: malformed data URL");
                 const meta = url.slice(5, comma);
                 const body = url.slice(comma + 1);
                 if (meta.endsWith(";base64")) {
@@ -268,24 +195,11 @@
                     source = decodeURIComponent(body);
                 }
             } else if (url.startsWith("http://") || url.startsWith("https://")) {
-                // Synchronous HTTP fetch from the worker thread. Implemented
-                // as an op that uses `block_on` on the worker's own tokio
-                // runtime so this call is sync from the worker's
-                // single-threaded V8 perspective.
                 source = ops.op_worker_sync_fetch(url);
-                if (!source) {
-                    throw new Error(
-                        "importScripts failed to load " + url
-                    );
-                }
+                if (!source) throw new Error("importScripts failed to load " + url);
             } else {
-                throw new Error(
-                    "importScripts: unsupported URL scheme: " + url
-                );
+                throw new Error("importScripts: unsupported URL scheme: " + url);
             }
-            // Evaluate in the worker global scope. `(0, eval)` forces
-            // indirect eval so the source runs at global scope rather
-            // than in the caller's scope chain.
             (0, eval)(source);
         }
     };

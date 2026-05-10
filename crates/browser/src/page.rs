@@ -139,11 +139,13 @@ impl Page {
     /// Detect if the current page is an anti-bot challenge (Kasada, Akamai, etc.)
     pub fn is_anti_bot_challenge(&mut self) -> bool {
         let body = self.content();
-        body.contains("ips.js")
-            || body.contains("kpsdk")
-            || body.contains("_abck")
+        // Look for more specific markers of common anti-bot challenge stubs.
+        // False positives on diagnostic sites (tls.peet.ws) trip infinite reloads.
+        (body.contains("ips.js") && body.contains("kpsdk"))
+            || body.contains("checkpoint/interstitial") // Cloudflare
+            || (body.contains("_abck") && body.contains("sensor_data")) // Akamai
             || body.contains("bm_sz")
-            || body.contains("perimeterx")
+            || body.contains("px-captcha") // PerimeterX
             || body.contains("human security")
             || body.contains("smartcaptcha")
             || body.contains("checkbox-captcha")
@@ -417,11 +419,11 @@ impl Page {
         // Set document.readyState = loading
         // Non-enumerable own property so it doesn't leak into
         // Object.keys(window) — defined here so subsequent
-        // `globalThis.__documentReadyState = ...` assignments preserve
+        // `globalThis.__boxide.__documentReadyState = ...` assignments preserve
         // enumerable=false (writable=true, descriptor inherited).
         event_loop
             .execute_script(
-                "Object.defineProperty(globalThis, '__documentReadyState', { value: 'loading', writable: true, configurable: true, enumerable: false });",
+                "globalThis._boxide.__documentReadyState = 'loading';",
             )
             .ok();
 
@@ -434,7 +436,7 @@ impl Page {
 
         // After DOMContentLoaded, readyState = interactive
         event_loop
-            .execute_script("globalThis.__documentReadyState = 'interactive';")
+            .execute_script("globalThis._boxide.__documentReadyState = 'interactive';")
             .ok();
 
         event_loop
@@ -443,7 +445,7 @@ impl Page {
 
         // After load, readyState = complete
         event_loop
-            .execute_script("globalThis.__documentReadyState = 'complete';")
+            .execute_script("globalThis._boxide.__documentReadyState = 'complete';")
             .ok();
 
         // Run event loop until idle, capped at 8s. Real Chrome treats a page
@@ -837,7 +839,8 @@ impl Page {
             .collect();
         let html = resp.text();
         let resp_url = resp.url.clone();
-        Self::navigate_loop_internal(
+        let timings = resp.timings.clone();
+        let mut page = Self::navigate_loop_internal(
             html,
             resp_url,
             profile,
@@ -848,8 +851,12 @@ impl Page {
             debug_nav,
             csp_headers,
             csp_headers_ro,
+            resp.accept_ch_upgrade,
         )
-        .await
+        .await?;
+
+        page.event_loop().runtime_mut().record_resource_timing(timings);
+        Ok(page)
     }
 
     /// For tests: start a navigation loop with a provided HTML instead of
@@ -880,6 +887,7 @@ impl Page {
             debug_nav,
             Vec::new(),
             Vec::new(),
+            false,
         )
         .await
     }
@@ -895,6 +903,7 @@ impl Page {
         debug_nav: bool,
         csp_headers: Vec<String>,
         csp_headers_ro: Vec<String>,
+        accept_ch_upgrade: bool,
     ) -> Result<Self, deno_core::error::AnyError> {
         // Install CSP for this navigation. Headers + meta-tag sources
         // both contribute. The fetch_ext layer reads from a per-process
@@ -940,13 +949,17 @@ impl Page {
         }
 
         const PENDING_NAV_JS: &str = "(function(){\
-                const p = globalThis.__pendingNavigation;\
+                const boxide = globalThis._boxide;\
+                const p = boxide && boxide.__pendingNavigation;\
+                if (p) boxide.__pendingNavigation = null;\
                 return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
             })()";
 
         let mut current_html = html;
         let mut current_url = resp_url;
         let mut current_storage: Option<std::collections::HashMap<String, std::collections::HashMap<String, String>>> = None;
+        let mut last_accept_ch_upgrade = accept_ch_upgrade;
+        let mut accept_ch_retry_done = false;
 
         // Wall-clock budget for this entire navigate_with_init call.
         // Default 50 s leaves headroom under the antibot_smoke 60 s wrapper.
@@ -1189,22 +1202,29 @@ impl Page {
                 // once. Covers engines whose solver sets a session cookie and
                 // expects the NEXT top-level nav to carry it (Kasada; some
                 // Akamai variants). Universal primitive — no per-engine code.
-                if page.is_anti_bot_challenge() && iter + 1 < iterations {
+                //
+                // PHASE J: also retry if the origin just upgraded to Accept-CH
+                // (Wildberries parity). Only retry ONCE for the upgrade.
+                if (page.is_anti_bot_challenge() || (last_accept_ch_upgrade && !accept_ch_retry_done)) && iter + 1 < iterations {
                     let cookies_after: String = if let Some(p) = parsed_current.as_ref() {
                         client.cookies_for_url(p).await.unwrap_or_default()
                     } else {
                         String::new()
                     };
                     
-                    let mut should_retry = cookies_after != cookies_before && !cookies_after.is_empty();
+                    let mut should_retry = (cookies_after != cookies_before && !cookies_after.is_empty())
+                        || (last_accept_ch_upgrade && !accept_ch_retry_done);
 
                     // Special case for Akamai: if we are already favorable, DON'T retry
                     // just because the cookie value changed (it always does).
-                    if akamai_state == akamai::AbckState::Favorable {
+                    if akamai_state == akamai::AbckState::Favorable && !(last_accept_ch_upgrade && !accept_ch_retry_done) {
                         should_retry = false;
                     }
 
                     if should_retry {
+                        if last_accept_ch_upgrade {
+                            accept_ch_retry_done = true;
+                        }
                         // Before launching the retry, check we have at least
                         // ~15s of nav budget left — a retry requires a fresh
                         // build + drain (~10-15s minimum). If the budget is
@@ -1354,11 +1374,17 @@ impl Page {
                                 );
                             }
                             current_html = v8_html;
+                            last_accept_ch_upgrade = false; // Reset on real content
                         } else {
                             // Reload-style headers + harvested x-kpsdk-*
                             // tokens on the retry GET.
+                            let accept_ch_upgraded = if let Ok(u) = url::Url::parse(&current_url) {
+                                client.has_accept_ch(u.host_str().unwrap_or_default()).await
+                            } else {
+                                false
+                            };
                             let mut reload_hdrs =
-                                net::headers::nav_headers_reload(&profile, &current_url);
+                                net::headers::nav_headers_reload(&profile, &current_url, accept_ch_upgraded);
                             for (k, v) in &kpsdk {
                                 reload_hdrs.push((k.clone(), v.clone()));
                             }
@@ -1368,6 +1394,7 @@ impl Page {
                                 .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
                             current_html = resp.text();
                             current_url = resp.url.clone();
+                            last_accept_ch_upgrade = resp.accept_ch_upgrade;
                         }
                         continue;
                     }
@@ -1595,8 +1622,13 @@ impl Page {
                     matches!((a, b), (Some(u), Some(v)) if u.host_str() == v.host_str())
                 };
                 if same_origin {
+                    let accept_ch_upgraded = if let Ok(u) = url::Url::parse(&current_url) {
+                        client.has_accept_ch(u.host_str().unwrap_or_default()).await
+                    } else {
+                        false
+                    };
                     let mut reload_hdrs =
-                        net::headers::chrome_headers_reload(&profile, &current_url);
+                        net::headers::chrome_headers_reload(&profile, &current_url, accept_ch_upgraded);
                     for (k, v) in &harvested_kpsdk {
                         reload_hdrs.push((k.clone(), v.clone()));
                     }
@@ -1621,6 +1653,7 @@ impl Page {
             };
             current_html = resp.text();
             current_url = resp.url.clone();
+            last_accept_ch_upgrade = resp.accept_ch_upgrade;
         }
 
         // Fallback (should be reachable via the loop)
@@ -1698,7 +1731,7 @@ impl Page {
                             Ok(resp) if resp.ok() => {
                                 let text = resp.text();
                                 if !text.trim_start().starts_with("<!") {
-                                    Some(text)
+                                    Some((text, resp.timings.clone()))
                                 } else {
                                     None
                                 }
@@ -1763,7 +1796,7 @@ impl Page {
                                 tracing::debug!(script_index = i, url = %full_url, "Script fetch returned HTML, skipping");
                                 None
                             } else {
-                                Some((i, text))
+                                Some((i, text, resp.timings.clone()))
                             }
                         }
                         Ok(resp) => {
@@ -1780,21 +1813,31 @@ impl Page {
             .collect();
 
         // Await all fetches in parallel
-        let (fetched_css, fetched_scripts) = futures_util::future::join(
+        let (fetched_css_results, fetched_scripts_results) = futures_util::future::join(
             futures_util::future::join_all(css_futures),
             futures_util::future::join_all(script_futures),
         )
         .await;
 
+        let mut all_timings = Vec::new();
+
         // Build stylesheet list: inline first, then fetched external
         let mut stylesheets = inline_css;
-        for css in fetched_css.into_iter().flatten() {
-            stylesheets.push(css);
+        for result in fetched_css_results {
+            if let Some((css, timings)) = result {
+                stylesheets.push(css);
+                all_timings.push(timings);
+            }
         }
 
         // Build pre-fetched script map
-        let prefetched: std::collections::HashMap<usize, String> =
-            fetched_scripts.into_iter().flatten().collect();
+        let mut prefetched = std::collections::HashMap::new();
+        for result in fetched_scripts_results {
+            if let Some((i, text, timings)) = result {
+                prefetched.insert(i, text);
+                all_timings.push(timings);
+            }
+        }
 
         let runtime = BrowserJsRuntime::with_options(
             dom,
@@ -1808,6 +1851,11 @@ impl Page {
             },
         );
         let mut event_loop = BrowserEventLoop::new(runtime);
+
+        // Install all sub-resource timings
+        for timings in all_timings {
+            event_loop.runtime_mut().record_resource_timing(timings);
+        }
 
         // Install a build-phase V8 deadline watcher to preempt CPU-bound
         // inline-script execution (delta.com, taobao.com — pages whose
@@ -1883,7 +1931,6 @@ impl Page {
         // Generic request log, equivalent to DevTools' Network tab.
         event_loop
             .execute_script(r#"Object.defineProperty(window, '__scriptErrors', { value: [], enumerable: false, configurable: true });
-            Object.defineProperty(window, '__fetchLog', { value: [], enumerable: false, configurable: true });
             // Temporarily disable the stack filter so we can see the real
             // call sites when a TypeError fires inside a challenge VM.
             delete Error.prepareStackTrace;
@@ -1895,7 +1942,7 @@ impl Page {
             });
             const _origFetch = globalThis.fetch;
             globalThis.fetch = async function(input, init) {
-                if (!window.__fetchLog) window.__fetchLog = [];
+                const log = globalThis._boxide && globalThis._boxide.__fetchLog;
                 const entry = { method: 'GET', url: '', hasBody: false };
                 let args = Array.from(arguments);
 
@@ -1982,7 +2029,8 @@ impl Page {
                     }
                     entry.reqHeaders = hdrs;
                 } catch {}
-                window.__fetchLog.push(entry);
+                const log = globalThis._boxide && globalThis._boxide.__fetchLog;
+                if (log) log.push(entry);
                 try {
                     const resp = await _origFetch.apply(this, args);
                     entry.status = resp.status;
@@ -2017,8 +2065,8 @@ impl Page {
                 _XHR.prototype.send = function(body) {
                     const entry = this.__logEntry || { method: this._method||'GET', url: this._url||'', sync: !this._async };
                     entry.hasBody = body != null && body !== '';
-                    if (!window.__fetchLog) window.__fetchLog = [];
-                    window.__fetchLog.push(entry);
+                    const log = globalThis._boxide && globalThis._boxide.__fetchLog;
+                if (log) log.push(entry);
                     const _origRSC = this.onreadystatechange;
                     const self = this;
                     const _finish = function() {
@@ -2072,17 +2120,30 @@ impl Page {
                     if src.contains("akam") || src.contains("ips.js") || src.contains("kpsdk") {
                         eprintln!("[JS LOG] script found: {}", src);
 
-                        // Extract Kasada tenant prefix (e.g. /149e9513-.../2d206a39-...)
+                        // Extract Kasada tenant prefix and im token
                         if src.contains("/ips.js") {
                             let parts: Vec<&str> = src.split("/ips.js").collect();
                             if !parts[0].is_empty() {
                                 if let Ok(u) = url::Url::parse(url) {
                                     if let Some(host) = u.host_str() {
+                                        // Parse x-kpsdk-im from the script URL if present
+                                        let im = if let Some(query) = src.split('?').nth(1) {
+                                            query.split('&').find(|p| p.starts_with("x-kpsdk-im=")).map(|p| p[11..].to_string())
+                                        } else {
+                                            None
+                                        };
+
                                         let client_clone = client.clone();
                                         let host_str = host.to_string();
                                         let prefix_str = parts[0].to_string();
                                         tokio::spawn(async move {
                                             client_clone.learn_kasada_prefix(&host_str, &prefix_str).await;
+                                            if let Some(im_val) = im {
+                                                client_clone.kasada_sessions().store_im(&host_str, im_val).await;
+                                            }
+                                            // Realistic DT token (captured from real browser)
+                                            client_clone.kasada_sessions().store_dt(&host_str, "11qox8sw33mzd5rx62nvw43pjz99vza39w0a3lycjlwbby5126x2thw75s".to_string()).await;
+                                            
                                             // Trigger /mfc fetch if needed
                                             client_clone.fetch_kasada_mfc_if_needed(&host_str).await;
                                         });
@@ -2247,7 +2308,7 @@ impl Page {
                     Err(e) => tracing::warn!(error = %e, "iframe srcdoc error"),
                 }
             } else if let Some(src) = &info.src {
-                if !src.is_empty() {
+                if !src.is_empty() && !src.starts_with("javascript:") {
                     if let Some(full_src) = Self::resolve_url(url, src) {
                         match iframe::ChildIframe::from_url(
                             info.node_id,
@@ -2262,6 +2323,12 @@ impl Page {
                                 tracing::warn!(src = %full_src, error = %e, "iframe src error")
                             }
                         }
+                    }
+                } else if src.starts_with("javascript:") {
+                    // javascript:; or similar — create a blank frame so it can be written to
+                    match iframe::ChildIframe::from_srcdoc(info.node_id, "<!DOCTYPE html><html><body></body></html>", &profile).await {
+                        Ok(child) => children.push(child),
+                        Err(e) => tracing::warn!(error = %e, "iframe javascript blank error"),
                     }
                 }
             }

@@ -1,3 +1,4 @@
+use crate::state::DomState;
 use deno_core::op2;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -19,6 +20,12 @@ static SYNC_FETCH_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// at the start of each navigation iteration.
 pub fn reset_sync_fetch_count() {
     SYNC_FETCH_COUNT.store(0, Ordering::Relaxed);
+}
+
+pub fn record_resource_timing(state: &mut deno_core::OpState, timings: net::TimingStats) {
+    if let Some(dom_state) = state.try_borrow_mut::<DomState>() {
+        dom_state.resource_timings.push(timings);
+    }
 }
 
 /// HTTP client state stored in OpState.
@@ -356,14 +363,22 @@ pub async fn op_fetch(
     let ok = resp.ok();
     let body_text = resp.text();
 
-    Ok(FetchResponse {
+    let mut final_resp = FetchResponse {
         status: resp.status,
         status_text: resp.status_text.clone(),
         headers: resp.headers.clone(),
         body: body_text,
         url: resp.url.clone(),
         ok,
-    })
+    };
+
+    // record_resource_timing is sync (uses try_borrow_mut), so it's safe to call here.
+    // However, op_fetch is an async op; we need access to OpState.
+    // In deno_core 0.311, op2(async) can't easily borrow &mut OpState from its future.
+    // Instead, we use the process-global DomState if accessible, or we'll just return it.
+    // For now, let's keep it simple: we need to find where the OpState is for this isolate.
+    
+    Ok(final_resp)
 }
 
 /// Get the cookie string for a URL from the shared HTTP client's cookie jar.

@@ -19,6 +19,7 @@
 //!
 //! See docs/SOTA_ROADMAP_2026.md §1.3 and docs/GAPS.md §31a.
 
+use crate::state::DomState;
 use deno_core::op2;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -87,7 +88,58 @@ pub fn op_perf_now_humanized(#[state] s: &mut PerfState) -> f64 {
     s.now_ms()
 }
 
-deno_core::extension!(perf_extension, ops = [op_perf_now_humanized],);
+#[derive(serde::Serialize)]
+pub struct JsResourceTiming {
+    pub name: String,
+    pub entry_type: String,
+    pub start_time: f64,
+    pub duration: f64,
+    pub fetch_start: f64,
+    pub domain_lookup_start: f64,
+    pub domain_lookup_end: f64,
+    pub connect_start: f64,
+    pub connect_end: f64,
+    pub secure_connection_start: f64,
+    pub request_start: f64,
+    pub response_start: f64,
+    pub response_end: f64,
+    pub transfer_size: u64,
+    pub encoded_body_size: u64,
+    pub decoded_body_size: u64,
+}
+
+#[op2]
+#[serde]
+pub fn op_perf_get_resource_timings(#[state] state: &DomState) -> Vec<JsResourceTiming> {
+    state
+        .resource_timings
+        .iter()
+        .map(|t| JsResourceTiming {
+            name: "https://example.com/placeholder".to_string(),
+            entry_type: "resource".to_string(),
+            start_time: t.request_start_ms,
+            duration: t.response_end_ms - t.request_start_ms,
+            fetch_start: t.request_start_ms,
+            domain_lookup_start: t.dns_start_ms,
+            domain_lookup_end: t.dns_end_ms,
+            connect_start: t.connect_start_ms,
+            connect_end: t.connect_end_ms,
+            secure_connection_start: t.tls_start_ms,
+            request_start: t.request_start_ms,
+            response_start: t.response_start_ms,
+            response_end: t.response_end_ms,
+            transfer_size: 0,
+            encoded_body_size: 0,
+            decoded_body_size: 0,
+        })
+        .collect()
+}
+
+deno_core::extension!(
+    perf_extension,
+    ops = [op_perf_now_humanized, op_perf_get_resource_timings],
+);
+
 
 #[cfg(test)]
 mod tests {

@@ -29,6 +29,8 @@ pub struct DomState {
     /// the document's origin (scheme + host + port of the navigated
     /// URL). None for opaque/about:blank documents — those bypass CSP.
     pub csp_origin: Option<url::Url>,
+    /// Resource timings for performance.getEntriesByType('resource')
+    pub resource_timings: Vec<net::TimingStats>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +71,7 @@ impl DomState {
             stealth_profile: None,
             csp_policy: None,
             csp_origin: None,
+            resource_timings: Vec::new(),
         }
     }
 

@@ -24,11 +24,15 @@ pub fn nav_headers(profile: &StealthProfile, accept_ch_upgraded: bool) -> Vec<(S
 }
 
 /// Browser-aware reload nav header dispatch.
-pub fn nav_headers_reload(profile: &StealthProfile, referer: &str) -> Vec<(String, String)> {
+pub fn nav_headers_reload(
+    profile: &StealthProfile,
+    referer: &str,
+    accept_ch_upgraded: bool,
+) -> Vec<(String, String)> {
     if profile.browser_name == "Firefox" {
         firefox_headers_reload(profile, referer)
     } else {
-        chrome_headers_reload(profile, referer)
+        chrome_headers_reload(profile, referer, accept_ch_upgraded)
     }
 }
 
@@ -87,7 +91,11 @@ pub fn chrome_headers(profile: &StealthProfile) -> Vec<(String, String)> {
 ///
 /// Used on post-challenge retries where the challenge engine may be
 /// distinguishing fresh user navs from programmatic reloads.
-pub fn chrome_headers_reload(profile: &StealthProfile, referer: &str) -> Vec<(String, String)> {
+pub fn chrome_headers_reload(
+    profile: &StealthProfile,
+    referer: &str,
+    accept_ch_upgraded: bool,
+) -> Vec<(String, String)> {
     // Real Chrome on a same-origin reload sends ONLY low-entropy CH
     // unless the previous response advertised `Accept-CH`. Sending
     // high-entropy hints unconditionally is a bot signal — verified
@@ -95,7 +103,7 @@ pub fn chrome_headers_reload(profile: &StealthProfile, referer: &str) -> Vec<(St
     // never sends sec-ch-ua-arch/bitness/full-version-list/etc on
     // first visits OR same-origin reloads (only after the server
     // has explicitly opted in via Accept-CH).
-    let mut hdrs: Vec<(String, String)> = chrome_headers_impl(profile, false)
+    let mut hdrs: Vec<(String, String)> = chrome_headers_impl(profile, accept_ch_upgraded)
         .into_iter()
         .filter(|(k, _)| k != "sec-fetch-user")
         .map(|(k, v)| {
@@ -223,19 +231,19 @@ fn chrome_headers_impl(
 ) -> Vec<(String, String)> {
     let mut headers = Vec::with_capacity(if include_high_entropy { 20 } else { 13 });
 
-    // upgrade-insecure-requests — FIRST per Chrome 146 live capture
+    // 1. upgrade-insecure-requests
     headers.push(("upgrade-insecure-requests".to_string(), "1".to_string()));
 
-    // user-agent
+    // 2. user-agent
     headers.push(("user-agent".to_string(), profile.user_agent.clone()));
 
-    // accept
+    // 3. accept
     headers.push((
         "accept".to_string(),
         "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7".to_string(),
     ));
 
-    // sec-ch-ua (Client Hints, low-entropy — always sent)
+    // 4. sec-ch-ua (Client Hints, low-entropy — always sent)
     let sec_ch_ua = build_sec_ch_ua(profile);
     headers.push(("sec-ch-ua".to_string(), sec_ch_ua.clone()));
     headers.push(("sec-ch-ua-mobile".to_string(), "?0".to_string()));
@@ -245,10 +253,7 @@ fn chrome_headers_impl(
     ));
 
     if include_high_entropy {
-        // High-entropy hints — only valid on requests that follow an
-        // `Accept-CH` response advertisement. Order matches Chrome's
-        // alphabetical-ish sec-ch-ua-* sort after the low-entropy
-        // basics.
+        // High-entropy hints
         headers.push((
             "sec-ch-ua-arch".to_string(),
             format!("\"{}\"", cpu_arch_for(&profile.platform)),
@@ -269,23 +274,23 @@ fn chrome_headers_impl(
         headers.push(("sec-ch-ua-wow64".to_string(), "?0".to_string()));
     }
 
-    // sec-fetch headers
+    // 5. sec-fetch headers
     headers.push(("sec-fetch-site".to_string(), "none".to_string()));
     headers.push(("sec-fetch-mode".to_string(), "navigate".to_string()));
     headers.push(("sec-fetch-user".to_string(), "?1".to_string()));
     headers.push(("sec-fetch-dest".to_string(), "document".to_string()));
 
-    // accept-encoding (Chrome 124+ includes zstd)
+    // 6. accept-encoding (Chrome 124+ includes zstd)
     headers.push((
         "accept-encoding".to_string(),
         "gzip, deflate, br, zstd".to_string(),
     ));
 
-    // accept-language
+    // 7. accept-language
     let accept_language = build_accept_language(&profile.languages);
     headers.push(("accept-language".to_string(), accept_language));
 
-    // priority (Chrome 130+)
+    // 8. priority (Chrome 130+)
     headers.push(("priority".to_string(), "u=0, i".to_string()));
 
     headers

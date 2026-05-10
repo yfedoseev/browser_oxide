@@ -5,13 +5,10 @@
     };
 
     // --- Function.prototype.toString bypass patch ---
-    // CreepJS and other detectors call Function.prototype.toString.call(fn) directly,
-    // which bypasses any instance-level fn.toString override and returns the raw JS
-    // source of polyfilled functions. We patch Function.prototype.toString itself to
-    // consult a private Symbol tag we set on masked functions.
     const _nativeTag = Symbol.for('__boxide_native__');
     const _origFnToStr = Function.prototype.toString;
 
+    /*
     // Re-entrant guard: prevents infinite recursion when this[_nativeTag] access
     // triggers a Proxy get trap that itself calls Function.prototype.toString.
     let _inPatchedToStr = false;
@@ -38,6 +35,7 @@
         writable: true,
         configurable: true,
     });
+    */
 
     // --- Native code masking ---
     const _maskFunction = (fn, name) => {

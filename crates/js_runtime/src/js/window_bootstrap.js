@@ -1,6 +1,18 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
-    const _boxide = globalThis.__boxide;
+    const _boxide = {
+        __documentReadyState: "loading",
+        __pendingNavigation: null,
+        __perfResourceEntries: [],
+        __fetchLog: [],
+        __cspViolations: [],
+        __drainCspViolations: () => {
+            const v = [..._boxide.__cspViolations];
+            _boxide.__cspViolations = [];
+            return v;
+        }
+    };
+    Object.defineProperty(globalThis, '_boxide', { value: _boxide, configurable: true, enumerable: false, writable: true });
 
     if (globalThis.WebAssembly) {
         // Streaming stubs
@@ -19,6 +31,9 @@
     // Masking helpers are provided by stealth_bootstrap.js
     const _maskFunction = globalThis._maskFunction;
     const _maskAsNative = globalThis._maskAsNative;
+
+    // --- Global self-references (window, self, top, parent, frames) ---
+    // Chrome alignment — handled by Deno defaults for now to avoid snapshot conflicts.
 
     // Helper: read from stealth profile or use default
     const _p = (key, fallback) => {
@@ -193,6 +208,15 @@
         for (let i = 0; i < len; i++) if (_allPlugins[i].name === n) return _allPlugins[i];
         return null;
     });
+    
+    // (Phase J) Add numeric accessors for navigator.plugins[0] etc.
+    for (let i = 0; i < 5; i++) {
+        Object.defineProperty(_PluginArrayProto, i, {
+            get: function() { return this.item(i); },
+            enumerable: true, configurable: true
+        });
+    }
+
     _defProtoMethod(_PluginArrayProto, 'refresh', () => {});
     // Symbol.iterator iterates the live sliced range.
     Object.defineProperty(_PluginArrayProto, Symbol.iterator, {
@@ -216,6 +240,13 @@
         for (let i = 0; i < len; i++) if (_allMimes[i].type === n) return _allMimes[i];
         return null;
     });
+    // Numeric accessors for mimeTypes
+    for (let i = 0; i < 2; i++) {
+        Object.defineProperty(_MimeTypeArrayProto, i, {
+            get: function() { return this.item(i); },
+            enumerable: true, configurable: true
+        });
+    }
     Object.defineProperty(_MimeTypeArrayProto, Symbol.iterator, {
         value: function* iter() {
             const n = _mimesLen();
@@ -768,7 +799,11 @@
     _defNav('deviceMemory', () => _secure() ? _pInt("device_memory", 8) : undefined);
     _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
     _defNav('pdfViewerEnabled', () => true);
-    _defNav('webdriver', () => false);
+    Object.defineProperty(Navigator.prototype, 'webdriver', {
+        get: () => false,
+        enumerable: true,
+        configurable: true
+    });
     _defNav('doNotTrack', () => null);
     _defNav('msDoNotTrack', () => undefined);
     _defNav('loadPurpose', () => undefined);
@@ -1030,12 +1065,6 @@
     // location.href = ... sets this; <meta http-equiv="refresh"> does too.
     // Matches the behavior of a real browser's navigation algorithm without
     // any per-engine awareness.
-    Object.defineProperty(globalThis, '__pendingNavigation', {
-        value: null,
-        writable: true,
-        enumerable: false,
-        configurable: true
-    });
 
     // Location class and instance
     const _LocProto = globalThis.Location.prototype;
@@ -1056,23 +1085,27 @@
     _defLoc('href', () => _locationData.href, (v) => {
         try { Deno.core.print('[BOOTSTRAP] SETTING LOCATION HREF TO ' + v + '\n'); } catch(e) {}
         _parseLocationUrl(v);
-        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _boxide.__pendingNavigation = 
+ { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defLoc('origin', () => _locationData.origin);
     _defLoc('protocol', () => _locationData.protocol, (v) => {
         _parseLocationUrl(v + "//" + _locationData.host + _locationData.pathname);
-        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _boxide.__pendingNavigation = 
+ { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defLoc('host', () => _locationData.host, (v) => {
         _parseLocationUrl(_locationData.protocol + "//" + v + _locationData.pathname);
-        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _boxide.__pendingNavigation = 
+ { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defLoc('hostname', () => _locationData.hostname, (v) => {
         _parseLocationUrl(_locationData.protocol + "//" + v + (_locationData.port ? ":" + _locationData.port : "") + _locationData.pathname);
-        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _boxide.__pendingNavigation = 
+ { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defLoc('port', () => _locationData.port);
@@ -1086,16 +1119,19 @@
 
     _defProtoMethod(_LocProto, 'assign', (url) => {
         _parseLocationUrl(url);
-        globalThis.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _boxide.__pendingNavigation = 
+ { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defProtoMethod(_LocProto, 'replace', (url) => {
         _parseLocationUrl(url);
-        globalThis.__pendingNavigation = { url: _locationData.href, kind: "replace" };
+        _boxide.__pendingNavigation = 
+ { url: _locationData.href, kind: "replace" };
         _signalNav();
     });
     _defProtoMethod(_LocProto, 'reload', () => {
-        globalThis.__pendingNavigation = { url: _locationData.href, kind: "reload" };
+        _boxide.__pendingNavigation = 
+ { url: _locationData.href, kind: "reload" };
         _signalNav();
     });
     _defProtoMethod(_LocProto, 'toString', function() { return this.href; });
@@ -1149,7 +1185,12 @@
     _defProtoGetter(_ScreenProto, 'isExtended', () => false);
     Object.defineProperty(_ScreenProto, Symbol.toStringTag, { value: "Screen", configurable: true });
     Object.defineProperty(ScreenOrientation.prototype, Symbol.toStringTag, { value: "ScreenOrientation", configurable: true });
-    globalThis.screen = Object.create(_ScreenProto);
+    const _screenInstance = Object.create(_ScreenProto);
+    Object.defineProperty(globalThis, 'screen', {
+        get: function() { return _screenInstance; },
+        enumerable: true,
+        configurable: true
+    });
 
     // Misc globals anti-bot checks for
     // isSecureContext: per-URL, computed from scheme on the Rust side
@@ -1177,11 +1218,11 @@
     // Window metrics must resolve LAZILY — bootstrap runs at V8-snapshot
     // build time with no profile installed; eager values get baked as
     // defaults and never update when the profile loads.
-    Object.defineProperty(globalThis, 'innerWidth',  { get: () => _pInt("inner_width", 1920),   configurable: true });
-    Object.defineProperty(globalThis, 'innerHeight', { get: () => _pInt("inner_height", 1080),  configurable: true });
-    Object.defineProperty(globalThis, 'outerWidth',  { get: () => _pInt("outer_width", 1920),   configurable: true });
-    Object.defineProperty(globalThis, 'outerHeight', { get: () => _pInt("outer_height", 1080),  configurable: true });
-    Object.defineProperty(globalThis, 'devicePixelRatio', { get: () => _pFloat("device_pixel_ratio", 1), configurable: true });
+    Object.defineProperty(globalThis, 'innerWidth',  { get: () => _pInt("inner_width", 1920),   configurable: true, enumerable: true });
+    Object.defineProperty(globalThis, 'innerHeight', { get: () => _pInt("inner_height", 1080),  configurable: true, enumerable: true });
+    Object.defineProperty(globalThis, 'outerWidth',  { get: () => _pInt("outer_width", 1920),   configurable: true, enumerable: true });
+    Object.defineProperty(globalThis, 'outerHeight', { get: () => _pInt("outer_height", 1080),  configurable: true, enumerable: true });
+    Object.defineProperty(globalThis, 'devicePixelRatio', { get: () => _pFloat("device_pixel_ratio", 2.0), configurable: true, enumerable: true });
 
     // Scroll + screen position — OWN accessor properties on the window
     // instance (globalThis), per real Chrome (verified via Playwright
@@ -1457,7 +1498,7 @@
         const _fullCached = () => (_fullBrands ||= _makeFullBrands());
 
         const _allowedHints = new Set([
-            "architecture", "bitness", "brands", "fullVersionList",
+            "architecture", "bitness", "brands", "formFactors", "fullVersionList",
             "mobile", "model", "platform", "platformVersion",
             "uaFullVersion", "wow64",
         ]);
@@ -1489,6 +1530,7 @@
                         case "architecture":      result.architecture = _uaArch(); break;
                         case "bitness":           result.bitness = _uaBitness(); break;
                         case "brands":            result.brands = _lowCached(); break;
+                        case "formFactors":       result.formFactors = ["Desktop"]; break;
                         case "fullVersionList":   result.fullVersionList = _fullCached(); break;
                         case "mobile":            result.mobile = false; break;
                         case "model":             result.model = _uaModel(); break;
@@ -2334,12 +2376,13 @@
             TYPE_RESERVED: 255,
         };
 
-        globalThis.__perfResourceEntries = globalThis.__perfResourceEntries || [];
         const _buildResourceEntries = () => {
             const entries = [];
             const origin = globalThis.location?.origin || "https://example.com";
             const base = _perfNav.fetchStart;
             let offset = 10;
+            const _internalEntries = _boxide.__perfResourceEntries || [];
+            const _rustEntries = (ops.op_perf_get_resource_timings && ops.op_perf_get_resource_timings()) || [];
 
             const mk = (name, startOffset, duration, type, size) => ({
                 name,
@@ -2391,7 +2434,7 @@
                 }
             }
 
-            for (const req of globalThis.__perfResourceEntries) {
+            for (const req of _internalEntries) {
                 const sTime = req.startTime || (base + offset);
                 const e = mk(req.url, sTime - base, req.duration || 100, req.type || "xmlhttprequest", req.size || 1024);
                 e.startTime = sTime;
@@ -2406,6 +2449,21 @@
                 e.responseEnd = sTime + (req.duration || 100);
                 entries.push(e);
                 offset += Math.max(10, (req.duration || 100) * 0.1);
+            }
+
+            for (const rt of _rustEntries) {
+                const e = mk(rt.name, 0, rt.duration, "other", 0);
+                e.startTime = rt.start_time;
+                e.fetchStart = rt.fetch_start;
+                e.domainLookupStart = rt.domain_lookup_start;
+                e.domainLookupEnd = rt.domain_lookup_end;
+                e.connectStart = rt.connect_start;
+                e.connect_end = rt.connect_end;
+                e.secureConnectionStart = rt.secure_connection_start;
+                e.requestStart = rt.request_start;
+                e.responseStart = rt.response_start;
+                e.responseEnd = rt.response_end;
+                entries.push(e);
             }
 
             if (entries.length === 0) {
@@ -3189,8 +3247,9 @@
                     );
                     const result = JSON.parse(resultJson);
                     
-                    if (globalThis.__perfResourceEntries) {
-                        globalThis.__perfResourceEntries.push({ url: xhr._url, type: "xmlhttprequest", startTime, duration: performance.now() - startTime, size: result.body ? result.body.length : 0 });
+                    const _internalEntries = _boxide.__perfResourceEntries;
+                    if (_internalEntries) {
+                        _internalEntries.push({ url: xhr._url, type: "xmlhttprequest", startTime, duration: performance.now() - startTime, size: result.body ? result.body.length : 0 });
                     }
                     
                     xhr.status = result.status || 0;
@@ -3226,8 +3285,9 @@
                 credentials: xhr.withCredentials ? 'include' : 'same-origin',
             })
                 .then(async (resp) => {
-                    if (globalThis.__perfResourceEntries && globalThis.__perfResourceEntries.length > 0) {
-                        globalThis.__perfResourceEntries[globalThis.__perfResourceEntries.length - 1].type = "xmlhttprequest";
+                    const _internalEntries = _boxide.__perfResourceEntries;
+                    if (_internalEntries && _internalEntries.length > 0) {
+                        _internalEntries[_internalEntries.length - 1].type = "xmlhttprequest";
                     }
                     if (xhr._aborted) return;
                     xhr.status = resp.status;
@@ -5509,6 +5569,46 @@
         });
     }
 
+    // (11) Document.prototype.hasStorageAccess / requestStorageAccess (Storage Access API)
+    // Chrome 130+. Cross-site trackers probe these heavily.
+    if (globalThis.Document && typeof globalThis.Document.prototype.hasStorageAccess === "undefined") {
+        const _hasStorageAccess = function hasStorageAccess() { return Promise.resolve(false); };
+        const _requestStorageAccess = function requestStorageAccess() { 
+            return Promise.reject(new DOMException("The request was denied.", "NotAllowedError")); 
+        };
+        if (typeof _maskFunction === "function") {
+            _maskFunction(_hasStorageAccess, "hasStorageAccess");
+            _maskFunction(_requestStorageAccess, "requestStorageAccess");
+        }
+        Object.defineProperty(globalThis.Document.prototype, "hasStorageAccess", {
+            value: _hasStorageAccess, configurable: true, writable: true,
+        });
+        Object.defineProperty(globalThis.Document.prototype, "requestStorageAccess", {
+            value: _requestStorageAccess, configurable: true, writable: true,
+        });
+    }
+
+    // (12) Document.prototype.hasPrivateToken / hasRedemptionRecord (Trust Tokens API)
+    // Chrome 130+ ad-fraud prevention APIs. Absence is a headless tell.
+    if (globalThis.Document && typeof globalThis.Document.prototype.hasPrivateToken === "undefined") {
+        const _hasPrivateToken = function hasPrivateToken() { 
+            return Promise.reject(new DOMException("The Trust Token API is not supported.", "NotSupportedError"));
+        };
+        const _hasRedemptionRecord = function hasRedemptionRecord() {
+            return Promise.reject(new DOMException("The Trust Token API is not supported.", "NotSupportedError"));
+        };
+        if (typeof _maskFunction === "function") {
+            _maskFunction(_hasPrivateToken, "hasPrivateToken");
+            _maskFunction(_hasRedemptionRecord, "hasRedemptionRecord");
+        }
+        Object.defineProperty(globalThis.Document.prototype, "hasPrivateToken", {
+            value: _hasPrivateToken, configurable: true, writable: true,
+        });
+        Object.defineProperty(globalThis.Document.prototype, "hasRedemptionRecord", {
+            value: _hasRedemptionRecord, configurable: true, writable: true,
+        });
+    }
+
     // fetch(), Headers, Request, Response are now provided by fetch_bootstrap.js
     // (wired to real net::HttpClient via op_fetch)
 
@@ -5519,6 +5619,50 @@
     //   (snapshot bootstraps with is_secure_context=true) and then
     //   stripped per-page in cleanup_bootstrap.js when the actual page
     //   URL is insecure.
+    // (Phase J) High-ROI Parity Gaps: VirtualKeyboard, DevicePosture, WindowControlsOverlay
+    {
+        class VirtualKeyboard extends EventTarget {
+            constructor() { super(); }
+            get boundingRect() { return { x: 0, y: 0, width: 0, height: 0 }; } // Avoid DOMRect dependency
+            get overlaysContent() { return false; }
+            show() {}
+            hide() {}
+        }
+        Object.defineProperty(VirtualKeyboard.prototype, Symbol.toStringTag, {
+            value: "VirtualKeyboard", configurable: true,
+        });
+        globalThis.VirtualKeyboard = VirtualKeyboard;
+        const _vk = new VirtualKeyboard();
+        _defNav('virtualKeyboard', () => _vk);
+    }
+
+    {
+        class DevicePosture extends EventTarget {
+            constructor() { super(); }
+            get type() { return "continuous"; }
+        }
+        Object.defineProperty(DevicePosture.prototype, Symbol.toStringTag, {
+            value: "DevicePosture", configurable: true,
+        });
+        globalThis.DevicePosture = DevicePosture;
+        const _dp = new DevicePosture();
+        _defNav('devicePosture', () => _dp);
+    }
+
+    {
+        class WindowControlsOverlay extends EventTarget {
+            constructor() { super(); }
+            get visible() { return false; }
+            getTitlebarAreaRect() { return { x: 0, y: 0, width: 0, height: 0 }; } // Avoid DOMRect dependency
+        }
+        Object.defineProperty(WindowControlsOverlay.prototype, Symbol.toStringTag, {
+            value: "WindowControlsOverlay", configurable: true,
+        });
+        globalThis.WindowControlsOverlay = WindowControlsOverlay;
+        const _wco = new WindowControlsOverlay();
+        _defNav('windowControlsOverlay', () => _wco);
+    }
+
     Object.defineProperty(globalThis, 'external', {
         value: {
             AddSearchProvider() {},
@@ -5529,5 +5673,22 @@
     globalThis.clientInformation = globalThis.navigator;
     globalThis.offscreenBuffering = true;
     globalThis.defaultStatus = "";
+    
+    // (Phase J) Iframe indexing parity: define window[0], window[1] etc.
+    // Real Chrome has numeric own-properties for each child frame.
+    const _defineIframeGetter = (index) => {
+        Object.defineProperty(globalThis, index, {
+            get: () => {
+                // If we have iframes, return the contentWindow of the i-th one.
+                // Our Page layer manages the children.
+                const iframes = document.querySelectorAll('iframe');
+                return iframes[index] ? iframes[index].contentWindow : undefined;
+            },
+            configurable: true, enumerable: true
+        });
+    };
+    // Pre-define for common counts.
+    for (let i = 0; i < 5; i++) _defineIframeGetter(i);
+
     Object.defineProperty(globalThis, Symbol.toStringTag, { value: "Window", configurable: true });
 })(globalThis);

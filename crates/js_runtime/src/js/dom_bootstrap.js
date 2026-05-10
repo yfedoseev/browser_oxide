@@ -1394,7 +1394,9 @@
         elementsFromPoint(x, y) { return this.body ? [this.body] : []; }
         caretPositionFromPoint(x, y) { return null; }
         hasFocus() { return true; }  // Anti-bot: must return true
-        get readyState() { return globalThis.__documentReadyState || "complete"; }
+        get readyState() { 
+            return (globalThis._boxide && globalThis._boxide.__documentReadyState) || "complete"; 
+        }
         get URL() { return globalThis.location?.href || "about:blank"; }
         get documentURI() { return this.URL; }
         get domain() { return globalThis.location?.hostname || ""; }

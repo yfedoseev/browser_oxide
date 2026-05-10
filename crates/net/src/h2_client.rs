@@ -103,12 +103,8 @@ where
         .headers_stream_dependency(StreamDependency::new(
             StreamId::zero(),
             // Chrome 147 sends weight 256 (wire byte 255), exclusive=true,
-            // depends_on=0 — verified against the 2026-04-29 Chrome 147
-            // capture from `tls.peet.ws/api/all` (priority block:
-            // `weight: 256, depends_on: 0, exclusive: 1`). The earlier
-            // value 219 in this file was for Chrome 130–146 per
-            // wreq-util's gold-standard reference, but Chrome 147 reverts
-            // to weight 256.
+            // depends_on=0 — verified against the 2026-05-09 Playwright
+            // capture from `tls.peet.ws/api/all`.
             255,
             true,
         ));

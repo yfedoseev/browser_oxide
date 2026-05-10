@@ -68,7 +68,7 @@ mod tests {
 
     fn shape_single(ch: &str, size_px: f32) -> (shaper::Glyph, &'static [u8], u32) {
         let db = FontDatabase::get();
-        let id = db.query("Arial", 400, false).unwrap();
+        let id = db.query("Arial", 400, false, "Linux").unwrap();
         let (data, idx) = db.face_data(id).unwrap();
         let run = shaper::shape(ch, data, idx, size_px);
         assert!(

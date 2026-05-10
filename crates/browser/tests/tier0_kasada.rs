@@ -1998,7 +1998,7 @@ async fn yandex_sso_form_submit_diagnostic() {
 
     // Fetch log (tail)
     let fl = page
-        .evaluate("JSON.stringify(window.__fetchLog || [])")
+        .evaluate("JSON.stringify((globalThis._boxide && globalThis._boxide.__fetchLog) || [])")
         .unwrap_or_default();
     if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&fl) {
         println!("__fetchLog ({} entries):", arr.len());
@@ -2548,7 +2548,7 @@ async fn kasada_canadagoose_raw_with_cookies_test() {
     println!("  status={} body={}b", r2.status, r2.body.len());
 
     println!("\nStep 3: GET with reload-style headers + Referer");
-    let reload_hdrs = net::headers::chrome_headers_reload(&profile, "https://www.canadagoose.com/");
+    let reload_hdrs = net::headers::chrome_headers_reload(&profile, "https://www.canadagoose.com/", false);
     let r3 = client
         .get_follow_exact_headers("https://www.canadagoose.com/", &reload_hdrs, 10)
         .await
@@ -2645,7 +2645,7 @@ async fn kasada_canadagoose_cookie_and_fetch_diagnostic() {
 
     // Full fetch log from the JS side (URL, method, status, req/resp headers)
     let fl = page
-        .evaluate("JSON.stringify(window.__fetchLog || [])")
+        .evaluate("JSON.stringify((globalThis._boxide && globalThis._boxide.__fetchLog) || [])")
         .unwrap_or_default();
     println!("__fetchLog len: {} chars", fl.len());
     // Parse and pretty-print each entry with just URL + status + KP headers

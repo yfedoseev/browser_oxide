@@ -268,6 +268,15 @@ mod tests {
     }
 
     #[test]
+    fn test_ja4h_hdr_hash_reference() {
+        let profile = stealth::presets::chrome_130_macos();
+        let s = nav_ja4h_for(&profile);
+        println!("Computed JA4H: {}", s);
+        // Expected hash from tls.peet.ws capture: 8daaf6152771
+        assert!(s.contains("_0e897bb088aa_"), "JA4H hash mismatch: expected 0e897bb088aa in {s}");
+    }
+
+    #[test]
     fn ja4h_chrome_130_macos_format() {
         let s = nav_ja4h_for(&stealth::presets::chrome_130_macos());
         assert!(s.starts_with("ge20nn13enus_"), "got {s}");

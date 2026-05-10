@@ -203,4 +203,10 @@ impl BrowserJsRuntime {
     pub fn op_state(&mut self) -> std::rc::Rc<std::cell::RefCell<deno_core::OpState>> {
         self.inner.op_state()
     }
+
+    pub fn record_resource_timing(&mut self, timings: net::TimingStats) {
+        let op_state = self.inner.op_state();
+        let mut state = op_state.borrow_mut();
+        extensions::fetch_ext::record_resource_timing(&mut state, timings);
+    }
 }

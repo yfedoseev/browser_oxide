@@ -7,13 +7,20 @@ use browser::Page;
 use stealth;
 
 async fn evaluate(js: &str) -> String {
-    let mut page = Page::from_html(
+    let mut page = Page::from_html_with_url(
         "<!DOCTYPE html><html><body></body></html>",
+        "https://example.com",
         None::<stealth::StealthProfile>,
     )
     .await
     .unwrap();
     page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
+}
+
+#[tokio::test]
+async fn total_window_properties_count() {
+    let r = evaluate("Object.getOwnPropertyNames(globalThis).length").await;
+    println!("Total window properties: {}", r);
 }
 
 /// Helper: assert a constructor exists and has the expected name.

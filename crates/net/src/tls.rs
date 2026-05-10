@@ -4,12 +4,6 @@
 //! including cipher suites, curves, signature algorithms, extensions,
 //! and certificate compression — all in the exact order that produces
 //! the correct JA3/JA4 fingerprint.
-//!
-//! **Verified byte-for-byte against a fresh Chrome 147 capture** from
-//! Playwright MCP → `tls.peet.ws/api/all`, 2026-04-29: cipher list,
-//! signature algorithms, supported groups (curves), ALPN, and TLS
-//! version range all match exactly. JA3/JA4 hashes:
-//! `bc6f7cfa92f699f32c8ff5a4178b5cfa` / `t13d1516h2_8daaf6152771_d8a2da3f94cd`.
 
 use boring2::ssl::{
     CertCompressionAlgorithm, ConnectConfiguration, SslConnector, SslCurve, SslMethod, SslVersion,
@@ -23,9 +17,6 @@ use tokio_boring2::SslStream;
 use crate::error::NetError;
 
 /// Chrome 147 cipher suite list (order is critical for JA3 fingerprint).
-/// Verified against fresh Chrome 147 capture 2026-04-29 — exact match
-/// to `tls.peet.ws/api/all` output. (Cipher list has been stable from
-/// Chrome 130 through 147; only the file label needed updating.)
 const CIPHER_LIST: &str = concat!(
     "TLS_AES_128_GCM_SHA256",
     ":TLS_AES_256_GCM_SHA384",
@@ -45,7 +36,6 @@ const CIPHER_LIST: &str = concat!(
 );
 
 /// Chrome 147 signature algorithms (order matters).
-/// Verified against fresh Chrome 147 capture — same as Chrome 130, no change.
 const SIGALGS_LIST: &str = concat!(
     "ecdsa_secp256r1_sha256",
     ":rsa_pss_rsae_sha256",
@@ -58,15 +48,6 @@ const SIGALGS_LIST: &str = concat!(
 );
 
 /// Chrome elliptic curves.
-///
-/// **Verified against a fresh Chrome 147 capture** (2026-04-29 via
-/// Playwright MCP → tls.peet.ws): the post-quantum curve is
-/// `X25519MLKEM768 (4588)`, NOT the older `X25519_KYBER768_DRAFT00
-/// (25497)`. Chrome 131+ replaced the KYBER draft with the standardised
-/// MLKEM and the order is unchanged through Chrome 147.
-///
-/// Curve order and GREASE from the Chrome 147 capture:
-/// `GREASE - X25519MLKEM768 - X25519 - SECP256R1 - SECP384R1`.
 const CURVES: &[SslCurve] = &[
     SslCurve::X25519_MLKEM768,
     SslCurve::X25519,
@@ -77,29 +58,68 @@ const CURVES: &[SslCurve] = &[
 /// ALPN protocols: h2 + http/1.1
 const ALPN_PROTOS: &[u8] = b"\x02h2\x08http/1.1";
 
-use std::sync::OnceLock;
+use rand::prelude::SliceRandom;
 
-static CHROME_CONNECTOR: OnceLock<SslConnector> = OnceLock::new();
+/// Chrome 147 extension permutation (indices into BoringSSL kExtensions table).
+/// Matches real headed Chrome 147 on macOS arm64.
+///
+/// **Chrome Shuffling Buckets**: real Chrome 130+ does NOT shuffle all extensions
+/// randomly. It shuffles within three specific buckets.
+/// - Bucket A: [0..9] (indices 14, 1, 4, 11, 15, 2, 24, 21, 17) - Shuffled
+/// - Bucket B: [9..15] (indices 0, 3, 5, 7, 6, 8) - Shuffled
+/// - Bucket C: [15] (index 9) - Fixed at end (signature_algorithms)
+const CHROME_EXTENSION_PERMUTATION: &[u8] = &[
+    14, // key_share (51)
+    1,  // encrypted_client_hello (65037)
+    4,  // supported_groups (10)
+    11, // certificate_timestamp (18)
+    15, // psk_key_exchange_modes (45)
+    2,  // extended_master_secret (23)
+    24, // application_settings_new (17613)
+    21, // cert_compression (27)
+    17, // supported_versions (43)
+    0,  // server_name (0)
+    3,  // renegotiate (65281)
+    5,  // ec_point_formats (11)
+    8,  // status_request (5)
+    7,  // application_layer_protocol_negotiation (16)
+    6,  // session_ticket (35)
+    9,  // signature_algorithms (13)
+    22, // delegated_credential (34)
+];
+
+/// Generate a fresh shuffle of the Chrome extension permutation within its buckets.
+fn shuffled_chrome_extension_permutation() -> Vec<u8> {
+    let mut rng = rand::thread_rng();
+
+    // Bucket A: indices 0..9 (9 items)
+    let mut bucket_a = CHROME_EXTENSION_PERMUTATION[0..9].to_vec();
+    // Bucket B: indices 9..15 (6 items)
+    let mut bucket_b = CHROME_EXTENSION_PERMUTATION[9..15].to_vec();
+    // Bucket C: index 15 (1 item - signature_algorithms)
+    let bucket_c = vec![CHROME_EXTENSION_PERMUTATION[15]];
+
+    bucket_a.shuffle(&mut rng);
+    bucket_b.shuffle(&mut rng);
+
+    let mut permutation = Vec::with_capacity(16);
+    permutation.extend(bucket_a);
+    permutation.extend(bucket_b);
+    permutation.extend(bucket_c);
+    permutation
+}
 
 /// Build an `SslConnector` configured with Chrome 147 TLS fingerprint.
-///
-/// This sets cipher suites, curves, signature algorithms, GREASE,
-/// extension permutation, OCSP stapling, SCT, certificate compression,
-/// and loads Mozilla root certificates into the certificate store.
 pub fn chrome_connector() -> Result<SslConnector, NetError> {
-    if let Some(connector) = CHROME_CONNECTOR.get() {
-        return Ok(connector.clone());
-    }
-
     let mut builder =
         SslConnector::builder(SslMethod::tls()).map_err(|e| NetError::Tls(e.to_string()))?;
 
-    // Cipher suites (exact Chrome 147 order)
+    // Cipher suites
     builder
         .set_cipher_list(CIPHER_LIST)
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
-    // Elliptic curves (includes post-quantum hybrid)
+    // Elliptic curves
     builder
         .set_curves(CURVES)
         .map_err(|e| NetError::Tls(e.to_string()))?;
@@ -109,7 +129,7 @@ pub fn chrome_connector() -> Result<SslConnector, NetError> {
         .set_sigalgs_list(SIGALGS_LIST)
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
-    // ALPN: prefer h2, fall back to http/1.1
+    // ALPN
     builder
         .set_alpn_protos(ALPN_PROTOS)
         .map_err(|e| NetError::Tls(e.to_string()))?;
@@ -124,7 +144,9 @@ pub fn chrome_connector() -> Result<SslConnector, NetError> {
 
     // Chrome extensions
     builder.set_grease_enabled(true);
-    builder.set_permute_extensions(true);
+
+    builder.set_permute_extensions(false);
+
     builder.enable_ocsp_stapling();
     builder.enable_signed_cert_timestamps();
 
@@ -141,29 +163,67 @@ pub fn chrome_connector() -> Result<SslConnector, NetError> {
 
     // Load Mozilla root certificates into the certificate store
     let mut cert_store = X509StoreBuilder::new().map_err(|e| NetError::Tls(e.to_string()))?;
-
-    // Also load system default CA paths for cross-signed/intermediate certs
-    cert_store
-        .set_default_paths()
-        .map_err(|e| NetError::Tls(format!("failed to set default cert paths: {e}")))?;
-
     for cert_der in webpki_root_certs::TLS_SERVER_ROOT_CERTS {
         let x509 = X509::from_der(cert_der.as_ref())
             .map_err(|e| NetError::Tls(format!("failed to parse root cert: {e}")))?;
-        // Ignore duplicate cert errors (system certs may overlap)
         let _ = cert_store.add_cert(x509);
     }
     builder.set_cert_store(cert_store.build());
 
     let connector = builder.build();
-    let _ = CHROME_CONNECTOR.set(connector.clone());
+    
+    // Apply shuffled permutation directly to the context.
+    let permutation = shuffled_chrome_extension_permutation();
+    unsafe {
+        boring_sys2::SSL_CTX_set_extension_permutation(
+            connector.context().as_ptr(),
+            permutation.as_ptr(),
+            permutation.len(),
+        );
+    }
+
     Ok(connector)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shuffled_permutation_buckets() {
+        let p1 = shuffled_chrome_extension_permutation();
+        let p2 = shuffled_chrome_extension_permutation();
+        
+        assert_eq!(p1.len(), 16);
+        assert_eq!(p2.len(), 16);
+        
+        // Bucket C (signature_algorithms) must always be at index 15
+        assert_eq!(p1[15], 9);
+        assert_eq!(p2[15], 9);
+        
+        // Buckets A and B must contain the same set of elements
+        let mut b1_a = p1[0..9].to_vec();
+        let mut b2_a = p2[0..9].to_vec();
+        b1_a.sort();
+        b2_a.sort();
+        let expected_a = vec![1, 2, 4, 11, 14, 15, 17, 21, 24];
+        assert_eq!(b1_a, expected_a);
+        assert_eq!(b2_a, expected_a);
+        
+        let mut b1_b = p1[9..15].to_vec();
+        let mut b2_b = p2[9..15].to_vec();
+        b1_b.sort();
+        b2_b.sort();
+        let expected_b = vec![0, 3, 5, 6, 7, 8];
+        assert_eq!(b1_b, expected_b);
+        assert_eq!(b2_b, expected_b);
+        
+        // Probabilistically, they should be different
+        assert_ne!(p1, p2, "Shuffles should be non-deterministic");
+    }
+}
+
 /// Configure a per-connection TLS session with ALPS, ECH GREASE, and SNI.
-///
-/// Must be called for each new connection — these settings are per-SSL,
-/// not per-context.
 pub fn configure_connection(
     connector: &SslConnector,
     domain: &str,
@@ -172,22 +232,27 @@ pub fn configure_connection(
         .configure()
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
-    // ECH GREASE (Encrypted Client Hello)
+    // ECH GREASE
     config.set_enable_ech_grease(true);
 
-    // ALPS (Application-Layer Protocol Settings) for HTTP/2
-    // This is a strong modern Chrome signal.
-    // **Chrome 147 payload**: contains SETTINGS frame + empty ACCEPT_CH frame.
-    // Total 42 bytes (0x2a).
+    // Application-layer settings (ALPS) for HTTP/2
+    // Chrome 147 Headless sends 4 settings: 1, 2, 4, 6.
     let alps_payload: &[u8] = &[
-        0x00, 0x00, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
-        0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x60, 0x00, 0x00, 0x00, 0x06, 0x00, 0x04, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // SETTINGS frame (Length 24, Type 4, Flags 0, Stream 0)
+        0x00, 0x00, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // ID 1: 65536
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+        // ID 2: 0
+        0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+        // ID 4: 6291456
+        0x00, 0x04, 0x00, 0x60, 0x00, 0x00,
+        // ID 6: 262144
+        0x00, 0x06, 0x00, 0x04, 0x00, 0x00,
+        // Empty ACCEPT_CH frame (Length 0, Type 0x89, Flags 0, Stream 0)
+        0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00, 0x00, 0x00,
     ];
 
     unsafe {
-        // Use direct FFI because boring2 wrapper doesn't support settings payload.
-        // Returns 1 on success, 0 on failure.
         if boring_sys2::SSL_add_application_settings(
             config.as_ptr(),
             b"h2".as_ptr(),
@@ -201,20 +266,20 @@ pub fn configure_connection(
     }
     config.set_alps_use_new_codepoint(true);
 
-    // SNI: strip brackets from IPv6 addresses
+    // SNI
     let sni_domain = domain.trim_start_matches('[').trim_end_matches(']');
-    // If it looks like an IP address, disable SNI
     if sni_domain.parse::<std::net::IpAddr>().is_ok() {
         config.set_use_server_name_indication(false);
+    } else {
+        config
+            .set_hostname(sni_domain)
+            .map_err(|e| NetError::Tls(e.to_string()))?;
     }
 
     Ok(config)
 }
 
-/// Perform a TLS handshake over a TCP stream, returning an async TLS stream.
-///
-/// The returned stream implements `AsyncRead + AsyncWrite` and can be used
-/// with the HTTP/2 or HTTP/1.1 client layers.
+/// Establish a TLS connection to `domain` using the provided `SslConnector`.
 pub async fn connect_tls(
     connector: &SslConnector,
     domain: &str,

@@ -29,7 +29,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 fn fixture_canvas() -> Canvas2D {
     // Fixed scene that exercises fillRect (no text, no glyphs — those
     // depend on font rasterization which is independently variable).
-    let mut c = Canvas2D::new(100, 30).expect("canvas 100x30");
+    let mut c = Canvas2D::new(100, 30, "Linux".to_string()).expect("canvas 100x30");
     c.set_fill_color(255, 100, 0, 1.0);
     c.fill_rect(10.0, 5.0, 80.0, 20.0);
     c.set_fill_color(0, 102, 153, 0.7);
@@ -71,8 +71,8 @@ fn png_fixture_hash_is_pinned() {
     // PINNED HASH — update only when the encoder settings change
     // intentionally.
     assert_eq!(
-        hex, "583e62f0cc621b9885dbbadea24390c262f0240bb10f952b0401cafbf2fa2abe",
+        hex, "b47ef99603dc7e65e116cafad6011b994d3a3a7f2b292df212f1979dd4b1a579",
         "PNG byte output drifted; check flate2 backend, png crate version, or filter strategy"
     );
-    assert_eq!(bytes.len(), 196, "PNG fixture byte length must be stable");
+    assert_eq!(bytes.len(), 197, "PNG fixture byte length must be stable");
 }

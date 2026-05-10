@@ -8,7 +8,7 @@
 //! See `crates/stealth/src/kasada.rs` for the PoW algorithm and
 //! `docs/TIER0_KASADA_RESULTS.md` for the diagnostic that motivated this.
 
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,7 +48,11 @@ struct KasadaSession {
     /// hyatt.com — /tl returns 200 + x-kpsdk-ct, but retry without
     /// echoing x-kpsdk-ct keeps getting the 737-byte init page.
     ct_token: Option<String>,
-    /// Tenant-prefix path discovered from the /tl POST URL — same prefix
+    /// Initialization marker (im) token.
+    im_token: Option<String>,
+    /// Device token (dt).
+    dt_token: Option<String>,
+    /// Tenant-prefix path discovered from the /tl POST URL - same prefix
     /// used for /mfc (e.g. `/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3`).
     tenant_prefix: Option<String>,
     /// Header x-kpsdk-h
@@ -88,6 +92,8 @@ impl KasadaSessionStore {
                 id: generate_session_id(&mut id_rng),
                 fc_token: None,
                 ct_token: None,
+                im_token: None,
+                dt_token: None,
                 tenant_prefix: None,
                 h_token: None,
                 v_token: None,
@@ -152,6 +158,8 @@ impl KasadaSessionStore {
                 id: generate_session_id(&mut rng),
                 fc_token: None,
                 ct_token: None,
+                im_token: None,
+                dt_token: None,
                 tenant_prefix: None,
                 h_token: None,
                 v_token: None,
@@ -173,6 +181,10 @@ impl KasadaSessionStore {
         }
         if let Some(r) = headers.get("x-kpsdk-r") {
             entry.r_token = Some(r.clone());
+        }
+        if let Some(fc) = headers.get("x-kpsdk-fc") {
+            eprintln!("[kasada] LEARNED x-kpsdk-fc for {} (len={})", host, fc.len());
+            entry.fc_token = Some(fc.clone());
         }
 
         // Cache x-kpsdk-ct (session token from /tl response). Required as
@@ -278,11 +290,16 @@ impl KasadaSessionStore {
         let mut solution: KasadaSolution =
             solve_with_realistic_duration(work_time, &id, &mut rng);
         solution.st = Some(session.server_st_ms);
-        // rst = request start time (when solving BEGAN).
-        let rst = work_time as f64;
-        solution.rst = Some(rst);
+
+        // Request Start Time (rst) — should be a realistic page-relative
+        // timestamp (ms), not absolute epoch. 2-8 seconds is typical.
+        let rst_ms = (rng.gen_range(2000..8000) as f64) + rng.gen_range(0.0..1.0);
+        solution.rst = Some(rst_ms);
+
         solution.v = Some(1);
-        solution.d = Some((rst as i64) - session.server_st_ms);
+        // Estimated clock drift (d) — in Flow 2 this is often used for
+        // replay detection. It should ≈ work_time - st (absolute epoch delta).
+        solution.d = Some(work_time - session.server_st_ms);
         Some(solution.to_header_value())
     }
 
@@ -302,6 +319,30 @@ impl KasadaSessionStore {
     pub async fn ct_token(&self, host: &str) -> Option<String> {
         let store = self.inner.read().await;
         store.get(host).and_then(|s| s.ct_token.clone())
+    }
+
+    pub async fn dt_token(&self, host: &str) -> Option<String> {
+        let store = self.inner.read().await;
+        store.get(host).and_then(|s| s.dt_token.clone())
+    }
+
+    pub async fn im_token(&self, host: &str) -> Option<String> {
+        let store = self.inner.read().await;
+        store.get(host).and_then(|s| s.im_token.clone())
+    }
+
+    pub async fn store_dt(&self, host: &str, dt: String) {
+        let mut store = self.inner.write().await;
+        if let Some(entry) = store.get_mut(host) {
+            entry.dt_token = Some(dt);
+        }
+    }
+
+    pub async fn store_im(&self, host: &str, im: String) {
+        let mut store = self.inner.write().await;
+        if let Some(entry) = store.get_mut(host) {
+            entry.im_token = Some(im);
+        }
     }
 
     /// Get the current fc_token for a host.

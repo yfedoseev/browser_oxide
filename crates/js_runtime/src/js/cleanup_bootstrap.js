@@ -149,8 +149,6 @@
         'ops',
         '_maskFunction',
         '_maskAsNative',
-        // _nativeTag is the Symbol used to mark masked functions. Exposing it
-        // lets anti-bot scripts read our masking mechanism directly.
         '_nativeTag',
         '_customElementsRegistry',
         '__bootstrap',
@@ -158,11 +156,53 @@
         '__syncCookiesFromNet',
         '__documentReadyState',
         '__drainCspViolations',
-        // __onNodeInserted is a strong bot signal — real browsers don't expose
-        // internal DOM mutation callbacks on globalThis.
         '__onNodeInserted',
         '__errors',
     ];
+
+    // -- Worker Scope Isolation (Phase 8) ---------------------------
+    // Real Chrome Web Workers (DedicatedWorkerGlobalScope) have a very
+    // clean namespace. They do NOT expose DOM, CSSOM, or Hardware APIs.
+    // If we're in a worker, purge the illegal globals.
+    const _isWorker = typeof DedicatedWorkerGlobalScope !== 'undefined' && 
+                      globalThis instanceof DedicatedWorkerGlobalScope;
+    if (_isWorker) {
+        const _workerPurge = [
+            'window', 'document', 'history', 'locationbar', 'menubar', 
+            'personalbar', 'scrollbars', 'statusbar', 'toolbar', 'frames', 
+            'parent', 'top', 'opener', 'frameElement', 'styleMedia', 
+            'getComputedStyle', 'getSelection', 'matchMedia', 'alert', 
+            'confirm', 'prompt', 'print', 'stop', 'open', 'close', 
+            'focus', 'blur', 'moveBy', 'moveTo', 'resizeBy', 'resizeTo', 
+            'scroll', 'scrollBy', 'scrollTo', 'requestAnimationFrame', 
+            'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback',
+            // Constructors
+            'Node', 'Element', 'HTMLElement', 'HTMLDocument', 'Document', 
+            'CharacterData', 'Text', 'Comment', 'CDATASection', 'DocumentFragment', 
+            'DocumentType', 'NamedNodeMap', 'Attr', 'NodeList', 'HTMLCollection', 
+            'HTMLAllCollection', 'DOMTokenList', 'DOMImplementation', 'Range', 
+            'Selection', 'DOMParser', 'XMLSerializer', 'XPathEvaluator', 
+            'XPathExpression', 'XPathResult', 'XSLTProcessor', 'MutationObserver', 
+            'MutationRecord', 'IntersectionObserver', 'ResizeObserver', 
+            'PermissionStatus', 'Screen', 'ScreenOrientation', 'VisualViewport',
+            'ViewTransition', 'Highlight', 'HighlightRegistry',
+            // Hardware/Media (not allowed in workers)
+            'Bluetooth', 'USB', 'HID', 'Serial', 'Gamepad', 'GamepadButton', 
+            'GamepadEvent', 'GamepadHapticActuator', 'MediaStream', 'MediaStreamTrack', 
+            'MediaRecorder', 'RTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 
+            'RTCIceCandidate', 'RTCCertificate', 'Presentation', 'PresentationRequest',
+            // CSS classes (100+)
+            'CSS', 'CSSStyleSheet', 'CSSRule', 'CSSStyleRule', 'CSSMediaRule', 
+            'CSSImportRule', 'CSSFontFaceRule', 'CSSPageRule', 'CSSKeyframesRule', 
+            'CSSKeyframeRule', 'CSSNamespaceRule', 'CSSSupportsRule', 'CSSCounterStyleRule',
+            // ... and all HTML*Element subclasses
+        ];
+        for (const k of Object.keys(globalThis)) {
+            if (k.startsWith('HTML') || k.startsWith('SVG') || k.startsWith('CSS') || _workerPurge.includes(k)) {
+                try { delete globalThis[k]; } catch (_) {}
+            }
+        }
+    }
 
     if (ops && ops.op_cross_origin_isolated && !ops.op_cross_origin_isolated()) {
         internals.push('SharedArrayBuffer');

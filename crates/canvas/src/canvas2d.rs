@@ -597,13 +597,15 @@ pub struct Canvas2D {
     pixels: Vec<u8>,
     width: u32,
     height: u32,
+    os_name: String,
+    seed: u64,
     state: CanvasState,
     state_stack: Vec<CanvasState>,
     path: Path2D,
 }
 
 impl Canvas2D {
-    pub fn new(width: u32, height: u32) -> Option<Self> {
+    pub fn new(width: u32, height: u32, os_name: String, seed: u64) -> Option<Self> {
         if width == 0 || height == 0 {
             return None;
         }
@@ -612,6 +614,8 @@ impl Canvas2D {
             pixels,
             width,
             height,
+            os_name,
+            seed,
             state: CanvasState::default(),
             state_stack: Vec::new(),
             path: Path2D::new(),
@@ -949,13 +953,13 @@ impl Canvas2D {
 
     /// Measure text width in CSS pixels (Canvas 2D `measureText().width`).
     pub fn measure_text(&self, text: &str) -> f64 {
-        text::measure_text_width(text, &self.state.font)
+        text::measure_text_width(text, &self.state.font, &self.os_name)
     }
 
     /// Full 13-field `TextMetrics` object for
     /// `CanvasRenderingContext2D.measureText`.
     pub fn measure_text_metrics(&self, text: &str) -> TextMetrics {
-        text::measure_text_metrics(text, &self.state.font)
+        text::measure_text_metrics(text, &self.state.font, &self.os_name)
     }
 
     /// Fill text at `(x, y)`, with `y` interpreted as the alphabetic
@@ -974,6 +978,7 @@ impl Canvas2D {
             color.g,
             color.b,
             self.state.global_alpha * color.alpha(),
+            &self.os_name,
         );
 
         let w = self.width;
@@ -990,7 +995,14 @@ impl Canvas2D {
     /// their contours, not by rasterizing-and-edge-detecting.
     pub fn stroke_text(&mut self, text: &str, x: f32, y: f32) {
         let mut path = crate::path::Path2D::new();
-        let any = text::append_text_outline_to_path(&mut path, text, x, y, &self.state.font);
+        let any = text::append_text_outline_to_path(
+            &mut path,
+            text,
+            x,
+            y,
+            &self.state.font,
+            &self.os_name,
+        );
         if !any {
             return;
         }
@@ -1035,14 +1047,25 @@ impl Canvas2D {
     pub fn to_data_url_with_jitter(&self) -> String {
         let mut pixels = self.get_image_data(0, 0, self.width, self.height);
         if !pixels.is_empty() {
-            let mut rng = 0x9e3779b9u32;
+            // PCG32-style PRNG seeded by the profile
+            let mut state = self.seed.wrapping_add(0x9E3779B97F4A7C15);
+            let mut inc = (self.seed >> 32) | 1;
+
+            let mut next_u32 = |s: &mut u64| {
+                let old_state = *s;
+                *s = old_state.wrapping_mul(6364136223846793005).wrapping_add(inc);
+                let xorshifted = (((old_state >> 18) ^ old_state) >> 27) as u32;
+                let rot = (old_state >> 59) as u32;
+                (xorshifted >> rot) | (xorshifted << (rot.wrapping_neg() & 31))
+            };
+
             for i in (0..pixels.len()).step_by(4) {
-                rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
-                if (rng % 100) < 5 {
-                    // Jitter RGB channels by +/- 1
-                    pixels[i] = pixels[i].wrapping_add((rng & 1) as u8);
-                    pixels[i + 1] = pixels[i + 1].wrapping_sub(((rng >> 1) & 1) as u8);
-                    pixels[i + 2] = pixels[i + 2].wrapping_add(((rng >> 2) & 1) as u8);
+                let val = next_u32(&mut state);
+                if (val % 100) < 5 { // Jitter 5% of pixels
+                    // Perturb RGB by +/- 1 in a way that remains in [0, 255]
+                    pixels[i] = if pixels[i] > 128 { pixels[i].wrapping_sub(1) } else { pixels[i].wrapping_add(1) };
+                    pixels[i+1] = if pixels[i+1] > 128 { pixels[i+1].wrapping_sub(1) } else { pixels[i+1].wrapping_add(1) };
+                    pixels[i+2] = if pixels[i+2] > 128 { pixels[i+2].wrapping_sub(1) } else { pixels[i+2].wrapping_add(1) };
                 }
             }
         }
@@ -1281,7 +1304,7 @@ mod tests {
 
     #[test]
     fn create_canvas() {
-        let c = Canvas2D::new(200, 100).unwrap();
+        let c = Canvas2D::new(200, 100, "Linux".to_string()).unwrap();
         assert_eq!(c.width(), 200);
         assert_eq!(c.height(), 100);
         assert!(!c.has_content());
@@ -1289,7 +1312,7 @@ mod tests {
 
     #[test]
     fn fill_rect_produces_pixels() {
-        let mut c = Canvas2D::new(100, 100).unwrap();
+        let mut c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c.set_fill_color(255, 0, 0, 1.0);
         c.fill_rect(10.0, 10.0, 50.0, 50.0);
         assert!(c.has_content());
@@ -1297,7 +1320,7 @@ mod tests {
 
     #[test]
     fn clear_rect_clears() {
-        let mut c = Canvas2D::new(100, 100).unwrap();
+        let mut c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c.set_fill_color(255, 0, 0, 1.0);
         c.fill_rect(0.0, 0.0, 100.0, 100.0);
         assert!(c.has_content());
@@ -1307,7 +1330,7 @@ mod tests {
 
     #[test]
     fn path_fill() {
-        let mut c = Canvas2D::new(100, 100).unwrap();
+        let mut c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c.set_fill_color(0, 0, 255, 1.0);
         c.begin_path();
         c.move_to(10.0, 10.0);
@@ -1320,7 +1343,7 @@ mod tests {
 
     #[test]
     fn stroke_rect() {
-        let mut c = Canvas2D::new(100, 100).unwrap();
+        let mut c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c.set_stroke_color(0, 255, 0, 1.0);
         c.set_line_width(2.0);
         c.stroke_rect(10.0, 10.0, 80.0, 80.0);
@@ -1329,7 +1352,7 @@ mod tests {
 
     #[test]
     fn get_image_data_red() {
-        let mut c = Canvas2D::new(10, 10).unwrap();
+        let mut c = Canvas2D::new(10, 10, "Linux".to_string()).unwrap();
         c.set_fill_color(255, 0, 0, 1.0);
         c.fill_rect(0.0, 0.0, 10.0, 10.0);
         let data = c.get_image_data(0, 0, 10, 10);
@@ -1342,7 +1365,7 @@ mod tests {
 
     #[test]
     fn to_data_url() {
-        let mut c = Canvas2D::new(10, 10).unwrap();
+        let mut c = Canvas2D::new(10, 10, "Linux".to_string()).unwrap();
         c.set_fill_color(255, 0, 0, 1.0);
         c.fill_rect(0.0, 0.0, 10.0, 10.0);
         let url = c.to_data_url();
@@ -1352,7 +1375,7 @@ mod tests {
 
     #[test]
     fn to_png_bytes_magic() {
-        let mut c = Canvas2D::new(10, 10).unwrap();
+        let mut c = Canvas2D::new(10, 10, "Linux".to_string()).unwrap();
         c.set_fill_color(0, 0, 255, 1.0);
         c.fill_rect(0.0, 0.0, 10.0, 10.0);
         let bytes = c.to_png_bytes();
@@ -1361,7 +1384,7 @@ mod tests {
 
     #[test]
     fn fill_text_produces_content() {
-        let mut c = Canvas2D::new(200, 50).unwrap();
+        let mut c = Canvas2D::new(200, 50, "Linux".to_string()).unwrap();
         c.set_fill_color(0, 0, 0, 1.0);
         c.set_font("16px sans-serif");
         c.fill_text("Hello World", 10.0, 30.0);
@@ -1370,14 +1393,14 @@ mod tests {
 
     #[test]
     fn measure_text_nonzero() {
-        let c = Canvas2D::new(100, 100).unwrap();
+        let c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         let width = c.measure_text("Hello");
         assert!(width > 0.0);
     }
 
     #[test]
     fn save_restore() {
-        let mut c = Canvas2D::new(100, 100).unwrap();
+        let mut c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c.set_fill_color(255, 0, 0, 1.0);
         c.save();
         c.set_fill_color(0, 0, 255, 1.0);
@@ -1398,12 +1421,12 @@ mod tests {
 
     #[test]
     fn fill_text_renders_real_glyphs() {
-        let mut text_canvas = Canvas2D::new(200, 50).unwrap();
+        let mut text_canvas = Canvas2D::new(200, 50, "Linux".to_string()).unwrap();
         text_canvas.set_fill_color(0, 0, 0, 1.0);
         text_canvas.set_font("16px sans-serif");
         text_canvas.fill_text("Hello World", 10.0, 30.0);
 
-        let mut rect_canvas = Canvas2D::new(200, 50).unwrap();
+        let mut rect_canvas = Canvas2D::new(200, 50, "Linux".to_string()).unwrap();
         rect_canvas.set_fill_color(0, 0, 0, 1.0);
         rect_canvas.fill_rect(10.0, 14.0, 80.0, 16.0);
 
@@ -1417,11 +1440,11 @@ mod tests {
 
     #[test]
     fn measure_text_varies_by_font_size() {
-        let mut c1 = Canvas2D::new(100, 100).unwrap();
+        let mut c1 = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c1.set_font("10px sans-serif");
         let w1 = c1.measure_text("Hello");
 
-        let mut c2 = Canvas2D::new(100, 100).unwrap();
+        let mut c2 = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c2.set_font("20px sans-serif");
         let w2 = c2.measure_text("Hello");
 
@@ -1430,7 +1453,7 @@ mod tests {
 
     #[test]
     fn measure_text_varies_by_content() {
-        let c = Canvas2D::new(100, 100).unwrap();
+        let c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         let short = c.measure_text("Hi");
         let long = c.measure_text("Hello World");
         assert!(long > short);
@@ -1439,7 +1462,7 @@ mod tests {
     #[test]
     fn fill_text_deterministic() {
         fn render() -> Vec<u8> {
-            let mut c = Canvas2D::new(200, 50).unwrap();
+            let mut c = Canvas2D::new(200, 50, "Linux".to_string()).unwrap();
             c.set_fill_color(0, 0, 0, 1.0);
             c.set_font("16px sans-serif");
             c.fill_text("Fingerprint", 10.0, 30.0);
@@ -1452,12 +1475,12 @@ mod tests {
 
     #[test]
     fn different_text_different_output() {
-        let mut c1 = Canvas2D::new(200, 50).unwrap();
+        let mut c1 = Canvas2D::new(200, 50, "Linux".to_string()).unwrap();
         c1.set_fill_color(0, 0, 0, 1.0);
         c1.set_font("16px sans-serif");
         c1.fill_text("Hello", 10.0, 30.0);
 
-        let mut c2 = Canvas2D::new(200, 50).unwrap();
+        let mut c2 = Canvas2D::new(200, 50, "Linux".to_string()).unwrap();
         c2.set_fill_color(0, 0, 0, 1.0);
         c2.set_font("16px sans-serif");
         c2.fill_text("World", 10.0, 30.0);
@@ -1468,7 +1491,7 @@ mod tests {
     #[test]
     fn deterministic_output() {
         fn render() -> Vec<u8> {
-            let mut c = Canvas2D::new(50, 50).unwrap();
+            let mut c = Canvas2D::new(50, 50, "Linux".to_string()).unwrap();
             c.set_fill_color(128, 64, 32, 1.0);
             c.fill_rect(5.0, 5.0, 40.0, 40.0);
             c.to_png_bytes()
@@ -1480,7 +1503,7 @@ mod tests {
 
     #[test]
     fn linear_gradient_fill_rect() {
-        let mut c = Canvas2D::new(100, 100).unwrap();
+        let mut c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c.set_fill_gradient(Gradient::Linear {
             x0: 0.0,
             y0: 0.0,
@@ -1511,7 +1534,7 @@ mod tests {
 
     #[test]
     fn radial_gradient_fill_rect() {
-        let mut c = Canvas2D::new(100, 100).unwrap();
+        let mut c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c.set_fill_gradient(Gradient::Radial {
             x0: 50.0,
             y0: 50.0,
@@ -1539,7 +1562,7 @@ mod tests {
     #[test]
     fn radial_gradient_inner_radius_changes_output() {
         fn render(r0: f32) -> Vec<u8> {
-            let mut c = Canvas2D::new(100, 100).unwrap();
+            let mut c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
             c.set_fill_gradient(Gradient::Radial {
                 x0: 50.0,
                 y0: 50.0,
@@ -1568,7 +1591,7 @@ mod tests {
     fn radial_gradient_offset_focal() {
         // Focal point at (25, 25) with r0=0, expanding out to (75, 75) r1=60.
         // This is the two-circle form that tiny_skia could not express.
-        let mut c = Canvas2D::new(100, 100).unwrap();
+        let mut c = Canvas2D::new(100, 100, "Linux".to_string()).unwrap();
         c.set_fill_gradient(Gradient::Radial {
             x0: 25.0,
             y0: 25.0,
@@ -1596,7 +1619,7 @@ mod tests {
 
     #[test]
     fn gradient_resets_on_solid_color() {
-        let mut c = Canvas2D::new(50, 50).unwrap();
+        let mut c = Canvas2D::new(50, 50, "Linux".to_string()).unwrap();
         c.set_fill_gradient(Gradient::Linear {
             x0: 0.0,
             y0: 0.0,
@@ -1662,7 +1685,7 @@ mod tests {
 
     #[test]
     fn multiply_blend_darkens_overlap() {
-        let mut c = Canvas2D::new(40, 40).unwrap();
+        let mut c = Canvas2D::new(40, 40, "Linux".to_string()).unwrap();
         // Start with a red background.
         c.set_fill_color(200, 200, 0, 1.0);
         c.fill_rect(0.0, 0.0, 40.0, 40.0);
@@ -1685,7 +1708,7 @@ mod tests {
         // variant must paint strictly more pixels because its drop
         // shadow spreads ink beyond the rect's rasterized footprint.
         fn render(blur: f32) -> usize {
-            let mut c = Canvas2D::new(80, 80).unwrap();
+            let mut c = Canvas2D::new(80, 80, "Linux".to_string()).unwrap();
             c.set_fill_color(0, 0, 0, 1.0);
             if blur > 0.0 {
                 c.set_shadow_color(255, 0, 0, 255);
@@ -1706,7 +1729,7 @@ mod tests {
 
     #[test]
     fn filter_grayscale_collapses_color() {
-        let mut c = Canvas2D::new(20, 20).unwrap();
+        let mut c = Canvas2D::new(20, 20, "Linux".to_string()).unwrap();
         c.set_filter("grayscale(100%)");
         c.set_fill_color(255, 0, 0, 1.0);
         c.fill_rect(0.0, 0.0, 20.0, 20.0);
@@ -1752,7 +1775,7 @@ mod tests {
 
     #[test]
     fn conic_gradient_renders() {
-        let mut c = Canvas2D::new(60, 60).unwrap();
+        let mut c = Canvas2D::new(60, 60, "Linux".to_string()).unwrap();
         c.set_fill_gradient(Gradient::Conic {
             cx: 30.0,
             cy: 30.0,
@@ -1790,7 +1813,7 @@ mod tests {
             height: 2,
             repetition: PatternRepetition::Repeat,
         };
-        let mut c = Canvas2D::new(10, 10).unwrap();
+        let mut c = Canvas2D::new(10, 10, "Linux".to_string()).unwrap();
         c.set_fill_pattern(pattern);
         c.fill_rect(0.0, 0.0, 10.0, 10.0);
         assert!(c.has_content(), "pattern should fill with repeating tiles");

@@ -3,6 +3,7 @@
 use crate::error::NetError;
 use crate::headers;
 use crate::Response;
+use crate::TimingStats;
 use bytes::Buf;
 use std::collections::HashMap;
 use stealth::profile::StealthProfile;
@@ -133,6 +134,8 @@ pub async fn h3_request(
             set_cookies,
             body,
             url: url.to_string(),
+            accept_ch_upgrade: false,
+            timings: TimingStats::default(),
         },
         alt_svc_value,
     ))

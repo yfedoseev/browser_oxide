@@ -99,9 +99,9 @@ impl FontDatabase {
     /// Look up a face by family name + weight + italic style. Uses
     /// fontdb's selection algorithm which includes weight-closeness and
     /// style-closeness fallbacks.
-    pub fn query(&self, family: &str, weight: u16, italic: bool) -> Option<ID> {
+    pub fn query(&self, family: &str, weight: u16, italic: bool, os_name: &str) -> Option<ID> {
         let style = if italic { Style::Italic } else { Style::Normal };
-        let families = resolve_family(family);
+        let families = resolve_family(family, os_name);
         let query = Query {
             families: &families,
             weight: Weight(weight),
@@ -127,9 +127,9 @@ impl FontDatabase {
     /// Used by `query_chain` so the user-supplied fallback chain is
     /// honoured — `("Wingdings", "serif")` must reach `serif` instead of
     /// short-circuiting on Wingdings's outer fallback.
-    fn query_strict(&self, family: &str, weight: u16, italic: bool) -> Option<ID> {
+    fn query_strict(&self, family: &str, weight: u16, italic: bool, os_name: &str) -> Option<ID> {
         let style = if italic { Style::Italic } else { Style::Normal };
-        let families = resolve_family(family);
+        let families = resolve_family(family, os_name);
         self.inner.query(&Query {
             families: &families,
             weight: Weight(weight),
@@ -141,9 +141,15 @@ impl FontDatabase {
     /// First-match query across a family fallback chain. Tries each
     /// user-specified family in order; only after the entire chain is
     /// exhausted does the global sans-serif fallback fire.
-    pub fn query_chain(&self, families: &[String], weight: u16, italic: bool) -> Option<ID> {
+    pub fn query_chain(
+        &self,
+        families: &[String],
+        weight: u16,
+        italic: bool,
+        os_name: &str,
+    ) -> Option<ID> {
         for fam in families {
-            if let Some(id) = self.query_strict(fam, weight, italic) {
+            if let Some(id) = self.query_strict(fam, weight, italic, os_name) {
                 return Some(id);
             }
         }
@@ -190,7 +196,7 @@ impl FontDatabase {
 /// Without this, Akamai-style font detection probes
 /// (`Math.abs(measure("X, serif") - measure("serif")) > 0`) would
 /// register every unknown family as installed.
-fn resolve_family(name: &str) -> Vec<Family<'_>> {
+fn resolve_family<'a>(name: &'a str, os_name: &str) -> Vec<Family<'a>> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
         "sans-serif" => vec![Family::SansSerif],
@@ -198,15 +204,31 @@ fn resolve_family(name: &str) -> Vec<Family<'_>> {
         "monospace" => vec![Family::Monospace],
         "cursive" => vec![Family::Cursive],
         "fantasy" => vec![Family::Fantasy],
-        // Chrome substitution table for families we don't bundle. The
-        // SansSerif tail keeps the ALIASED name resolvable even if the
-        // bundled face name changes; the unknown-name branch below has
-        // no such fallback.
-        "arial" | "helvetica" | "helvetica neue" => {
-            vec![Family::Name("Liberation Sans"), Family::SansSerif]
+        // Chrome substitution table for families we don't bundle.
+        // We map standard Windows/macOS/Linux families to our bundled
+        // Liberation set based on the profile's OS.
+        "arial" | "helvetica" | "helvetica neue" | "tahoma" | "verdana" | "segoe ui"
+        | "calibri" => {
+            if os_name == "Windows" || os_name == "macOS" || os_name == "Linux" {
+                vec![Family::Name("Liberation Sans"), Family::SansSerif]
+            } else {
+                vec![Family::Name(name)]
+            }
         }
-        "times" | "times new roman" => vec![Family::Name("Liberation Serif"), Family::Serif],
-        "courier" | "courier new" => vec![Family::Name("Liberation Mono"), Family::Monospace],
+        "times" | "times new roman" | "georgia" => {
+            if os_name == "Windows" || os_name == "macOS" || os_name == "Linux" {
+                vec![Family::Name("Liberation Serif"), Family::Serif]
+            } else {
+                vec![Family::Name(name)]
+            }
+        }
+        "courier" | "courier new" | "consolas" | "menlo" | "monaco" => {
+            if os_name == "Windows" || os_name == "macOS" || os_name == "Linux" {
+                vec![Family::Name("Liberation Mono"), Family::Monospace]
+            } else {
+                vec![Family::Name(name)]
+            }
+        }
         _ => vec![Family::Name(name)],
     }
 }
@@ -218,15 +240,17 @@ mod tests {
     #[test]
     fn resolves_sans_serif_generic() {
         let db = FontDatabase::get();
-        assert!(db.query("sans-serif", 400, false).is_some());
+        assert!(db.query("sans-serif", 400, false, "Linux").is_some());
     }
 
     #[test]
     fn resolves_arial_alias_to_liberation_sans() {
         let db = FontDatabase::get();
-        let arial_id = db.query("Arial", 400, false).expect("Arial should resolve");
+        let arial_id = db
+            .query("Arial", 400, false, "Linux")
+            .expect("Arial should resolve");
         let libsans_id = db
-            .query("Liberation Sans", 400, false)
+            .query("Liberation Sans", 400, false, "Linux")
             .expect("Liberation Sans should resolve");
         assert_eq!(
             arial_id, libsans_id,
@@ -238,10 +262,10 @@ mod tests {
     fn resolves_times_alias_to_liberation_serif() {
         let db = FontDatabase::get();
         let id = db
-            .query("Times New Roman", 400, false)
+            .query("Times New Roman", 400, false, "Linux")
             .expect("Times should resolve");
         let libserif_id = db
-            .query("Liberation Serif", 400, false)
+            .query("Liberation Serif", 400, false, "Linux")
             .expect("Liberation Serif should resolve");
         assert_eq!(id, libserif_id);
     }
@@ -249,8 +273,8 @@ mod tests {
     #[test]
     fn resolves_bold_weight() {
         let db = FontDatabase::get();
-        let reg = db.query("Arial", 400, false).unwrap();
-        let bold = db.query("Arial", 700, false).unwrap();
+        let reg = db.query("Arial", 400, false, "Linux").unwrap();
+        let bold = db.query("Arial", 700, false, "Linux").unwrap();
         assert_ne!(
             reg, bold,
             "regular and bold Arial should map to different faces"
@@ -261,13 +285,15 @@ mod tests {
     fn fallback_when_family_unknown() {
         let db = FontDatabase::get();
         // Should still return something via the sans-serif fallback.
-        assert!(db.query("NonexistentFamily42", 400, false).is_some());
+        assert!(db
+            .query("NonexistentFamily42", 400, false, "Linux")
+            .is_some());
     }
 
     #[test]
     fn face_data_returns_bytes() {
         let db = FontDatabase::get();
-        let id = db.query("Arial", 400, false).unwrap();
+        let id = db.query("Arial", 400, false, "Linux").unwrap();
         let (bytes, _idx) = db.face_data(id).expect("bundled face has binary source");
         assert!(
             bytes.len() > 1000,
@@ -285,8 +311,8 @@ mod tests {
     #[test]
     fn resolves_italic_sans() {
         let db = FontDatabase::get();
-        let reg = db.query("Arial", 400, false).unwrap();
-        let italic = db.query("Arial", 400, true).unwrap();
+        let reg = db.query("Arial", 400, false, "Linux").unwrap();
+        let italic = db.query("Arial", 400, true, "Linux").unwrap();
         assert_ne!(
             reg, italic,
             "italic Arial should map to Liberation Sans Italic"
@@ -296,8 +322,8 @@ mod tests {
     #[test]
     fn resolves_bold_italic_serif() {
         let db = FontDatabase::get();
-        let reg = db.query("Times New Roman", 400, false).unwrap();
-        let bi = db.query("Times New Roman", 700, true).unwrap();
+        let reg = db.query("Times New Roman", 400, false, "Linux").unwrap();
+        let bi = db.query("Times New Roman", 700, true, "Linux").unwrap();
         assert_ne!(
             reg, bi,
             "bold-italic Times should map to Liberation Serif Bold Italic"
@@ -324,8 +350,8 @@ mod tests {
             "NonexistentB".to_string(),
             "Arial".to_string(),
         ];
-        let id = db.query_chain(&chain, 400, false).unwrap();
-        let arial_id = db.query("Arial", 400, false).unwrap();
+        let id = db.query_chain(&chain, 400, false, "Linux").unwrap();
+        let arial_id = db.query("Arial", 400, false, "Linux").unwrap();
         assert_eq!(id, arial_id);
     }
 }

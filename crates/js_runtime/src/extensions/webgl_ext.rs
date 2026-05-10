@@ -42,16 +42,21 @@ pub fn op_webgl_available(#[state] state: &WebGLState) -> bool {
 #[op2(fast)]
 #[smi]
 pub fn op_webgl_create_context(
-    #[state] _state: &mut WebGLState,
-    #[smi] _width: i32,
-    #[smi] _height: i32,
+    #[state] state: &mut deno_core::OpState,
+    #[smi] width: i32,
+    #[smi] height: i32,
 ) -> i32 {
     #[cfg(feature = "webgl-render")]
     {
-        if let Some(ctx) = WebGLContext::new(_width as u32, _height as u32) {
-            let id = _state.next_id;
-            _state.next_id += 1;
-            _state.contexts.insert(id, ctx);
+        let seed = {
+            let dom = state.borrow::<crate::state::DomState>();
+            dom.stealth_profile.as_ref().map(|p| p.canvas_seed).unwrap_or(0)
+        };
+        let mut gl_state = state.borrow_mut::<WebGLState>();
+        if let Some(ctx) = WebGLContext::new(width as u32, height as u32, seed) {
+            let id = gl_state.next_id;
+            gl_state.next_id += 1;
+            gl_state.contexts.insert(id, ctx);
             return id;
         }
     }

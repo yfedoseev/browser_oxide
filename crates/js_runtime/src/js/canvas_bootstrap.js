@@ -40,12 +40,15 @@
         ]),
     };
     const _resolveInstalledFonts = () => {
+        const os = _getOsName();
+        return _FONT_LIST_BY_OS[os] || _FONT_LIST_BY_OS["Linux"];
+    };
+    const _getOsName = () => {
         try {
             const has = ops.op_has_stealth_profile && ops.op_has_stealth_profile();
-            const os = has ? (ops.op_get_profile_value("os_name") || "Linux") : "Linux";
-            return _FONT_LIST_BY_OS[os] || _FONT_LIST_BY_OS["Linux"];
+            return has ? (ops.op_get_profile_value("os_name") || "Linux") : "Linux";
         } catch (_e) {
-            return _FONT_LIST_BY_OS["Linux"];
+            return "Linux";
         }
     };
     const _GENERIC_FAMILIES = new Set(["sans-serif","serif","monospace","cursive","fantasy","system-ui","ui-sans-serif","ui-serif","ui-monospace"]);
@@ -832,7 +835,7 @@
         #canvasId;
         #attrs;
         constructor(width = 300, height = 150) {
-            this.#canvasId = ops.op_canvas_create(width, height);
+            this.#canvasId = ops.op_canvas_create(width, height, _getOsName());
             this.#attrs = { width: String(width), height: String(height) };
             Object.defineProperty(this, 'width', { value: width, writable: true, enumerable: true, configurable: true });
             Object.defineProperty(this, 'height', { value: height, writable: true, enumerable: true, configurable: true });
@@ -1014,7 +1017,7 @@
             if (!self._canvasId) {
                 const w = parseInt(self.getAttribute && self.getAttribute("width")) || 300;
                 const h = parseInt(self.getAttribute && self.getAttribute("height")) || 150;
-                self._canvasId = ops.op_canvas_create(w, h);
+                self._canvasId = ops.op_canvas_create(w, h, _getOsName());
             }
         }
 
@@ -1107,7 +1110,7 @@
         getContext(type, _opts) {
             if (type !== "2d") return null;
             if (!this._canvasId) {
-                this._canvasId = ops.op_canvas_create(this.width, this.height);
+                this._canvasId = ops.op_canvas_create(this.width, this.height, _getOsName());
             }
             if (!this._context) {
                 this._context = new CanvasRenderingContext2D(this._canvasId);

@@ -214,3 +214,21 @@ fn reports_current_sum() {
         &fp.data[4995..5000]
     );
 }
+
+#[test]
+fn scan_threshold_for_chrome_parity() {
+    use canvas::{AudioFingerprint, AudioParams};
+    let sr = 44100u32;
+    let len = 5000usize;
+    
+    println!("\n=== threshold scan ===");
+    for threshold in [-24.0, -30.0, -40.0, -50.0] {
+        let params = AudioParams {
+            threshold,
+            ..Default::default()
+        };
+        let fp = AudioFingerprint::from_params(0, params);
+        let sum: f64 = fp.data[4500..5000].iter().map(|&s| (s as f64).abs()).sum();
+        println!("  threshold = {threshold:5.1}  sum = {sum}");
+    }
+}

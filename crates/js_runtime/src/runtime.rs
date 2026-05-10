@@ -177,6 +177,8 @@ pub fn create_runtime_with_signals(
             "\n",
             include_str!("js/interfaces_bootstrap.js"),
             "\n",
+            include_str!("js/shared_apis_bootstrap.js"),
+            "\n",
             include_str!("js/instances_bootstrap.js"),
             "\n",
             include_str!("js/fetch_bootstrap.js"),
@@ -275,12 +277,30 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
         .expect("worker: console bootstrap failed");
 
     runtime
+        .execute_script(
+            "<interfaces_bootstrap>",
+            include_str!("js/interfaces_bootstrap.js"),
+        )
+        .expect("worker: interfaces bootstrap failed");
+
+    runtime
+        .execute_script(
+            "<shared_apis_bootstrap>",
+            include_str!("js/shared_apis_bootstrap.js"),
+        )
+        .expect("worker: shared_apis bootstrap failed");
+
+    runtime
         .execute_script("<timer_bootstrap>", include_str!("js/timer_bootstrap.js"))
         .expect("worker: timer bootstrap failed");
 
     runtime
         .execute_script("<fetch_bootstrap>", include_str!("js/fetch_bootstrap.js"))
         .expect("worker: fetch bootstrap failed");
+
+    runtime
+        .execute_script("<streams_bootstrap>", include_str!("js/streams_bootstrap.js"))
+        .expect("worker: streams bootstrap failed");
 
     // structuredClone is useful inside workers too — worker code that
     // uses `postMessage` with complex values relies on it, and the

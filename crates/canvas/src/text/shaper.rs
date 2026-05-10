@@ -162,7 +162,7 @@ mod tests {
 
     fn arial_14px() -> (&'static [u8], u32) {
         let db = FontDatabase::get();
-        let id = db.query("Arial", 400, false).unwrap();
+        let id = db.query("Arial", 400, false, "Linux").unwrap();
         db.face_data(id).unwrap()
     }
 

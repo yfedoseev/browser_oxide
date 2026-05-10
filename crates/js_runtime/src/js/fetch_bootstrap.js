@@ -279,12 +279,15 @@
             const startTime = performance.now();
             const result = await ops.op_fetch(url, method, headers, body);
             
-            // Log for audit
-            globalThis.__fetchLog = globalThis.__fetchLog || [];
-            globalThis.__fetchLog.push({ method, url, status: result.status });
+            const boxide = globalThis._boxide;
+            const fetchLog = boxide && boxide.__fetchLog;
+            if (fetchLog) {
+                fetchLog.push({ method, url, status: result.status });
+            }
 
-            if (globalThis.__perfResourceEntries) {
-                globalThis.__perfResourceEntries.push({ url, type: "fetch", startTime, duration: performance.now() - startTime, size: result.body ? result.body.length : 0 });
+            const entries = boxide && boxide.__perfResourceEntries;
+            if (entries) {
+                entries.push({ url, type: "fetch", startTime, duration: performance.now() - startTime, size: result.body ? result.body.length : 0 });
             }
 
             // Sync cookies from the net jar into document.cookie so subsequent JS
@@ -299,8 +302,11 @@
             });
         } catch (e) {
             // Log error for audit
-            globalThis.__fetchLog = globalThis.__fetchLog || [];
-            globalThis.__fetchLog.push({ method, url, status: 0, error: e.message });
+            const boxide = globalThis._boxide;
+            const fetchLog = boxide && boxide.__fetchLog;
+            if (fetchLog) {
+                fetchLog.push({ method, url, status: 0, error: e.message });
+            }
             throw new TypeError("Failed to fetch: " + e.message);
         }
     };

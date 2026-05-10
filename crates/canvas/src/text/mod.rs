@@ -66,19 +66,19 @@ impl TextMetrics {
 /// Resolve a parsed font to concrete face data. Walks the family
 /// fallback chain and returns both the raw face bytes and the face
 /// index (for TTC collections).
-fn resolve_face(font: &ParsedFont) -> Option<(&'static [u8], u32)> {
+fn resolve_face(font: &ParsedFont, os_name: &str) -> Option<(&'static [u8], u32)> {
     let db = FontDatabase::get();
-    let id = db.query_chain(&font.families, font.weight, font.italic)?;
+    let id = db.query_chain(&font.families, font.weight, font.italic, os_name)?;
     db.face_data(id)
 }
 
 /// Measure text using the parsed font. Returns zero metrics for empty
 /// text or unresolvable fonts — matching Canvas 2D's tolerant behaviour.
-pub fn measure_text_metrics(text: &str, font: &ParsedFont) -> TextMetrics {
+pub fn measure_text_metrics(text: &str, font: &ParsedFont, os_name: &str) -> TextMetrics {
     if text.is_empty() {
         return TextMetrics::zero();
     }
-    let Some((data, idx)) = resolve_face(font) else {
+    let Some((data, idx)) = resolve_face(font, os_name) else {
         return TextMetrics::zero();
     };
     let run = shaper::shape(text, data, idx, font.size_px);
@@ -111,8 +111,8 @@ pub fn measure_text_metrics(text: &str, font: &ParsedFont) -> TextMetrics {
 
 /// Convenience: measure width only (for the simple `measureText(...).width`
 /// fingerprint probes).
-pub fn measure_text_width(text: &str, font: &ParsedFont) -> f64 {
-    measure_text_metrics(text, font).width as f64
+pub fn measure_text_width(text: &str, font: &ParsedFont, os_name: &str) -> f64 {
+    measure_text_metrics(text, font, os_name).width as f64
 }
 
 /// One blitted glyph ready to composite onto the canvas pixel buffer.
@@ -146,11 +146,12 @@ pub fn rasterize_text(
     g: u8,
     b: u8,
     alpha: f32,
+    os_name: &str,
 ) -> Vec<PlacedGlyph> {
     if text.is_empty() {
         return Vec::new();
     }
-    let Some((data, idx)) = resolve_face(font) else {
+    let Some((data, idx)) = resolve_face(font, os_name) else {
         return Vec::new();
     };
     let run = shaper::shape(text, data, idx, font.size_px);
@@ -242,11 +243,12 @@ pub fn append_text_outline_to_path(
     x: f32,
     y: f32,
     font: &ParsedFont,
+    os_name: &str,
 ) -> bool {
     if text.is_empty() {
         return false;
     }
-    let Some((data, idx)) = resolve_face(font) else {
+    let Some((data, idx)) = resolve_face(font, os_name) else {
         return false;
     };
     // Parse a fresh ttf_parser::Face for outline access. rustybuzz's
@@ -366,12 +368,12 @@ pub fn composite_glyph(
 
 /// Legacy convenience: measure width using a default sans-serif face
 /// at the given size. New code should use `measure_text_width`.
-pub fn measure_text_width_size_only(text: &str, font_size: f32) -> f64 {
+pub fn measure_text_width_size_only(text: &str, font_size: f32, os_name: &str) -> f64 {
     let font = ParsedFont {
         size_px: font_size,
         ..ParsedFont::default_font()
     };
-    measure_text_width(text, &font)
+    measure_text_width(text, &font, os_name)
 }
 
 /// Legacy convenience for `fillText` paths that only know the font
@@ -387,12 +389,13 @@ pub fn rasterize_text_size_only(
     g: u8,
     b: u8,
     alpha: f32,
+    os_name: &str,
 ) -> Vec<PlacedGlyph> {
     let font = ParsedFont {
         size_px: font_size,
         ..ParsedFont::default_font()
     };
-    rasterize_text(text, x, y, &font, r, g, b, alpha)
+    rasterize_text(text, x, y, &font, r, g, b, alpha, os_name)
 }
 
 #[cfg(test)]
@@ -402,7 +405,7 @@ mod tests {
     #[test]
     fn measure_hello_world_at_16px_arial() {
         let font = ParsedFont::parse("16px Arial").unwrap();
-        let metrics = measure_text_metrics("Hello, World!", &font);
+        let metrics = measure_text_metrics("Hello, World!", &font, "Linux");
         assert!(metrics.width > 30.0 && metrics.width < 200.0);
         assert!(metrics.font_bounding_box_ascent > 10.0);
     }
@@ -411,8 +414,8 @@ mod tests {
     fn different_sizes_different_widths() {
         let small = ParsedFont::parse("10px Arial").unwrap();
         let big = ParsedFont::parse("40px Arial").unwrap();
-        let w1 = measure_text_width("Hello", &small);
-        let w2 = measure_text_width("Hello", &big);
+        let w1 = measure_text_width("Hello", &small, "Linux");
+        let w2 = measure_text_width("Hello", &big, "Linux");
         assert!(w2 > w1 * 3.0);
     }
 
@@ -422,8 +425,8 @@ mod tests {
         // font measures much less than a fixed-width monospace font.
         let sans = ParsedFont::parse("14px Arial").unwrap();
         let mono = ParsedFont::parse("14px monospace").unwrap();
-        let sans_w = measure_text_width("iiiiii", &sans);
-        let mono_w = measure_text_width("iiiiii", &mono);
+        let sans_w = measure_text_width("iiiiii", &sans, "Linux");
+        let mono_w = measure_text_width("iiiiii", &mono, "Linux");
         assert!(
             mono_w > sans_w * 1.3,
             "mono should be much wider for narrow chars: sans={sans_w} mono={mono_w}"
@@ -433,7 +436,7 @@ mod tests {
     #[test]
     fn rasterize_produces_glyphs() {
         let font = ParsedFont::parse("24px Arial").unwrap();
-        let glyphs = rasterize_text("A", 0.0, 20.0, &font, 0, 0, 0, 1.0);
+        let glyphs = rasterize_text("A", 0.0, 20.0, &font, 0, 0, 0, 1.0, "Linux");
         assert!(!glyphs.is_empty());
         let g = &glyphs[0];
         assert!(g.width > 0 && g.height > 0);
@@ -443,7 +446,7 @@ mod tests {
     #[test]
     fn rasterize_empty_returns_empty() {
         let font = ParsedFont::parse("16px Arial").unwrap();
-        let glyphs = rasterize_text("", 0.0, 0.0, &font, 0, 0, 0, 1.0);
+        let glyphs = rasterize_text("", 0.0, 0.0, &font, 0, 0, 0, 1.0, "Linux");
         assert!(glyphs.is_empty());
     }
 }

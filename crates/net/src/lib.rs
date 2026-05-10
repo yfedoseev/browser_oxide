@@ -46,7 +46,19 @@ pub enum Method {
 }
 
 /// HTTP response.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+pub struct TimingStats {
+    pub dns_start_ms: f64,
+    pub dns_end_ms: f64,
+    pub connect_start_ms: f64,
+    pub connect_end_ms: f64,
+    pub tls_start_ms: f64,
+    pub tls_end_ms: f64,
+    pub request_start_ms: f64,
+    pub response_start_ms: f64,
+    pub response_end_ms: f64,
+}
+
 pub struct Response {
     pub status: u16,
     pub status_text: String,
@@ -56,6 +68,10 @@ pub struct Response {
     pub set_cookies: Vec<String>,
     pub body: Vec<u8>,
     pub url: String,
+    /// Whether this response taught the client Accept-CH for the first time.
+    /// Drives reloads in the navigation loop (Wildberries parity).
+    pub accept_ch_upgrade: bool,
+    pub timings: TimingStats,
 }
 
 impl Response {
@@ -290,14 +306,17 @@ impl HttpClient {
     }
 
     /// Record that `host` has advertised `Accept-CH` so subsequent requests
-    /// include the full high-entropy Client Hints set.
-    async fn learn_accept_ch(&self, host: &str, headers: &HashMap<String, String>) {
+    /// include the full high-entropy Client Hints set. Returns `true`
+    /// if this is a new origin for which we just learned Accept-CH.
+    async fn learn_accept_ch(&self, host: &str, headers: &HashMap<String, String>) -> bool {
         if headers.keys().any(|k| k.eq_ignore_ascii_case("accept-ch")) {
-            self.accept_ch_origins
-                .lock()
-                .await
-                .insert(host.to_string());
+            let mut origins = self.accept_ch_origins.lock().await;
+            if !origins.contains(host) {
+                origins.insert(host.to_string());
+                return true;
+            }
         }
+        false
     }
 
     /// Learn Akamai web `_abck` state from response Set-Cookies. T3A.
@@ -392,7 +411,7 @@ impl HttpClient {
     }
 
     /// Return `true` if `host` has previously sent `Accept-CH`.
-    async fn has_accept_ch(&self, host: &str) -> bool {
+    pub async fn has_accept_ch(&self, host: &str) -> bool {
         self.accept_ch_origins.lock().await.contains(host)
     }
 
@@ -424,10 +443,12 @@ impl HttpClient {
         let mut hdrs = headers::nav_headers_fetch(&self.profile, &mfc_url, Some(&format!("https://{}", host)));
         hdrs.push(("cache-control".to_string(), "no-cache".to_string()));
         hdrs.push(("pragma".to_string(), "no-cache".to_string()));
+        hdrs.push(("x-kpsdk-dt".to_string(), "11qox8sw33mzd5rx62nvw43pjz99vza39w0a3lycjlwbby5126x2thw75s".to_string()));
+        hdrs.push(("content-type".to_string(), "application/octet-stream".to_string()));
         // Merge extra headers if needed
         merge_headers(&mut hdrs, &headers);
 
-        let resp = match self.get_with_exact_headers(&mfc_url, &hdrs).await {
+        let resp = match self.post_bytes_with_exact_headers_direct(&mfc_url, b"", &hdrs).await {
             Ok(r) => {
                 eprintln!("[kasada] /mfc response status: {} headers: {:?}", r.status, r.headers);
                 r
@@ -675,20 +696,20 @@ impl HttpClient {
         if !has_header(&hdrs, "cookie") {
             let jar = self.cookies.lock().await;
             if let Some(cookie_str) = jar.cookies_for(&parsed) {
-                hdrs.push(("cookie".to_string(), cookie_str));
+                insert_before_priority(&mut hdrs, "cookie".to_string(), cookie_str);
             }
         }
 
         // Inject Kasada x-kpsdk-cd if we have a session for this host (gap #Kasada).
         if !has_header(&hdrs, "x-kpsdk-cd") {
             if let Some((k, v)) = self.kasada_cd_header(host).await {
-                hdrs.push((k, v));
+                insert_before_priority(&mut hdrs, k, v);
             }
         }
         // Inject Kasada x-kpsdk-fc on stricter tenants (Hyper-Solutions Flow 2).
         if !has_header(&hdrs, "x-kpsdk-fc") {
             if let Some((k, v)) = self.kasada_sessions.fc_header(host).await {
-                hdrs.push((k, v));
+                insert_before_priority(&mut hdrs, k, v);
             }
         }
         // Inject Kasada x-kpsdk-ct (session token from /tl response). Without
@@ -697,24 +718,34 @@ impl HttpClient {
         if !has_header(&hdrs, "x-kpsdk-ct") {
             if let Some((k, v)) = self.kasada_sessions.ct_header(host).await {
                 eprintln!("[kasada] INJECTING x-kpsdk-ct on GET {} (len={})", host, v.len());
-                hdrs.push((k, v));
+                insert_before_priority(&mut hdrs, k, v);
             } else {
                 eprintln!("[kasada] no ct_token to inject for {}", host);
             }
         }
         if !has_header(&hdrs, "x-kpsdk-h") {
             if let Some((k, v)) = self.kasada_sessions.h_header(host).await {
-                hdrs.push((k, v));
+                insert_before_priority(&mut hdrs, k, v);
             }
         }
         if !has_header(&hdrs, "x-kpsdk-v") {
             if let Some((k, v)) = self.kasada_sessions.v_header(host).await {
-                hdrs.push((k, v));
+                insert_before_priority(&mut hdrs, k, v);
+            }
+        }
+        if !has_header(&hdrs, "x-kpsdk-im") {
+            if let Some(v) = self.kasada_sessions.im_token(host).await {
+                insert_before_priority(&mut hdrs, "x-kpsdk-im".to_string(), v);
+            }
+        }
+        if !has_header(&hdrs, "x-kpsdk-dt") {
+            if let Some(v) = self.kasada_sessions.dt_token(host).await {
+                insert_before_priority(&mut hdrs, "x-kpsdk-dt".to_string(), v);
             }
         }
         if !has_header(&hdrs, "x-kpsdk-r") {
             if let Some((k, v)) = self.kasada_sessions.r_header(host).await {
-                hdrs.push((k, v));
+                insert_before_priority(&mut hdrs, k, v);
             }
         }
 
@@ -774,9 +805,12 @@ impl HttpClient {
         self.learn_alt_svc(url, &response.headers).await;
         self.learn_kasada(host, &response.headers, Some(url)).await;
         self.learn_abck(host, &response.set_cookies).await;
-        self.learn_accept_ch(host, &response.headers).await;
+        let upgrade = self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
-        Ok(response)
+
+        let mut final_response = response;
+        final_response.accept_ch_upgrade = upgrade;
+        Ok(final_response)
     }
 
     /// GET follow for exact-header requests.
@@ -829,7 +863,7 @@ impl HttpClient {
         if !has_header(&hdrs, "cookie") {
             let jar = self.cookies.lock().await;
             if let Some(cookie_str) = jar.cookies_for(&parsed) {
-                hdrs.push(("cookie".to_string(), cookie_str));
+                insert_before_priority(&mut hdrs, "cookie".to_string(), cookie_str);
             }
         }
 
@@ -840,7 +874,7 @@ impl HttpClient {
         // and `crates/net/src/kasada_session.rs` for the per-origin store.
         if !has_header(&hdrs, "x-kpsdk-cd") {
             if let Some((k, v)) = self.kasada_cd_header(host).await {
-                hdrs.push((k, v));
+                insert_before_priority(&mut hdrs, k, v);
             }
         }
 
@@ -910,12 +944,14 @@ impl HttpClient {
         // Learn Kasada session from response (look for x-kpsdk-cr + x-kpsdk-st).
         self.learn_kasada(host, &response.headers, Some(url)).await;
         self.learn_abck(host, &response.set_cookies).await;
-        self.learn_accept_ch(host, &response.headers).await;
+        let upgrade = self.learn_accept_ch(host, &response.headers).await;
 
         // Store Set-Cookie from response into jar
         self.store_set_cookies(&parsed, &response.set_cookies).await;
 
-        Ok(response)
+        let mut final_response = response;
+        final_response.accept_ch_upgrade = upgrade;
+        Ok(final_response)
     }
 
     /// Store all Set-Cookie headers from a response into the cookie jar.
@@ -1064,6 +1100,56 @@ impl HttpClient {
             .await
     }
 
+    pub async fn post_bytes_with_exact_headers_direct(
+        &self,
+        url: &str,
+        body: &[u8],
+        headers: &[(String, String)],
+    ) -> Result<Response, NetError> {
+        let parsed = Url::parse(url)?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
+        let port = parsed.port().unwrap_or(443);
+        let path = if let Some(q) = parsed.query() {
+            format!("{}?{}", parsed.path(), q)
+        } else {
+            parsed.path().to_string()
+        };
+
+        let mut hdrs: Vec<(String, String)> = headers
+            .iter()
+            .filter(|(k, _)| {
+                let lower = k.to_ascii_lowercase();
+                !lower.starts_with(':') && lower != "host" && lower != "connection"
+            })
+            .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
+            .collect();
+
+        // Add cookies
+        let jar = self.cookies.lock().await;
+        if let Some(cookie_str) = jar.cookies_for(&parsed) {
+            if !has_header(&hdrs, "cookie") {
+                hdrs.push(("cookie".to_string(), cookie_str));
+            }
+        }
+        drop(jar);
+
+        let tcp_stream = tcp::connect_via_proxy(
+            host,
+            port,
+            std::time::Duration::from_secs(10),
+            Some(&self.dns_cache),
+            self.proxy.as_ref(),
+        )
+        .await?;
+        let connector = tls::chrome_connector()?;
+        let mut tls_stream = tls::connect_tls(&connector, host, tcp_stream).await?;
+
+        let raw = h1_client::send_post(&mut tls_stream, host, &path, &hdrs, body).await?;
+        self.build_response_from_raw(raw, url).await
+    }
+
     /// POST with a raw byte body and ONLY the caller-provided headers plus cookies.
     pub async fn post_bytes_with_exact_headers(
         &self,
@@ -1105,6 +1191,16 @@ impl HttpClient {
                 hdrs.push(("x-kpsdk-fc".to_string(), fc));
             }
         }
+        if let Some(im) = self.kasada_sessions.im_token(host).await {
+            if !has_header(&hdrs, "x-kpsdk-im") {
+                hdrs.push(("x-kpsdk-im".to_string(), im));
+            }
+        }
+        if let Some(dt) = self.kasada_sessions.dt_token(host).await {
+            if !has_header(&hdrs, "x-kpsdk-dt") {
+                hdrs.push(("x-kpsdk-dt".to_string(), dt));
+            }
+        }
         if !has_header(&hdrs, "x-kpsdk-h") {
             if let Some((k, v)) = self.kasada_sessions.h_header(host).await {
                 hdrs.push((k, v));
@@ -1117,7 +1213,7 @@ impl HttpClient {
         }
         if !has_header(&hdrs, "x-kpsdk-r") {
             if let Some((k, v)) = self.kasada_sessions.r_header(host).await {
-                hdrs.push((k, v));
+                insert_before_priority(&mut hdrs, k, v);
             }
         }
         // Inject Kasada x-kpsdk-cd if we have a session for this host (gap #Kasada).
@@ -1222,15 +1318,18 @@ impl HttpClient {
 
         self.learn_kasada(host, &response.headers, Some(url)).await;
         self.learn_abck(host, &response.set_cookies).await;
-        self.learn_accept_ch(host, &response.headers).await;
+        let upgrade = self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
+
+        let mut final_response = response;
+        final_response.accept_ch_upgrade = upgrade;
 
         // If this was a successful /tl, we might need to kick off /mfc
         if url.contains("/tl") || url.contains("/r") {
             self.fetch_kasada_mfc_if_needed(host).await;
         }
 
-        Ok(response)
+        Ok(final_response)
     }
 
     /// POST with a raw byte body and caller-provided headers. This is the
@@ -1304,7 +1403,7 @@ impl HttpClient {
         if !has_header(&hdrs, "cookie") {
             let jar = self.cookies.lock().await;
             if let Some(cookie_str) = jar.cookies_for(&parsed) {
-                hdrs.push(("cookie".to_string(), cookie_str));
+                insert_before_priority(&mut hdrs, "cookie".to_string(), cookie_str);
             }
         }
 
@@ -1314,7 +1413,7 @@ impl HttpClient {
         // do — and we don't differentiate at this layer.
         if !has_header(&hdrs, "x-kpsdk-cd") {
             if let Some((k, v)) = self.kasada_cd_header(host).await {
-                hdrs.push((k, v));
+                insert_before_priority(&mut hdrs, k, v);
             }
         }
 
@@ -1372,10 +1471,12 @@ impl HttpClient {
         // Also learn Kasada session: the /tl POST returns x-kpsdk-cr/st here.
         self.learn_kasada(host, &response.headers, Some(url)).await;
         self.learn_abck(host, &response.set_cookies).await;
-        self.learn_accept_ch(host, &response.headers).await;
+        let upgrade = self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
 
-        Ok(response)
+        let mut final_response = response;
+        final_response.accept_ch_upgrade = upgrade;
+        Ok(final_response)
     }
 
     /// Snapshot all cookies for a URL as a "name=value; name2=value2" string.
@@ -1438,6 +1539,8 @@ impl HttpClient {
             set_cookies,
             body: decompressed,
             url: url.to_string(),
+            accept_ch_upgrade: false,
+            timings: TimingStats::default(),
         })
     }
 
@@ -1470,6 +1573,8 @@ impl HttpClient {
             set_cookies,
             body: decompressed,
             url: url.to_string(),
+            accept_ch_upgrade: false,
+            timings: TimingStats::default(),
         })
     }
 }
@@ -1490,6 +1595,17 @@ fn is_stale_conn_error(e: &NetError) -> bool {
 /// Check if a header name is already present (case-insensitive).
 fn has_header(hdrs: &[(String, String)], name: &str) -> bool {
     hdrs.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
+}
+
+fn insert_before_priority(hdrs: &mut Vec<(String, String)>, name: String, value: String) {
+    if let Some(pos) = hdrs
+        .iter()
+        .position(|(k, _)| k.eq_ignore_ascii_case("priority"))
+    {
+        hdrs.insert(pos, (name, value));
+    } else {
+        hdrs.push((name, value));
+    }
 }
 
 /// Merge extra headers into the base list. Existing headers with the same name
@@ -1546,6 +1662,7 @@ mod tests {
             set_cookies: Vec::new(),
             body: b"Hello world".to_vec(),
             url: "https://example.com".into(),
+            accept_ch_upgrade: false,
         };
         assert_eq!(resp.text(), "Hello world");
         assert!(resp.ok());
@@ -1560,6 +1677,7 @@ mod tests {
             set_cookies: Vec::new(),
             body: vec![],
             url: "https://example.com/missing".into(),
+            accept_ch_upgrade: false,
         };
         assert!(!resp.ok());
     }

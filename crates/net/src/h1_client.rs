@@ -52,15 +52,28 @@ async fn send_request<S>(
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
 {
-    // Build the request
-    let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\n");
+    // Build the request using Title-Case names and specific order for H1.
+    // Real Chrome H1 order: Host, Connection, (Content-Length), then others.
+    let mut request = format!("{method} {path} HTTP/1.1\r\n");
+    request.push_str(&format!("Host: {host}\r\n"));
+    request.push_str("Connection: keep-alive\r\n");
+    
     if let Some(body) = body {
         request.push_str(&format!("Content-Length: {}\r\n", body.len()));
     }
+
     for (name, value) in headers {
-        request.push_str(&format!("{name}: {value}\r\n"));
+        let lk = name.to_lowercase();
+        // Skip headers we already added or pseudo-headers from H2 layer
+        if lk == "host" || lk == "connection" || lk == "content-length" || lk.starts_with(':') {
+            continue;
+        }
+
+        // Normalize casing to Title-Case for H1 (e.g., user-agent -> User-Agent)
+        let h1_name = normalize_h1_header_name(name);
+        request.push_str(&format!("{h1_name}: {value}\r\n"));
     }
-    request.push_str("Connection: keep-alive\r\n\r\n");
+    request.push_str("\r\n");
 
     stream
         .write_all(request.as_bytes())
@@ -161,6 +174,51 @@ where
 
 fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
+}
+
+/// Standard Chrome H1 header casing normalization.
+/// H2 uses lowercase exclusively, but H1 uses Title-Case.
+fn normalize_h1_header_name(name: &str) -> String {
+    match name.to_lowercase().as_str() {
+        "upgrade-insecure-requests" => "Upgrade-Insecure-Requests".to_string(),
+        "user-agent" => "User-Agent".to_string(),
+        "accept" => "Accept".to_string(),
+        "accept-encoding" => "Accept-Encoding".to_string(),
+        "accept-language" => "Accept-Language".to_string(),
+        "referer" => "Referer".to_string(),
+        "cookie" => "Cookie".to_string(),
+        "origin" => "Origin".to_string(),
+        "priority" => "Priority".to_string(),
+        "content-type" => "Content-Type".to_string(),
+        s if s.starts_with("sec-") => {
+            // sec-ch-ua -> Sec-Ch-Ua, sec-fetch-site -> Sec-Fetch-Site
+            let parts: Vec<String> = s
+                .split('-')
+                .map(|p| {
+                    let mut c = p.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                    }
+                })
+                .collect();
+            parts.join("-")
+        }
+        _ => {
+            // Default to capitalized first letter of each part
+            let parts: Vec<String> = name
+                .split('-')
+                .map(|p| {
+                    let mut c = p.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                    }
+                })
+                .collect();
+            parts.join("-")
+        }
+    }
 }
 
 async fn read_content_length_body<S>(

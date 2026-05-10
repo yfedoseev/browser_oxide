@@ -6,7 +6,7 @@ use canvas::Canvas2D;
 
 #[test]
 fn png_uses_minimal_chunks() {
-    let mut c = Canvas2D::new(100, 30).unwrap();
+    let mut c = Canvas2D::new(100, 30, "Linux".to_string()).unwrap();
     c.set_fill_color(255, 100, 0, 1.0);
     c.fill_rect(10.0, 5.0, 80.0, 20.0);
     let png = c.to_png_bytes();

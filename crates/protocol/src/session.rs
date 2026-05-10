@@ -15,6 +15,11 @@ pub struct CdpSession {
     /// Set by Page.navigate — the server handles the actual page replacement
     /// because V8 isolates must be dropped in LIFO order.
     pub pending_navigate: Option<String>,
+    /// Last known mouse coordinates for trajectory generation.
+    last_mouse_x: f32,
+    last_mouse_y: f32,
+    /// Behavioral profile for input humanization.
+    behavior: stealth::behavior::BehaviorProfile,
 }
 
 impl CdpSession {
@@ -28,6 +33,9 @@ impl CdpSession {
             extra_headers: std::collections::HashMap::new(),
             request_interception_enabled: false,
             pending_navigate: None,
+            last_mouse_x: 0.0,
+            last_mouse_y: 0.0,
+            behavior: stealth::behavior::BehaviorProfile::default(),
         }
     }
 
@@ -386,39 +394,21 @@ impl CdpSession {
             // humanized input call multiple Input.dispatchMouseEvent
             // moves between actions; CDP itself stays event-faithful.
             "Input.dispatchMouseEvent" => {
-                let event_type = req
-                    .params
-                    .get("type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let x = req.params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let y = req.params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let button = req
-                    .params
-                    .get("button")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("none");
-                let buttons = req
-                    .params
-                    .get("buttons")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
-                let click_count = req
-                    .params
-                    .get("clickCount")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(1);
-                let modifiers = req
-                    .params
-                    .get("modifiers")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
+                let event_type = req.params.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                let x = req.params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                let y = req.params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                let button = req.params.get("button").and_then(|v| v.as_str()).unwrap_or("none");
+                let buttons = req.params.get("buttons").and_then(|v| v.as_i64()).unwrap_or(0);
+                let click_count = req.params.get("clickCount").and_then(|v| v.as_i64()).unwrap_or(1);
+                let modifiers = req.params.get("modifiers").and_then(|v| v.as_i64()).unwrap_or(0);
+
                 let js_event = match event_type {
                     "mousePressed" => "mousedown",
                     "mouseReleased" => "mouseup",
                     "mouseMoved" => "mousemove",
                     _ => "",
                 };
+
                 if !js_event.is_empty() {
                     let button_n = match button {
                         "left" => 0,
@@ -428,23 +418,87 @@ impl CdpSession {
                         "forward" => 4,
                         _ => 0,
                     };
-                    let script = format!(
-                        "(() => {{ \
-                          const e = new MouseEvent({js_event:?}, {{ \
-                            bubbles: true, cancelable: true, \
-                            clientX: {x}, clientY: {y}, screenX: {x}, screenY: {y}, \
-                            button: {button_n}, buttons: {buttons}, detail: {click_count}, \
-                            ctrlKey: {ctrl}, shiftKey: {shift}, altKey: {alt}, metaKey: {meta} \
-                          }}); \
-                          const t = (document.elementFromPoint && document.elementFromPoint({x},{y})) || document.body || document; \
-                          t.dispatchEvent(e); \
-                        }})()",
-                        ctrl = (modifiers & 2) != 0,
-                        shift = (modifiers & 8) != 0,
-                        alt = (modifiers & 1) != 0,
-                        meta = (modifiers & 4) != 0,
-                    );
-                    let _ = page.evaluate(&script);
+
+                    let dx = x - self.last_mouse_x;
+                    let dy = y - self.last_mouse_y;
+                    let dist = (dx * dx + dy * dy).sqrt();
+
+                    // For 'mouseMoved' with significant distance, generate human trajectory.
+                    if event_type == "mouseMoved" && dist > 10.0 {
+                        let pts = stealth::behavior::mouse_trajectory(
+                            (self.last_mouse_x, self.last_mouse_y),
+                            (x, y),
+                            30.0, // assumption: target width is 30px if not specified
+                            &self.behavior,
+                        );
+
+                        for (i, p) in pts.iter().enumerate() {
+                            let script = format!(
+                                "(() => {{ \
+                                  const props = {{ \
+                                    bubbles: true, cancelable: true, composed: true, \
+                                    clientX: {x}, clientY: {y}, screenX: {x}, screenY: {y}, \
+                                    button: {button_n}, buttons: {buttons}, detail: {click_count}, \
+                                    ctrlKey: {ctrl}, shiftKey: {shift}, altKey: {alt}, metaKey: {meta}, \
+                                    pointerId: 1, width: 1, height: 1, pressure: {pressure}, \
+                                    pointerType: 'mouse', isPrimary: true \
+                                  }}; \
+                                  const e = new PointerEvent('pointermove', props); \
+                                  const m = new MouseEvent('mousemove', props); \
+                                  const t = (document.elementFromPoint && document.elementFromPoint({x},{y})) || document.body || document; \
+                                  t.dispatchEvent(e); \
+                                  t.dispatchEvent(m); \
+                                }})()",
+                                x = p.x,
+                                y = p.y,
+                                pressure = if buttons != 0 { 0.5 } else { 0.0 },
+                                ctrl = (modifiers & 2) != 0,
+                                shift = (modifiers & 8) != 0,
+                                alt = (modifiers & 1) != 0,
+                                meta = (modifiers & 4) != 0,
+                            );
+                            let _ = page.evaluate(&script);
+
+                            // Real-time delay between points (8ms sample rate in model)
+                            if i < pts.len() - 1 {
+                                tokio::time::sleep(std::time::Duration::from_millis(8)).await;
+                            }
+                        }
+                    } else {
+                        // Single jump for clicks or small moves
+                        let pointer_type = match event_type {
+                            "mousePressed" => "pointerdown",
+                            "mouseReleased" => "pointerup",
+                            "mouseMoved" => "pointermove",
+                            _ => "pointermove",
+                        };
+                        let script = format!(
+                            "(() => {{ \
+                              const props = {{ \
+                                bubbles: true, cancelable: true, composed: true, \
+                                clientX: {x}, clientY: {y}, screenX: {x}, screenY: {y}, \
+                                button: {button_n}, buttons: {buttons}, detail: {click_count}, \
+                                ctrlKey: {ctrl}, shiftKey: {shift}, altKey: {alt}, metaKey: {meta}, \
+                                pointerId: 1, width: 1, height: 1, pressure: {pressure}, \
+                                pointerType: 'mouse', isPrimary: true \
+                              }}; \
+                              const e = new PointerEvent({pointer_type:?}, props); \
+                              const m = new MouseEvent({js_event:?}, props); \
+                              const t = (document.elementFromPoint && document.elementFromPoint({x},{y})) || document.body || document; \
+                              t.dispatchEvent(e); \
+                              t.dispatchEvent(m); \
+                            }})()",
+                            pressure = if event_type == "mousePressed" || buttons != 0 { 0.5 } else { 0.0 },
+                            ctrl = (modifiers & 2) != 0,
+                            shift = (modifiers & 8) != 0,
+                            alt = (modifiers & 1) != 0,
+                            meta = (modifiers & 4) != 0,
+                        );
+                        let _ = page.evaluate(&script);
+                    }
+
+                    self.last_mouse_x = x;
+                    self.last_mouse_y = y;
                 }
                 Ok(serde_json::json!({}))
             }
@@ -508,18 +562,51 @@ impl CdpSession {
             }
             "Input.dispatchTouchEvent" => Ok(serde_json::json!({})),
             "Input.insertText" => {
-                let text = req
-                    .params
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let text = req.params.get("text").and_then(|v| v.as_str()).unwrap_or("");
                 if !text.is_empty() {
-                    let script = format!(
-                        "(() => {{ const ae = document.activeElement; \
-                         if (ae && ('value' in ae)) {{ ae.value = (ae.value || '') + {text:?}; \
-                         ae.dispatchEvent(new Event('input', {{bubbles: true}})); }} }})()"
-                    );
-                    let _ = page.evaluate(&script);
+                    let timings = stealth::behavior::keystroke_timings(text, &self.behavior);
+                    for (i, t) in timings.iter().enumerate() {
+                        // Flight time (delay before this key)
+                        if i > 0 {
+                            tokio::time::sleep(std::time::Duration::from_millis(t.flight_ms as u64)).await;
+                        }
+
+                        // Fire keydown
+                        let kd_script = format!(
+                            "(() => {{ \
+                              const e = new KeyboardEvent('keydown', {{ \
+                                bubbles: true, cancelable: true, key: {ch:?}, code: 'Key' + {ch:?}.toUpperCase() \
+                              }}); \
+                              (document.activeElement || document.body || document).dispatchEvent(e); \
+                            }})()",
+                            ch = t.ch
+                        );
+                        let _ = page.evaluate(&kd_script);
+
+                        // Dwell time (delay while key is down)
+                        tokio::time::sleep(std::time::Duration::from_millis(t.dwell_ms as u64)).await;
+
+                        // Insert character + fire 'input'
+                        let script = format!(
+                            "(() => {{ const ae = document.activeElement; \
+                             if (ae && ('value' in ae)) {{ ae.value = (ae.value || '') + {text:?}; \
+                             ae.dispatchEvent(new Event('input', {{bubbles: true}})); }} }})()",
+                            text = t.ch.to_string()
+                        );
+                        let _ = page.evaluate(&script);
+
+                        // Fire keyup
+                        let ku_script = format!(
+                            "(() => {{ \
+                              const e = new KeyboardEvent('keyup', {{ \
+                                bubbles: true, cancelable: true, key: {ch:?}, code: 'Key' + {ch:?}.toUpperCase() \
+                              }}); \
+                              (document.activeElement || document.body || document).dispatchEvent(e); \
+                            }})()",
+                            ch = t.ch
+                        );
+                        let _ = page.evaluate(&ku_script);
+                    }
                 }
                 Ok(serde_json::json!({}))
             }
