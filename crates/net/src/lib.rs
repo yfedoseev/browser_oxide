@@ -440,53 +440,18 @@ impl HttpClient {
     /// Fetch the Kasada `/mfc` endpoint for `host` if we have a session
     /// with a known tenant prefix and don't yet have an fc token.
     /// On success, stores `x-kpsdk-fc` from the response in the session.
-    pub async fn fetch_kasada_mfc_if_needed(&self, host: &str) {
-        let target = self.kasada_sessions.mfc_target(host).await;
-        let Some((tenant_prefix, fc_already)) = target else {
-            eprintln!("[kasada] NO mfc target for {}", host);
-            return;
-        };
-        if fc_already {
-            return; // Already have it; no need to refetch.
-        }
-        let mfc_url = format!("https://{}{}/mfc", host, tenant_prefix);
-        eprintln!("[kasada] FETCHING /mfc: {}", mfc_url);
-        // Use a single GET via the same HTTP/2 path. We deliberately call
-        // get_with_headers (which auto-injects cookies + x-kpsdk-cd) so
-        // /mfc gets the same context Kasada expects.
-        if mfc_url.contains("/mfc") {
-            let jar = self.cookies.lock().await;
-            let host_url = url::Url::parse(&mfc_url).unwrap();
-            let cks = jar.cookies_for(&host_url).unwrap_or_default();
-            eprintln!("[kasada] cookies for /mfc: {}", cks);
-        }
-        let headers = vec![];
-        eprintln!("[kasada] /mfc request headers: {:?}", headers);
-        let mut hdrs = headers::nav_headers_fetch(&self.profile, &mfc_url, Some(&format!("https://{}", host)));
-        hdrs.push(("cache-control".to_string(), "no-cache".to_string()));
-        hdrs.push(("pragma".to_string(), "no-cache".to_string()));
-        hdrs.push(("x-kpsdk-dt".to_string(), "11qox8sw33mzd5rx62nvw43pjz99vza39w0a3lycjlwbby5126x2thw75s".to_string()));
-        hdrs.push(("content-type".to_string(), "application/octet-stream".to_string()));
-        // Merge extra headers if needed
-        merge_headers(&mut hdrs, &headers);
-
-        let resp = match self.post_bytes_with_exact_headers_direct(&mfc_url, b"", &hdrs).await {
-            Ok(r) => {
-                eprintln!("[kasada] /mfc response status: {} headers: {:?}", r.status, r.headers);
-                r
-            },
-            Err(e) => {
-                eprintln!("[kasada] /mfc fetch failed: {}", e);
-                // /mfc fetch failed — fail open; subsequent requests omit fc.
-                return;
-            }
-        };
-        if let Some(fc) = resp.headers.get("x-kpsdk-fc") {
-            eprintln!("[kasada] LEARNED x-kpsdk-fc for {} (len={})", host, fc.len());
-            self.kasada_sessions.store_fc(host, fc.clone()).await;
-        } else {
-            eprintln!("[kasada] /mfc response MISSING x-kpsdk-fc (status={})", resp.status);
-        }
+    /// Previously raced the page's ips.js by fetching /mfc from Rust with a
+    /// hardcoded `x-kpsdk-dt` literal. That token is per-session and derived
+    /// inside the ips.js VM; hardcoding it caused Kasada to refuse to issue
+    /// `x-kpsdk-fc` (and exposed an obvious bot signature: every session
+    /// presented the same dt value).
+    ///
+    /// The page's own ips.js fetches /mfc with the correct session-derived
+    /// headers via window.fetch(), and our `learn_from_headers` already
+    /// extracts `x-kpsdk-fc` from any response that carries it. So the right
+    /// behaviour is to do nothing here — let the page run.
+    pub async fn fetch_kasada_mfc_if_needed(&self, _host: &str) {
+        // Intentionally a no-op. See doc comment.
     }
 
     pub async fn evict_kasada_session(&self, host: &str) {

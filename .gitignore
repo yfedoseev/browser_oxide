@@ -36,3 +36,9 @@ docs/**/scratch/
 /diagnostic*.log
 /cg_run*.log
 /adidas-network.json
+
+# Test-generated capture blobs (test wrote them to crate cwd)
+crates/*/kasada_error_*.b64
+crates/*/kasada_blob_*.b64
+crates/*/decoded_*.bin
+crates/*/decoded_*.txt

@@ -218,14 +218,22 @@ impl Page {
         };
 
         // 2. Check if we actually NEED to send sensor_data.
+        // Only POST when Akamai EXPLICITLY signals NeedsSensor (the
+        // ~0~-1~ suffix). Defaulting to NeedsSensor on Unknown caused
+        // spurious POSTs on Kasada-only sites where Kasada's edge sets
+        // _abck without the standard Akamai trust suffix — the POST then
+        // got Kasada-intercepted and returned 429 + interstitial HTML,
+        // which we mis-attributed to Akamai bot scoring. NeedsSecCpt and
+        // NeedsPixel are also "out of scope" per AbckState docs and
+        // shouldn't trigger a sensor_data POST either.
         let current_state = client
             .akamai_sessions
             .abck_state(&host)
             .await
-            .unwrap_or(akamai::AbckState::NeedsSensor);
+            .unwrap_or(akamai::AbckState::Unknown);
 
-        if current_state == akamai::AbckState::Favorable {
-            return Ok(akamai::AbckState::Favorable);
+        if current_state != akamai::AbckState::NeedsSensor {
+            return Ok(current_state);
         }
 
         // 3. Drain behavioural events from the page.
@@ -1012,11 +1020,37 @@ impl Page {
         // marker get retried with a fresh budget per iteration. The old
         // 50 s default left 35 s on the table for fast sites, which
         // dominated the holistic-sweep wall-clock (96 min for 126 sites).
+        // Host-aware default. Kasada-protected sites run a ~530KB ips.js
+        // VM that completes a SHA-256 PoW + sensor-data POST + token
+        // negotiation; on our V8 this typically takes 25–40 s. Defaulting
+        // to 15 s here cut the run off mid-VM and we never received the
+        // x-kpsdk-ct token. Bump to 45 s for known-Kasada hosts.
+        // Akamai BMP sensor flows are also slow (~20 s budget needed).
+        let host_budget_default_ms = match url::Url::parse(&current_url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .as_deref()
+        {
+            // Kasada-protected (high-tier).
+            Some(h) if h.ends_with("canadagoose.com")
+                || h.ends_with("hyatt.com")
+                || h.ends_with("ticketmaster.com")
+                || h.ends_with("footlocker.com")
+                || h.ends_with("veve.me") => 45_000,
+            // Akamai BMP-protected.
+            Some(h) if h.ends_with("bestbuy.com")
+                || h.ends_with("homedepot.com")
+                || h.ends_with("nike.com")
+                || h.ends_with("adidas.com")
+                || h.ends_with("samsclub.com")
+                || h.ends_with("walmart.com") => 25_000,
+            _ => 15_000,
+        };
         let mut nav_budget = Duration::from_millis(
             std::env::var("BOXIDE_NAV_BUDGET_MS")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(15_000),
+                .unwrap_or(host_budget_default_ms),
         );
         let nav_budget_extend = Duration::from_millis(
             std::env::var("BOXIDE_NAV_BUDGET_EXTEND_MS")
