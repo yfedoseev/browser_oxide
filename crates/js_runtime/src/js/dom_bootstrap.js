@@ -2309,6 +2309,8 @@
             'AnalyserNode', 'BiquadFilterNode', 'DynamicsCompressorNode',
             // Workers
             'Worker', 'BroadcastChannel', 'MessageChannel', 'MessagePort',
+            // Media
+            'MediaRecorder', 'MediaSource', 'MediaSession',
             // HTML element subclasses (mostly empty markers, but their
             // class source still leaks via toString without masking).
             'HTMLDivElement', 'HTMLSpanElement', 'HTMLParagraphElement',

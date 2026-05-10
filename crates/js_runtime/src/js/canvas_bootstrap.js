@@ -358,8 +358,15 @@
         //
         // All values come from the active StealthProfile's gpu_profile entry.
         // Loaded lazily the first time getParameter is called and cached on
-        // the WebGLRenderingContext constructor itself (shared across instances).
-        _loadGpuProfile() {
+        // the WebGLRenderingContext constructor itself (shared across
+        // instances). Implementation note: this is now a STATIC accessor
+        // wrapper around a closure-scoped cache loader so the methods
+        // below don't reference `this._g` — that meant
+        // `getParameter.call(somethingElse)` threw
+        // `TypeError: this._g is not a function` (caught by Kasada's
+        // `esd.wgl` field, decrypted blob 0, 2026-05-10). Real Chrome's
+        // native methods don't have that dependency.
+        static _g() {
             if (WebGLRenderingContext._gpuCache) return WebGLRenderingContext._gpuCache;
             // Defaults — used when no stealth profile is active. Must match
             // stealth::gpu::common_params_desktop() so probes that check for
@@ -434,7 +441,7 @@
             return WebGLRenderingContext._gpuCache;
         }
         getParameter(pname) {
-            const gpu = this._loadGpuProfile();
+            const gpu = WebGLRenderingContext._g();
             // String-valued parameters
             if (pname === 0x1F00) return gpu.vendor;                // VENDOR
             if (pname === 0x1F01) return gpu.renderer;              // RENDERER
@@ -449,7 +456,7 @@
             return null;
         }
         getSupportedExtensions() {
-            const gpu = this._loadGpuProfile();
+            const gpu = WebGLRenderingContext._g();
             // Fallback if the catalog is empty (no profile active).
             // Captured from real Chrome 147 on macOS arm64 — 36 extensions, exact list.
             // See tests/fixtures/chrome147/captured_macos_arm64.json.
@@ -479,7 +486,7 @@
             if (name === "WEBGL_debug_renderer_info") return { UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246 };
             // Any supported extension gets a non-null stub. Fingerprinters
             // call getExtension(name) after getSupportedExtensions to verify.
-            const gpu = this._loadGpuProfile();
+            const gpu = WebGLRenderingContext._g();
             if (gpu.extensions.includes(name)) return {};
             return null;
         }
@@ -501,7 +508,7 @@
         }
         isContextLost() { return false; }
         getShaderPrecisionFormat(shaderType, precisionType) {
-            const gpu = this._loadGpuProfile();
+            const gpu = WebGLRenderingContext._g();
             const key = `${shaderType}:${precisionType}`;
             if (gpu.shaderPrec[key]) return gpu.shaderPrec[key];
             // Fallback for unknown combinations — float-style values (our old behavior)

@@ -4800,6 +4800,61 @@
             };
             globalThis.document.createElement = _patchedCreate;
         }
+
+        // MediaRecorder — Chrome ships this as a real constructor with
+        // a static isTypeSupported(mimeType) for codec capability checks.
+        // Without it, the Kasada `mrs` probe throws
+        // "Cannot read properties of undefined (reading 'isTypeSupported')".
+        // Stub class — produces no recordings but answers capability
+        // probes correctly using the same _supportedTypes set.
+        if (!globalThis.MediaRecorder) {
+            const _mrSupported = new Set([
+                "video/webm", 'video/webm;codecs=vp8', 'video/webm;codecs=vp9',
+                'video/webm;codecs=h264', 'video/webm;codecs="vp8,opus"',
+                'video/webm;codecs="vp9,opus"', 'video/webm;codecs="h264,opus"',
+                "video/x-matroska", 'video/x-matroska;codecs=avc1',
+                "audio/webm", 'audio/webm;codecs=opus', 'audio/webm;codecs=pcm',
+                "audio/mp4", 'audio/mp4;codecs=opus',
+            ]);
+            globalThis.MediaRecorder = class MediaRecorder extends EventTarget {
+                constructor(stream, options = {}) {
+                    super();
+                    this.stream = stream || null;
+                    this.mimeType = (options && options.mimeType) || "video/webm";
+                    this.state = "inactive";
+                    this.audioBitsPerSecond = 0;
+                    this.videoBitsPerSecond = 0;
+                    this.audioBitrateMode = "variable";
+                    this.ondataavailable = null;
+                    this.onstop = null;
+                    this.onpause = null;
+                    this.onresume = null;
+                    this.onstart = null;
+                    this.onerror = null;
+                }
+                start(_timeslice) {
+                    this.state = "recording";
+                    if (typeof this.onstart === 'function') {
+                        try { this.onstart(new Event('start')); } catch (_) {}
+                    }
+                }
+                stop() {
+                    this.state = "inactive";
+                    if (typeof this.onstop === 'function') {
+                        try { this.onstop(new Event('stop')); } catch (_) {}
+                    }
+                }
+                pause() { this.state = "paused"; }
+                resume() { this.state = "recording"; }
+                requestData() {}
+                static isTypeSupported(mimeType) {
+                    if (typeof mimeType !== 'string') return false;
+                    if (_mrSupported.has(mimeType)) return true;
+                    const base = mimeType.split(';')[0].trim();
+                    return _mrSupported.has(base);
+                }
+            };
+        }
     }
 
     // --- Native code masking ---
