@@ -182,6 +182,28 @@ impl HttpClient {
         self.alt_svc_cache.clone()
     }
 
+    /// Connect TCP and apply profile-specific TCP fingerprinting (TTL).
+    pub(crate) async fn connect_tcp(&self, host: &str, port: u16) -> Result<tokio::net::TcpStream, NetError> {
+        let tcp_stream = tcp::connect_via_proxy(
+            host,
+            port,
+            std::time::Duration::from_secs(10),
+            Some(&self.dns_cache),
+            self.proxy.as_ref(),
+        )
+        .await?;
+
+        // Set TCP TTL to match claimed OS (Linux=64, Windows=128, macOS=64)
+        // Advanced anti-bot systems check TCP SYN TTL vs User-Agent. Gap #8.
+        let ttl = match self.profile.os_name.as_str() {
+            "Windows" => 128,
+            _ => 64,
+        };
+        let _ = tcp_stream.set_ttl(ttl);
+
+        Ok(tcp_stream)
+    }
+
     /// Create a new client with the given stealth profile.
     pub fn new(profile: &StealthProfile) -> Result<Self, NetError> {
         let connector = tls::chrome_connector()?;
@@ -570,21 +592,7 @@ impl HttpClient {
     /// Connect TCP+TLS and perform HTTP/2 handshake, returning a sender.
     /// Also spawns the connection driver task.
     async fn connect_h2(&self, host: &str, port: u16) -> Result<SendRequest<Bytes>, NetError> {
-        let tcp_stream = tcp::connect_via_proxy(
-            host,
-            port,
-            std::time::Duration::from_secs(10),
-            Some(&self.dns_cache),
-            self.proxy.as_ref(),
-        )
-        .await?;
-
-        // Set TCP TTL to match claimed OS (Linux=64, Windows=128, macOS=64)
-        let ttl = match self.profile.os_name.as_str() {
-            "Windows" => 128,
-            _ => 64,
-        };
-        let _ = tcp_stream.set_ttl(ttl);
+        let tcp_stream = self.connect_tcp(host, port).await?;
 
         let tls_stream = tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
 
@@ -1135,14 +1143,7 @@ impl HttpClient {
         }
         drop(jar);
 
-        let tcp_stream = tcp::connect_via_proxy(
-            host,
-            port,
-            std::time::Duration::from_secs(10),
-            Some(&self.dns_cache),
-            self.proxy.as_ref(),
-        )
-        .await?;
+        let tcp_stream = self.connect_tcp(host, port).await?;
         let connector = tls::chrome_connector()?;
         let mut tls_stream = tls::connect_tls(&connector, host, tcp_stream).await?;
 
