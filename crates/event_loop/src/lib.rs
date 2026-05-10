@@ -4,6 +4,196 @@
 use js_runtime::BrowserJsRuntime;
 use std::time::{Duration, Instant};
 
+// ---------------------------------------------------------------------------
+// PROFILER (env-gated, near-zero overhead when disabled)
+// ---------------------------------------------------------------------------
+//
+// Enable with `BOXIDE_EVENT_LOOP_PROFILE=1`. When active, every
+// `run_until_idle` invocation captures per-tick wall-clock plus the
+// deno_core RuntimeActivity snapshot (pending async ops, timers, intervals,
+// resources) and dumps a histogram + per-tick CSV to stderr at exit.
+//
+// Used by docs/W5b_SPA_HYDRATION_PROFILE_2026_05_10.md to root-cause SPA
+// hydration timeouts (twitter.com / x.com) where body=69 bytes after the
+// 90s nav budget.
+
+#[derive(Clone, Copy, Default, Debug)]
+struct TickRow {
+    tick: u32,
+    wall_us: u64,           // tick wall-clock duration (microseconds)
+    pending_async_ops: u32, // in-flight ops (op_fetch, op_sleep, ...)
+    pending_timers: u32,    // setTimeout entries
+    pending_intervals: u32, // setInterval entries
+    pending_resources: u32, // open ResourceTable handles
+    timed_out: bool,        // tick hit its 100ms slice ceiling without idling
+}
+
+#[inline(always)]
+fn profile_enabled() -> bool {
+    // Cached after first call — env var lookups are syscalls on every tick
+    // when nested in run_until_idle, which would itself perturb the timing
+    // we're measuring. Read once per process.
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        matches!(
+            std::env::var("BOXIDE_EVENT_LOOP_PROFILE").as_deref(),
+            Ok("1") | Ok("true") | Ok("yes")
+        )
+    })
+}
+
+/// Capture the current pending-task counts from the underlying deno_core
+/// runtime. Cheap-ish: walks 3-4 small Vecs and clones the activity
+/// snapshot. Only called when profiling is enabled.
+fn capture_pending(runtime: &mut BrowserJsRuntime) -> (u32, u32, u32, u32) {
+    use deno_core::stats::{RuntimeActivity, RuntimeActivityStatsFilter};
+    let factory = runtime.inner().runtime_activity_stats_factory();
+    let stats = factory.capture(&RuntimeActivityStatsFilter::all());
+    let snap = stats.dump();
+    let mut ops = 0u32;
+    let mut timers = 0u32;
+    let mut intervals = 0u32;
+    let mut resources = 0u32;
+    for a in snap.active.iter() {
+        match a {
+            RuntimeActivity::AsyncOp(..) => ops += 1,
+            RuntimeActivity::Timer(..) => timers += 1,
+            RuntimeActivity::Interval(..) => intervals += 1,
+            RuntimeActivity::Resource(..) => resources += 1,
+        }
+    }
+    (ops, timers, intervals, resources)
+}
+
+/// Pretty-print a sequence of `TickRow`s to stderr as a profile dump.
+/// Sections: header, top-N slowest ticks, growth check (quadratic
+/// detector), and CSV tail for offline analysis.
+fn dump_profile(label: &str, rows: &[TickRow], total: Duration, reason: IdleReason) {
+    use std::io::Write;
+    let stderr = std::io::stderr();
+    let mut w = stderr.lock();
+
+    let _ = writeln!(w, "\n========== BOXIDE EVENT-LOOP PROFILE ==========");
+    let _ = writeln!(w, "label              : {}", label);
+    let _ = writeln!(w, "reason             : {:?}", reason);
+    let _ = writeln!(w, "total wall (ms)    : {}", total.as_millis());
+    let _ = writeln!(w, "ticks              : {}", rows.len());
+    if rows.is_empty() {
+        let _ = writeln!(w, "(no ticks recorded — instantaneous idle)");
+        let _ = writeln!(w, "================================================\n");
+        return;
+    }
+
+    let total_us: u64 = rows.iter().map(|r| r.wall_us).sum();
+    let timed_out: usize = rows.iter().filter(|r| r.timed_out).count();
+    let max_tick = rows.iter().max_by_key(|r| r.wall_us).copied().unwrap();
+    let avg_us = total_us / rows.len() as u64;
+
+    let _ = writeln!(w, "total tick us      : {}", total_us);
+    let _ = writeln!(w, "avg tick us        : {}", avg_us);
+    let _ = writeln!(w, "ticks-timed-out    : {}", timed_out);
+    let _ = writeln!(
+        w,
+        "max tick           : #{} {}us pending(ops={}, timers={}, intervals={}, res={})",
+        max_tick.tick,
+        max_tick.wall_us,
+        max_tick.pending_async_ops,
+        max_tick.pending_timers,
+        max_tick.pending_intervals,
+        max_tick.pending_resources,
+    );
+
+    // Top-10 slowest ticks
+    let mut sorted = rows.to_vec();
+    sorted.sort_unstable_by_key(|r| std::cmp::Reverse(r.wall_us));
+    let _ = writeln!(w, "\n--- top-10 slowest ticks ---");
+    let _ = writeln!(
+        w,
+        "  tick   wall_us  ops  timers  intervals  res  timed_out"
+    );
+    for r in sorted.iter().take(10) {
+        let _ = writeln!(
+            w,
+            "  {:5}  {:>7}  {:>3}  {:>6}  {:>9}  {:>3}  {}",
+            r.tick,
+            r.wall_us,
+            r.pending_async_ops,
+            r.pending_timers,
+            r.pending_intervals,
+            r.pending_resources,
+            r.timed_out,
+        );
+    }
+
+    // Pending-task histogram across all ticks
+    let max_ops = rows.iter().map(|r| r.pending_async_ops).max().unwrap_or(0);
+    let max_timers = rows.iter().map(|r| r.pending_timers).max().unwrap_or(0);
+    let max_intervals = rows.iter().map(|r| r.pending_intervals).max().unwrap_or(0);
+    let final_row = rows.last().copied().unwrap();
+    let _ = writeln!(w, "\n--- pending-task envelope ---");
+    let _ = writeln!(w, "  max async-ops   : {}", max_ops);
+    let _ = writeln!(w, "  max timers      : {}", max_timers);
+    let _ = writeln!(w, "  max intervals   : {}", max_intervals);
+    let _ = writeln!(
+        w,
+        "  final pending   : ops={} timers={} intervals={} res={}",
+        final_row.pending_async_ops,
+        final_row.pending_timers,
+        final_row.pending_intervals,
+        final_row.pending_resources,
+    );
+
+    // Quadratic / monotonic-growth detector. We chunk into quartiles and
+    // compare avg pending counts per quartile — if Q4 > 4 × Q1 it's a
+    // strong sign of unbounded accumulation (Promise.then bombs,
+    // MutationObserver flooding, runaway IntersectionObserver, ...).
+    let n = rows.len();
+    if n >= 8 {
+        let q = n / 4;
+        let avg_ops = |slice: &[TickRow]| -> f64 {
+            slice.iter().map(|r| r.pending_async_ops as u64).sum::<u64>() as f64
+                / slice.len() as f64
+        };
+        let avg_t = |slice: &[TickRow]| -> f64 {
+            slice.iter().map(|r| r.pending_timers as u64).sum::<u64>() as f64
+                / slice.len() as f64
+        };
+        let q1_ops = avg_ops(&rows[..q]);
+        let q4_ops = avg_ops(&rows[n - q..]);
+        let q1_t = avg_t(&rows[..q]);
+        let q4_t = avg_t(&rows[n - q..]);
+        let _ = writeln!(w, "\n--- growth detector (quartile averages) ---");
+        let _ = writeln!(w, "  ops    Q1={:.1}  Q4={:.1}  ratio={:.2}x", q1_ops, q4_ops, if q1_ops > 0.0 { q4_ops / q1_ops } else { 0.0 });
+        let _ = writeln!(w, "  timers Q1={:.1}  Q4={:.1}  ratio={:.2}x", q1_t, q4_t, if q1_t > 0.0 { q4_t / q1_t } else { 0.0 });
+        if (q1_ops > 0.0 && q4_ops / q1_ops > 4.0)
+            || (q1_t > 0.0 && q4_t / q1_t > 4.0)
+        {
+            let _ = writeln!(
+                w,
+                "  WARNING: pending-task count > 4x growth Q1→Q4 — likely runaway scheduler"
+            );
+        }
+    }
+
+    // CSV tail for offline crunching (paste into a spreadsheet / Pandas).
+    let _ = writeln!(w, "\n--- per-tick CSV (tick,wall_us,ops,timers,intervals,res,timed_out) ---");
+    for r in rows.iter() {
+        let _ = writeln!(
+            w,
+            "EL-CSV,{},{},{},{},{},{},{}",
+            r.tick,
+            r.wall_us,
+            r.pending_async_ops,
+            r.pending_timers,
+            r.pending_intervals,
+            r.pending_resources,
+            if r.timed_out { 1 } else { 0 },
+        );
+    }
+    let _ = writeln!(w, "================================================\n");
+}
+
 /// The browser event loop. Drives JS execution, timers, and async ops.
 pub struct BrowserEventLoop {
     runtime: BrowserJsRuntime,
@@ -52,10 +242,21 @@ impl BrowserEventLoop {
         // navigation iteration.
         const NAV_TAIL: Duration = Duration::from_millis(150);
 
-        loop {
+        // Profiling state — only allocates when the env var is set, so
+        // production overhead is one OnceLock-cached load + a branch.
+        let profiling = profile_enabled();
+        let profile_start = if profiling { Some(Instant::now()) } else { None };
+        let mut rows: Vec<TickRow> = if profiling {
+            Vec::with_capacity(2048)
+        } else {
+            Vec::new()
+        };
+        let mut tick_idx: u32 = 0;
+
+        let outcome: Result<IdleReason, deno_core::error::AnyError> = loop {
             // Check timeout
             if Instant::now() >= deadline {
-                return Ok(IdleReason::Timeout);
+                break Ok(IdleReason::Timeout);
             }
 
             // JS-triggered navigation? Drain a short tail and exit.
@@ -68,28 +269,63 @@ impl BrowserEventLoop {
                     )
                     .await;
                 }
-                return Ok(IdleReason::AllWorkDone);
+                break Ok(IdleReason::AllWorkDone);
             }
 
             // Run one event loop tick with a short timeout
             let remaining = deadline.saturating_duration_since(Instant::now());
             let tick_timeout = remaining.min(Duration::from_millis(100));
 
+            let tick_t0 = if profiling { Some(Instant::now()) } else { None };
             let result = tokio::time::timeout(tick_timeout, self.runtime.run_event_loop()).await;
+
+            // Capture pending-task snapshot AFTER the tick (so the row
+            // reflects what's still in-flight). Skipped when profiling
+            // disabled — capture_pending walks several Vecs and dumps the
+            // activity snapshot, ~10-50us per call on x.com-class loads.
+            if profiling {
+                let elapsed = tick_t0.unwrap().elapsed().as_micros() as u64;
+                let (ops, timers, intervals, resources) = capture_pending(&mut self.runtime);
+                rows.push(TickRow {
+                    tick: tick_idx,
+                    wall_us: elapsed,
+                    pending_async_ops: ops,
+                    pending_timers: timers,
+                    pending_intervals: intervals,
+                    pending_resources: resources,
+                    timed_out: matches!(result, Err(_)),
+                });
+                tick_idx = tick_idx.wrapping_add(1);
+            }
 
             match result {
                 Ok(Ok(())) => {
                     // Event loop completed all work
-                    return Ok(IdleReason::AllWorkDone);
+                    break Ok(IdleReason::AllWorkDone);
                 }
-                Ok(Err(e)) => return Err(e),
+                Ok(Err(e)) => break Err(e),
                 Err(_timeout) => {
                     // Tick timed out — event loop still has pending work.
                     // Continue looping (and re-check nav_pending at the top).
                     continue;
                 }
             }
+        };
+
+        if profiling {
+            let total = profile_start
+                .map(|s| s.elapsed())
+                .unwrap_or_default();
+            let label = std::env::var("BOXIDE_EVENT_LOOP_PROFILE_LABEL")
+                .unwrap_or_else(|_| "run_until_idle".to_string());
+            let reason = match &outcome {
+                Ok(r) => *r,
+                Err(_) => IdleReason::Timeout, // best-effort tag
+            };
+            dump_profile(&label, &rows, total, reason);
         }
+
+        outcome
     }
 
     /// Execute a script in the runtime.

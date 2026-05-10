@@ -75,6 +75,17 @@ pub fn get_tenant_settings(host: &str) -> Option<TenantSettings> {
             tenant_seed: 3_224_113,
             post_path: "/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B",
         })
+    } else if host.contains("homedepot.com") {
+        // Captured 2026-05-10 via Playwright MCP (W17 in PLAN_2026_05_10).
+        // Real Chrome 147 from a residential macOS profile navigates
+        // homedepot.com → Akamai sensor_data POST goes to the obfuscated
+        // path below with `{"sensor_data":"3;0;1;0;3420213;..."}` body.
+        // Tenant seed (field 5) = 3_420_213. Verified across 2 captured
+        // POSTs in the same session.
+        Some(TenantSettings {
+            tenant_seed: 3_420_213,
+            post_path: "/R8CjSca6_7i6/TepMG7/yyZyaB/1z5kQJkkNz4V0tS1fY/IjUxRBpiDAI/KRkJCEx/PelsB",
+        })
     } else {
         // Per-tenant config table is intentionally minimal. Adding a host
         // here without its real `tenant_seed` + obfuscated `post_path` is

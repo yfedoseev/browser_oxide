@@ -253,7 +253,8 @@ fn chrome_headers_impl(
     ));
 
     if include_high_entropy {
-        // High-entropy hints
+        // High-entropy hints. Order matches Chrome 147's actual emission
+        // order observed via tls.peet.ws + browserleaks.com captures.
         headers.push((
             "sec-ch-ua-arch".to_string(),
             format!("\"{}\"", cpu_arch_for(&profile.platform)),
@@ -262,6 +263,15 @@ fn chrome_headers_impl(
         headers.push((
             "sec-ch-ua-full-version-list".to_string(),
             build_sec_ch_ua_full_version_list(profile),
+        ));
+        // sec-ch-ua-full-version (singular) is deprecated in favor of
+        // -full-version-list, but Cloudflare's Managed Challenge still
+        // lists it in critical-ch. Send it for compatibility — Chrome
+        // 147 still emits it when servers ask. Verified via
+        // `curl -sI https://www.udemy.com/` 2026-05-10.
+        headers.push((
+            "sec-ch-ua-full-version".to_string(),
+            format!("\"{}\"", profile.browser_version),
         ));
         headers.push(("sec-ch-ua-model".to_string(), "\"\"".to_string()));
         headers.push((
@@ -272,6 +282,12 @@ fn chrome_headers_impl(
             ),
         ));
         headers.push(("sec-ch-ua-wow64".to_string(), "?0".to_string()));
+        // sec-ch-device-memory — DataDome's accept-ch demands it
+        // (yelp/leboncoin/etsy/wsj). Chrome 147 reports a quantized
+        // value (typically "8" for ≥8GB systems, "4" for 4GB).
+        // Per the W3 spec the value is a number (0.25, 0.5, 1, 2, 4, 8).
+        let dm = (profile.device_memory as f64).clamp(0.25, 8.0);
+        headers.push(("sec-ch-device-memory".to_string(), format!("{dm}")));
     }
 
     // 5. sec-fetch headers

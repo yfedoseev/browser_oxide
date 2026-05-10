@@ -4857,6 +4857,116 @@
         }
     }
 
+    // ================================================================
+    // Stubs for Web APIs that Kasada/DataDome probe (W4 fixes per
+    // docs/W4a_KASADA_PROBE_IDENTIFICATION_2026_05_10.md). All defined
+    // as globalThis classes + (where applicable) navigator/window
+    // accessors. These return defined-but-functionally-stub objects
+    // so antibot probes that read `.SOME_PROPERTY` get a non-undefined
+    // receiver.
+    // ================================================================
+
+    // PressureObserver / PressureRecord — Compute Pressure API
+    // (https://w3c.github.io/compute-pressure/). Chrome 125+. Probed by
+    // Kasada esd.cpt.
+    if (!globalThis.PressureObserver) {
+        class PressureRecord {
+            constructor(source = 'cpu', state = 'nominal') {
+                this.source = source;
+                this.state = state;
+                this.time = performance.now();
+            }
+            toJSON() { return { source: this.source, state: this.state, time: this.time }; }
+        }
+        Object.defineProperty(PressureRecord.prototype, Symbol.toStringTag, {
+            value: 'PressureRecord', configurable: true,
+        });
+        globalThis.PressureRecord = PressureRecord;
+
+        class PressureObserver {
+            constructor(callback, options = {}) {
+                this._callback = callback;
+                this._options = options;
+                this._observing = new Set();
+            }
+            observe(source, _options) {
+                this._observing.add(source);
+                return Promise.resolve();
+            }
+            unobserve(source) { this._observing.delete(source); }
+            disconnect() { this._observing.clear(); }
+            takeRecords() { return []; }
+            static knownSources = ['cpu'];
+        }
+        Object.defineProperty(PressureObserver.prototype, Symbol.toStringTag, {
+            value: 'PressureObserver', configurable: true,
+        });
+        globalThis.PressureObserver = PressureObserver;
+    }
+
+    // MediaSourceHandle — wraps MediaSource for transfer to Worker.
+    // (https://w3c.github.io/media-source/#mediasourcehandle-interface).
+    // Probed by Kasada smc.o. Stub class with toString tag.
+    if (!globalThis.MediaSourceHandle) {
+        class MediaSourceHandle {}
+        Object.defineProperty(MediaSourceHandle.prototype, Symbol.toStringTag, {
+            value: 'MediaSourceHandle', configurable: true,
+        });
+        globalThis.MediaSourceHandle = MediaSourceHandle;
+    }
+
+    // DocumentPictureInPicture — Document Picture-in-Picture API
+    // (https://wicg.github.io/document-picture-in-picture/). Chrome 116+.
+    // Probed by Kasada dpv. Singleton on window.
+    if (!globalThis.DocumentPictureInPicture) {
+        class DocumentPictureInPicture extends EventTarget {
+            constructor() { super(); this._window = null; }
+            get window() { return this._window; }
+            requestWindow(_options) {
+                // We don't actually open a PiP window in headless. Reject
+                // to match Chrome's headless behavior.
+                return Promise.reject(new DOMException(
+                    'Document PiP requires a user gesture',
+                    'NotAllowedError'
+                ));
+            }
+        }
+        Object.defineProperty(DocumentPictureInPicture.prototype, Symbol.toStringTag, {
+            value: 'DocumentPictureInPicture', configurable: true,
+        });
+        globalThis.DocumentPictureInPicture = DocumentPictureInPicture;
+        const _docPip = new DocumentPictureInPicture();
+        Object.defineProperty(globalThis, 'documentPictureInPicture', {
+            get: () => _docPip, configurable: true, enumerable: true,
+        });
+    }
+
+    // navigator.userActivation — UserActivation interface
+    // (https://html.spec.whatwg.org/multipage/interaction.html#useractivation).
+    // Reports whether the user has interacted with the page (gestures).
+    // Probed by Kasada bot1225 / various others.
+    if (typeof globalThis.UserActivation === 'undefined') {
+        class UserActivation {
+            constructor() {
+                this._hasBeenActive = false;
+                this._isActive = false;
+            }
+            get hasBeenActive() { return this._hasBeenActive; }
+            get isActive() { return this._isActive; }
+        }
+        Object.defineProperty(UserActivation.prototype, Symbol.toStringTag, {
+            value: 'UserActivation', configurable: true,
+        });
+        globalThis.UserActivation = UserActivation;
+        const _userAct = new UserActivation();
+        // Wire onto navigator (and Navigator.prototype when accessor-defined).
+        try {
+            Object.defineProperty(navigator, 'userActivation', {
+                get: () => _userAct, configurable: true, enumerable: true,
+            });
+        } catch (_e) {}
+    }
+
     // --- Native code masking ---
     // Anti-bot detectors check Function.prototype.toString() for polyfilled APIs.
     // Real Chrome returns "function X() { [native code] }" for built-in functions.

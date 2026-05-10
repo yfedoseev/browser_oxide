@@ -331,7 +331,10 @@ impl HttpClient {
     /// include the full high-entropy Client Hints set. Returns `true`
     /// if this is a new origin for which we just learned Accept-CH.
     async fn learn_accept_ch(&self, host: &str, headers: &HashMap<String, String>) -> bool {
-        if headers.keys().any(|k| k.eq_ignore_ascii_case("accept-ch")) {
+        if headers.keys().any(|k| {
+            let k = k.to_ascii_lowercase();
+            k == "accept-ch" || k == "critical-ch"
+        }) {
             let mut origins = self.accept_ch_origins.lock().await;
             if !origins.contains(host) {
                 origins.insert(host.to_string());
@@ -339,6 +342,17 @@ impl HttpClient {
             }
         }
         false
+    }
+
+    /// Per W3 Client Hints Reliability spec
+    /// (https://wicg.github.io/client-hints-infrastructure/#critical-ch),
+    /// when a server sends `Critical-CH`, the browser MUST retry the
+    /// request with the listed hints BEFORE rendering the response.
+    /// Without this retry, the server treats the client as non-conformant
+    /// (Cloudflare Managed Challenge serves the captcha; DataDome
+    /// returns 403; Akamai BMP downgrades).
+    fn needs_critical_ch_retry(headers: &HashMap<String, String>) -> bool {
+        headers.keys().any(|k| k.eq_ignore_ascii_case("critical-ch"))
     }
 
     /// Learn Akamai web `_abck` state from response Set-Cookies. T3A.
@@ -921,6 +935,16 @@ impl HttpClient {
 
         // Store Set-Cookie from response into jar
         self.store_set_cookies(&parsed, &response.set_cookies).await;
+
+        // Critical-CH per W3 spec: when the server demands immediate-retry
+        // hints AND we weren't already sending full CH, retry the same
+        // URL once with the high-entropy hints. Cloudflare Managed
+        // Challenge (udemy.com) and DataDome (yelp/leboncoin/etsy/wsj)
+        // both send Critical-CH; without an immediate retry they treat
+        // us as non-Chrome and serve the captcha. One-shot to avoid loops.
+        if !accept_ch_upgraded && Self::needs_critical_ch_retry(&response.headers) {
+            return Box::pin(self.get_with_headers(url, extra_headers)).await;
+        }
 
         let mut final_response = response;
         final_response.accept_ch_upgrade = upgrade;
