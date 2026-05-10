@@ -4987,3 +4987,194 @@ async fn fingerprint_probe_vs_chrome() {
     // Just ensure it ran
     assert!(result.starts_with('{'), "expected JSON, got: {}", &result[..100.min(result.len())]);
 }
+
+/// W6 — DataDome diagnostic capture. Mirror of kasada_error_blob_capture
+/// for DataDome-protected sites. DataDome's flow per
+/// docs/RESEARCH_DATADOME_BYPASS_2026_05_10.md:
+///   1. Page loads `<script src="//js.datadome.co/tags.js?...">` (the
+///      bootstrap with the obfuscated probe code).
+///   2. Bootstrap collects fingerprint+behavioural data, encrypts via
+///      dual-XOR-PRNG over a kv buffer, and POSTs to
+///      `https://api-js.datadome.co/js/?dd=<obfuscated_payload>`.
+///   3. Server responds with `Set-Cookie: datadome=...` (1y TTL,
+///      IP-bound) on success, or 302 to `geo.captcha-delivery.com/...`
+///      on failure.
+///
+/// This test patches XHR + fetch + TextEncoder.encode to capture every
+/// request/response involving datadome.co or captcha-delivery.com,
+/// stashing them as base64 globals for offline analysis.
+#[tokio::test]
+#[ignore = "network: datadome diagnostic capture"]
+async fn datadome_diagnostic_capture() {
+    use browser::Page;
+    use std::time::Duration;
+
+    let capture_init = r#"
+        (function() {
+            globalThis.__ddCapture = [];
+
+            const _isDdUrl = (u) => {
+                if (!u || typeof u !== 'string') return false;
+                return u.includes('datadome.co')
+                    || u.includes('captcha-delivery.com')
+                    || u.includes('/js/?dd=');
+            };
+
+            // Intercept TextEncoder.encode — catch the cleartext probe
+            // payload before it gets encrypted+base64'd.
+            const oldEncode = TextEncoder.prototype.encode;
+            TextEncoder.prototype.encode = function(str) {
+                if (typeof str === 'string' && str.length > 100) {
+                    try {
+                        globalThis.__ddCapture.push({
+                            kind: 'raw-text',
+                            len: str.length,
+                            b64: btoa(unescape(encodeURIComponent(str.substring(0, 8000)))),
+                            preview: str.substring(0, 200),
+                        });
+                    } catch (e) {
+                        globalThis.__ddCapture.push({ kind: 'err-encode', err: String(e) });
+                    }
+                }
+                return oldEncode.apply(this, arguments);
+            };
+
+            // Intercept XHR (DataDome often uses this for the sensor POST)
+            const oldOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this._ddUrl = url;
+                this._ddMethod = method;
+                return oldOpen.apply(this, arguments);
+            };
+            const oldSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.send = function(body) {
+                if (this._ddUrl && _isDdUrl(this._ddUrl)) {
+                    try {
+                        globalThis.__ddCapture.push({
+                            kind: 'xhr',
+                            url: this._ddUrl.substring(0, 500),
+                            method: this._ddMethod || 'GET',
+                            len: body ? (body.length || body.byteLength || 0) : 0,
+                            b64: body && typeof body === 'string' ? btoa(body.substring(0, 8000)) : '',
+                        });
+                    } catch (e) {
+                        globalThis.__ddCapture.push({ kind: 'err-xhr', err: String(e) });
+                    }
+                }
+                return oldSend.apply(this, arguments);
+            };
+
+            // Intercept fetch
+            const _origFetch = globalThis.fetch;
+            globalThis.fetch = function(input, init) {
+                try {
+                    const url = typeof input === 'string' ? input : (input && input.url) || '';
+                    if (_isDdUrl(url)) {
+                        const body = init && init.body;
+                        let snapshot = {
+                            kind: 'fetch',
+                            url: url.substring(0, 500),
+                            method: (init && init.method) || 'GET',
+                        };
+                        if (typeof body === 'string') {
+                            snapshot.body_kind = 'string';
+                            snapshot.len = body.length;
+                            snapshot.b64 = btoa(body.substring(0, 8000));
+                        } else if (body instanceof ArrayBuffer || body instanceof Uint8Array) {
+                            const u8 = body instanceof ArrayBuffer ? new Uint8Array(body) : body;
+                            const chunks = [];
+                            for (let i = 0; i < u8.length && i < 8000; i += 8192) {
+                                chunks.push(String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + 8192, 8000))));
+                            }
+                            snapshot.body_kind = 'binary';
+                            snapshot.len = u8.length;
+                            snapshot.b64 = btoa(chunks.join(''));
+                        } else if (body) {
+                            snapshot.body_kind = typeof body;
+                            snapshot.len = body.size || 0;
+                        }
+                        globalThis.__ddCapture.push(snapshot);
+                    }
+                } catch (e) {
+                    globalThis.__ddCapture.push({ kind: 'err-fetch', err: String(e) });
+                }
+                return _origFetch.apply(this, arguments);
+            };
+        })();
+    "#;
+
+    // yelp is the simplest of the 4 DataDome-protected sites in our
+    // sweep — no paywall (vs wsj), no auth requirement (vs leboncoin
+    // ad-posting), simpler page (vs etsy product index).
+    let target_url = "https://www.yelp.com/";
+    println!("\n=== DataDome diagnostic capture: {target_url} ===\n");
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(120),
+        Page::navigate_with_init(
+            target_url,
+            stealth::presets::chrome_130_macos(),
+            2,
+            vec![capture_init.to_string()],
+        ),
+    )
+    .await;
+
+    match page {
+        Ok(Ok(mut p)) => {
+            // Pump deferred operations (fetch handlers fire asynchronously).
+            for _ in 0..30 {
+                let _ = p.evaluate("0");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let n = p
+                .evaluate("(globalThis.__ddCapture || []).length")
+                .unwrap_or_default()
+                .trim_matches('"')
+                .parse::<usize>()
+                .unwrap_or(0);
+            println!("\n=== DataDome capture: {n} entries ===");
+
+            // Page final state
+            let title = p.title();
+            let url = p.url().to_string();
+            let content_len = p.content().len();
+            // Did we get a `datadome` cookie? Indirect check via
+            // document.cookie — Page-level cookie jar is the truth, but
+            // this is what the JS would see.
+            let cookie = p.evaluate("document.cookie || ''")
+                .unwrap_or_default();
+            println!("page final: title={title:?} url={url} content_len={content_len}");
+            println!("page cookie: {}", cookie.trim_matches('"').chars().take(500).collect::<String>());
+
+            for i in 0..n {
+                let kind = p.evaluate(&format!("globalThis.__ddCapture[{i}].kind || ''"))
+                    .unwrap_or_default();
+                let url = p.evaluate(&format!("globalThis.__ddCapture[{i}].url || ''"))
+                    .unwrap_or_default();
+                let len = p.evaluate(&format!("globalThis.__ddCapture[{i}].len || 0"))
+                    .unwrap_or_default();
+                let b64 = p.evaluate(&format!("globalThis.__ddCapture[{i}].b64 || ''"))
+                    .unwrap_or_default();
+                let preview = p.evaluate(&format!("globalThis.__ddCapture[{i}].preview || ''"))
+                    .unwrap_or_default();
+                let kind = kind.trim_matches('"');
+                let url = url.trim_matches('"');
+                let len = len.trim_matches('"');
+                let b64 = b64.trim_matches('"');
+                let preview = preview.trim_matches('"');
+                println!("--- entry #{i}: kind={kind} len={len} url={url} ---");
+                if !preview.is_empty() {
+                    println!("    preview: {}", preview.chars().take(200).collect::<String>());
+                }
+                if !b64.is_empty() {
+                    let path = format!("datadome_blob_{i}.b64");
+                    std::fs::write(&path, b64).ok();
+                    println!("    wrote {path}");
+                }
+            }
+        }
+        Ok(Err(e)) => println!("page err: {e}"),
+        Err(_) => println!("timeout"),
+    }
+}

@@ -181,12 +181,21 @@ impl Page {
         // False positives on diagnostic sites (tls.peet.ws) trip infinite reloads.
         (body.contains("ips.js") && body.contains("kpsdk"))
             || body.contains("checkpoint/interstitial") // Cloudflare
+            || body.contains("/cdn-cgi/challenge-platform/") // Cloudflare Managed Challenge
             || (body.contains("_abck") && body.contains("sensor_data")) // Akamai
             || body.contains("bm_sz")
             || body.contains("px-captcha") // PerimeterX
             || body.contains("human security")
             || body.contains("smartcaptcha")
             || body.contains("checkbox-captcha")
+            // DataDome — geo.captcha-delivery.com is the captcha iframe src;
+            // dd-script.min.js / dd_engagement_check are bootstrap markers;
+            // server header `x-datadome: protected` is also a tell but lives
+            // in headers not body. Caught yelp/etsy/leboncoin/wsj per the
+            // 2026-05-10 holistic sweep.
+            || body.contains("captcha-delivery.com")
+            || body.contains("dd-script")
+            || body.contains("dd_engagement")
     }
 
     /// T3A-A5: Autonomous Akamai bypass. Detects `_abck` challenge state,
@@ -1020,12 +1029,16 @@ impl Page {
         // marker get retried with a fresh budget per iteration. The old
         // 50 s default left 35 s on the table for fast sites, which
         // dominated the holistic-sweep wall-clock (96 min for 126 sites).
-        // Host-aware default. Kasada-protected sites run a ~530KB ips.js
-        // VM that completes a SHA-256 PoW + sensor-data POST + token
-        // negotiation; on our V8 this typically takes 25–40 s. Defaulting
-        // to 15 s here cut the run off mid-VM and we never received the
-        // x-kpsdk-ct token. Bump to 45 s for known-Kasada hosts.
-        // Akamai BMP sensor flows are also slow (~20 s budget needed).
+        // Host-aware default. Three classes of sites need more than the
+        // 15s baseline:
+        //   - Kasada-protected: ~530KB ips.js VM that runs PoW + sensor
+        //     POST + token negotiation; 25-40s on our V8. Bump to 45s.
+        //   - Akamai BMP-protected: sensor_data flow ~20s. Bump to 25s.
+        //   - SPA shells (twitter, x.com, hulu, yandex.ru, h&m,
+        //     khanacademy): main bundle is 1-5MB; React/Vue hydration
+        //     in our V8 takes 60-90s vs ~5s on headed Chrome. Without
+        //     the bump, body=0/69 bytes after deadline. Per W5 Tier A
+        //     in PLAN_2026_05_10_UPDATE.md.
         let host_budget_default_ms = match url::Url::parse(&current_url)
             .ok()
             .and_then(|u| u.host_str().map(str::to_string))
@@ -1037,6 +1050,14 @@ impl Page {
                 || h.ends_with("ticketmaster.com")
                 || h.ends_with("footlocker.com")
                 || h.ends_with("veve.me") => 45_000,
+            // SPA shells — heavy React/Vue hydration.
+            Some(h) if h.ends_with("twitter.com")
+                || h.ends_with("x.com")
+                || h.ends_with("hulu.com")
+                || h.ends_with("yandex.ru")
+                || h.ends_with("hm.com")
+                || h.ends_with("khanacademy.org")
+                || h.ends_with("spotify.com") => 90_000,
             // Akamai BMP-protected.
             Some(h) if h.ends_with("bestbuy.com")
                 || h.ends_with("homedepot.com")
