@@ -30,25 +30,15 @@ impl CanvasState {
 #[op2(fast)]
 #[smi]
 pub fn op_canvas_create(
-    #[state] state: &mut deno_core::OpState,
+    #[state] state: &mut CanvasState,
     #[smi] width: i32,
     #[smi] height: i32,
     #[string] os_name: String,
+    #[bigint] canvas_seed: u64,
 ) -> i32 {
-    let (seed, os) = {
-        let dom = state.borrow::<crate::state::DomState>();
-        let profile = dom.stealth_profile.as_ref();
-        (
-            profile.map(|p| p.canvas_seed).unwrap_or(0),
-            profile.map(|p| p.os_name.clone()).unwrap_or(os_name),
-        )
-    };
-
-    let mut state = state.borrow_mut::<CanvasState>();
-    tracing::debug!(width = width, height = height, os_name = %os, "Canvas created");
     let id = state.next_id;
     state.next_id += 1;
-    if let Some(canvas) = Canvas2D::new(width.max(1) as u32, height.max(1) as u32, os, seed) {
+    if let Some(canvas) = Canvas2D::new(width.max(1) as u32, height.max(1) as u32, os_name, canvas_seed) {
         state.canvases.insert(id, canvas);
         id
     } else {

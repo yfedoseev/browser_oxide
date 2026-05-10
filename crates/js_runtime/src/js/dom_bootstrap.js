@@ -1117,7 +1117,14 @@
     });
     HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
         if (!this._canvasId) {
-            this._canvasId = ops.op_canvas_create(this.width, this.height);
+            let osName = "Linux", canvasSeed = 0n;
+            try {
+                if (ops.op_has_stealth_profile && ops.op_has_stealth_profile()) {
+                    osName = ops.op_get_profile_value("os_name") || "Linux";
+                    canvasSeed = BigInt(ops.op_get_profile_value("canvas_seed") || "0");
+                }
+            } catch (_e) { /* fall back to defaults */ }
+            this._canvasId = ops.op_canvas_create(this.width, this.height, osName, canvasSeed);
         }
         return ops.op_canvas_to_data_url(this._canvasId);
     };
