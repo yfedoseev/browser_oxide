@@ -4,6 +4,7 @@
 //!
 //! Parses CSS component values into typed Rust structs for every known property.
 
+pub mod calc;
 pub mod error;
 pub mod parse;
 pub mod property;

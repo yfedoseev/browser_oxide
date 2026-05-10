@@ -956,6 +956,20 @@ fn try_length_percentage(cv: &ComponentValue<'_>) -> Option<LengthPercentage> {
             kind: TokenKind::Number { value, .. },
             ..
         }) if *value == 0.0 => Some(LengthPercentage::Length(Length::Zero)),
+        // calc(), min(), max(), clamp(), and the CSS Values 4 math
+        // functions. The parser builds a CalcExpr tree; resolution to
+        // a concrete pixel value happens at computed-style time via
+        // CalcExpr::evaluate(&CalcContext). Carrying the unresolved
+        // tree means the parsed property value is correctly populated
+        // even when the math depends on layout context (vw/em/etc.) —
+        // and getComputedStyle output stays correct under the Kasada
+        // calc-fingerprint probe.
+        ComponentValue::Function(f) => {
+            match crate::calc::parse_math_function(f) {
+                Ok(Some(expr)) => Some(LengthPercentage::Calc(Box::new(expr))),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
