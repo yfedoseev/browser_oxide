@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::Notify;
 
 // ============================================================================
 // BlobRegistry — backs URL.createObjectURL / .revokeObjectURL / blob: loader.
@@ -173,6 +174,11 @@ struct WorkerSlot {
     to_worker: Sender<String>,
     from_worker: Receiver<String>,
     terminate: Arc<AtomicBool>,
+    /// Notified by the worker thread after sending each message AND on
+    /// terminate. Used by `op_worker_await_message` to wake without
+    /// polling. Drives the W5b-deep fix: SPA pages stop pinning the
+    /// V8 event loop with a 5ms setInterval.
+    notify_parent: Arc<Notify>,
 }
 
 fn worker_registry() -> &'static Mutex<HashMap<u32, WorkerSlot>> {
@@ -189,6 +195,10 @@ static NEXT_WORKER_ID: AtomicU32 = AtomicU32::new(1);
 struct WorkerSelf {
     to_parent: Sender<String>,
     from_parent: Receiver<String>,
+    /// Same Arc as the parent's `WorkerSlot.notify_parent`. Worker
+    /// signals after every send so the parent's awaiting promise wakes
+    /// up without polling.
+    notify_parent: Arc<Notify>,
 }
 
 thread_local! {
@@ -217,6 +227,7 @@ pub fn op_worker_spawn(
     let (to_worker_tx, to_worker_rx) = std::sync::mpsc::channel::<String>();
     let (to_parent_tx, to_parent_rx) = std::sync::mpsc::channel::<String>();
     let terminate = Arc::new(AtomicBool::new(false));
+    let notify_parent = Arc::new(Notify::new());
     let worker_id = NEXT_WORKER_ID.fetch_add(1, Ordering::Relaxed);
 
     {
@@ -227,6 +238,7 @@ pub fn op_worker_spawn(
                 to_worker: to_worker_tx,
                 from_worker: to_parent_rx,
                 terminate: terminate.clone(),
+                notify_parent: notify_parent.clone(),
             },
         );
     }
@@ -245,6 +257,7 @@ pub fn op_worker_spawn(
                 *w.borrow_mut() = Some(WorkerSelf {
                     to_parent: to_parent_tx,
                     from_parent: to_worker_rx,
+                    notify_parent: notify_parent.clone(),
                 });
             });
 
@@ -370,8 +383,65 @@ pub fn op_worker_terminate(#[smi] worker_id: i32) {
     let mut reg = worker_registry().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(slot) = reg.get(&(worker_id as u32)) {
         slot.terminate.store(true, Ordering::Release);
+        // Wake any in-flight `op_worker_await_message` so it can return
+        // empty and the JS-side pump can stop chaining.
+        slot.notify_parent.notify_waiters();
     }
     reg.remove(&(worker_id as u32));
+}
+
+/// W5b-deep: async op that returns the next worker→parent message,
+/// awaiting on a tokio Notify rather than polling. Returns "" when the
+/// worker has terminated. Replaces the JS-level `setInterval(5)` pump
+/// at `window_bootstrap.js:1633` that previously pinned `is_pending=true`
+/// for the lifetime of every Worker, blocking SPA hydration completion
+/// detection (twitter, x.com, etc.).
+#[op2(async)]
+#[string]
+pub async fn op_worker_await_message(#[smi] worker_id: i32) -> String {
+    let id = worker_id as u32;
+    // Acquire the notify Arc + drain any messages already queued.
+    // Drop the registry lock BEFORE awaiting so other ops on this worker
+    // (terminate, post_to_worker) aren't blocked.
+    let (notify, terminate, fast_msg) = {
+        let reg = worker_registry().lock().unwrap_or_else(|e| e.into_inner());
+        match reg.get(&id) {
+            Some(slot) => {
+                // Try to drain a message synchronously first — if one is
+                // already buffered we don't even need to await.
+                let already = slot.from_worker.try_recv().ok();
+                (
+                    slot.notify_parent.clone(),
+                    slot.terminate.clone(),
+                    already,
+                )
+            }
+            None => return String::new(), // worker is gone
+        }
+    };
+    if let Some(msg) = fast_msg {
+        return msg;
+    }
+    // Loop on notify until we get a message OR the worker terminates.
+    // Notified is edge-triggered so we have to re-check the queue after
+    // each wake.
+    loop {
+        if terminate.load(Ordering::Acquire) {
+            return String::new();
+        }
+        notify.notified().await;
+        // Re-acquire and drain.
+        let reg = worker_registry().lock().unwrap_or_else(|e| e.into_inner());
+        match reg.get(&id) {
+            Some(slot) => {
+                if let Ok(msg) = slot.from_worker.try_recv() {
+                    return msg;
+                }
+                // Spurious wake — re-loop.
+            }
+            None => return String::new(),
+        }
+    }
 }
 
 // ============================================================================
@@ -383,6 +453,10 @@ pub fn op_worker_self_post(#[string] data: String) {
     WORKER_SELF.with(|w| {
         if let Some(s) = w.borrow().as_ref() {
             let _ = s.to_parent.send(data);
+            // Wake the parent's awaiting `op_worker_await_message` so
+            // it can drain this message immediately. Without the
+            // notify, the await would block until the worker terminates.
+            s.notify_parent.notify_one();
         }
     });
 }
@@ -413,6 +487,7 @@ deno_core::extension!(
         op_worker_spawn,
         op_worker_post_to_worker,
         op_worker_poll_from_worker,
+        op_worker_await_message,
         op_worker_terminate,
         op_worker_self_post,
         op_worker_self_recv,

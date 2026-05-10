@@ -1627,18 +1627,26 @@
                     return;
                 }
 
-                // Drain parent←worker messages every 5ms. We use setInterval
-                // so the poll keeps firing while the main event loop is live.
+                // W5b-deep fix (commit pending): replace the prior
+                // setInterval(5) polling with an async-await chain
+                // backed by op_worker_await_message. The old impl
+                // pinned the V8 event loop's `is_pending=true` for the
+                // lifetime of every Worker, blocking SPA hydration
+                // completion detection (twitter, x.com, etc.). The new
+                // pump suspends on a tokio::sync::Notify so the loop
+                // is only marked pending while there's an actual
+                // pending message — same correctness, no perpetual
+                // pinning. See docs/W5b_SPA_HYDRATION_PROFILE_2026_05_10.md.
                 const self = this;
-                this._pollTimer = setInterval(() => {
+                const _drainOnce = () => {
                     if (!self._id) return;
-                    const deserializer =
-                        _boxide && _boxide.deserializeFromWire;
-                    for (let i = 0; i < 32; i++) {
-                        const raw = _wops.op_worker_poll_from_worker(self._id);
-                        if (!raw) return;
+                    _wops.op_worker_await_message(self._id).then((raw) => {
+                        if (!raw || !self._id) return; // worker died
+                        const deserializer =
+                            _boxide && _boxide.deserializeFromWire;
                         let payload = null;
-                        try { payload = JSON.parse(raw); } catch (e) { continue; }
+                        try { payload = JSON.parse(raw); }
+                        catch (e) { return _drainOnce(); }
                         const data = deserializer
                             ? deserializer(payload && payload.data)
                             : payload && payload.data;
@@ -1651,9 +1659,12 @@
                             ports: [],
                             timeStamp: Date.now(),
                         };
-                        self._fireEvent('message', event);
-                    }
-                }, 5);
+                        try { self._fireEvent('message', event); }
+                        catch (_) {}
+                        _drainOnce(); // chain next await
+                    }).catch(() => {});
+                };
+                _drainOnce();
             }
 
             _fireEvent(type, event) {
