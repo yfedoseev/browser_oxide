@@ -15,3 +15,24 @@
 # Live-debug dumps (not source)
 oxide_dump/
 downloaded_files/
+
+# External tool dirs
+.fossil/
+.gemini/
+
+# Reverse-engineering scratch (preserved under docs/*/scratch/, ignored at root)
+docs/**/scratch/
+/kasada_*
+/decode_*
+/decoded_*
+/chunk_*
+/head.js
+/full_table.txt
+/print_indices.js
+/guess_xor.py
+/search_xor.py
+/test_*.rs
+/test_*.py
+/diagnostic*.log
+/cg_run*.log
+/adidas-network.json
