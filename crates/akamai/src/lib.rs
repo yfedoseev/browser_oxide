@@ -75,13 +75,36 @@ pub fn get_tenant_settings(host: &str) -> Option<TenantSettings> {
             tenant_seed: 3_224_113,
             post_path: "/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B",
         })
-    } else if host.contains("homedepot.com") {
-        // Placeholder for HomeDepot (captured in A0 follow-up)
-        Some(TenantSettings {
-            tenant_seed: 0, // TODO
-            post_path: "/akam/13/sensor_data", // standard v1.3 fallback
-        })
     } else {
+        // Per-tenant config table is intentionally minimal. Adding a host
+        // here without its real `tenant_seed` + obfuscated `post_path` is
+        // strictly harmful: we POST a malformed v2 sensor body to the
+        // wrong endpoint and the CDN returns 429 (which we mis-attribute
+        // to bot scoring). The previous homedepot.com placeholder did
+        // exactly this.
+        //
+        // To add homedepot.com (and other Akamai-protected sites), capture
+        // the challenge bootstrap via Playwright MCP:
+        //
+        //   1. browser_navigate to https://www.homedepot.com/, let the
+        //      Akamai challenge run.
+        //   2. Read the obfuscated bootstrap script Akamai serves at
+        //      <script src="/akam/13/<hash>">. Look for:
+        //        - a big numeric constant (analogous to bestbuy's
+        //          `3_224_113`) — this is the per-tenant seed.
+        //        - a `fetch("/<rand1>/<rand2>/.../<randN>")` call —
+        //          this is the obfuscated POST path.
+        //   3. Add a new branch here:
+        //        } else if host.contains("homedepot.com") {
+        //            Some(TenantSettings { tenant_seed: <captured>,
+        //                                  post_path: "<captured>" })
+        //   4. Verify Page::navigate flips _abck to ~-1~-1~-1~ on
+        //      a live request, then re-run the holistic sweep.
+        //
+        // Without these, returning None is the correct behaviour — the
+        // page navigates without our sensor_data POST, which still
+        // produces the Akamai-CHL outcome but doesn't pollute the engine
+        // signal with a known-wrong POST.
         None
     }
 }

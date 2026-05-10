@@ -1593,19 +1593,19 @@ fn merge_headers(base: &mut Vec<(String, String)>, extra: &[(String, String)]) {
 
 /// Resolve a redirect Location header to an absolute URL.
 fn resolve_redirect(current_url: &str, location: &str) -> Result<String, NetError> {
-    if location.starts_with("http") {
-        Ok(location.to_string())
-    } else if location.starts_with('/') {
-        let parsed = Url::parse(current_url).map_err(|e| NetError::Request(e.to_string()))?;
-        Ok(format!(
-            "{}://{}{}",
-            parsed.scheme(),
-            parsed.host_str().unwrap_or(""),
-            location
-        ))
-    } else {
-        Ok(location.to_string())
-    }
+    // RFC 3986 §5.2 — resolve `location` against `current_url` as base.
+    // Url::join correctly handles all three cases:
+    //   - absolute URL ("https://b.com/x")
+    //   - root-relative ("/x")
+    //   - relative ("x.html", "../y")
+    // The previous impl returned `location` verbatim for the third case,
+    // which then failed downstream "no host in URL" — caught on iphey.com
+    // (holistic sweep 2026-05-10, FAILURE_ROOT_CAUSES.md bucket A).
+    let base = Url::parse(current_url).map_err(|e| NetError::Request(e.to_string()))?;
+    let resolved = base
+        .join(location)
+        .map_err(|e| NetError::Request(format!("redirect resolve: {e} (base={current_url}, loc={location})")))?;
+    Ok(resolved.to_string())
 }
 
 #[cfg(test)]
@@ -1617,6 +1617,42 @@ mod tests {
         let profile = stealth::chrome_130_linux();
         let client = HttpClient::new(&profile);
         assert!(client.is_ok());
+    }
+
+    #[test]
+    fn redirect_resolve_handles_all_three_rfc3986_cases() {
+        // Absolute — pass through.
+        assert_eq!(
+            resolve_redirect("https://a.com/x", "https://b.com/y").unwrap(),
+            "https://b.com/y"
+        );
+        // Root-relative — replaces path on same origin.
+        assert_eq!(
+            resolve_redirect("https://a.com/x/y", "/z").unwrap(),
+            "https://a.com/z"
+        );
+        // Relative-no-leading-slash — resolves against current path's
+        // directory. THIS WAS THE IPHEY BUG (returned "z.html" verbatim
+        // → "no host in URL" downstream).
+        assert_eq!(
+            resolve_redirect("https://a.com/x/y", "z.html").unwrap(),
+            "https://a.com/x/z.html"
+        );
+        // Dot segments per RFC 3986 §5.2.4.
+        assert_eq!(
+            resolve_redirect("https://a.com/x/y/", "../z.html").unwrap(),
+            "https://a.com/x/z.html"
+        );
+        // Scheme-relative.
+        assert_eq!(
+            resolve_redirect("https://a.com/x", "//b.com/y").unwrap(),
+            "https://b.com/y"
+        );
+        // Query-only — preserves path.
+        assert_eq!(
+            resolve_redirect("https://a.com/x?old=1", "?new=2").unwrap(),
+            "https://a.com/x?new=2"
+        );
     }
 
     #[test]
