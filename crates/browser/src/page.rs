@@ -136,6 +136,44 @@ impl Drop for Page {
 }
 
 impl Page {
+    /// Simulate a user switching to another tab and then coming back.
+    /// This defeats macro-behavioral heuristics that flag sessions
+    /// without visibility/focus changes as automated.
+    pub async fn simulate_tab_switch(&mut self) -> Result<(), deno_core::error::AnyError> {
+        let code = r#"
+            (function() {
+                // 1. Blur the window (user clicked away)
+                window.dispatchEvent(new Event('blur', { bubbles: false, cancelable: false }));
+                document.hasFocus = () => false;
+
+                // 2. Hide the document (tab backgrounded)
+                Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+                Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+                document.dispatchEvent(new Event('visibilitychange', { bubbles: true, cancelable: false }));
+            })();
+        "#;
+        self.event_loop.execute_script(code)?;
+
+        // Sleep for a random amount of time to simulate reading another tab (e.g., 2-5 seconds)
+        // For testing we keep it short, but in a real scraper this would be realistic.
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+
+        let code_focus = r#"
+            (function() {
+                // 3. Show the document (tab foregrounded)
+                Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+                Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+                document.dispatchEvent(new Event('visibilitychange', { bubbles: true, cancelable: false }));
+
+                // 4. Focus the window
+                document.hasFocus = () => true;
+                window.dispatchEvent(new Event('focus', { bubbles: false, cancelable: false }));
+            })();
+        "#;
+        self.event_loop.execute_script(code_focus)?;
+        Ok(())
+    }
+
     /// Detect if the current page is an anti-bot challenge (Kasada, Akamai, etc.)
     pub fn is_anti_bot_challenge(&mut self) -> bool {
         let body = self.content();
