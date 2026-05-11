@@ -5367,13 +5367,44 @@ async fn kasada_typeerror_stack_capture() {
                 .unwrap_or(0);
             println!("\n=== Captured {n} unjzomuy TypeError stacks ===\n");
             for i in 0..n {
-                let entry = p.evaluate(&format!(
-                    "JSON.stringify(globalThis.__teLog[{i}])"
-                )).unwrap_or_default();
                 println!("--- TypeError #{i} ---");
-                // Pretty-print
-                let s = entry.trim_matches('"').replace("\\\"", "\"");
-                println!("{}", s);
+                let msg = p.evaluate(&format!(
+                    "globalThis.__teLog[{i}].msg || ''"
+                )).unwrap_or_default();
+                println!("  msg: {}", msg.trim_matches('"'));
+                let frames_n = p.evaluate(&format!(
+                    "(globalThis.__teLog[{i}].stack || []).length"
+                )).unwrap_or_default()
+                    .trim_matches('"').parse::<usize>().unwrap_or(0);
+                for f in 0..frames_n {
+                    let fn_name = p.evaluate(&format!(
+                        "globalThis.__teLog[{i}].stack[{f}].fn || ''"
+                    )).unwrap_or_default();
+                    let file = p.evaluate(&format!(
+                        "globalThis.__teLog[{i}].stack[{f}].file || ''"
+                    )).unwrap_or_default();
+                    let line = p.evaluate(&format!(
+                        "globalThis.__teLog[{i}].stack[{f}].line || -1"
+                    )).unwrap_or_default();
+                    let col = p.evaluate(&format!(
+                        "globalThis.__teLog[{i}].stack[{f}].col || -1"
+                    )).unwrap_or_default();
+                    let is_eval = p.evaluate(&format!(
+                        "globalThis.__teLog[{i}].stack[{f}].isEval || false"
+                    )).unwrap_or_default();
+                    let is_native = p.evaluate(&format!(
+                        "globalThis.__teLog[{i}].stack[{f}].isNative || false"
+                    )).unwrap_or_default();
+                    println!(
+                        "  [{f}] fn={} file={} line={} col={} isEval={} isNative={}",
+                        fn_name.trim_matches('"'),
+                        file.trim_matches('"'),
+                        line.trim_matches('"'),
+                        col.trim_matches('"'),
+                        is_eval.trim_matches('"'),
+                        is_native.trim_matches('"'),
+                    );
+                }
                 println!();
             }
         }
