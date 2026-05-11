@@ -5277,3 +5277,107 @@ async fn kasada_eval_source_capture() {
         Err(_) => println!("timeout"),
     }
 }
+
+/// W4a-deeper — hook TypeError constructor to capture the throw-site
+/// stack frame for every unjzomuy probe. Property-access TypeErrors
+/// (e.g. `undefined.X` where X is the obfuscated name) include the
+/// call stack of the catching function, which tells us which Kasada
+/// VM opcode handler is performing the probe and what target object
+/// it expected.
+#[tokio::test]
+#[ignore = "network: kasada TypeError stack capture for unjzomuy probes"]
+async fn kasada_typeerror_stack_capture() {
+    use browser::Page;
+    use std::time::Duration;
+
+    let capture_init = r#"
+        (function() {
+            globalThis.__teLog = [];
+            // Capture all Error construction with the unjzomuy pattern
+            // by patching Error.prepareStackTrace before any other code
+            // runs, so V8 will call our prepareStackTrace once per
+            // unhandled error stack access.
+            //
+            // The Kasada VM catches every TypeError its probes throw.
+            // Inside the catch handler it reads err.message — which
+            // forces V8 to format the stack. Our prepareStackTrace
+            // hook fires at that point and records the structured
+            // CallSite array. We filter by message content for the
+            // unjzomuy 28-char identifier.
+            const _origPrepare = Error.prepareStackTrace;
+            Error.prepareStackTrace = function(err, frames) {
+                try {
+                    if (err && err.message && err.message.indexOf('unjzomuybtbyyhwwkdpkxomylnab') !== -1) {
+                        // Capture top 5 frames as raw strings so we
+                        // see file:line for each.
+                        const stack = [];
+                        for (let i = 0; i < Math.min(8, frames.length); i++) {
+                            const f = frames[i];
+                            try {
+                                stack.push({
+                                    fn: f.getFunctionName ? (f.getFunctionName() || '<anonymous>') : '?',
+                                    file: f.getFileName ? (f.getFileName() || '?') : '?',
+                                    line: f.getLineNumber ? f.getLineNumber() : -1,
+                                    col: f.getColumnNumber ? f.getColumnNumber() : -1,
+                                    isEval: f.isEval ? f.isEval() : false,
+                                    isNative: f.isNative ? f.isNative() : false,
+                                });
+                            } catch (_) {}
+                        }
+                        globalThis.__teLog.push({
+                            msg: err.message,
+                            stack: stack,
+                            ts: Date.now(),
+                        });
+                    }
+                } catch (_) {}
+                // Fall back to the default formatter so we don't break the
+                // catch handler's err.stack reads.
+                return _origPrepare ? _origPrepare(err, frames) :
+                    err.toString() + '\n' + frames.map(f => '    at ' +
+                        ((f.getFunctionName && f.getFunctionName()) || '<anon>') +
+                        ' (' + ((f.getFileName && f.getFileName()) || '?') + ':' +
+                        ((f.getLineNumber && f.getLineNumber()) || -1) + ')').join('\n');
+            };
+        })();
+    "#;
+
+    println!("\n=== Kasada TypeError stack capture: canadagoose.com ===\n");
+    let page = tokio::time::timeout(
+        Duration::from_secs(120),
+        Page::navigate_with_init(
+            "https://www.canadagoose.com/",
+            stealth::presets::chrome_130_macos(),
+            2,
+            vec![capture_init.to_string()],
+        ),
+    )
+    .await;
+
+    match page {
+        Ok(Ok(mut p)) => {
+            for _ in 0..30 {
+                let _ = p.evaluate("0");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let n = p.evaluate("(globalThis.__teLog || []).length")
+                .unwrap_or_default()
+                .trim_matches('"')
+                .parse::<usize>()
+                .unwrap_or(0);
+            println!("\n=== Captured {n} unjzomuy TypeError stacks ===\n");
+            for i in 0..n {
+                let entry = p.evaluate(&format!(
+                    "JSON.stringify(globalThis.__teLog[{i}])"
+                )).unwrap_or_default();
+                println!("--- TypeError #{i} ---");
+                // Pretty-print
+                let s = entry.trim_matches('"').replace("\\\"", "\"");
+                println!("{}", s);
+                println!();
+            }
+        }
+        Ok(Err(e)) => println!("page err: {e}"),
+        Err(_) => println!("timeout"),
+    }
+}

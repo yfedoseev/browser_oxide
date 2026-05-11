@@ -43,6 +43,17 @@ fn profile_enabled() -> bool {
     })
 }
 
+/// Per-op-name aggregate so the profile dump can name the dominant op.
+/// Stored in a thread-local because dump_profile takes only `rows` and we
+/// don't want to bloat TickRow with a HashMap. Reset at start of each
+/// `run_until_idle` invocation.
+type OpNameMap = std::collections::HashMap<&'static str, u64>;
+
+thread_local! {
+    static OP_NAME_TOTALS: std::cell::RefCell<OpNameMap> =
+        std::cell::RefCell::new(OpNameMap::new());
+}
+
 /// Capture the current pending-task counts from the underlying deno_core
 /// runtime. Cheap-ish: walks 3-4 small Vecs and clones the activity
 /// snapshot. Only called when profiling is enabled.
@@ -55,14 +66,20 @@ fn capture_pending(runtime: &mut BrowserJsRuntime) -> (u32, u32, u32, u32) {
     let mut timers = 0u32;
     let mut intervals = 0u32;
     let mut resources = 0u32;
-    for a in snap.active.iter() {
-        match a {
-            RuntimeActivity::AsyncOp(..) => ops += 1,
-            RuntimeActivity::Timer(..) => timers += 1,
-            RuntimeActivity::Interval(..) => intervals += 1,
-            RuntimeActivity::Resource(..) => resources += 1,
+    OP_NAME_TOTALS.with(|m| {
+        let mut m = m.borrow_mut();
+        for a in snap.active.iter() {
+            match a {
+                RuntimeActivity::AsyncOp(_, _, name) => {
+                    ops += 1;
+                    *m.entry(*name).or_insert(0) += 1;
+                }
+                RuntimeActivity::Timer(..) => timers += 1,
+                RuntimeActivity::Interval(..) => intervals += 1,
+                RuntimeActivity::Resource(..) => resources += 1,
+            }
         }
-    }
+    });
     (ops, timers, intervals, resources)
 }
 
@@ -176,6 +193,22 @@ fn dump_profile(label: &str, rows: &[TickRow], total: Duration, reason: IdleReas
         }
     }
 
+    // Top op names — names of the ops that were observed pending across
+    // all ticks (counts are sum of "snapshot pending count" — i.e. an op
+    // that stayed pending for N ticks contributes N). High-count names
+    // identify the chain that's keeping is_pending=true.
+    OP_NAME_TOTALS.with(|m| {
+        let m = m.borrow();
+        if !m.is_empty() {
+            let mut v: Vec<(&&'static str, &u64)> = m.iter().collect();
+            v.sort_unstable_by_key(|(_, c)| std::cmp::Reverse(**c));
+            let _ = writeln!(w, "\n--- pending-op name breakdown (sum of per-tick pending counts) ---");
+            for (name, count) in v.iter().take(15) {
+                let _ = writeln!(w, "  {:>8}  {}", count, name);
+            }
+        }
+    });
+
     // CSV tail for offline crunching (paste into a spreadsheet / Pandas).
     let _ = writeln!(w, "\n--- per-tick CSV (tick,wall_us,ops,timers,intervals,res,timed_out) ---");
     for r in rows.iter() {
@@ -245,6 +278,9 @@ impl BrowserEventLoop {
         // Profiling state — only allocates when the env var is set, so
         // production overhead is one OnceLock-cached load + a branch.
         let profiling = profile_enabled();
+        if profiling {
+            OP_NAME_TOTALS.with(|m| m.borrow_mut().clear());
+        }
         let profile_start = if profiling { Some(Instant::now()) } else { None };
         let mut rows: Vec<TickRow> = if profiling {
             Vec::with_capacity(2048)

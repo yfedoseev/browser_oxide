@@ -198,6 +198,157 @@ impl Page {
             || body.contains("dd_engagement")
     }
 
+    /// W7 / Cloudflare V1 — orchestrator-runner scaffolding.
+    ///
+    /// On the post-build page, detect a Cloudflare Managed/JS Challenge from
+    /// the response body (the `_cf_chl_opt` inline blob). When detected:
+    ///   1. Log a one-line telemetry summary (kind, ray, zone, orchestrator URL).
+    ///   2. Drive the event loop forward in 200 ms ticks for up to ~10 s,
+    ///      polling for a `cf_clearance` cookie or for the orchestrator
+    ///      script to set a `__pendingNavigation` (the orchestrator typically
+    ///      either 302s or assigns `location.href` after issuing clearance).
+    ///   3. Inject low-rate behavioural noise (mousemove/scroll) so the
+    ///      Phase-1 "25 events" gate in the legacy IUAM path is satisfied
+    ///      if the orchestrator is still listening for it.
+    ///
+    /// V1 explicitly does **not** attempt to deobfuscate or hand-solve the
+    /// PoW/Turnstile payload. Per `docs/RESEARCH_CLOUDFLARE_BYPASS_2026_05_10.md`
+    /// §0/§9, the recommended approach is to run the orchestrator JS to
+    /// completion in our V8 + DOM and let it negotiate clearance natively.
+    /// Returns `Some(ctx)` with the parsed challenge context iff a CF
+    /// challenge was detected (regardless of solve outcome).
+    pub async fn handle_cloudflare_flow(
+        &mut self,
+        client: &net::HttpClient,
+    ) -> Option<stealth::cloudflare::CfChallengeContext> {
+        let body = self.content();
+        // Build a minimal headers map from what we have on the live page.
+        // The body+server signal alone is enough for our detector when the
+        // orchestrator's inline blob is present (most common case).
+        let mut hdrs: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        // We don't have the response headers here, but the body marker is
+        // a strong enough signal — synthesize `server: cloudflare` so our
+        // body-fallback path fires. Safe: detect_challenge requires either
+        // the canonical header OR (body marker AND server: cloudflare).
+        if body.contains("_cf_chl_opt")
+            || body.contains("/cdn-cgi/challenge-platform/")
+        {
+            hdrs.insert("server".into(), "cloudflare".into());
+        }
+
+        let ctx = stealth::cloudflare::detect_challenge(&hdrs, &body)?;
+        eprintln!("[cloudflare] {}", ctx.summary());
+        tracing::info!(
+            kind = ?ctx.kind,
+            ray = %ctx.ray,
+            zone = %ctx.zone,
+            orchestrator = %ctx.orchestrator_url,
+            "cloudflare challenge detected"
+        );
+
+        // Fast-fail interactive Turnstile — V1 cannot solve it without a
+        // captcha service plug-in.
+        if !ctx.kind.v1_solvable() {
+            eprintln!("[cloudflare] kind {:?} is not V1-solvable — skipping orchestrator runner", ctx.kind);
+            return Some(ctx);
+        }
+
+        // Check the cookie jar for a pre-existing cf_clearance — if present
+        // this navigation already had clearance attached and we're done.
+        let host = url::Url::parse(&self.url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_default();
+        let parsed = url::Url::parse(&self.url).ok();
+        if let Some(p) = parsed.as_ref() {
+            if let Some(cookies) = client.cookies_for_url(p).await {
+                if cookies.contains("cf_clearance=") {
+                    eprintln!(
+                        "[cloudflare] cf_clearance already in jar for {} — orchestrator likely succeeded",
+                        host
+                    );
+                    return Some(ctx);
+                }
+            }
+        }
+
+        // Inject minimal behavioural noise. Real Chrome typically fires 5-25
+        // mousemove/scroll/keyup events in the few seconds the orchestrator
+        // is alive; the exact distribution doesn't matter for V1 — what
+        // matters is `event.isTrusted === false` doesn't get used to grade
+        // us (CF reportedly ignores untrusted events but the *count* may
+        // still be probed by the legacy phase-1 collector).
+        let noise_js = r#"
+            (function() {
+                try {
+                    let i = 0;
+                    const fire = () => {
+                        if (i++ > 30) return;
+                        try {
+                            window.dispatchEvent(new MouseEvent('mousemove', {
+                                clientX: 100 + (i * 7) % 400,
+                                clientY: 100 + (i * 11) % 300,
+                                bubbles: true,
+                            }));
+                            if (i % 5 === 0) {
+                                window.dispatchEvent(new Event('scroll', { bubbles: true }));
+                            }
+                            if (i % 7 === 0) {
+                                window.dispatchEvent(new KeyboardEvent('keyup', {
+                                    key: 'Tab', bubbles: true,
+                                }));
+                            }
+                        } catch (_) {}
+                        setTimeout(fire, 80 + (i * 13) % 60);
+                    };
+                    setTimeout(fire, 50);
+                } catch (_) {}
+            })();
+        "#;
+        let _ = self.event_loop.execute_script(noise_js);
+
+        // Drive the event loop in short bursts and check for clearance.
+        // 10 s budget total — Managed Challenge typically completes in 2-6 s
+        // for a fingerprint-correct browser.
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut cleared = false;
+        while std::time::Instant::now() < deadline {
+            let _ = self
+                .event_loop
+                .run_until_idle(std::time::Duration::from_millis(250))
+                .await;
+            if let Some(p) = parsed.as_ref() {
+                if let Some(cookies) = client.cookies_for_url(p).await {
+                    if cookies.contains("cf_clearance=") {
+                        cleared = true;
+                        break;
+                    }
+                }
+            }
+            // Also short-circuit if the orchestrator queued a navigation —
+            // the outer loop will pick it up on its own.
+            let pending = self
+                .event_loop
+                .execute_script(
+                    "globalThis._boxide && globalThis._boxide.__pendingNavigation ? '1' : ''",
+                )
+                .unwrap_or_default();
+            if pending.trim() == "1" {
+                eprintln!("[cloudflare] orchestrator queued __pendingNavigation — yielding to outer loop");
+                break;
+            }
+        }
+        if cleared {
+            eprintln!("[cloudflare] cf_clearance issued — outer loop will retry");
+        } else {
+            eprintln!("[cloudflare] orchestrator did not produce cf_clearance within budget — V2 work needed");
+        }
+
+        Some(ctx)
+    }
+
     /// T3A-A5: Autonomous Akamai bypass. Detects `_abck` challenge state,
     /// drains behavioural events (mouse/key) from JS, and POSTs sensor_data
     /// via the provided client. Returns the new trust state.
@@ -1336,6 +1487,12 @@ impl Page {
 
         // Phase A.5 — Akamai sensor_data POST.
         let akamai_state = page.handle_akamai_flow(&client).await.unwrap_or(akamai::AbckState::Unknown);
+
+        // W7 / Cloudflare V1 — orchestrator runner. Detect Managed/JS
+        // Challenge from the rendered body and drive the event loop until
+        // cf_clearance is issued (or the 10 s budget expires). The outer
+        // cookie-delta retry path picks up cf_clearance and re-fetches.
+        let _cf_ctx = page.handle_cloudflare_flow(&client).await;
 
             if pending_info.is_empty() {
                 // Post-settle cookie-delta retry: if the cookie jar gained new

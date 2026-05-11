@@ -5,6 +5,7 @@
 
 pub mod aliyun;
 pub mod behavior;
+pub mod cloudflare;
 pub mod douyin;
 pub mod gpu;
 pub mod kasada;
