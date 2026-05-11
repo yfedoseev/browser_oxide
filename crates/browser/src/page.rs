@@ -1321,7 +1321,8 @@ impl Page {
             || current_url.contains("hyatt.com")
             || current_url.contains("realtor.com")
             || current_url.contains("footlocker.com")
-            || current_url.contains("ticketmaster.com") {
+            || current_url.contains("ticketmaster.com")
+            || current_url.contains("udemy.com") {
             tracing::info!(url = %current_url, "applying selective CSP bypass for anti-bot domain");
             let mut rt = page.event_loop().runtime_mut();
             let op_state = rt.op_state();
