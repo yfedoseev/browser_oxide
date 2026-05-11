@@ -1731,9 +1731,17 @@ impl Page {
                 return Ok(page);
             }
 
-            // Resolve relative pending URLs
-            let next_url = Self::resolve_url(&current_url, pending_url)
-                .ok_or_else(|| deno_core::error::AnyError::msg("Failed to resolve pending URL"))?;
+            // Resolve relative pending URLs. resolve_url returns None for
+            // non-http(s) schemes (about:blank, data:, javascript:, etc.) —
+            // those are programmatic JS navigations that don't change the
+            // navigable; treat as no-op and return the current page.
+            // Caught on iphey.com 2026-05-10: JS sets location.href='about:blank'
+            // in an iframe bootstrap, our pending-nav harvester previously
+            // bubbled this as a hard error.
+            let next_url = match Self::resolve_url(&current_url, pending_url) {
+                Some(u) => u,
+                None => return Ok(page),
+            };
             tracing::debug!(kind = kind, url = %next_url, method = %pending_method, "navigate pending navigation");
 
             if iter + 1 == iterations {
@@ -1998,7 +2006,18 @@ impl Page {
     /// Resolve a potentially-relative URL against a base URL.
     fn resolve_url(base: &str, relative: &str) -> Option<String> {
         let base_url = url::Url::parse(base).ok()?;
-        base_url.join(relative).ok().map(|u| u.to_string())
+        let joined = base_url.join(relative).ok()?;
+        // We can only fetch http/https. about:blank, data:, blob:,
+        // javascript:, chrome-extension:, etc. either have no host
+        // (Url::host_str() returns None, causing "no host in URL"
+        // downstream) or aren't network-addressable. Filter here so
+        // every caller (scripts, iframes, stylesheets, fetches)
+        // skips them uniformly. Caught on iphey.com 2026-05-10:
+        // about:blank surfaced from a programmatic iframe src.
+        match joined.scheme() {
+            "http" | "https" => Some(joined.to_string()),
+            _ => None,
+        }
     }
 
     async fn build_page_with_scripts(

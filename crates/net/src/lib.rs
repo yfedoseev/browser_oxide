@@ -668,7 +668,7 @@ impl HttpClient {
         let parsed = Url::parse(url)?;
         let host = parsed
             .host_str()
-            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
+            .ok_or_else(|| NetError::Http(format!("no host in URL: {url}")))?;
         let port = parsed.port().unwrap_or(443);
 
         let mut hdrs: Vec<(String, String)> = headers
@@ -836,7 +836,7 @@ impl HttpClient {
         let parsed = Url::parse(url)?;
         let host = parsed
             .host_str()
-            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
+            .ok_or_else(|| NetError::Http(format!("no host in URL: {url}")))?;
         let port = parsed.port().unwrap_or(443);
 
         // Browser-aware nav headers. For Chrome, may upgrade to high-entropy
@@ -1106,7 +1106,7 @@ impl HttpClient {
         let parsed = Url::parse(url)?;
         let host = parsed
             .host_str()
-            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
+            .ok_or_else(|| NetError::Http(format!("no host in URL: {url}")))?;
         let port = parsed.port().unwrap_or(443);
         let path = if let Some(q) = parsed.query() {
             format!("{}?{}", parsed.path(), q)
@@ -1150,7 +1150,7 @@ impl HttpClient {
         let parsed = Url::parse(url)?;
         let host = parsed
             .host_str()
-            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
+            .ok_or_else(|| NetError::Http(format!("no host in URL: {url}")))?;
         let port = parsed.port().unwrap_or(443);
 
         let mut hdrs: Vec<(String, String)> = headers
@@ -1343,7 +1343,7 @@ impl HttpClient {
         let parsed = Url::parse(url)?;
         let host = parsed
             .host_str()
-            .ok_or_else(|| NetError::Http("no host in URL".into()))?;
+            .ok_or_else(|| NetError::Http(format!("no host in URL: {url}")))?;
         let port = parsed.port().unwrap_or(443);
 
         // Browser-aware nav headers (Chrome may upgrade with high-entropy

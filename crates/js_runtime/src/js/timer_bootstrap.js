@@ -29,10 +29,17 @@
     // and unrefing them causes run_until_idle to exit before the
     // continuation runs (verified empirically on x.com 2026-05-10:
     // unref-everything → AllWorkDone in 4 s, body=69 B; unref nothing
-    // → 90 s timeout, body=69 B). Long timers (1 s+) are analytics,
-    // keepalive, retry/poll loops — exactly the "background" work
-    // node.js timer.unref() was designed for.
-    const UNREF_THRESHOLD_MS = 1000;
+    // → 90 s timeout, body=69 B).
+    //
+    // Threshold history:
+    //   1000ms — twitter/x flipped to L3 but macys/ria/threads regressed
+    //            to THIN-BODY (their hydration uses setTimeout(fn, ~1500)
+    //            for delayed render steps; unref'd them too eagerly).
+    //   2000ms — current. Keeps twitter/x (their pinning is cycles of
+    //            hundreds of sub-second timers + occasional 5–60s
+    //            analytics) while preserving macys/ria/threads
+    //            ~1.5s-delay hydration callbacks as refed.
+    const UNREF_THRESHOLD_MS = 2000;
     const _maybeUnref = _unrefRaw
         ? (p, ms) => { if (ms >= UNREF_THRESHOLD_MS) _unrefRaw(p); }
         : () => {};
