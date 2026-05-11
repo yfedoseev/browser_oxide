@@ -246,6 +246,81 @@
         }
     }
 
+    // ---- W6a #A: synchronous pre-population --------------------------
+    //
+    // DataDome's tags.js scores its 31-feature mouse-path vector at
+    // POST time. If __akamai_events.mouse is empty (or has only 1-2
+    // points from setTimeouts that fired before POST), DataDome's
+    // empty-coord-list heuristic flags us. Solution: synthesize a
+    // small history of "user moved mouse just before navigating here"
+    // events SYNCHRONOUSLY, so the buffer is non-empty from the very
+    // first instant any antibot script can read it.
+    //
+    // We add ~10 historical points spanning the 200ms-2000ms window
+    // BEFORE current time (negative t values, modeling a real user
+    // who was moving cursor before the page loaded). Per the W6a
+    // research doc — `crates/stealth/src/behavior.rs` already produces
+    // sigma-lognormal trajectories; we mirror its statistics here.
+    //
+    // These also get dispatched as actual mousemove events on
+    // window+document+body so live event listeners (DataDome's
+    // tags.js) see them when they attach.
+    (function _seedHistoricalCoords() {
+        const vw = (window.innerWidth || 1920);
+        const vh = (window.innerHeight || 1080);
+        // Sigma-lognormal-ish: cluster near a likely starting region
+        // (screen center-right where the previous-tab close button
+        // would be) with realistic per-step deltas.
+        let x = vw * 0.5 + (Math.random() - 0.5) * 80;
+        let y = vh * 0.4 + (Math.random() - 0.5) * 80;
+        const points = 12;
+        // Spread the historical timestamps from -1800ms to -100ms
+        // before "now" (= _akT0 = humanize load time).
+        for (let i = 0; i < points; i++) {
+            const dt = -1800 + (i / (points - 1)) * 1700; // -1800..-100
+            // Smooth muscle-impulse-like path: sigma-lognormal velocity
+            // → smaller steps near the start and end, larger in the
+            // middle. Approximation: triangular speed window.
+            const phase = Math.abs(i / (points - 1) - 0.5) * 2; // 0..1, 0 in middle
+            const speed = 1 - phase * 0.7; // 0.3 at edges, 1.0 in middle
+            const dx = (Math.random() - 0.5) * 80 * speed;
+            const dy = (Math.random() - 0.5) * 80 * speed;
+            x = Math.max(0, Math.min(vw, x + dx));
+            y = Math.max(0, Math.min(vh, y + dy));
+            // Push the historical event directly into the buffer with
+            // its negative timestamp. _akT() returns positive elapsed
+            // since _akT0; we hand-craft a record matching the schema.
+            if (_akEvents.mouse.length < 200) {
+                _akEvents.mouse.push({
+                    x: x | 0, y: y | 0, t: Math.round(dt),
+                    kind: 0, button: 0,
+                });
+            }
+            _akEvents.counters.mouse++;
+        }
+        // Also fire ONE synchronous mousemove now (t=0 on the buffer)
+        // so live addEventListener('mousemove') subscribers see at
+        // least one real event before any setTimeouts get a chance.
+        try {
+            const ev = new MouseEvent('mousemove', {
+                bubbles: true, cancelable: true, view: window,
+                clientX: x | 0, clientY: y | 0,
+                screenX: x | 0, screenY: (y | 0) + 90,
+                movementX: 1, movementY: 0,
+                button: 0, buttons: 0,
+            });
+            try { Object.defineProperty(ev, 'isTrusted', { value: true, configurable: true }); } catch (_) {}
+            try { window.dispatchEvent(ev); } catch (_) {}
+            try { document.dispatchEvent(ev); } catch (_) {}
+            try { body.dispatchEvent(ev); } catch (_) {}
+        } catch (_) {}
+        // Capture the final position so runCycle's deltas pick up
+        // from where this seeding left off.
+        try {
+            globalThis.__akamai_events._lastPos = [x | 0, y | 0];
+        } catch (_) {}
+    })();
+
     // Run first cycle immediately
     runCycle();
     // Then every 4 seconds to keep the "human" active during long builds
