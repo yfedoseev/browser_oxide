@@ -256,4 +256,37 @@
             (0, eval)(source);
         }
     };
+
+    // MediaSource + MediaRecorder.isTypeSupported in Worker realm.
+    // Kasada's `mrs` probe (W4a 2026-05-11) reads .isTypeSupported on
+    // an undefined receiver in our Worker context — real Chrome has
+    // MediaSource available in DedicatedWorker since Chrome 108.
+    const _mediaTypes = new Set([
+        "video/mp4", 'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+        'video/mp4;codecs="avc1.640028"', "video/webm",
+        'video/webm;codecs="vp8,vorbis"', 'video/webm;codecs="vp9"',
+        'video/webm;codecs="vp9,opus"', "audio/mp4",
+        'audio/mp4;codecs="mp4a.40.2"', "audio/webm",
+        'audio/webm;codecs=opus', 'audio/webm;codecs=vorbis',
+    ]);
+    if (!globalThis.MediaSource) {
+        globalThis.MediaSource = class MediaSource {
+            static isTypeSupported(type) {
+                if (typeof type !== 'string') return false;
+                if (_mediaTypes.has(type)) return true;
+                const base = type.split(';')[0].trim();
+                return _mediaTypes.has(base);
+            }
+        };
+    }
+    if (!globalThis.MediaRecorder) {
+        globalThis.MediaRecorder = class MediaRecorder {
+            static isTypeSupported(type) {
+                if (typeof type !== 'string') return false;
+                if (_mediaTypes.has(type)) return true;
+                const base = type.split(';')[0].trim();
+                return _mediaTypes.has(base);
+            }
+        };
+    }
 })(globalThis);
