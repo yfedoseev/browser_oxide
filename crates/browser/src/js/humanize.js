@@ -161,7 +161,11 @@
         }
     }
 
-    // Fire a `mousemove` at a given client coordinate.
+    // Fire a `mousemove` at a given client coordinate. Dispatched on
+    // window + document + body — DataDome's tags.js (per W6a research)
+    // listens at `window` not `document`, and our prior dispatch only
+    // hit document+body so DataDome's empty-coord-list scoring caught
+    // us. Now all three event targets receive it.
     function _fireMove(x, y, prev) {
         const ev = new MouseEvent('mousemove', {
             bubbles: true, cancelable: true, view: window,
@@ -171,6 +175,7 @@
             movementY: prev ? Math.round(y - prev[1]) : 0,
             button: 0, buttons: 0,
         });
+        try { _dispatch(window, ev); } catch (_) {}
         _dispatch(document, ev);
         _dispatch(body, ev);
         _akRecMouse(x, y, 0, 0); // 0 = move, button 0 = left

@@ -1309,9 +1309,19 @@ impl Page {
             }
 
         // 3. Selective CSP bypass for known anti-bot challenge domains.
-        // Walmart / CanadaGoose CSPs often block their own Akamai/Kasada trackers
-        // in emulated environments due to origin/nonce mismatches.
-        if current_url.contains("walmart.com") || current_url.contains("canadagoose.com") {
+        // Walmart / Canada Goose / Hyatt / Realtor / Foot Locker etc. CSPs
+        // often block their own Akamai/Kasada trackers in emulated
+        // environments due to origin/nonce mismatches. Without the bypass
+        // we get body=0 because the ips.js script we'd LOAD to solve the
+        // challenge is the very thing CSP refuses (caught on hyatt.com
+        // 2026-05-10 round-3 sweep — went Kasada-CHL → THIN-BODY when
+        // body=0 because CSP refused to load the ips.js script).
+        if current_url.contains("walmart.com")
+            || current_url.contains("canadagoose.com")
+            || current_url.contains("hyatt.com")
+            || current_url.contains("realtor.com")
+            || current_url.contains("footlocker.com")
+            || current_url.contains("ticketmaster.com") {
             tracing::info!(url = %current_url, "applying selective CSP bypass for anti-bot domain");
             let mut rt = page.event_loop().runtime_mut();
             let op_state = rt.op_state();
