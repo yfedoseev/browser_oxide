@@ -1388,19 +1388,29 @@ impl Page {
                         );
                     }
                 }
-                // SPA hydration early-exit (W5b A3 fix). For React/Vue/
-                // Next.js sites the document.body outerHTML stays tiny
-                // (a 69-byte <noscript> + a single mount div) but the
-                // mount point gets populated by JS. If we see ANY of the
-                // common SPA mount points has children, the app is alive
-                // — return the page even if outerHTML is small. Without
-                // this, twitter/x/hulu/etc. wait the full nav budget for
-                // body to grow (it never does — the whole app lives in
-                // the React tree under #react-root). Per W5b research:
-                // Worker setInterval(5) at window_bootstrap.js:1633 pins
-                // is_pending=true so run_until_idle never reaches "done"
-                // — this signal lets us exit anyway when content is real.
-                if !is_chl && body_len <= 50 * 1024 {
+                // SPA hydration early-exit (W5b A3 + W5b-PLUS expansion).
+                // For React/Vue/Next.js sites the `<body>` outerHTML may be
+                // tiny (a 69-byte <noscript> + a single mount div) OR
+                // moderately sized (twitter ships a 241KB shell of inline
+                // state + script tags) — but the user-visible content is
+                // always under one of the well-known mount-point IDs. If
+                // ANY common SPA mount has ≥1 child element, the app is
+                // alive and the loop's continued spinning is just noise
+                // we'd terminate at drop time anyway. Without this signal,
+                // twitter/x/hulu (heavy shells, slow hydration) burn the
+                // full nav budget waiting for is_pending=false — which
+                // never arrives because React's scheduler keeps queuing
+                // setTimeout work forever. Per W5b research + W5b-PLUS
+                // profile (2026-05-10): pending state in steady-state is
+                // 33 op_timer_sleep, cycling 33→18→1→33 driven by React.
+                //
+                // The mount-populated check is intentionally cheap (single
+                // querySelector chain, fail-fast) so it adds <1ms per
+                // iteration. Removed the prior `body_len <= 50KB` gate
+                // because twitter's 241KB shell was tripping the wrong
+                // branch — the mount-children count is the single source
+                // of truth for "is this app rendered."
+                if !is_chl {
                     let mount_populated: usize = page
                         .event_loop()
                         .execute_script(
@@ -1418,7 +1428,7 @@ impl Page {
                         .unwrap_or(0);
                     if mount_populated > 0 {
                         eprintln!(
-                            "[navigate] SPA-fast-exit on iter={} (body={}KB but mount has {} children)",
+                            "[navigate] SPA-fast-exit on iter={} (body={}KB, mount has {} children)",
                             iter,
                             body_len / 1024,
                             mount_populated

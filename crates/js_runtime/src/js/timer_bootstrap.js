@@ -1,6 +1,41 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
     const _cancelledTimers = new Set();
+    // W5b-PLUS (twitter/x.com hydration fix): unref every op_timer_sleep
+    // promise. The deno_core event loop treats every in-flight async op as
+    // "is_pending=true" (jsruntime.rs:2223 — has_pending_refed_ops).
+    // A pre-fix profile of x.com showed 33 simultaneous pending ops, ALL
+    // op_timer_sleep, cycling 33→18→1→33 driven by React's scheduler +
+    // requestIdleCallback polyfill + IntersectionObserver fanout. The
+    // loop never reached idle, so SPA hydration timed out at body=69 B.
+    //
+    // unrefOpPromise is the deno equivalent of node.js's `timer.unref()`:
+    // the promise still fires when its time comes, but it doesn't block
+    // the event loop from reporting "all work done". Real Chrome treats
+    // setTimeout-scheduled work as background work that doesn't gate
+    // navigation idle — this matches that semantics exactly.
+    //
+    // Side effect: if the page exits run_until_idle before a long timer
+    // fires, that callback runs on the *next* run_until_idle invocation
+    // (page.rs schedules several drains per navigate iteration). For SPA
+    // homepage hydration, this is exactly the desired behavior — once
+    // the React mount has children (page.rs:1252 early-exit), any
+    // outstanding setTimeout(50000, retryAnalytics) is just background
+    // noise we'd be killing on drop anyway.
+    const _unrefRaw = Deno.core.unrefOpPromise;
+    // Only unref *long-delay* timers (>= UNREF_THRESHOLD_MS). Short
+    // timers (< threshold) carry render-critical work — React's
+    // scheduler postTask, microtask-equivalent rIC fallback, etc. —
+    // and unrefing them causes run_until_idle to exit before the
+    // continuation runs (verified empirically on x.com 2026-05-10:
+    // unref-everything → AllWorkDone in 4 s, body=69 B; unref nothing
+    // → 90 s timeout, body=69 B). Long timers (1 s+) are analytics,
+    // keepalive, retry/poll loops — exactly the "background" work
+    // node.js timer.unref() was designed for.
+    const UNREF_THRESHOLD_MS = 1000;
+    const _maybeUnref = _unrefRaw
+        ? (p, ms) => { if (ms >= UNREF_THRESHOLD_MS) _unrefRaw(p); }
+        : () => {};
 
     globalThis.setTimeout = function setTimeout(callback, delay = 0, ...args) {
         if (typeof callback !== "function") {
@@ -9,7 +44,9 @@
         const ms = Math.max(0, delay | 0);
         const id = ops.op_set_timeout(ms);
         // Async ops in deno_core 0.311 are called directly and return Promise
-        ops.op_timer_sleep(ms).then(() => {
+        const p = ops.op_timer_sleep(ms);
+        _maybeUnref(p, ms);
+        p.then(() => {
             if (!_cancelledTimers.has(id)) {
                 callback(...args);
             }
@@ -25,7 +62,12 @@
         const id = ops.op_set_interval(ms);
 
         function tick() {
-            ops.op_timer_sleep(ms).then(() => {
+            const p = ops.op_timer_sleep(ms);
+            // Intervals are by definition recurring — unref them at the
+            // same threshold. A 5 s recurring analytics ping shouldn't
+            // pin the loop any more than a 5 s setTimeout.
+            _maybeUnref(p, ms);
+            p.then(() => {
                 if (!_cancelledTimers.has(id)) {
                     callback(...args);
                     tick();
