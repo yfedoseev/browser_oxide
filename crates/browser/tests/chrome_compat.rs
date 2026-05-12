@@ -5412,3 +5412,342 @@ async fn kasada_typeerror_stack_capture() {
         Err(_) => println!("timeout"),
     }
 }
+
+#[tokio::test]
+async fn check_iterators_test() {
+    let profile = stealth::chrome_130_macos();
+    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let js = r#"
+        (function() {
+            const results = {};
+            const targets = [
+                ['navigator.plugins', navigator.plugins],
+                ['navigator.mimeTypes', navigator.mimeTypes],
+                ['document.fonts', document.fonts],
+            ];
+            for (const [name, obj] of targets) {
+                try {
+                    const it = obj[Symbol.iterator]();
+                    results[name + '_iterator_iterable'] = it[Symbol.iterator]() === it;
+                } catch (e) {
+                    results[name + '_error'] = e.message;
+                }
+            }
+            return JSON.stringify(results, null, 2);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap();
+    println!("ITERATOR CHECK:\n{}", result);
+}
+
+#[tokio::test]
+async fn check_ctors_test() {
+    let profile = stealth::chrome_130_macos();
+    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let js = r#"
+        (function() {
+            const results = {};
+            const targets = [
+                ['navigator.plugins.item', navigator.plugins.item],
+                ['navigator.plugins.namedItem', navigator.plugins.namedItem],
+                ['navigator.plugins.refresh', navigator.plugins.refresh],
+                ['MediaSource.isTypeSupported', MediaSource.isTypeSupported],
+                ['Notification.requestPermission', Notification.requestPermission],
+            ];
+            for (const [name, fn] of targets) {
+                try {
+                    new fn();
+                    results[name] = 'IS_CONSTRUCTOR';
+                } catch (e) {
+                    results[name] = 'NOT_CONSTRUCTOR';
+                }
+            }
+            return JSON.stringify(results, null, 2);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap();
+    println!("CTOR CHECK:\n{}", result);
+}
+
+#[tokio::test]
+async fn check_tostring_test() {
+    let profile = stealth::chrome_130_macos();
+    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let js = r#"
+        (function() {
+            const res = {};
+            const targets = {
+                'mediaDevices.enumerateDevices': navigator.mediaDevices && navigator.mediaDevices.enumerateDevices,
+                'mediaDevices.getUserMedia': navigator.mediaDevices && navigator.mediaDevices.getUserMedia,
+                'mediaDevices.addEventListener': navigator.mediaDevices && navigator.mediaDevices.addEventListener,
+                'PublicKeyCredential.isUVPAA': globalThis.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable,
+                'CredentialsContainer.get': navigator.credentials && navigator.credentials.get,
+                'plugins.item': navigator.plugins.item,
+                'plugins.refresh': navigator.plugins.refresh,
+                'fetch': globalThis.fetch,
+                'setTimeout': globalThis.setTimeout,
+            };
+            for (const [k, v] of Object.entries(targets)) {
+                try {
+                    res[k + '_instance'] = v.toString();
+                    res[k + '_protoCall'] = Function.prototype.toString.call(v);
+                    res[k + '_length'] = v.length;
+                } catch (e) {
+                    res[k + '_err'] = e.message;
+                }
+            }
+            return JSON.stringify(res, null, 2);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap();
+    println!("TOSTRING CHECK:\n{}", result);
+}
+
+#[tokio::test]
+async fn check_spread_test() {
+    let profile = stealth::chrome_130_macos();
+    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let js = r#"
+        (function() {
+            const res = {};
+            const targets = {
+                'plugins': navigator.plugins,
+                'mimeTypes': navigator.mimeTypes,
+                'fonts': document.fonts,
+                'scripts': document.scripts,
+                'styleSheets': document.styleSheets,
+                'all': document.all,
+                'htmlCollection': document.getElementsByTagName('div'),
+                'nodeList': document.querySelectorAll('div'),
+            };
+            for (const [k, v] of Object.entries(targets)) {
+                try {
+                    [...v];
+                    res[k] = true;
+                } catch(e) {
+                    res[k] = e.message;
+                }
+            }
+            return JSON.stringify(res, null, 2);
+        })()
+    "#;
+    println!("SPREAD CHECK:\n{}", page.evaluate(js).unwrap());
+}
+
+/// W4a candidates probe — try `[...x]` on every known `ao` candidate
+/// and report which throw. The doc lists: navigator.plugins,
+/// userAgentData.brands, MediaSource.activeSourceBuffers,
+/// document.fonts, HTMLCollection, RTCRtpReceiver.getCapabilities.
+#[tokio::test]
+async fn check_ao_candidates_test() {
+    let profile = stealth::chrome_130_macos();
+    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let js = r#"
+        (function() {
+            const res = {};
+            const tests = [
+                ['navigator.plugins',
+                    () => navigator.plugins],
+                ['navigator.mimeTypes',
+                    () => navigator.mimeTypes],
+                ['navigator.userAgentData.brands',
+                    () => navigator.userAgentData && navigator.userAgentData.brands],
+                ['document.fonts',
+                    () => document.fonts],
+                ['document.scripts',
+                    () => document.scripts],
+                ['document.styleSheets',
+                    () => document.styleSheets],
+                ['document.all',
+                    () => document.all],
+                ['document.images',
+                    () => document.images],
+                ['document.links',
+                    () => document.links],
+                ['document.forms',
+                    () => document.forms],
+                ['document.embeds',
+                    () => document.embeds],
+                ['document.anchors',
+                    () => document.anchors],
+                ['HTMLCollection (children)',
+                    () => document.body.children],
+                ['NodeList (querySelectorAll)',
+                    () => document.querySelectorAll('div')],
+                ['NodeList (childNodes)',
+                    () => document.body.childNodes],
+                ['NamedNodeMap (attributes)',
+                    () => document.body.attributes],
+                ['DOMTokenList (classList)',
+                    () => document.body.classList],
+                ['FormData',
+                    () => new FormData()],
+                ['URLSearchParams',
+                    () => new URLSearchParams('a=1&b=2')],
+                ['Headers',
+                    () => new Headers({'X-Test': 'a'})],
+                ['MediaList',
+                    () => document.styleSheets[0] && document.styleSheets[0].media],
+                ['CSSRuleList',
+                    () => document.styleSheets[0] && document.styleSheets[0].cssRules],
+                ['MediaSource exists?',
+                    () => typeof MediaSource],
+                ['MediaSource.activeSourceBuffers',
+                    () => { const ms = new MediaSource(); return ms.activeSourceBuffers; }],
+                ['MediaSource.sourceBuffers',
+                    () => { const ms = new MediaSource(); return ms.sourceBuffers; }],
+                ['RTCRtpReceiver exists?',
+                    () => typeof RTCRtpReceiver],
+                ['RTCRtpReceiver.getCapabilities(audio)',
+                    () => RTCRtpReceiver.getCapabilities('audio')],
+                ['RTCRtpSender.getCapabilities(video)',
+                    () => RTCRtpSender.getCapabilities('video')],
+                ['ResizeObserverSize-like',
+                    () => ({length: 2, 0: 'a', 1: 'b'})],
+                ['FileList',
+                    () => null /* requires <input type=file>; skip */],
+                ['TouchList',
+                    () => null],
+            ];
+            for (const [name, fn] of tests) {
+                let r = {};
+                try {
+                    const v = fn();
+                    if (v === null) { r.skip = true; }
+                    else if (typeof v === 'string') { r.value = v; }
+                    else {
+                        r.type = Object.prototype.toString.call(v);
+                        r.hasSymbolIter = typeof v[Symbol.iterator] === 'function';
+                        try {
+                            const arr = [...v];
+                            r.spread = `ok len=${arr.length}`;
+                        } catch (e) {
+                            r.spread = 'ERR: ' + e.message.split('\n')[0];
+                        }
+                    }
+                } catch (e) {
+                    r.setup_err = e.message;
+                }
+                res[name] = r;
+            }
+            return JSON.stringify(res, null, 2);
+        })()
+    "#;
+    println!("AO CANDIDATES CHECK:\n{}", page.evaluate(js).unwrap());
+}
+
+/// W4a-deeper — Symbol.iterator probe. Install a getter on
+/// Object.prototype[Symbol.iterator] that logs every access where the
+/// receiver doesn't already have an own/inherited Symbol.iterator. The
+/// getter returns undefined so the spread/iteration still throws as
+/// V8 default. Each access is recorded with constructor name, keys, and
+/// a stack snippet. The goal: identify exactly which object Kasada's
+/// `ao` probe attempts to spread (we know it's something we don't make
+/// iterable).
+#[tokio::test]
+#[ignore = "network: canadagoose Symbol.iterator probe"]
+async fn kasada_symbol_iterator_probe() {
+    use browser::Page;
+    use std::time::Duration;
+
+    let init = r#"
+        (function() {
+            globalThis.__iterProbe = [];
+            // Cap the log to avoid OOM on busy pages.
+            const MAX = 1000;
+            // Define a CONFIGURABLE+ENUMERABLE getter on Object.prototype.
+            // ECMA spec: when V8 looks up Symbol.iterator on a receiver
+            // that doesn't have it own and doesn't inherit from Array/
+            // Map/Set/etc., it walks up to Object.prototype, hits our
+            // getter, and reads undefined — which then throws
+            // "non-iterable".
+            try {
+                Object.defineProperty(Object.prototype, Symbol.iterator, {
+                    configurable: true,
+                    get() {
+                        if (globalThis.__iterProbe.length < MAX) {
+                            let stack = '';
+                            try { stack = new Error().stack || ''; } catch (_) {}
+                            let typeTag = '?';
+                            try { typeTag = Object.prototype.toString.call(this); } catch (_) {}
+                            let keys = [];
+                            try { keys = Object.keys(this || {}).slice(0, 15); } catch (_) {}
+                            let proto = '?';
+                            try {
+                                const p = Object.getPrototypeOf(this);
+                                proto = p && p.constructor && p.constructor.name || String(p);
+                            } catch (_) {}
+                            // Truncate stack — most useful frames are top 6
+                            const stackTop = stack.split('\n').slice(0, 6).join(' | ');
+                            globalThis.__iterProbe.push({
+                                typeTag, keys, proto, stackTop,
+                            });
+                        }
+                        // Return undefined to preserve V8's "non-iterable" throw
+                        return undefined;
+                    },
+                });
+            } catch (e) {
+                globalThis.__iterProbeInitErr = String(e);
+            }
+        })();
+    "#;
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(120),
+        Page::navigate_with_init(
+            "https://www.canadagoose.com/",
+            stealth::presets::chrome_130_macos(),
+            2,
+            vec![init.to_string()],
+        ),
+    )
+    .await;
+
+    match page {
+        Ok(Ok(mut p)) => {
+            for _ in 0..30 {
+                let _ = p.evaluate("0");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let init_err = p.evaluate("globalThis.__iterProbeInitErr || ''").unwrap_or_default();
+            let n = p
+                .evaluate("(globalThis.__iterProbe || []).length")
+                .unwrap_or_default()
+                .trim_matches('"')
+                .parse::<usize>()
+                .unwrap_or(0);
+            println!("init_err: {init_err}");
+            println!("=== Symbol.iterator probes (all): {n} ===");
+            // Group by (typeTag, keys.join, proto) to dedupe.
+            let summary = p.evaluate(r#"
+                JSON.stringify((() => {
+                    const counts = {};
+                    for (const e of globalThis.__iterProbe || []) {
+                        const key = `${e.typeTag} ${e.proto} keys=${(e.keys||[]).join(',')}`;
+                        counts[key] = (counts[key] || 0) + 1;
+                    }
+                    return counts;
+                })())
+            "#).unwrap_or_default();
+            println!("SUMMARY: {summary}");
+            // Show the first 20 unique stacks
+            let stacks = p.evaluate(r#"
+                JSON.stringify((() => {
+                    const seen = new Set(); const out = [];
+                    for (const e of globalThis.__iterProbe || []) {
+                        const k = (e.stackTop || '').slice(0, 200);
+                        if (seen.has(k)) continue;
+                        seen.add(k);
+                        out.push(e);
+                        if (out.length >= 20) break;
+                    }
+                    return out;
+                })())
+            "#).unwrap_or_default();
+            println!("UNIQUE_STACKS: {stacks}");
+        }
+        Ok(Err(e)) => println!("page err: {e}"),
+        Err(_) => println!("timeout"),
+    }
+}
