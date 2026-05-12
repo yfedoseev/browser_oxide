@@ -79,10 +79,19 @@
         if (setter) _maskFunction(setter, `set ${name}`);
     };
     const _defProtoMethod = (proto, name, fn) => {
+        // WebIDL methods are NOT constructors. Using object literal
+        // method shorthand ensures the function lacks a [[Construct]]
+        // internal slot. Preserve fn.length so Function.prototype.length
+        // reflection matches real Chrome's WebIDL method arity (e.g.
+        // addEventListener=1, getUserMedia=1, enumerateDevices=0).
+        const wrapped = ({ [name](...args) { return fn.apply(this, args); } })[name];
+        try {
+            Object.defineProperty(wrapped, 'length', { value: fn.length, configurable: true });
+        } catch (_) {}
         Object.defineProperty(proto, name, {
-            value: fn, writable: true, enumerable: false, configurable: true,
+            value: wrapped, writable: true, enumerable: false, configurable: true,
         });
-        _maskFunction(fn, name);
+        _maskFunction(wrapped, name);
     };
 
     // ================================================================
@@ -220,9 +229,17 @@
     _defProtoMethod(_PluginArrayProto, 'refresh', () => {});
     // Symbol.iterator iterates the live sliced range.
     Object.defineProperty(_PluginArrayProto, Symbol.iterator, {
-        value: function* iter() {
+        value: function iter() {
             const n = _pluginsLen();
-            for (let i = 0; i < n; i++) yield _allPlugins[i];
+            let i = 0;
+            const self = this;
+            return {
+                next() {
+                    if (i < n) return { value: self[i++], done: false };
+                    return { value: undefined, done: true };
+                },
+                [Symbol.iterator]() { return this; }
+            };
         },
         configurable: true,
     });
@@ -248,9 +265,17 @@
         });
     }
     Object.defineProperty(_MimeTypeArrayProto, Symbol.iterator, {
-        value: function* iter() {
+        value: function iter() {
             const n = _mimesLen();
-            for (let i = 0; i < n; i++) yield _allMimes[i];
+            let i = 0;
+            const self = this;
+            return {
+                next() {
+                    if (i < n) return { value: self[i++], done: false };
+                    return { value: undefined, done: true };
+                },
+                [Symbol.iterator]() { return this; }
+            };
         },
         configurable: true,
     });
@@ -329,38 +354,47 @@
     //       Leaking populated labels pre-permission is a classic automation
     //       tell. _PERMISSION_STATE_MAP is defined below; reference resolves
     //       lazily when this function is called. §6.6 item 9 / item 7.
-    _navMediaDevices.enumerateDevices = function enumerateDevices() {
-        const raw = _pJson("media_devices", []);
-        const permFor = (kind) => {
-            if (kind === "videoinput") return _PERMISSION_STATE_MAP["camera"] || "prompt";
-            if (kind === "audioinput" || kind === "audiooutput") return _PERMISSION_STATE_MAP["microphone"] || "prompt";
-            return "granted"; // unknown kinds — don't blank
-        };
-        // Real Chrome's enumerateDevices behaviour pre-permission:
-        //   - Returns the SAME array length (count of devices is leaked).
-        //   - Each entry has empty deviceId / groupId / label until the
-        //     user grants getUserMedia for the corresponding permission
-        //     (camera for videoinput, microphone for audioinput/audiooutput).
-        // Previously we only blanked `label`; spec says all three string
-        // fields must blank pre-grant. FingerprintJS open-source and
-        // BrowserLeaks both probe deviceId equality across runs to fingerprint.
-        const out = raw.map((d) => {
-            const granted = permFor(d.kind) === "granted";
-            const deviceId = granted ? (d.deviceId != null ? d.deviceId : (d.device_id || "")) : "";
-            const groupId = granted ? (d.groupId != null ? d.groupId : (d.group_id || "")) : "";
-            const label = granted ? (d.label || "") : "";
-            return { deviceId, kind: d.kind || "", label, groupId };
-        });
-        return Promise.resolve(out);
-    };
-    _navMediaDevices.getUserMedia = function () { return Promise.reject(new Error("Permission denied")); };
-    _navMediaDevices.getDisplayMedia = function () { return Promise.reject(new Error("Permission denied")); };
-    _navMediaDevices.getSupportedConstraints = function () {
-        return { aspectRatio: true, autoGainControl: true, brightness: true, channelCount: true, colorTemperature: true, contrast: true, deviceId: true, displaySurface: true, echoCancellation: true, exposureCompensation: true, exposureMode: true, exposureTime: true, facingMode: true, focusDistance: true, focusMode: true, frameRate: true, groupId: true, height: true, iso: true, latency: true, noiseSuppression: true, pan: true, pointsOfInterest: true, resizeMode: true, sampleRate: true, sampleSize: true, saturation: true, sharpness: true, suppressLocalAudioPlayback: true, tilt: true, torch: true, whiteBalanceMode: true, width: true, zoom: true };
-    };
-    _navMediaDevices.addEventListener = function () {};
-    _navMediaDevices.removeEventListener = function () {};
-    _navMediaDevices.dispatchEvent = function () { return true; };
+    _navMediaDevices.enumerateDevices = ({
+        enumerateDevices() {
+            const raw = _pJson("media_devices", []);
+            const permFor = (kind) => {
+                if (kind === "videoinput") return _PERMISSION_STATE_MAP["camera"] || "prompt";
+                if (kind === "audioinput" || kind === "audiooutput") return _PERMISSION_STATE_MAP["microphone"] || "prompt";
+                return "granted"; // unknown kinds — don't blank
+            };
+            const out = raw.map((d) => {
+                const granted = permFor(d.kind) === "granted";
+                const deviceId = granted ? (d.deviceId != null ? d.deviceId : (d.device_id || "")) : "";
+                const groupId = granted ? (d.groupId != null ? d.groupId : (d.group_id || "")) : "";
+                const label = granted ? (d.label || "") : "";
+                return { deviceId, kind: d.kind || "", label, groupId };
+            });
+            return Promise.resolve(out);
+        }
+    }).enumerateDevices;
+    _maskFunction(_navMediaDevices.enumerateDevices, 'enumerateDevices');
+
+    _navMediaDevices.getUserMedia = ({ getUserMedia() { return Promise.reject(new Error("Permission denied")); } }).getUserMedia;
+    _maskFunction(_navMediaDevices.getUserMedia, 'getUserMedia');
+
+    _navMediaDevices.getDisplayMedia = ({ getDisplayMedia() { return Promise.reject(new Error("Permission denied")); } }).getDisplayMedia;
+    _maskFunction(_navMediaDevices.getDisplayMedia, 'getDisplayMedia');
+
+    _navMediaDevices.getSupportedConstraints = ({
+        getSupportedConstraints() {
+            return { aspectRatio: true, autoGainControl: true, brightness: true, channelCount: true, colorTemperature: true, contrast: true, deviceId: true, displaySurface: true, echoCancellation: true, exposureCompensation: true, exposureMode: true, exposureTime: true, facingMode: true, focusDistance: true, focusMode: true, frameRate: true, groupId: true, height: true, iso: true, latency: true, noiseSuppression: true, pan: true, pointsOfInterest: true, resizeMode: true, sampleRate: true, sampleSize: true, saturation: true, sharpness: true, suppressLocalAudioPlayback: true, tilt: true, torch: true, whiteBalanceMode: true, width: true, zoom: true };
+        }
+    }).getSupportedConstraints;
+    _maskFunction(_navMediaDevices.getSupportedConstraints, 'getSupportedConstraints');
+
+    _navMediaDevices.addEventListener = ({ addEventListener() {} }).addEventListener;
+    _maskFunction(_navMediaDevices.addEventListener, 'addEventListener');
+
+    _navMediaDevices.removeEventListener = ({ removeEventListener() {} }).removeEventListener;
+    _maskFunction(_navMediaDevices.removeEventListener, 'removeEventListener');
+
+    _navMediaDevices.dispatchEvent = ({ dispatchEvent() { return true; } }).dispatchEvent;
+    _maskFunction(_navMediaDevices.dispatchEvent, 'dispatchEvent');
 
     // Permission name → state map matching headed Chrome defaults.
     // W3C PermissionState enum: 'granted' | 'denied' | 'prompt'. Headless
@@ -473,27 +507,38 @@
     }
     Object.defineProperty(PublicKeyCredential.prototype, Symbol.toStringTag,
         { value: "PublicKeyCredential", configurable: true });
-    PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = function () {
-        return Promise.resolve(_p("has_platform_authenticator", "false") === "true");
-    };
-    PublicKeyCredential.isConditionalMediationAvailable = function () {
-        return Promise.resolve(_p("conditional_mediation", "true") === "true");
-    };
+    PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = ({
+        isUserVerifyingPlatformAuthenticatorAvailable() {
+            return Promise.resolve(_p("has_platform_authenticator", "false") === "true");
+        }
+    }).isUserVerifyingPlatformAuthenticatorAvailable;
+    _maskFunction(PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable, 'isUserVerifyingPlatformAuthenticatorAvailable');
+
+    PublicKeyCredential.isConditionalMediationAvailable = ({
+        isConditionalMediationAvailable() {
+            return Promise.resolve(_p("conditional_mediation", "true") === "true");
+        }
+    }).isConditionalMediationAvailable;
+    _maskFunction(PublicKeyCredential.isConditionalMediationAvailable, 'isConditionalMediationAvailable');
+
     // Chrome 133+ surface — see web.dev/articles/webauthn-client-capabilities.
-    PublicKeyCredential.getClientCapabilities = function () {
-        const uvpa = _p("has_platform_authenticator", "false") === "true";
-        return Promise.resolve({
-            conditionalCreate: false,
-            conditionalGet: true,
-            hybridTransport: true,
-            passkeyPlatformAuthenticator: uvpa,
-            userVerifyingPlatformAuthenticator: uvpa,
-            relatedOrigins: true,
-            signalAllAcceptedCredentials: true,
-            signalCurrentUserDetails: true,
-            signalUnknownCredential: true,
-        });
-    };
+    PublicKeyCredential.getClientCapabilities = ({
+        getClientCapabilities() {
+            const uvpa = _p("has_platform_authenticator", "false") === "true";
+            return Promise.resolve({
+                conditionalCreate: false,
+                conditionalGet: true,
+                hybridTransport: true,
+                passkeyPlatformAuthenticator: uvpa,
+                userVerifyingPlatformAuthenticator: uvpa,
+                relatedOrigins: true,
+                signalAllAcceptedCredentials: true,
+                signalCurrentUserDetails: true,
+                signalUnknownCredential: true,
+            });
+        }
+    }).getClientCapabilities;
+    _maskFunction(PublicKeyCredential.getClientCapabilities, 'getClientCapabilities');
     globalThis.PublicKeyCredential = PublicKeyCredential;
 
     class IdentityCredential {
@@ -504,9 +549,12 @@
     globalThis.IdentityCredential = IdentityCredential;
 
     class IdentityProvider {}
-    IdentityProvider.getUserInfo = function () {
-        return Promise.reject(new DOMException("Not allowed", "NotAllowedError"));
-    };
+    IdentityProvider.getUserInfo = ({
+        getUserInfo() {
+            return Promise.reject(new DOMException("Not allowed", "NotAllowedError"));
+        }
+    }).getUserInfo;
+    _maskFunction(IdentityProvider.getUserInfo, 'getUserInfo');
     globalThis.IdentityProvider = IdentityProvider;
 
     function _fedcmGet(_identity) {
@@ -520,39 +568,46 @@
     class CredentialsContainer {}
     Object.defineProperty(CredentialsContainer.prototype, Symbol.toStringTag,
         { value: "CredentialsContainer", configurable: true });
-    CredentialsContainer.prototype.create = function (opts) {
-        if (!opts || typeof opts !== "object") {
-            return Promise.reject(new TypeError(
-                "Failed to execute 'create' on 'CredentialsContainer': 1 argument required."));
+    CredentialsContainer.prototype.create = ({
+        create(opts) {
+            if (!opts || typeof opts !== "object") {
+                return Promise.reject(new TypeError(
+                    "Failed to execute 'create' on 'CredentialsContainer': 1 argument required."));
+            }
+            if (opts.publicKey) {
+                // Realistic ~120 ms delay then NotAllowedError — matches Chrome with no UV.
+                return new Promise((_, rej) => setTimeout(() =>
+                    rej(new DOMException(
+                        "The operation either timed out or was not allowed; see https://www.w3.org/TR/webauthn-2/#sctn-privacy-considerations-client.",
+                        "NotAllowedError")), 120));
+            }
+            return Promise.resolve(null);
         }
-        if (opts.publicKey) {
-            // Realistic ~120 ms delay then NotAllowedError — matches Chrome with no UV.
-            return new Promise((_, rej) => setTimeout(() =>
-                rej(new DOMException(
-                    "The operation either timed out or was not allowed; see https://www.w3.org/TR/webauthn-2/#sctn-privacy-considerations-client.",
-                    "NotAllowedError")), 120));
+    }).create;
+    _maskFunction(CredentialsContainer.prototype.create, 'create');
+
+    CredentialsContainer.prototype.get = ({
+        get(opts) {
+            if (opts && opts.identity) return _fedcmGet(opts.identity);
+            if (opts && opts.publicKey) {
+                return new Promise((_, rej) => setTimeout(() =>
+                    rej(new DOMException(
+                        "The operation either timed out or was not allowed; see https://www.w3.org/TR/webauthn-2/#sctn-privacy-considerations-client.",
+                        "NotAllowedError")), 120));
+            }
+            return Promise.resolve(null);
         }
-        return Promise.resolve(null);
-    };
-    CredentialsContainer.prototype.get = function (opts) {
-        if (opts && opts.identity) return _fedcmGet(opts.identity);
-        if (opts && opts.publicKey) {
-            return new Promise((_, rej) => setTimeout(() =>
-                rej(new DOMException(
-                    "The operation either timed out or was not allowed; see https://www.w3.org/TR/webauthn-2/#sctn-privacy-considerations-client.",
-                    "NotAllowedError")), 120));
-        }
-        return Promise.resolve(null);
-    };
-    CredentialsContainer.prototype.store = function () { return Promise.resolve(undefined); };
-    CredentialsContainer.prototype.preventSilentAccess = function () { return Promise.resolve(undefined); };
+    }).get;
+    _maskFunction(CredentialsContainer.prototype.get, 'get');
+
+    CredentialsContainer.prototype.store = ({ store() { return Promise.resolve(undefined); } }).store;
+    _maskFunction(CredentialsContainer.prototype.store, 'store');
+
+    CredentialsContainer.prototype.preventSilentAccess = ({ preventSilentAccess() { return Promise.resolve(undefined); } }).preventSilentAccess;
+    _maskFunction(CredentialsContainer.prototype.preventSilentAccess, 'preventSilentAccess');
+
     globalThis.CredentialsContainer = CredentialsContainer;
     const _navCredentials = Object.create(CredentialsContainer.prototype);
-
-    _maskAsNative(PublicKeyCredential, 'isUserVerifyingPlatformAuthenticatorAvailable',
-        'isConditionalMediationAvailable', 'getClientCapabilities');
-    _maskAsNative(IdentityProvider, 'getUserInfo');
-    _maskAsNative(CredentialsContainer.prototype, 'create', 'get', 'store', 'preventSilentAccess');
 
     class Bluetooth extends EventTarget {
         constructor() { super(); }
@@ -560,8 +615,12 @@
     Object.defineProperty(Bluetooth.prototype, Symbol.toStringTag, {
         value: "Bluetooth", configurable: true,
     });
-    Bluetooth.prototype.getAvailability = function () { return Promise.resolve(false); };
-    Bluetooth.prototype.requestDevice = function () { return Promise.reject(new DOMException("User denied", "NotFoundError")); };
+    Bluetooth.prototype.getAvailability = ({ getAvailability() { return Promise.resolve(false); } }).getAvailability;
+    _maskFunction(Bluetooth.prototype.getAvailability, 'getAvailability');
+
+    Bluetooth.prototype.requestDevice = ({ requestDevice() { return Promise.reject(new DOMException("User denied", "NotFoundError")); } }).requestDevice;
+    _maskFunction(Bluetooth.prototype.requestDevice, 'requestDevice');
+
     globalThis.Bluetooth = Bluetooth;
     const _navBluetooth = Object.create(Bluetooth.prototype);
 
@@ -572,8 +631,10 @@
     const _navUsb = (() => {
         const _UProto = globalThis.USB && globalThis.USB.prototype;
         const u = _UProto ? Object.create(_UProto) : {};
-        u.getDevices = function getDevices() { return Promise.resolve([]); };
-        u.requestDevice = function requestDevice() { return Promise.reject(new DOMException("User denied", "NotFoundError")); };
+        u.getDevices = ({ getDevices() { return Promise.resolve([]); } }).getDevices;
+        _maskFunction(u.getDevices, 'getDevices');
+        u.requestDevice = ({ requestDevice() { return Promise.reject(new DOMException("User denied", "NotFoundError")); } }).requestDevice;
+        _maskFunction(u.requestDevice, 'requestDevice');
         u.onconnect = null;
         u.ondisconnect = null;
         return u;
@@ -581,8 +642,10 @@
     const _navSerial = (() => {
         const _SProto = globalThis.Serial && globalThis.Serial.prototype;
         const s = _SProto ? Object.create(_SProto) : {};
-        s.getPorts = function getPorts() { return Promise.resolve([]); };
-        s.requestPort = function requestPort() { return Promise.reject(new DOMException("User denied", "NotFoundError")); };
+        s.getPorts = ({ getPorts() { return Promise.resolve([]); } }).getPorts;
+        _maskFunction(s.getPorts, 'getPorts');
+        s.requestPort = ({ requestPort() { return Promise.reject(new DOMException("User denied", "NotFoundError")); } }).requestPort;
+        _maskFunction(s.requestPort, 'requestPort');
         s.onconnect = null;
         s.ondisconnect = null;
         return s;
@@ -590,8 +653,10 @@
     const _navHid = (() => {
         const _HProto = globalThis.HID && globalThis.HID.prototype;
         const h = _HProto ? Object.create(_HProto) : {};
-        h.getDevices = function getDevices() { return Promise.resolve([]); };
-        h.requestDevice = function requestDevice() { return Promise.reject(new DOMException("User denied", "NotFoundError")); };
+        h.getDevices = ({ getDevices() { return Promise.resolve([]); } }).getDevices;
+        _maskFunction(h.getDevices, 'getDevices');
+        h.requestDevice = ({ requestDevice() { return Promise.reject(new DOMException("User denied", "NotFoundError")); } }).requestDevice;
+        _maskFunction(h.requestDevice, 'requestDevice');
         h.onconnect = null;
         h.ondisconnect = null;
         return h;
@@ -599,8 +664,10 @@
     const _navLocks = (() => {
         const _LProto = globalThis.LockManager && globalThis.LockManager.prototype;
         const l = _LProto ? Object.create(_LProto) : {};
-        l.query = function query() { return Promise.resolve({ held: [], pending: [] }); };
-        l.request = function request() { return new Promise(() => {}); };
+        l.query = ({ query() { return Promise.resolve({ held: [], pending: [] }); } }).query;
+        _maskFunction(l.query, 'query');
+        l.request = ({ request() { return new Promise(() => {}); } }).request;
+        _maskFunction(l.request, 'request');
         return l;
     })();
 
@@ -647,7 +714,13 @@
         keys() { return this._m.keys(); }
         values() { return this._m.values(); }
         forEach(cb, thisArg) { return this._m.forEach(cb, thisArg); }
-        [Symbol.iterator]() { return this._m[Symbol.iterator](); }
+        [Symbol.iterator]() {
+            const it = this._m[Symbol.iterator]();
+            return {
+                next() { return it.next(); },
+                [Symbol.iterator]() { return this; }
+            };
+        }
     }
     Object.defineProperty(KeyboardLayoutMap.prototype, Symbol.toStringTag, {
         value: 'KeyboardLayoutMap', configurable: true,
@@ -671,21 +744,29 @@
     Object.defineProperty(StorageManager.prototype, Symbol.toStringTag, {
         value: "StorageManager", configurable: true,
     });
-    StorageManager.prototype.estimate = function () {
-        // Real Chrome on modern macOS/Windows desktops reports ~60% of
-        // free disk as quota. ~120 GB is a typical-disk plausible value
-        // — the previous 1 GB constant is a hard fingerprint tell because
-        // Chrome quota is always many tens of GB. Usage breakdown matches
-        // Chrome's documented `usageDetails` shape so iteration probes
-        // (e.g. `for (k in details)`) see the same key set.
-        return Promise.resolve({
-            quota: 128849018880,                 // ~120 GB
-            usage: 0,
-            usageDetails: { indexedDB: 0, caches: 0, serviceWorkerRegistrations: 0 },
-        });
-    };
-    StorageManager.prototype.persist = function () { return Promise.resolve(false); };
-    StorageManager.prototype.persisted = function () { return Promise.resolve(false); };
+    StorageManager.prototype.estimate = ({
+        estimate() {
+            // Real Chrome on modern macOS/Windows desktops reports ~60% of
+            // free disk as quota. ~120 GB is a typical-disk plausible value
+            // — the previous 1 GB constant is a hard fingerprint tell because
+            // Chrome quota is always many tens of GB. Usage breakdown matches
+            // Chrome's documented `usageDetails` shape so iteration probes
+            // (e.g. `for (k in details)`) see the same key set.
+            return Promise.resolve({
+                quota: 128849018880,                 // ~120 GB
+                usage: 0,
+                usageDetails: { indexedDB: 0, caches: 0, serviceWorkerRegistrations: 0 },
+            });
+        }
+    }).estimate;
+    _maskFunction(StorageManager.prototype.estimate, 'estimate');
+
+    StorageManager.prototype.persist = ({ persist() { return Promise.resolve(false); } }).persist;
+    _maskFunction(StorageManager.prototype.persist, 'persist');
+
+    StorageManager.prototype.persisted = ({ persisted() { return Promise.resolve(false); } }).persisted;
+    _maskFunction(StorageManager.prototype.persisted, 'persisted');
+
     globalThis.StorageManager = StorageManager;
     const _navStorage = Object.create(StorageManager.prototype);
 
@@ -704,45 +785,73 @@
     Object.defineProperty(ServiceWorkerContainer.prototype, Symbol.toStringTag, {
         value: "ServiceWorkerContainer", configurable: true,
     });
-    ServiceWorkerContainer.prototype.register = function (scriptURL, options) {
-        return Promise.resolve({
-            scope: (options && options.scope) || "/",
-            active: { scriptURL, state: "activated" },
-            installing: null,
-            waiting: null,
-            updateViaCache: "imports",
-            update() { return Promise.resolve(this); },
-            unregister() { return Promise.resolve(true); },
-            addEventListener() {},
-            removeEventListener() {},
-        });
-    };
-    ServiceWorkerContainer.prototype.getRegistrations = function () { return Promise.resolve([]); };
-    ServiceWorkerContainer.prototype.getRegistration = function () { return Promise.resolve(undefined); };
-    ServiceWorkerContainer.prototype.startMessages = function () {};
-    ServiceWorkerContainer.prototype.addEventListener = function () {};
-    ServiceWorkerContainer.prototype.removeEventListener = function () {};
+    ServiceWorkerContainer.prototype.register = ({
+        register(scriptURL, options) {
+            return Promise.resolve({
+                scope: (options && options.scope) || "/",
+                active: { scriptURL, state: "activated" },
+                installing: null,
+                waiting: null,
+                updateViaCache: "imports",
+                update() { return Promise.resolve(this); },
+                unregister() { return Promise.resolve(true); },
+                addEventListener() {},
+                removeEventListener() {},
+            });
+        }
+    }).register;
+    _maskFunction(ServiceWorkerContainer.prototype.register, 'register');
+
+    ServiceWorkerContainer.prototype.getRegistrations = ({ getRegistrations() { return Promise.resolve([]); } }).getRegistrations;
+    _maskFunction(ServiceWorkerContainer.prototype.getRegistrations, 'getRegistrations');
+
+    ServiceWorkerContainer.prototype.getRegistration = ({ getRegistration() { return Promise.resolve(undefined); } }).getRegistration;
+    _maskFunction(ServiceWorkerContainer.prototype.getRegistration, 'getRegistration');
+
+    ServiceWorkerContainer.prototype.startMessages = ({ startMessages() {} }).startMessages;
+    _maskFunction(ServiceWorkerContainer.prototype.startMessages, 'startMessages');
+
+    ServiceWorkerContainer.prototype.addEventListener = ({ addEventListener() {} }).addEventListener;
+    _maskFunction(ServiceWorkerContainer.prototype.addEventListener, 'addEventListener');
+
+    ServiceWorkerContainer.prototype.removeEventListener = ({ removeEventListener() {} }).removeEventListener;
+    _maskFunction(ServiceWorkerContainer.prototype.removeEventListener, 'removeEventListener');
+
     globalThis.ServiceWorkerContainer = ServiceWorkerContainer;
     const _navServiceWorker = new ServiceWorkerContainer();
     const _navClipboard = (() => {
         const _CProto = globalThis.Clipboard && globalThis.Clipboard.prototype;
         const c = _CProto ? Object.create(_CProto) : {};
-        c.readText = function readText() { return Promise.resolve(""); };
-        c.writeText = function writeText() { return Promise.resolve(); };
+        c.readText = ({ readText() { return Promise.resolve(""); } }).readText;
+        _maskFunction(c.readText, 'readText');
+
+        c.writeText = ({ writeText() { return Promise.resolve(); } }).writeText;
+        _maskFunction(c.writeText, 'writeText');
+
         return c;
     })();
     Object.defineProperty(_navClipboard, Symbol.toStringTag, { value: "Clipboard", configurable: true });
     const _navGeolocation = (() => {
         const _GProto = globalThis.Geolocation && globalThis.Geolocation.prototype;
         const g = _GProto ? Object.create(_GProto) : {};
-        g.getCurrentPosition = function getCurrentPosition(ok, err, options) {
-            if (typeof err === "function") setTimeout(() => err({ code: 1, message: "User denied Geolocation" }), 0);
-        };
-        g.watchPosition = function watchPosition(ok, err, options) {
-            if (typeof err === "function") setTimeout(() => err({ code: 1, message: "User denied Geolocation" }), 0);
-            return 0;
-        };
-        g.clearWatch = function clearWatch() {};
+        g.getCurrentPosition = ({
+            getCurrentPosition(ok, err, options) {
+                if (typeof err === "function") setTimeout(() => err({ code: 1, message: "User denied Geolocation" }), 0);
+            }
+        }).getCurrentPosition;
+        _maskFunction(g.getCurrentPosition, 'getCurrentPosition');
+
+        g.watchPosition = ({
+            watchPosition(ok, err, options) {
+                if (typeof err === "function") setTimeout(() => err({ code: 1, message: "User denied Geolocation" }), 0);
+                return 0;
+            }
+        }).watchPosition;
+        _maskFunction(g.watchPosition, 'watchPosition');
+
+        g.clearWatch = ({ clearWatch() {} }).clearWatch;
+        _maskFunction(g.clearWatch, 'clearWatch');
+
         return g;
     })();
     Object.defineProperty(_navGeolocation, Symbol.toStringTag, { value: "Geolocation", configurable: true });
@@ -1282,23 +1391,31 @@
         enumerable: true, configurable: true,
     });
 
-    globalThis.scrollTo = function(xOrOptions, y) {
-        if (typeof xOrOptions === "object" && xOrOptions !== null) {
-            _scrollX = xOrOptions.left || 0;
-            _scrollY = xOrOptions.top || 0;
-        } else {
-            _scrollX = xOrOptions || 0;
-            _scrollY = y || 0;
+    globalThis.scrollTo = ({
+        scrollTo(xOrOptions, y) {
+            if (typeof xOrOptions === "object" && xOrOptions !== null) {
+                _scrollX = xOrOptions.left || 0;
+                _scrollY = xOrOptions.top || 0;
+            } else {
+                _scrollX = xOrOptions || 0;
+                _scrollY = y || 0;
+            }
         }
-    };
+    }).scrollTo;
+    _maskFunction(globalThis.scrollTo, 'scrollTo');
+
     globalThis.scroll = globalThis.scrollTo;
-    globalThis.scrollBy = function(xOrOptions, y) {
-        if (typeof xOrOptions === "object" && xOrOptions !== null) {
-            globalThis.scrollTo(_scrollX + (xOrOptions.left || 0), _scrollY + (xOrOptions.top || 0));
-        } else {
-            globalThis.scrollTo(_scrollX + (xOrOptions || 0), _scrollY + (y || 0));
+
+    globalThis.scrollBy = ({
+        scrollBy(xOrOptions, y) {
+            if (typeof xOrOptions === "object" && xOrOptions !== null) {
+                globalThis.scrollTo(_scrollX + (xOrOptions.left || 0), _scrollY + (xOrOptions.top || 0));
+            } else {
+                globalThis.scrollTo(_scrollX + (xOrOptions || 0), _scrollY + (y || 0));
+            }
         }
-    };
+    }).scrollBy;
+    _maskFunction(globalThis.scrollBy, 'scrollBy');
 
     // window.chrome (CRITICAL — every antibot system checks this object).
     //
@@ -1317,38 +1434,35 @@
     // 5. Object.getOwnPropertyNames(chrome).length > 0 in real Chrome,
     //    so leaving chrome as a plain object here is CORRECT — we don't
     //    want zero own properties like navigator.
-    const _chromeCsi = function csi() {
-        return { startE: Date.now(), onloadT: Date.now(), pageT: Date.now(), tran: 15 };
-    };
-    const _chromeLoadTimes = function loadTimes() {
-        // For HTTP/2 pages these are true/"h2"; for about:blank/non-HTTP they are false/"".
-        const _isHttp = globalThis.location && /^https?:/.test(globalThis.location.protocol);
-        return {
-            commitLoadTime: Date.now()/1000,
-            connectionInfo: _isHttp ? "h2" : "",
-            finishDocumentLoadTime: Date.now()/1000,
-            finishLoadTime: Date.now()/1000,
-            firstPaintAfterLoadTime: 0,
-            firstPaintTime: Date.now()/1000,
-            navigationType: "Other",
-            npnNegotiatedProtocol: _isHttp ? "h2" : "",
-            requestTime: Date.now()/1000,
-            startLoadTime: Date.now()/1000,
-            wasAlternateProtocolAvailable: _isHttp,
-            wasFetchedViaSpdy: _isHttp,
-            wasNpnNegotiated: _isHttp,
-        };
-    };
-    Object.defineProperty(_chromeCsi, 'toString', {
-        value: function toString() { return 'function csi() { [native code] }'; },
-        configurable: true,
-    });
-    Object.defineProperty(_chromeCsi, _nativeTag, { value: 'csi', configurable: true });
-    Object.defineProperty(_chromeLoadTimes, 'toString', {
-        value: function toString() { return 'function loadTimes() { [native code] }'; },
-        configurable: true,
-    });
-    Object.defineProperty(_chromeLoadTimes, _nativeTag, { value: 'loadTimes', configurable: true });
+    const _chromeCsi = ({
+        csi() {
+            return { startE: Date.now(), onloadT: Date.now(), pageT: Date.now(), tran: 15 };
+        }
+    }).csi;
+    _maskFunction(_chromeCsi, 'csi');
+
+    const _chromeLoadTimes = ({
+        loadTimes() {
+            // For HTTP/2 pages these are true/"h2"; for about:blank/non-HTTP they are false/"".
+            const _isHttp = globalThis.location && /^https?:/.test(globalThis.location.protocol);
+            return {
+                commitLoadTime: Date.now()/1000,
+                connectionInfo: _isHttp ? "h2" : "",
+                finishDocumentLoadTime: Date.now()/1000,
+                finishLoadTime: Date.now()/1000,
+                firstPaintAfterLoadTime: 0,
+                firstPaintTime: Date.now()/1000,
+                navigationType: "Other",
+                npnNegotiatedProtocol: _isHttp ? "h2" : "",
+                requestTime: Date.now()/1000,
+                startLoadTime: Date.now()/1000,
+                wasAlternateProtocolAvailable: _isHttp,
+                wasFetchedViaSpdy: _isHttp,
+                wasNpnNegotiated: _isHttp,
+            };
+        }
+    }).loadTimes;
+    _maskFunction(_chromeLoadTimes, 'loadTimes');
 
     // Real Chrome 147 on a regular page (no extensions): {app, csi, loadTimes}
     // chrome.runtime is ONLY present in extension contexts — absent on regular pages.
@@ -1511,44 +1625,51 @@
                 mobile: { get: () => false, enumerable: true },
                 platform: { get: () => _uaPlatform(), enumerable: true },
             });
-            u.getHighEntropyValues = function getHighEntropyValues(hints) {
-                // Chrome rejects with TypeError on non-array (or missing).
-                if (!Array.isArray(hints)) {
-                    return Promise.reject(new TypeError(
-                        "Failed to execute 'getHighEntropyValues' on 'NavigatorUAData': " +
-                        "The provided value cannot be converted to a sequence."
-                    ));
-                }
-                const result = {
-                    brands: _lowCached(),
-                    mobile: false,
-                    platform: _uaPlatform(),
-                };
-                for (const key of hints) {
-                    if (typeof key !== "string" || !_allowedHints.has(key)) continue;
-                    switch (key) {
-                        case "architecture":      result.architecture = _uaArch(); break;
-                        case "bitness":           result.bitness = _uaBitness(); break;
-                        case "brands":            result.brands = _lowCached(); break;
-                        case "formFactors":       result.formFactors = ["Desktop"]; break;
-                        case "fullVersionList":   result.fullVersionList = _fullCached(); break;
-                        case "mobile":            result.mobile = false; break;
-                        case "model":             result.model = _uaModel(); break;
-                        case "platform":          result.platform = _uaPlatform(); break;
-                        case "platformVersion":   result.platformVersion = _uaPlatformVersion(); break;
-                        case "uaFullVersion":     result.uaFullVersion = _uaBrowserFull(); break;
-                        case "wow64":             result.wow64 = _uaWow64(); break;
+            u.getHighEntropyValues = ({
+                getHighEntropyValues(hints) {
+                    // Chrome rejects with TypeError on non-array (or missing).
+                    if (!Array.isArray(hints)) {
+                        return Promise.reject(new TypeError(
+                            "Failed to execute 'getHighEntropyValues' on 'NavigatorUAData': " +
+                            "The provided value cannot be converted to a sequence."
+                        ));
                     }
+                    const result = {
+                        brands: _lowCached(),
+                        mobile: false,
+                        platform: _uaPlatform(),
+                    };
+                    for (const key of hints) {
+                        if (typeof key !== "string") continue;
+                        switch (key) {
+                            case "architecture":      result.architecture = _uaArch(); break;
+                            case "bitness":           result.bitness = _uaBitness(); break;
+                            case "brands":            result.brands = _lowCached(); break;
+                            case "formFactors":       result.formFactors = ["Desktop"]; break;
+                            case "fullVersionList":   result.fullVersionList = _fullCached(); break;
+                            case "mobile":            result.mobile = false; break;
+                            case "model":             result.model = _uaModel(); break;
+                            case "platform":          result.platform = _uaPlatform(); break;
+                            case "platformVersion":   result.platformVersion = _uaPlatformVersion(); break;
+                            case "uaFullVersion":     result.uaFullVersion = _uaBrowserFull(); break;
+                            case "wow64":             result.wow64 = _uaWow64(); break;
+                        }
+                    }
+                    return Promise.resolve(result);
                 }
-                return Promise.resolve(result);
-            };
-            u.toJSON = function toJSON() {
-                return {
-                    brands: _lowCached().map(b => ({ brand: b.brand, version: b.version })),
-                    mobile: false,
-                    platform: _uaPlatform(),
-                };
-            };
+            }).getHighEntropyValues;
+            _maskFunction(u.getHighEntropyValues, 'getHighEntropyValues');
+
+            u.toJSON = ({
+                toJSON() {
+                    return {
+                        brands: _lowCached().map(b => ({ brand: b.brand, version: b.version })),
+                        mobile: false,
+                        platform: _uaPlatform(),
+                    };
+                }
+            }).toJSON;
+            _maskFunction(u.toJSON, 'toJSON');
             return u;
         })();
         // userAgentData is [SecureContext] — return undefined on
@@ -1558,7 +1679,7 @@
     })();
 
     // Notification
-    globalThis.Notification = class Notification { static permission = "default"; };
+    // globalThis.Notification = class Notification { static permission = "default"; };
 
     // Worker / SharedWorker / ServiceWorker classes. Our runtime has a
     // crates/workers module but doesn't auto-expose the constructor to JS.
@@ -1836,7 +1957,8 @@
         };
     }
     if (!globalThis.createImageBitmap) {
-        globalThis.createImageBitmap = function() { return Promise.resolve(new globalThis.ImageBitmap()); };
+        globalThis.createImageBitmap = ({ createImageBitmap() { return Promise.resolve(new globalThis.ImageBitmap()); } }).createImageBitmap;
+        _maskFunction(globalThis.createImageBitmap, 'createImageBitmap');
     }
 
     if (!globalThis.DOMPoint) {
@@ -2882,37 +3004,41 @@
 
     // atob / btoa
     if (!globalThis.atob) {
-        globalThis.atob = function atob(s) {
-            if (arguments.length === 0) {
-                throw new TypeError("Failed to execute 'atob' on 'Window': 1 argument required, but only 0 present.");
+        globalThis.atob = ({
+            atob(s) {
+                if (arguments.length === 0) {
+                    throw new TypeError("Failed to execute 'atob' on 'Window': 1 argument required, but only 0 present.");
+                }
+                const input = String(s).replace(/[\t\n\f\r ]/g, "");
+                if (input.length === 0) return "";
+                
+                const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                let out = "";
+                for (let i = 0; i < input.length; i += 4) {
+                    const a = chars.indexOf(input[i]), b = chars.indexOf(input[i+1]);
+                    const c = chars.indexOf(input[i+2]), d = chars.indexOf(input[i+3]);
+                    out += String.fromCharCode((a << 2) | (b >> 4));
+                    if (c !== -1 && c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+                    if (d !== -1 && d !== 64) out += String.fromCharCode(((c & 3) << 6) | d);
+                }
+                return out;
             }
-            const input = String(s).replace(/[\t\n\f\r ]/g, "");
-            if (input.length === 0) return "";
-            
-            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-            let out = "";
-            for (let i = 0; i < input.length; i += 4) {
-                const a = chars.indexOf(input[i]), b = chars.indexOf(input[i+1]);
-                const c = chars.indexOf(input[i+2]), d = chars.indexOf(input[i+3]);
-                out += String.fromCharCode((a << 2) | (b >> 4));
-                if (c !== -1 && c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
-                if (d !== -1 && d !== 64) out += String.fromCharCode(((c & 3) << 6) | d);
-            }
-            return out;
-        };
+        }).atob;
+        _maskFunction(globalThis.atob, 'atob');
     }
     const _origStringify = JSON.stringify;
     if (!globalThis.btoa) {
-        globalThis.btoa = function btoa(s) {
-            if (arguments.length === 0) {
-                throw new TypeError("Failed to execute 'btoa' on 'Window': 1 argument required, but only 0 present.");
-            }
-            const str = String(s);
-            for (let i = 0; i < str.length; i++) {
-                if (str.charCodeAt(i) > 255) {
-                    throw new DOMException("Failed to execute 'btoa' on 'Window': The string to be encoded contains characters outside of the Latin1 range.", "InvalidCharacterError");
+        globalThis.btoa = ({
+            btoa(s) {
+                if (arguments.length === 0) {
+                    throw new TypeError("Failed to execute 'btoa' on 'Window': 1 argument required, but only 0 present.");
                 }
-            }
+                const str = String(s);
+                for (let i = 0; i < str.length; i++) {
+                    if (str.charCodeAt(i) > 255) {
+                        throw new DOMException("Failed to execute 'btoa' on 'Window': The string to be encoded contains characters outside of the Latin1 range.", "InvalidCharacterError");
+                    }
+                }
             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
             let out = "";
             for (let i = 0; i < str.length; i += 3) {
@@ -2922,7 +3048,9 @@
                 out += (isNaN(c) ? "=" : chars[c & 63]);
             }
             return out;
-        };
+        }
+        }).btoa;
+        _maskFunction(globalThis.btoa, 'btoa');
     }
 
     // localStorage / sessionStorage persistent stubs (backed by Rust DomState)
@@ -3053,10 +3181,19 @@
     };
 
     // requestIdleCallback stub
-    globalThis.requestIdleCallback = function(cb) {
-        return setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 }), 1);
-    };
-    globalThis.cancelIdleCallback = clearTimeout;
+    globalThis.requestIdleCallback = ({
+        requestIdleCallback(cb) {
+            return setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 }), 1);
+        }
+    }).requestIdleCallback;
+    _maskFunction(globalThis.requestIdleCallback, 'requestIdleCallback');
+
+    globalThis.cancelIdleCallback = ({
+        cancelIdleCallback(id) {
+            return clearTimeout(id);
+        }
+    }).cancelIdleCallback;
+    _maskFunction(globalThis.cancelIdleCallback, 'cancelIdleCallback');
 
     // getComputedStyle — reads inline style from actual element, falls back to CSS defaults.
     // CAPTURE _getNodeId at bootstrap time: cleanup_bootstrap.js deletes
@@ -3068,14 +3205,15 @@
     const _getNodeIdForCompStyle = (globalThis.__boxide && globalThis.__boxide._getNodeId)
         ? globalThis.__boxide._getNodeId
         : (() => 0);
-    globalThis.getComputedStyle = function(element, pseudoElt) {
-        if (!element) return null;
-        let styleProxy = _compStyleCache.get(element);
-        if (styleProxy) return styleProxy;
+    globalThis.getComputedStyle = ({
+        getComputedStyle(element, pseudoElt) {
+            if (!element) return null;
+            let styleProxy = _compStyleCache.get(element);
+            if (styleProxy) return styleProxy;
 
-        const nodeId = _getNodeIdForCompStyle(element);
-        // Create an instance of CSSStyleDeclaration.
-        const style = Object.create(globalThis.CSSStyleDeclaration.prototype || Object.prototype);
+            const nodeId = _getNodeIdForCompStyle(element);
+            // Create an instance of CSSStyleDeclaration.
+            const style = Object.create(globalThis.CSSStyleDeclaration.prototype || Object.prototype);
         let cache = null;
         let keys = null;
         function ensureCache() {
@@ -3117,8 +3255,9 @@
         });
         _compStyleCache.set(element, styleProxy);
         return styleProxy;
-    };
-    _maskAsNative(globalThis, 'getComputedStyle');
+        }
+    }).getComputedStyle;
+    _maskFunction(globalThis.getComputedStyle, 'getComputedStyle');
 
     // XMLHttpRequest stub (built on fetch)
     // XMLHttpRequest — must extend EventTarget and expose the full Chrome
@@ -3665,43 +3804,63 @@
         });
         globalThis.MediaQueryList = MediaQueryList;
 
-        globalThis.matchMedia = function matchMedia(query) {
-            return new MediaQueryList(query);
-        };
+        globalThis.matchMedia = ({
+            matchMedia(query) {
+                return new MediaQueryList(query);
+            }
+        }).matchMedia;
         if (typeof _maskFunction === "function") {
             _maskFunction(globalThis.matchMedia, "matchMedia");
         }
-    }
-
-    // --- window.open/close/postMessage ---
-    globalThis.open = function(url, target, features) { return null; };
-    globalThis.close = function() {};
-    globalThis.postMessage = function(message, targetOrigin, transfer) {
-        // Use structuredClone if available to match browser behavior.
-        // If not available (e.g. during very early bootstrap), fall back to reference.
-        let cloned = message;
-        try {
-            if (typeof globalThis.structuredClone === 'function') {
-                cloned = globalThis.structuredClone(message, { transfer });
-            }
-        } catch (e) {
-            // DataCloneError — propagate as-is (matches Chrome)
-            throw e;
         }
-        // Fire message event asynchronously
-        Promise.resolve().then(() => {
-            const event = new MessageEvent("message", {
-                data: cloned,
-                origin: targetOrigin || globalThis.location?.origin || "",
+
+        // --- window.open/close/postMessage ---
+        globalThis.open = ({ open(url, target, features) { return null; } }).open;
+        _maskFunction(globalThis.open, "open");
+
+        globalThis.close = ({ close() {} }).close;
+        _maskFunction(globalThis.close, "close");
+
+        globalThis.postMessage = ({
+        postMessage(message, targetOrigin, transfer) {
+            // Use structuredClone if available to match browser behavior.
+            // If not available (e.g. during very early bootstrap), fall back to reference.
+            let cloned = message;
+            try {
+                if (typeof globalThis.structuredClone === 'function') {
+                    cloned = globalThis.structuredClone(message, { transfer });
+                }
+            } catch (e) {
+                // DataCloneError — propagate as-is (matches Chrome)
+                throw e;
+            }
+            // Fire message event asynchronously
+            Promise.resolve().then(() => {
+                const event = new MessageEvent("message", {
+                    data: cloned,
+                    origin: targetOrigin || globalThis.location?.origin || "",
+                });
+                globalThis.dispatchEvent(event);
             });
-            globalThis.dispatchEvent(event);
-        });
-    };
-    globalThis.stop = function() {};
-    globalThis.print = function() {};
-    globalThis.confirm = function(msg) { return true; };
-    globalThis.alert = function(msg) {};
-    globalThis.prompt = function(msg, def) { return def || null; };
+        }
+        }).postMessage;
+        _maskFunction(globalThis.postMessage, "postMessage");
+
+        globalThis.stop = ({ stop() {} }).stop;
+        _maskFunction(globalThis.stop, "stop");
+
+        globalThis.print = ({ print() {} }).print;
+        _maskFunction(globalThis.print, "print");
+
+        globalThis.confirm = ({ confirm(msg) { return true; } }).confirm;
+        _maskFunction(globalThis.confirm, "confirm");
+
+        globalThis.alert = ({ alert(msg) {} }).alert;
+        _maskFunction(globalThis.alert, "alert");
+
+        globalThis.prompt = ({ prompt(msg, def) { return def || null; } }).prompt;
+        _maskFunction(globalThis.prompt, "prompt");
+
 
     // --- AbortController / AbortSignal ---
     class AbortSignal {
@@ -4782,17 +4941,7 @@
             "audio/mp3", "audio/x-wav",
         ]);
 
-        globalThis.MediaSource = class MediaSource {
-            static isTypeSupported(type) {
-                if (_supportedTypes.has(type)) return true;
-                // Partial match on base type
-                const base = type.split(';')[0].trim();
-                return _supportedTypes.has(base);
-            }
-            addEventListener() {}
-            removeEventListener() {}
-        };
-        globalThis.MediaSource.isTypeSupported = MediaSource.isTypeSupported;
+        // Removed redundant MediaSource definition here; it is defined further down.
 
         // Patch HTMLMediaElement.canPlayType if document exists
         if (globalThis.document) {
@@ -4818,54 +4967,7 @@
         // "Cannot read properties of undefined (reading 'isTypeSupported')".
         // Stub class — produces no recordings but answers capability
         // probes correctly using the same _supportedTypes set.
-        if (!globalThis.MediaRecorder) {
-            const _mrSupported = new Set([
-                "video/webm", 'video/webm;codecs=vp8', 'video/webm;codecs=vp9',
-                'video/webm;codecs=h264', 'video/webm;codecs="vp8,opus"',
-                'video/webm;codecs="vp9,opus"', 'video/webm;codecs="h264,opus"',
-                "video/x-matroska", 'video/x-matroska;codecs=avc1',
-                "audio/webm", 'audio/webm;codecs=opus', 'audio/webm;codecs=pcm',
-                "audio/mp4", 'audio/mp4;codecs=opus',
-            ]);
-            globalThis.MediaRecorder = class MediaRecorder extends EventTarget {
-                constructor(stream, options = {}) {
-                    super();
-                    this.stream = stream || null;
-                    this.mimeType = (options && options.mimeType) || "video/webm";
-                    this.state = "inactive";
-                    this.audioBitsPerSecond = 0;
-                    this.videoBitsPerSecond = 0;
-                    this.audioBitrateMode = "variable";
-                    this.ondataavailable = null;
-                    this.onstop = null;
-                    this.onpause = null;
-                    this.onresume = null;
-                    this.onstart = null;
-                    this.onerror = null;
-                }
-                start(_timeslice) {
-                    this.state = "recording";
-                    if (typeof this.onstart === 'function') {
-                        try { this.onstart(new Event('start')); } catch (_) {}
-                    }
-                }
-                stop() {
-                    this.state = "inactive";
-                    if (typeof this.onstop === 'function') {
-                        try { this.onstop(new Event('stop')); } catch (_) {}
-                    }
-                }
-                pause() { this.state = "paused"; }
-                resume() { this.state = "recording"; }
-                requestData() {}
-                static isTypeSupported(mimeType) {
-                    if (typeof mimeType !== 'string') return false;
-                    if (_mrSupported.has(mimeType)) return true;
-                    const base = mimeType.split(';')[0].trim();
-                    return _mrSupported.has(base);
-                }
-            };
-        }
+        // Removed redundant MediaRecorder definition here; it is defined further down.
     }
 
     // ================================================================
@@ -5078,6 +5180,100 @@
     // VisualViewport — Chrome surface that fingerprinters probe to
     // detect mobile vs desktop AND to detect headless absence. Real
     // Chrome exposes a singleton instance accessible as
+    // MediaSource + MediaRecorder.isTypeSupported in window realm.
+    // Kasada's `mrs` probe (W4a 2026-05-11) reads .isTypeSupported.
+    (() => {
+        const _supportedTypes = new Set([
+            "video/mp4", 'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+            'video/mp4;codecs="avc1.640028"', "video/webm",
+            'video/webm;codecs="vp8,vorbis"', 'video/webm;codecs="vp9"',
+            'video/webm;codecs="vp9,opus"', "audio/mp4",
+            'audio/mp4;codecs="mp4a.40.2"', "audio/webm",
+            'audio/webm;codecs=opus', 'audio/webm;codecs=vorbis',
+        ]);
+        
+        const _isTypeSupported = ({
+            isTypeSupported(type) {
+                if (typeof type !== 'string') return false;
+                if (_supportedTypes.has(type)) return true;
+                const base = type.split(';')[0].trim();
+                return _supportedTypes.has(base);
+            }
+        }).isTypeSupported;
+        _maskFunction(_isTypeSupported, "isTypeSupported");
+
+        class SourceBufferList extends EventTarget {
+            constructor() { super(); this.length = 0; }
+            [Symbol.iterator]() {
+                let i = 0;
+                const self = this;
+                return {
+                    next() {
+                        if (i < self.length) return { value: self[i++], done: false };
+                        return { value: undefined, done: true };
+                    },
+                    [Symbol.iterator]() { return this; }
+                };
+            }
+        }
+        _maskFunction(SourceBufferList, "SourceBufferList");
+
+        // Overwrite the stubs from interfaces_bootstrap
+        if (globalThis.MediaSource) {
+            const _MSProto = globalThis.MediaSource.prototype;
+            Object.defineProperty(globalThis.MediaSource, 'isTypeSupported', {
+                value: _isTypeSupported, configurable: true, writable: true, enumerable: false
+            });
+            Object.defineProperty(_MSProto, 'sourceBuffers', {
+                get: function() { return new SourceBufferList(); },
+                configurable: true, enumerable: true
+            });
+            Object.defineProperty(_MSProto, 'activeSourceBuffers', {
+                get: function() { return new SourceBufferList(); },
+                configurable: true, enumerable: true
+            });
+            _maskFunction(globalThis.MediaSource, "MediaSource");
+            _maskAsNative(_MSProto, 'sourceBuffers', 'activeSourceBuffers');
+        }
+        if (globalThis.MediaRecorder) {
+            Object.defineProperty(globalThis.MediaRecorder, 'isTypeSupported', {
+                value: _isTypeSupported, configurable: true, writable: true, enumerable: false
+            });
+            _maskFunction(globalThis.MediaRecorder, "MediaRecorder");
+        }
+
+        const _getCapabilities = ({
+            getCapabilities(kind) {
+                return {
+                    codecs: kind === 'audio' ? [
+                        { channels: 2, clockRate: 48000, mimeType: "audio/opus" },
+                        { channels: 1, clockRate: 8000, mimeType: "audio/PCMU" },
+                        { channels: 1, clockRate: 8000, mimeType: "audio/PCMA" }
+                    ] : [
+                        { clockRate: 90000, mimeType: "video/VP8" },
+                        { clockRate: 90000, mimeType: "video/VP9", sdpFmtpLine: "profile-id=0" },
+                        { clockRate: 90000, mimeType: "video/H264", sdpFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f" }
+                    ],
+                    headerExtensions: []
+                };
+            }
+        }).getCapabilities;
+        _maskFunction(_getCapabilities, "getCapabilities");
+
+        if (globalThis.RTCRtpReceiver) {
+            Object.defineProperty(globalThis.RTCRtpReceiver, 'getCapabilities', {
+                value: _getCapabilities, configurable: true, writable: true, enumerable: false
+            });
+            _maskFunction(globalThis.RTCRtpReceiver, "RTCRtpReceiver");
+        }
+        if (globalThis.RTCRtpSender) {
+            Object.defineProperty(globalThis.RTCRtpSender, 'getCapabilities', {
+                value: _getCapabilities, configurable: true, writable: true, enumerable: false
+            });
+            _maskFunction(globalThis.RTCRtpSender, "RTCRtpSender");
+        }
+    })();
+
     // `window.visualViewport`. Properties are layout-derived but for
     // a stationary viewport without pinch-zoom they equal the layout
     // viewport scaled by 1.0. Spec:
@@ -5321,10 +5517,12 @@
     // reportError (Chrome 95+) — dispatches an ErrorEvent on window.
     // ================================================================
     if (!globalThis.reportError) {
-        globalThis.reportError = function reportError(err) {
-            const evt = new ErrorEvent('error', { error: err, message: err && err.message || String(err), bubbles: true, cancelable: true });
-            globalThis.dispatchEvent(evt);
-        };
+        globalThis.reportError = ({
+            reportError(err) {
+                const evt = new ErrorEvent('error', { error: err, message: err && err.message || String(err), bubbles: true, cancelable: true });
+                globalThis.dispatchEvent(evt);
+            }
+        }).reportError;
         _maskAsNative(globalThis, 'reportError');
     }
 
@@ -5533,23 +5731,24 @@
     // Promise that resolves to "default" / "granted" / "denied".
     // Both Promise and legacy callback forms are supported per spec.
     {
-        const _NotifProto = globalThis.Notification?.prototype;
         class Notification extends EventTarget {
             constructor(title, options) {
                 super();
-                options = options || {};
-                this.title = String(title || "");
-                this.dir = options.dir || "auto";
-                this.lang = options.lang || "";
-                this.body = options.body || "";
-                this.tag = options.tag || "";
-                this.icon = options.icon || "";
-                this.image = options.image || "";
-                this.badge = options.badge || "";
-                this.data = options.data ?? null;
-                this.silent = options.silent ?? null;
-                this.requireInteraction = !!options.requireInteraction;
-                this.actions = options.actions || [];
+                if (arguments.length === 0) {
+                    throw new TypeError("Failed to construct 'Notification': 1 argument required, but only 0 present.");
+                }
+                this.title = String(title);
+                this.dir = (options && options.dir) || "auto";
+                this.lang = (options && options.lang) || "";
+                this.body = (options && options.body) || "";
+                this.tag = (options && options.tag) || "";
+                this.icon = (options && options.icon) || "";
+                this.image = (options && options.image) || "";
+                this.badge = (options && options.badge) || "";
+                this.data = (options && options.data) ?? null;
+                this.silent = (options && options.silent) ?? null;
+                this.requireInteraction = !!(options && options.requireInteraction);
+                this.actions = (options && options.actions) || [];
                 this.timestamp = Date.now();
                 this.onclick = null;
                 this.onerror = null;
@@ -5570,27 +5769,47 @@
         Object.defineProperty(Notification, "maxActions", {
             value: 2, configurable: true,
         });
-        Notification.requestPermission = function requestPermission(deprecatedCallback) {
-            // Always resolves to "default" — we never actually grant; matches
-            // headless Chrome behaviour and avoids a tell when the user
-            // never clicks the (non-existent) browser permission UI.
-            const result = "default";
-            const promise = Promise.resolve(result);
-            // Legacy callback form support (Notification spec § Permission).
-            if (typeof deprecatedCallback === "function") {
-                Promise.resolve().then(() => {
-                    try { deprecatedCallback(result); } catch (_e) {}
-                });
+        Notification.requestPermission = ({
+            requestPermission(deprecatedCallback) {
+                // Always resolves to "default" — we never actually grant; matches
+                // headless Chrome behaviour and avoids a tell when the user
+                // never clicks the (non-existent) browser permission UI.
+                const result = "default";
+                const promise = Promise.resolve(result);
+                // Legacy callback form support (Notification spec § Permission).
+                if (typeof deprecatedCallback === "function") {
+                    Promise.resolve().then(() => {
+                        try { deprecatedCallback(result); } catch (_e) {}
+                    });
+                }
+                return promise;
             }
-            return promise;
-        };
-        if (typeof _maskFunction === "function") {
-            _maskFunction(Notification.requestPermission, "requestPermission");
-        }
+        }).requestPermission;
+        _maskFunction(Notification.requestPermission, "requestPermission");
+        _maskFunction(Notification, "Notification");
         globalThis.Notification = Notification;
     }
 
-    // (5) IdleDetector — User Idle Detection API (Chrome 94+)
+    // (5) ApplePaySession — macOS/iOS only surface.
+    (() => {
+        const ApplePaySession = ({
+            ApplePaySession() { throw new TypeError("Illegal constructor"); }
+        }).ApplePaySession;
+        ApplePaySession.canMakePayments = ({ canMakePayments() { return true; } }).canMakePayments;
+        ApplePaySession.canMakePaymentsWithActiveCard = ({ canMakePaymentsWithActiveCard() { return Promise.resolve(true); } }).canMakePaymentsWithActiveCard;
+        ApplePaySession.supportsVersion = ({ supportsVersion() { return true; } }).supportsVersion;
+        _maskFunction(ApplePaySession, 'ApplePaySession');
+        _maskFunction(ApplePaySession.canMakePayments, 'canMakePayments');
+        _maskFunction(ApplePaySession.canMakePaymentsWithActiveCard, 'canMakePaymentsWithActiveCard');
+        _maskFunction(ApplePaySession.supportsVersion, 'supportsVersion');
+        Object.defineProperty(globalThis, 'ApplePaySession', {
+            get: () => _p("os_name", "") === "macOS" ? ApplePaySession : undefined,
+            configurable: true, enumerable: false
+        });
+    })();
+
+
+    // (6) IdleDetector — User Idle Detection API (Chrome 94+)
     // Spec: https://wicg.github.io/idle-detection/
     // [SecureContext] — undefined on insecure contexts. Phase 7.
     if (_secure() && typeof globalThis.IdleDetector === "undefined") {
