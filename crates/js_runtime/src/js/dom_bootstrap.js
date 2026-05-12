@@ -338,8 +338,9 @@
             return {
                 next() {
                     if (i < self.length) return { value: self[i++], done: false };
-                    return { done: true };
-                }
+                    return { value: undefined, done: true };
+                },
+                [Symbol.iterator]() { return this; }
             };
         }
     }
@@ -360,6 +361,54 @@
         get value() { return ops.op_dom_get_attribute(this.#nodeId, "class") || ""; }
         get length() { return this.value.split(/\s+/).filter(Boolean).length; }
         toString() { return this.value; }
+        item(index) {
+            const tokens = this.value.split(/\s+/).filter(Boolean);
+            return tokens[index] != null ? tokens[index] : null;
+        }
+        // Real Chrome DOMTokenList is iterable; iterating yields each token
+        // string. Kasada's `ao` probe spreads element.classList — without
+        // Symbol.iterator we throw "non-iterable" while Chrome returns the
+        // token array.
+        [Symbol.iterator]() {
+            const tokens = this.value.split(/\s+/).filter(Boolean);
+            let i = 0;
+            return {
+                next() {
+                    if (i < tokens.length) return { value: tokens[i++], done: false };
+                    return { value: undefined, done: true };
+                },
+                [Symbol.iterator]() { return this; }
+            };
+        }
+        entries() {
+            const tokens = this.value.split(/\s+/).filter(Boolean);
+            let i = 0;
+            return {
+                next() {
+                    if (i < tokens.length) { const idx = i; return { value: [idx, tokens[i++]], done: false }; }
+                    return { value: undefined, done: true };
+                },
+                [Symbol.iterator]() { return this; }
+            };
+        }
+        keys() {
+            const n = this.length;
+            let i = 0;
+            return {
+                next() {
+                    if (i < n) return { value: i++, done: false };
+                    return { value: undefined, done: true };
+                },
+                [Symbol.iterator]() { return this; }
+            };
+        }
+        values() { return this[Symbol.iterator](); }
+        forEach(cb, thisArg) {
+            const tokens = this.value.split(/\s+/).filter(Boolean);
+            for (let i = 0; i < tokens.length; i++) {
+                cb.call(thisArg, tokens[i], i, this);
+            }
+        }
     }
 
     // EventTarget is the base of the DOM prototype chain in real Chrome:
@@ -1246,8 +1295,9 @@
             let i = 0;
             return {
                 next() {
-                    return i < nodes.length ? { value: nodes[i++], done: false } : { done: true };
-                }
+                    return i < nodes.length ? { value: nodes[i++], done: false } : { value: undefined, done: true };
+                },
+                [Symbol.iterator]() { return this; }
             };
         }
     }
