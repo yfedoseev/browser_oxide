@@ -5751,3 +5751,156 @@ async fn kasada_symbol_iterator_probe() {
         Err(_) => println!("timeout"),
     }
 }
+
+/// Capture the per-session ips.js source from a canadagoose load. The
+/// W4a doc points at line 5 col 116 (U dispatcher) and line 3 col 66
+/// (STORE-INDEXED handler #12) as the load-bearing inspection targets.
+/// This test writes ips.js to ./kasada_ips.js for static analysis.
+#[tokio::test]
+#[ignore = "network: captures ips.js for static analysis"]
+async fn kasada_capture_ips_js() {
+    use browser::Page;
+    use std::time::Duration;
+
+    // Init script: hook script-element src setter so we record every
+    // <script src=...> assignment. Then after page load, fetch the
+    // ips.js URL from JS-side (same-origin) and stash the source on
+    // globalThis.__ipsJsSource.
+    let init = r#"
+        (function() {
+            globalThis.__scriptUrls = [];
+            // Capture script src assignments via setter.
+            const HSE = HTMLScriptElement && HTMLScriptElement.prototype;
+            if (HSE) {
+                const origDesc = Object.getOwnPropertyDescriptor(HSE, 'src');
+                if (origDesc && origDesc.set) {
+                    const origSet = origDesc.set;
+                    Object.defineProperty(HSE, 'src', {
+                        configurable: true,
+                        get: origDesc.get,
+                        set(v) {
+                            try { globalThis.__scriptUrls.push(String(v)); } catch (_) {}
+                            return origSet.call(this, v);
+                        }
+                    });
+                }
+            }
+        })();
+    "#;
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(120),
+        Page::navigate_with_init(
+            "https://www.canadagoose.com/",
+            stealth::presets::chrome_130_macos(),
+            2,
+            vec![init.to_string()],
+        ),
+    )
+    .await;
+
+    match page {
+        Ok(Ok(mut p)) => {
+            // Pump event loop briefly so ips.js script tag is observed.
+            for _ in 0..10 {
+                let _ = p.evaluate("0");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            // Find ips.js URL from setter log OR from DOM <script src> elements.
+            let url_js = r#"
+                (function() {
+                    // From setter capture
+                    const fromSetter = (globalThis.__scriptUrls || [])
+                        .find(u => u && u.includes('ips.js'));
+                    if (fromSetter) return fromSetter;
+                    // Fallback: walk current DOM for <script src> ending in ips.js
+                    const scripts = document.querySelectorAll('script[src]');
+                    for (const s of scripts) {
+                        if (s.src && s.src.includes('ips.js')) return s.src;
+                    }
+                    return '';
+                })()
+            "#;
+            let ips_url = p.evaluate(url_js).unwrap_or_default();
+            let ips_url = ips_url.trim_matches('"').to_string();
+            if ips_url.is_empty() {
+                println!("ips.js URL not found in setter log or DOM");
+                println!("Captured script URLs:");
+                let urls = p.evaluate("JSON.stringify(globalThis.__scriptUrls || [])").unwrap_or_default();
+                println!("{urls}");
+                return;
+            }
+            println!("ips.js URL: {ips_url}");
+
+            // Resolve to absolute URL. The captured URL is path-only
+            // (starts with /), so prepend canadagoose's origin.
+            let abs_url = if ips_url.starts_with('/') {
+                format!("https://www.canadagoose.com{}", ips_url)
+            } else if ips_url.starts_with("http") {
+                ips_url.clone()
+            } else {
+                format!("https://www.canadagoose.com/{}", ips_url)
+            };
+            println!("Absolute ips.js URL: {abs_url}");
+
+            // Debug: what does the runtime think the location is?
+            let loc = p.evaluate("JSON.stringify({base: document.baseURI, loc: location.href})").unwrap_or_default();
+            println!("Page location debug: {loc}");
+
+            // Use a SYNCHRONOUS XHR — our op_net_fetch_sync runs inline
+            // and avoids the async-promise pump pitfall.
+            let fetch_js = format!(
+                r#"
+                (function() {{
+                    try {{
+                        const x = new XMLHttpRequest();
+                        x.open('GET', {:?}, false);  // sync
+                        x.send();
+                        if (x.status >= 200 && x.status < 300) {{
+                            globalThis.__ipsJsSource = x.responseText;
+                            return 'OK_len_' + (x.responseText || '').length + '_status_' + x.status;
+                        }}
+                        return 'HTTP_' + x.status;
+                    }} catch (e) {{
+                        return 'ERR_' + String(e);
+                    }}
+                }})()
+                "#,
+                abs_url
+            );
+            let fetch_result = p.evaluate(&fetch_js).unwrap_or_default();
+            println!("Fetch result: {fetch_result}");
+            let source = p.evaluate("globalThis.__ipsJsSource || ''").unwrap_or_default();
+            // Strip JSON-encoded outer quotes if any
+            let source = source.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&source);
+            // Unescape JSON \" and \\
+            let source = source.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
+            println!("ips.js length: {}", source.len());
+            std::fs::write("kasada_ips.js", &source).ok();
+            println!("Wrote kasada_ips.js ({} bytes)", source.len());
+
+            // Show line 5 cols 100-200 (per W4a doc, col=116 is U dispatcher).
+            let lines: Vec<&str> = source.lines().collect();
+            if lines.len() >= 5 {
+                let line5 = lines[4];
+                println!("\n=== ips.js line 5 (len={}) ===", line5.len());
+                let start = 80.min(line5.len());
+                let end = 250.min(line5.len());
+                println!("cols 80..250: {:?}", &line5[start..end]);
+            }
+            // Also line 3 (STORE-INDEXED handler #12 body)
+            if lines.len() >= 3 {
+                let line3 = lines[2];
+                println!("\n=== ips.js line 3 (len={}) ===", line3.len());
+                let start = 30.min(line3.len());
+                let end = 200.min(line3.len());
+                println!("cols 30..200: {:?}", &line3[start..end]);
+            }
+            // Count spread syntax occurrences in source.
+            let spread_count = source.matches("...").count();
+            println!("\nSpread (...) occurrences in ips.js: {spread_count}");
+        }
+        Ok(Err(e)) => println!("page err: {e}"),
+        Err(_) => println!("timeout"),
+    }
+}
