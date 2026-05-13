@@ -1954,7 +1954,7 @@ impl Page {
                         false
                     };
                     let mut reload_hdrs =
-                        net::headers::chrome_headers_reload(&profile, &current_url, accept_ch_upgraded);
+                        net::headers::nav_headers_reload(&profile, &current_url, accept_ch_upgraded);
                     for (k, v) in &harvested_kpsdk {
                         reload_hdrs.push((k.clone(), v.clone()));
                     }

@@ -1,6 +1,22 @@
 use crate::gpu::GpuProfile;
 use serde::{Deserialize, Serialize};
 
+/// Device class for a stealth profile. Drives TLS curve selection (Android
+/// uses older Kyber768Draft00 vs desktop's MLKEM768), Sec-CH-UA-Mobile flag,
+/// Sec-CH-UA-Form-Factors header, and JS-side `navigator.userAgentData.mobile`.
+///
+/// See `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md` for the per-class
+/// implementation deltas.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DeviceClass {
+    #[default]
+    Desktop,
+    /// Chrome on Android (Pixel-class). Phase 2.
+    MobileAndroid,
+    /// Mobile Safari on iOS. Phase 3 (deferred — distinct TLS profile).
+    MobileIOS,
+}
+
 /// A media device reported by navigator.mediaDevices.enumerateDevices().
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaDeviceInfo {
@@ -83,6 +99,12 @@ pub struct StealthProfile {
     pub ua_wow64: bool,
 
     // === Network ===
+    /// Device class — Desktop, MobileAndroid, MobileIOS. Drives TLS
+    /// fingerprint, Sec-CH-UA-Mobile flag, model header, and form-factors.
+    /// `#[serde(default)]` keeps existing serialized profiles readable
+    /// (defaults to Desktop).
+    #[serde(default)]
+    pub device_class: DeviceClass,
     /// rquest Impersonate variant (e.g., "chrome_147")
     pub tls_impersonate: String,
     pub connection_effective_type: String,

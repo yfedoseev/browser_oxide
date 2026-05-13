@@ -206,7 +206,7 @@ impl HttpClient {
 
     /// Create a new client with the given stealth profile.
     pub fn new(profile: &StealthProfile) -> Result<Self, NetError> {
-        let connector = tls::chrome_connector()?;
+        let connector = tls::chrome_connector(profile)?;
 
         // Create QUIC client for HTTP/3 (non-fatal if it fails)
         let quic_client = quic::QuicClient::new().ok();
@@ -276,7 +276,7 @@ impl HttpClient {
         dns: tcp::DnsCache,
         alt_svc: AltSvcCache,
     ) -> Result<Self, NetError> {
-        let connector = tls::chrome_connector()?;
+        let connector = tls::chrome_connector(profile)?;
         let quic_client = quic::QuicClient::new().ok();
 
         Ok(Self {
@@ -573,7 +573,7 @@ impl HttpClient {
     async fn connect_h2(&self, host: &str, port: u16) -> Result<SendRequest<Bytes>, NetError> {
         let tcp_stream = self.connect_tcp(host, port).await?;
 
-        let tls_stream = tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
+        let tls_stream = tls::connect_tls(&self.tls_connector, &self.profile, host, tcp_stream).await?;
 
         // Check ALPN
         let alpn = tls::negotiated_alpn(&tls_stream);
@@ -582,7 +582,7 @@ impl HttpClient {
             return Err(NetError::Http("ALPN negotiated http/1.1, not h2".into()));
         }
 
-        let (sender, conn) = h2_client::handshake(tls_stream).await?;
+        let (sender, conn) = h2_client::handshake(tls_stream, &self.profile).await?;
 
         // Spawn the connection driver
         tokio::spawn(async move {
@@ -776,7 +776,7 @@ impl HttpClient {
                 )
                 .await?;
                 let mut tls_stream =
-                    tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
+                    tls::connect_tls(&self.tls_connector, &self.profile, host, tcp_stream).await?;
                 let path = if parsed.query().is_some() {
                     format!("{}?{}", parsed.path(), parsed.query().unwrap())
                 } else {
@@ -911,7 +911,7 @@ impl HttpClient {
                 )
                 .await?;
                 let mut tls_stream =
-                    tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
+                    tls::connect_tls(&self.tls_connector, &self.profile, host, tcp_stream).await?;
                 let path = if parsed.query().is_some() {
                     format!("{}?{}", parsed.path(), parsed.query().unwrap())
                 } else {
@@ -1133,8 +1133,8 @@ impl HttpClient {
         drop(jar);
 
         let tcp_stream = self.connect_tcp(host, port).await?;
-        let connector = tls::chrome_connector()?;
-        let mut tls_stream = tls::connect_tls(&connector, host, tcp_stream).await?;
+        let connector = tls::chrome_connector(&self.profile)?;
+        let mut tls_stream = tls::connect_tls(&connector, &self.profile, host, tcp_stream).await?;
 
         let raw = h1_client::send_post(&mut tls_stream, host, &path, &hdrs, body).await?;
         self.build_response_from_raw(raw, url).await
@@ -1291,8 +1291,8 @@ impl HttpClient {
                     self.proxy.as_ref(),
                 )
                 .await?;
-                let connector = tls::chrome_connector()?;
-                let mut tls_stream = tls::connect_tls(&connector, host, tcp_stream).await?;
+                let connector = tls::chrome_connector(&self.profile)?;
+                let mut tls_stream = tls::connect_tls(&connector, &self.profile, host, tcp_stream).await?;
                 let path = if parsed.query().is_some() {
                     format!("{}?{}", parsed.path(), parsed.query().unwrap())
                 } else {
@@ -1446,7 +1446,7 @@ impl HttpClient {
                 )
                 .await?;
                 let mut tls_stream =
-                    tls::connect_tls(&self.tls_connector, host, tcp_stream).await?;
+                    tls::connect_tls(&self.tls_connector, &self.profile, host, tcp_stream).await?;
                 let path = match parsed.query() {
                     Some(q) => format!("{}?{}", parsed.path(), q),
                     None => parsed.path().to_string(),

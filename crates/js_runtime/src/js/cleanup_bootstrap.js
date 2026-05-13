@@ -142,6 +142,119 @@
                 writable: true,
             });
         }
+
+        // -- iOS Safari profile: strip 16 declined APIs + add iOS globals --
+        // Per Apple's "16 web APIs declined for privacy" policy + the audit
+        // in docs/RESEARCH_2026_05_12_mobile_and_kasada.md §2.4. The single
+        // highest-ROI mobile patch — many leaks vanish at once.
+        const _deviceClass = (_hasProfile && ops.op_get_profile_value)
+            ? ops.op_get_profile_value("device_class")
+            : "Desktop";
+        if (_deviceClass === "MobileIOS") {
+            // 1. Delete 16 declined APIs from globalThis
+            const _iosDeleted = [
+                "Bluetooth", "USB", "USBAlternateInterface", "USBConfiguration",
+                "USBConnectionEvent", "USBDevice", "USBEndpoint",
+                "USBInTransferResult", "USBInterface",
+                "USBIsochronousInTransferPacket", "USBIsochronousInTransferResult",
+                "USBIsochronousOutPacket", "USBIsochronousOutTransferResult",
+                "USBOutTransferResult",
+                "HID", "HIDConnectionEvent", "HIDDevice", "HIDInputReportEvent",
+                "Serial", "SerialPort",
+                "NetworkInformation", "BatteryManager",
+                "IdleDetector", "EyeDropper",
+                "Sensor", "Accelerometer", "AbsoluteOrientationSensor",
+                "GravitySensor", "Gyroscope", "LinearAccelerationSensor",
+                "Magnetometer", "OrientationSensor", "RelativeOrientationSensor",
+                // WebGPU is feature-flagged on iOS 18+ but defaults off
+                "GPU", "GPUAdapter", "GPUDevice", "GPUQueue", "GPUBuffer",
+                "GPUTexture", "GPUSampler", "GPUBindGroup", "GPUBindGroupLayout",
+                "GPUPipelineLayout", "GPUShaderModule", "GPURenderPipeline",
+                "GPUComputePipeline", "GPUCommandEncoder", "GPUCommandBuffer",
+                "GPURenderPassEncoder", "GPUComputePassEncoder",
+                "GPURenderBundleEncoder", "GPURenderBundle", "GPUCanvasContext",
+                "GPUColorWrite", "GPUMapMode", "GPUTextureUsage",
+                "GPUBufferUsage", "GPUShaderStage",
+                // Speech recognition has limited iOS support, but webkit-prefixed
+                // is the only form Safari ships
+                "SpeechRecognition", "SpeechRecognitionEvent",
+                "SpeechRecognitionErrorEvent",
+            ];
+            for (const k of _iosDeleted) {
+                try { delete globalThis[k]; } catch (_e) {}
+            }
+
+            // 2. Strip Navigator.prototype methods/getters that iOS doesn't have
+            const _NavProto = globalThis.Navigator && globalThis.Navigator.prototype;
+            if (_NavProto) {
+                for (const k of [
+                    "bluetooth", "usb", "serial", "hid", "requestMIDIAccess",
+                    "getBattery", "connection", "getInstalledRelatedApps",
+                    "scheduling", "userActivation",
+                ]) {
+                    try { delete _NavProto[k]; } catch (_e) {}
+                }
+                // userAgentData absent on Safari (no UA-CH at all)
+                try {
+                    Object.defineProperty(_NavProto, "userAgentData", {
+                        get: function() { return undefined; },
+                        configurable: true, enumerable: false,
+                    });
+                } catch (_e) {}
+                // deviceMemory absent on Safari
+                try {
+                    Object.defineProperty(_NavProto, "deviceMemory", {
+                        get: function() { return undefined; },
+                        configurable: true, enumerable: false,
+                    });
+                } catch (_e) {}
+            }
+
+            // 3. PaymentRequest.prototype.hasEnrolledInstrument is Chrome/Edge-only
+            //    Safari MUST NOT have it.
+            if (globalThis.PaymentRequest && globalThis.PaymentRequest.prototype) {
+                try { delete globalThis.PaymentRequest.prototype.hasEnrolledInstrument; } catch (_e) {}
+            }
+
+            // 4. window.orientation — legacy iOS-only property. Desktop browsers
+            //    do NOT have this. Setting to 0 = portrait.
+            try {
+                Object.defineProperty(globalThis, "orientation", {
+                    get: function() { return 0; },
+                    configurable: true, enumerable: true,
+                });
+            } catch (_e) {}
+
+            // 5. ontouchstart on window — every detection script's cheapest
+            //    mobile-vs-desktop check
+            try {
+                Object.defineProperty(globalThis, "ontouchstart", {
+                    value: null, configurable: true, writable: true, enumerable: true,
+                });
+            } catch (_e) {}
+
+            // 6. DeviceMotionEvent.requestPermission + DeviceOrientationEvent.requestPermission
+            //    iOS 13+ requires user-gesture-gated permission for these. The presence
+            //    of these static methods is itself a strong iOS signal — Android does NOT
+            //    expose these statics.
+            if (globalThis.DeviceMotionEvent
+                && typeof globalThis.DeviceMotionEvent.requestPermission !== "function") {
+                try {
+                    globalThis.DeviceMotionEvent.requestPermission =
+                        function requestPermission() { return Promise.resolve("denied"); };
+                } catch (_e) {}
+            }
+            if (globalThis.DeviceOrientationEvent
+                && typeof globalThis.DeviceOrientationEvent.requestPermission !== "function") {
+                try {
+                    globalThis.DeviceOrientationEvent.requestPermission =
+                        function requestPermission() { return Promise.resolve("denied"); };
+                } catch (_e) {}
+            }
+
+            // 7. Sec-CH-UA-* JS surface absent on Safari — already handled
+            //    above via userAgentData getter returning undefined.
+        }
     } catch (_e) { /* profile-conditional installs are best-effort */ }
 
     const internals = [

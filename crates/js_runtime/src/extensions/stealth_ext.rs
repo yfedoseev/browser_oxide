@@ -112,6 +112,12 @@ pub fn op_get_profile_value(#[state] state: &StealthState, #[string] key: &str) 
             "ua_wow64" => p.ua_wow64.to_string(),
             "has_platform_authenticator" => p.has_platform_authenticator.to_string(),
             "conditional_mediation" => p.conditional_mediation.to_string(),
+            "device_class" => match p.device_class {
+                stealth::DeviceClass::Desktop => "Desktop",
+                stealth::DeviceClass::MobileAndroid => "MobileAndroid",
+                stealth::DeviceClass::MobileIOS => "MobileIOS",
+            }
+            .to_string(),
             _ => String::new(),
         },
         None => String::new(), // No profile = empty = use JS defaults

@@ -15,6 +15,7 @@
 use bytes::Bytes;
 use http2::client::{Builder, Connection, SendRequest};
 use http2::frame::{PseudoId, PseudoOrder, SettingId, SettingsOrder, StreamDependency, StreamId};
+use stealth::{DeviceClass, StealthProfile};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::NetError;
@@ -48,66 +49,131 @@ const MAX_HEADER_LIST_SIZE: u32 = 262_144; // SETTINGS 6 = 256 KB
 // `0x676e67/wreq-util/src/emulate/profile/chrome/http2.rs`).
 const INITIAL_CONNECTION_WINDOW_SIZE: u32 = 15_728_640; // → wire 15_663_105 = Chrome match
 
+// =============================================================================
+// Safari iOS 18.4 HTTP/2 SETTINGS — Phase B2-B4 (2026-05-12)
+// =============================================================================
+//
+// Per `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md` + lexiforest's
+// `safari_18.4_iOS.yaml`. iOS 18.4 sends 4 SETTINGS:
+//   2 ENABLE_PUSH = 0
+//   3 MAX_CONCURRENT_STREAMS = 100
+//   4 INITIAL_WINDOW_SIZE = 2097152 (2 MB, vs Chrome's 6 MB)
+//   9 NO_RFC7540_PRIORITIES = 1
+// (iOS 18.0 also sent 8 ENABLE_CONNECT_PROTOCOL = 1, dropped in 18.4.)
+//
+// INITIAL_CONNECTION_WINDOW_SIZE: configured target. The http2 lib sends a
+// WINDOW_UPDATE of (target - 65535) on the wire. Safari emits 10420225 →
+// configured target = 10485760 (10 MB).
+const SAFARI_IOS_INITIAL_STREAM_WINDOW_SIZE: u32 = 2_097_152; // 2 MB
+const SAFARI_IOS_MAX_CONCURRENT_STREAMS: u32 = 100;
+const SAFARI_IOS_INITIAL_CONNECTION_WINDOW_SIZE: u32 = 10_485_760; // → wire 10_420_225
+
 /// Perform an HTTP/2 handshake over a TLS stream and return a sender + connection.
 ///
 /// The connection must be driven by spawning it onto a tokio task.
-/// The sender is used to send requests.
-pub async fn handshake<T>(io: T) -> Result<(SendRequest<Bytes>, Connection<T, Bytes>), NetError>
+/// The sender is used to send requests. Per `profile.device_class`:
+///  - Desktop / Android: Chrome 147 SETTINGS (1,2,4,6) + masp pseudo-header order
+///    + 6 MB stream window + 15663105 wire connection-window
+///  - MobileIOS: Safari 18.4 SETTINGS (2,3,4,9) + msap pseudo-header order
+///    + 2 MB stream window + 10420225 wire connection-window
+pub async fn handshake<T>(
+    io: T,
+    profile: &StealthProfile,
+) -> Result<(SendRequest<Bytes>, Connection<T, Bytes>), NetError>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
-    // Chrome 130 pseudo-header order: :method, :authority, :scheme, :path
-    let pseudo_order = PseudoOrder::builder()
-        .push(PseudoId::Method)
-        .push(PseudoId::Authority)
-        .push(PseudoId::Scheme)
-        .push(PseudoId::Path)
-        .build();
+    let is_safari_ios = profile.device_class == DeviceClass::MobileIOS;
 
-    // Chrome 130+ sends SETTINGS in a specific order on the wire. The lib
-    // uses this `SettingsOrder` to determine the position of each ID in
-    // the SETTINGS frame, regardless of which ones actually carry a value.
-    // wreq-util's chrome profile (`0x676e67/wreq-util/src/emulate/profile/chrome/http2.rs`)
-    // — gold-standard Rust impersonator — uses the 8-entry order below for
-    // Chrome v100 through v146+. macOS Chrome 130+ emits a SUBSET of these
-    // (typically 1, 2, 4, 6) but the order field still must include all 8
-    // for the SETTINGS frame layout to match Chrome's expectation when one
-    // of the larger entries gets sent (e.g. `0x9 NO_RFC7540_PRIORITIES`
-    // on Windows/Linux Chrome 130+, used by Akamai for bot detection).
-    //
-    // Earlier in this session we sent only [1, 2, 4, 6]. That matches
-    // mac Chrome 143+'s ON-WIRE values, BUT a different `SettingsOrder`
-    // configuration — specifically NOT including 3, 5, 8, 9 — produces a
-    // different Akamai-FP hash than real Chrome (which knows the order
-    // even if the values aren't sent).
-    let settings_order = SettingsOrder::builder()
-        .push(SettingId::HeaderTableSize)
-        .push(SettingId::EnablePush)
-        .push(SettingId::MaxConcurrentStreams)
-        .push(SettingId::InitialWindowSize)
-        .push(SettingId::MaxFrameSize)
-        .push(SettingId::MaxHeaderListSize)
-        .push(SettingId::EnableConnectProtocol)
-        .push(SettingId::NoRfc7540Priorities)
-        .build();
+    // Pseudo-header order:
+    //   Chrome (masp) = :method, :authority, :scheme, :path
+    //   Safari (msap) = :method, :scheme, :authority, :path
+    let pseudo_order = if is_safari_ios {
+        PseudoOrder::builder()
+            .push(PseudoId::Method)
+            .push(PseudoId::Scheme)
+            .push(PseudoId::Authority)
+            .push(PseudoId::Path)
+            .build()
+    } else {
+        PseudoOrder::builder()
+            .push(PseudoId::Method)
+            .push(PseudoId::Authority)
+            .push(PseudoId::Scheme)
+            .push(PseudoId::Path)
+            .build()
+    };
+
+    // SETTINGS order on the wire. Chrome's 8-entry order (covers all the
+    // settings Chrome MIGHT emit even if only 4 carry values). Safari sends
+    // a different 4-setting subset in a different order; we declare just
+    // those 4 in their on-wire order.
+    let settings_order = if is_safari_ios {
+        // Safari iOS 18.4 wire order: 2, 3, 4, 9
+        SettingsOrder::builder()
+            .push(SettingId::EnablePush)
+            .push(SettingId::MaxConcurrentStreams)
+            .push(SettingId::InitialWindowSize)
+            .push(SettingId::NoRfc7540Priorities)
+            .build()
+    } else {
+        // Chrome 130+ canonical 8-entry order — wreq-util reference impl.
+        SettingsOrder::builder()
+            .push(SettingId::HeaderTableSize)
+            .push(SettingId::EnablePush)
+            .push(SettingId::MaxConcurrentStreams)
+            .push(SettingId::InitialWindowSize)
+            .push(SettingId::MaxFrameSize)
+            .push(SettingId::MaxHeaderListSize)
+            .push(SettingId::EnableConnectProtocol)
+            .push(SettingId::NoRfc7540Priorities)
+            .build()
+    };
 
     let mut builder = Builder::new();
-    builder
-        .header_table_size(HEADER_TABLE_SIZE)
-        .enable_push(ENABLE_PUSH)
-        .initial_window_size(INITIAL_STREAM_WINDOW_SIZE)
-        .max_header_list_size(MAX_HEADER_LIST_SIZE)
-        .initial_connection_window_size(INITIAL_CONNECTION_WINDOW_SIZE)
-        .headers_pseudo_order(pseudo_order)
-        .settings_order(settings_order)
-        .headers_stream_dependency(StreamDependency::new(
-            StreamId::zero(),
-            // Chrome 147 sends weight 256 (wire byte 255), exclusive=true,
-            // depends_on=0 — verified against the 2026-05-09 Playwright
-            // capture from `tls.peet.ws/api/all`.
-            255,
-            true,
-        ));
+    if is_safari_ios {
+        // Safari 18.4 advertises 4 SETTINGS on the wire (2, 3, 4, 9) — see
+        // SETTINGS order above. The http2 builder accepts additional setting
+        // VALUES that aren't in the wire order; those are used for internal
+        // validation (e.g. capacity checks against frames the server might
+        // send) without appearing on the wire.
+        //
+        // h-m.com (and likely other Akamai-fronted sites) returns RST_STREAM
+        // INTERNAL_ERROR if MAX_HEADER_LIST_SIZE isn't set on the connection
+        // — the server can't validate response headers without a limit.
+        // Discovered via Phase B sweep regression (2026-05-12). Adding
+        // max_header_list_size with Chrome's 256KB default (matches what real
+        // Safari uses internally even though it doesn't advertise the setting).
+        builder
+            .enable_push(ENABLE_PUSH)
+            .max_concurrent_streams(SAFARI_IOS_MAX_CONCURRENT_STREAMS)
+            .initial_window_size(SAFARI_IOS_INITIAL_STREAM_WINDOW_SIZE)
+            .max_header_list_size(MAX_HEADER_LIST_SIZE)
+            .initial_connection_window_size(SAFARI_IOS_INITIAL_CONNECTION_WINDOW_SIZE)
+            .headers_pseudo_order(pseudo_order)
+            .settings_order(settings_order);
+        // Safari does NOT send a stream-priority frame (`headers_stream_dependency`
+        // is the lib's HEADERS-frame priority hint — Chrome sends weight 255,
+        // exclusive=true; Safari has NO_RFC7540_PRIORITIES so it omits priority).
+        // Skipping the headers_stream_dependency call entirely.
+    } else {
+        builder
+            .header_table_size(HEADER_TABLE_SIZE)
+            .enable_push(ENABLE_PUSH)
+            .initial_window_size(INITIAL_STREAM_WINDOW_SIZE)
+            .max_header_list_size(MAX_HEADER_LIST_SIZE)
+            .initial_connection_window_size(INITIAL_CONNECTION_WINDOW_SIZE)
+            .headers_pseudo_order(pseudo_order)
+            .settings_order(settings_order)
+            .headers_stream_dependency(StreamDependency::new(
+                StreamId::zero(),
+                // Chrome 147 sends weight 256 (wire byte 255), exclusive=true,
+                // depends_on=0 — verified against the 2026-05-09 Playwright
+                // capture from `tls.peet.ws/api/all`.
+                255,
+                true,
+            ));
+    }
 
     builder
         .handshake(io)
@@ -222,18 +288,19 @@ mod tests {
     #[tokio::test]
     #[ignore] // requires network
     async fn h2_get_httpbin() {
-        let connector = crate::tls::chrome_connector().unwrap();
+        let profile = stealth::presets::chrome_130_macos();
+        let connector = crate::tls::chrome_connector(&profile).unwrap();
         let tcp = crate::tcp::connect("httpbin.org", 443, std::time::Duration::from_secs(10))
             .await
             .unwrap();
-        let tls = crate::tls::connect_tls(&connector, "httpbin.org", tcp)
+        let tls = crate::tls::connect_tls(&connector, &profile, "httpbin.org", tcp)
             .await
             .unwrap();
 
         // Verify ALPN negotiated h2
         assert_eq!(crate::tls::negotiated_alpn(&tls), Some(b"h2".as_slice()));
 
-        let (mut sender, conn) = handshake(tls).await.unwrap();
+        let (mut sender, conn) = handshake(tls, &profile).await.unwrap();
         tokio::spawn(async move {
             if let Err(e) = conn.await {
                 eprintln!("H2 connection error: {e}");

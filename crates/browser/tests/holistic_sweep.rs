@@ -38,6 +38,9 @@ fn pick_profile() -> stealth::StealthProfile {
         "firefox_135_macos" => stealth::presets::firefox_135_macos(),
         "firefox_135_windows" => stealth::presets::firefox_135_windows(),
         "firefox_135_linux" => stealth::presets::firefox_135_linux(),
+        // 2026-05-12 mobile profiles (Phase 2 + Phase 3)
+        "pixel_9_pro_chrome_147" => stealth::presets::pixel_9_pro_chrome_147(),
+        "iphone_15_pro_safari_18" => stealth::presets::iphone_15_pro_safari_18(),
         other => panic!("unknown BOXIDE_PROFILE={other}"),
     }
 }

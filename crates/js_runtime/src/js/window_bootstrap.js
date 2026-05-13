@@ -4943,21 +4943,32 @@
 
         // Removed redundant MediaSource definition here; it is defined further down.
 
-        // Patch HTMLMediaElement.canPlayType if document exists
+        // Patch HTMLMediaElement.canPlayType if document exists.
+        // The shim must be _maskFunction'd or its raw source leaks via
+        // `el.canPlayType + ""`, `el.canPlayType.toString()`, AND
+        // cross-realm `iframe.contentWindow.Function.prototype.toString.call(el.canPlayType)`.
+        // Discovered by check_tostring_audit_full (Tier 1.2 audit, 2026-05-12).
         if (globalThis.document) {
+            const _canPlayTypeShim = function canPlayType(type) {
+                if (_supportedTypes.has(type)) return "probably";
+                const base = type.split(';')[0].trim();
+                if (_supportedTypes.has(base)) return "maybe";
+                return "";
+            };
+            if (typeof _maskFunction === "function") {
+                _maskFunction(_canPlayTypeShim, "canPlayType");
+            }
             const _origCreate = globalThis.document.createElement.bind(globalThis.document);
-            const _patchedCreate = function(tag) {
+            const _patchedCreate = function createElement(tag) {
                 const el = _origCreate(tag);
                 if (tag === 'video' || tag === 'audio') {
-                    el.canPlayType = function(type) {
-                        if (_supportedTypes.has(type)) return "probably";
-                        const base = type.split(';')[0].trim();
-                        if (_supportedTypes.has(base)) return "maybe";
-                        return "";
-                    };
+                    el.canPlayType = _canPlayTypeShim;
                 }
                 return el;
             };
+            if (typeof _maskFunction === "function") {
+                _maskFunction(_patchedCreate, "createElement");
+            }
             globalThis.document.createElement = _patchedCreate;
         }
 
@@ -6008,6 +6019,149 @@
         });
         Object.defineProperty(globalThis.Document.prototype, "hasRedemptionRecord", {
             value: _hasRedemptionRecord, configurable: true, writable: true,
+        });
+    }
+
+    // (13) PaymentRequest — Payment Request API (W3C Recommendation, Sept 2022).
+    // Spec: https://www.w3.org/TR/payment-request/
+    // [SecureContext] — undefined on insecure contexts. cleanup_bootstrap.js
+    // already deletes "PaymentRequest" from globalThis on insecure pages.
+    //
+    // canMakePayment() resolves true for "https://google.com/pay" and
+    // "basic-card" methods — matches real Chrome with no enrolled card
+    // (handler is registered, instrument is not). hasEnrolledInstrument()
+    // resolves false: Chrome/Edge-only method that mirrors a fresh profile.
+    // No public stealth framework ships PaymentRequest; anti-bot scripts
+    // (Stripe, Sift, e-commerce sensors) feature-detect it as a real-browser
+    // signal even when they don't drive the show() flow.
+    //
+    // interfaces_bootstrap.js installs an illegal-constructor stub first,
+    // so we check for the .canMakePayment method (only present on a real
+    // implementation) rather than typeof === undefined.
+    const _PRStub = globalThis.PaymentRequest;
+    if (_secure() && (typeof _PRStub !== "function"
+        || typeof (_PRStub.prototype && _PRStub.prototype.canMakePayment) !== "function")) {
+        class PaymentRequest extends EventTarget {
+            #methods;
+            constructor(methodData, details, options = {}) {
+                super();
+                if (!Array.isArray(methodData) || methodData.length === 0) {
+                    throw new TypeError("Failed to construct 'PaymentRequest': At least one payment method is required");
+                }
+                if (!details || !details.total) {
+                    throw new TypeError("Failed to construct 'PaymentRequest': required member total is undefined.");
+                }
+                this.#methods = methodData;
+                const _id = (details && details.id)
+                    || (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function"
+                        ? globalThis.crypto.randomUUID()
+                        : Date.now().toString(36) + Math.random().toString(36).slice(2));
+                Object.defineProperty(this, "id", { value: _id, enumerable: true, configurable: true });
+                Object.defineProperty(this, "shippingAddress", { value: null, enumerable: true, configurable: true });
+                Object.defineProperty(this, "shippingOption", { value: null, enumerable: true, configurable: true });
+                Object.defineProperty(this, "shippingType", { value: null, enumerable: true, configurable: true });
+                this.onshippingaddresschange = null;
+                this.onshippingoptionchange = null;
+                this.onpaymentmethodchange = null;
+            }
+            show(_detailsPromise) {
+                // Real Chrome requires a user gesture and a registered
+                // merchant. Without them, show() rejects with AbortError.
+                // DOMException is unreliable at snapshot time (snapshot
+                // builds don't always have it available); use Error with
+                // .name set, which detectors check via e.name === "AbortError".
+                const err = new Error("User closed the Payment Request UI.");
+                err.name = "AbortError";
+                return Promise.reject(err);
+            }
+            abort() {
+                return Promise.resolve(undefined);
+            }
+            canMakePayment() {
+                const ok = this.#methods.some(m =>
+                    m && (m.supportedMethods === "https://google.com/pay"
+                        || m.supportedMethods === "basic-card")
+                );
+                return Promise.resolve(ok);
+            }
+            hasEnrolledInstrument() {
+                return Promise.resolve(false);
+            }
+        }
+        Object.defineProperty(PaymentRequest.prototype, Symbol.toStringTag, {
+            value: "PaymentRequest", configurable: true,
+        });
+        PaymentRequest.securePaymentConfirmationAvailability = function securePaymentConfirmationAvailability() {
+            return Promise.resolve("unavailable-no-user-verifying-platform-authenticator");
+        };
+        if (typeof _maskFunction === "function") {
+            _maskFunction(PaymentRequest, "PaymentRequest");
+            _maskFunction(PaymentRequest.prototype.show, "show");
+            _maskFunction(PaymentRequest.prototype.abort, "abort");
+            _maskFunction(PaymentRequest.prototype.canMakePayment, "canMakePayment");
+            _maskFunction(PaymentRequest.prototype.hasEnrolledInstrument, "hasEnrolledInstrument");
+            _maskFunction(PaymentRequest.securePaymentConfirmationAvailability, "securePaymentConfirmationAvailability");
+        }
+        globalThis.PaymentRequest = PaymentRequest;
+
+        class PaymentResponse extends EventTarget {
+            constructor() {
+                super();
+                throw new TypeError("Illegal constructor");
+            }
+        }
+        Object.defineProperty(PaymentResponse.prototype, Symbol.toStringTag, {
+            value: "PaymentResponse", configurable: true,
+        });
+        if (typeof _maskFunction === "function") {
+            _maskFunction(PaymentResponse, "PaymentResponse");
+        }
+        globalThis.PaymentResponse = PaymentResponse;
+
+        class PaymentMethodChangeEvent extends Event {
+            constructor(type, init) {
+                super(type, init || {});
+                const _init = init || {};
+                Object.defineProperty(this, "methodName", { value: _init.methodName || "", enumerable: true, configurable: true });
+                Object.defineProperty(this, "methodDetails", { value: _init.methodDetails || null, enumerable: true, configurable: true });
+            }
+        }
+        Object.defineProperty(PaymentMethodChangeEvent.prototype, Symbol.toStringTag, {
+            value: "PaymentMethodChangeEvent", configurable: true,
+        });
+        if (typeof _maskFunction === "function") {
+            _maskFunction(PaymentMethodChangeEvent, "PaymentMethodChangeEvent");
+        }
+        globalThis.PaymentMethodChangeEvent = PaymentMethodChangeEvent;
+
+        class PaymentRequestUpdateEvent extends Event {
+            constructor(type, init) {
+                super(type, init || {});
+            }
+            updateWith(_detailsPromise) {
+                // Outside an active show() flow this silently no-ops,
+                // matching Chrome behavior on stale events.
+            }
+        }
+        Object.defineProperty(PaymentRequestUpdateEvent.prototype, Symbol.toStringTag, {
+            value: "PaymentRequestUpdateEvent", configurable: true,
+        });
+        if (typeof _maskFunction === "function") {
+            _maskFunction(PaymentRequestUpdateEvent, "PaymentRequestUpdateEvent");
+            _maskFunction(PaymentRequestUpdateEvent.prototype.updateWith, "updateWith");
+        }
+        globalThis.PaymentRequestUpdateEvent = PaymentRequestUpdateEvent;
+    }
+
+    // (14) navigator.getInstalledRelatedApps — Get Installed Related Apps API.
+    // Spec: https://wicg.github.io/get-installed-related-apps/
+    // Chrome/Edge-only. Returns Promise<[]> on a fresh profile (no PWAs
+    // installed). Absence under a Chrome UA is itself a tell — anti-bot
+    // scripts can probe `'getInstalledRelatedApps' in navigator` against
+    // the UA family.
+    if (typeof navigator !== "undefined" && typeof navigator.getInstalledRelatedApps !== "function") {
+        _defNavMethod("getInstalledRelatedApps", function getInstalledRelatedApps() {
+            return Promise.resolve([]);
         });
     }
 

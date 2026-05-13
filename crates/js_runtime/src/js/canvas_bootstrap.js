@@ -816,11 +816,23 @@
 
                 let seed = 0;
                 try {
-                    if (typeof Deno !== 'undefined' && Deno.core?.ops?.op_get_profile_value) {
-                        const raw = Deno.core.ops.op_get_profile_value("audio_seed");
+                    // Use the local `ops` binding (same as canvas_seed path
+                    // at line 59) — `Deno` may be removed by stealth cleanup,
+                    // but `ops` was captured at IIFE entry.
+                    if (ops.op_has_stealth_profile && ops.op_has_stealth_profile()) {
+                        const raw = ops.op_get_profile_value("audio_seed");
                         if (raw) {
-                            const parsed = parseInt(raw, 10);
-                            if (!Number.isNaN(parsed)) seed = parsed | 0;
+                            // op_get_profile_value returns u64 stringified.
+                            // parseInt → Number lossy-coerces past 2^53, then
+                            // `| 0` truncates a rounded float — distinct u64s
+                            // can collapse to the same int32. BigInt.asIntN(32)
+                            // does exact 32-bit truncation.
+                            try {
+                                seed = Number(BigInt.asIntN(32, BigInt(raw)));
+                            } catch (_) {
+                                const parsed = parseInt(raw, 10);
+                                if (!Number.isNaN(parsed)) seed = parsed | 0;
+                            }
                         }
                     }
                 } catch (e) {}

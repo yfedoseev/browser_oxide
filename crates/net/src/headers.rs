@@ -3,23 +3,22 @@
 //! Anti-bot systems check both the presence and order of HTTP headers.
 //! This module builds headers in the exact Chrome 130 order.
 
-use stealth::StealthProfile;
+use stealth::{DeviceClass, StealthProfile};
 
 /// Browser-aware nav header dispatch. Reads `profile.browser_name` and
 /// returns the right header set for that browser family. Centralizes the
-/// chrome-vs-firefox decision so callers (HttpClient, Page::navigate) don't
-/// each need to repeat the match.
+/// chrome / firefox / safari decision so callers (HttpClient, Page::navigate)
+/// don't each need to repeat the match.
 ///
 /// `accept_ch_upgraded` should be `true` only on requests that follow an
-/// `Accept-CH` advertisement from the same origin. Chrome upgrades; Firefox
-/// has no Client Hints so the flag is ignored for Firefox profiles.
+/// `Accept-CH` advertisement from the same origin. Chrome upgrades; Safari
+/// and Firefox have no Client Hints so the flag is ignored for them.
 pub fn nav_headers(profile: &StealthProfile, accept_ch_upgraded: bool) -> Vec<(String, String)> {
-    if profile.browser_name == "Firefox" {
-        firefox_headers(profile)
-    } else if accept_ch_upgraded {
-        chrome_headers_with_accept_ch(profile)
-    } else {
-        chrome_headers(profile)
+    match profile.browser_name.as_str() {
+        "Firefox" => firefox_headers(profile),
+        "Safari" => safari_headers(profile),
+        _ if accept_ch_upgraded => chrome_headers_with_accept_ch(profile),
+        _ => chrome_headers(profile),
     }
 }
 
@@ -29,10 +28,10 @@ pub fn nav_headers_reload(
     referer: &str,
     accept_ch_upgraded: bool,
 ) -> Vec<(String, String)> {
-    if profile.browser_name == "Firefox" {
-        firefox_headers_reload(profile, referer)
-    } else {
-        chrome_headers_reload(profile, referer, accept_ch_upgraded)
+    match profile.browser_name.as_str() {
+        "Firefox" => firefox_headers_reload(profile, referer),
+        "Safari" => safari_headers_reload(profile, referer),
+        _ => chrome_headers_reload(profile, referer, accept_ch_upgraded),
     }
 }
 
@@ -42,10 +41,10 @@ pub fn nav_headers_fetch(
     target_url: &str,
     origin: Option<&str>,
 ) -> Vec<(String, String)> {
-    if profile.browser_name == "Firefox" {
-        firefox_headers_fetch(profile, target_url, origin)
-    } else {
-        chrome_headers_fetch(profile, target_url, origin)
+    match profile.browser_name.as_str() {
+        "Firefox" => firefox_headers_fetch(profile, target_url, origin),
+        "Safari" => safari_headers_fetch(profile, target_url, origin),
+        _ => chrome_headers_fetch(profile, target_url, origin),
     }
 }
 
@@ -246,7 +245,14 @@ fn chrome_headers_impl(
     // 4. sec-ch-ua (Client Hints, low-entropy — always sent)
     let sec_ch_ua = build_sec_ch_ua(profile);
     headers.push(("sec-ch-ua".to_string(), sec_ch_ua.clone()));
-    headers.push(("sec-ch-ua-mobile".to_string(), "?0".to_string()));
+    let is_mobile = matches!(
+        profile.device_class,
+        DeviceClass::MobileAndroid | DeviceClass::MobileIOS
+    );
+    headers.push((
+        "sec-ch-ua-mobile".to_string(),
+        if is_mobile { "?1" } else { "?0" }.to_string(),
+    ));
     headers.push((
         "sec-ch-ua-platform".to_string(),
         format!("\"{}\"", profile.os_name),
@@ -273,7 +279,13 @@ fn chrome_headers_impl(
             "sec-ch-ua-full-version".to_string(),
             format!("\"{}\"", profile.browser_version),
         ));
-        headers.push(("sec-ch-ua-model".to_string(), "\"\"".to_string()));
+        // sec-ch-ua-model: empty on desktop, real model name on mobile.
+        // Profile field `ua_model` is the source of truth — desktop presets
+        // leave it empty; Pixel/Galaxy presets set it to "Pixel 9 Pro" etc.
+        headers.push((
+            "sec-ch-ua-model".to_string(),
+            format!("\"{}\"", profile.ua_model),
+        ));
         headers.push((
             "sec-ch-ua-platform-version".to_string(),
             format!(
@@ -282,6 +294,13 @@ fn chrome_headers_impl(
             ),
         ));
         headers.push(("sec-ch-ua-wow64".to_string(), "?0".to_string()));
+        // sec-ch-ua-form-factors: Chrome 130+ added this hint. "Mobile"
+        // on phones, "Desktop" on PC. Lacks for older Chrome but landing
+        // it for Chrome 147+ is correct.
+        headers.push((
+            "sec-ch-ua-form-factors".to_string(),
+            if is_mobile { "\"Mobile\"" } else { "\"Desktop\"" }.to_string(),
+        ));
         // sec-ch-device-memory — DataDome's accept-ch demands it
         // (yelp/leboncoin/etsy/wsj). Chrome 147 reports a quantized
         // value (typically "8" for ≥8GB systems, "4" for 4GB).
@@ -551,6 +570,95 @@ fn firefox_headers_impl(
     headers
 }
 
+// =============================================================================
+// Safari iOS 18 header builders — Phase B1 (2026-05-12)
+// =============================================================================
+//
+// Safari does NOT send sec-fetch-*, sec-ch-ua-*, priority, or
+// upgrade-insecure-requests. Header set is much shorter than Chrome's.
+// Per real iOS Safari 18 captures and lexiforest signatures.
+//
+// The `Accept` value uses Safari's specific MIME ordering (no avif/webp/apng,
+// no signed-exchange). `Accept-Encoding` excludes zstd (Safari has not adopted
+// it as of iOS 18).
+
+/// Build Safari headers for a fresh user navigation.
+pub fn safari_headers(profile: &StealthProfile) -> Vec<(String, String)> {
+    safari_headers_impl(profile, /*referer*/ None)
+}
+
+/// Same-origin reload variant — adds Referer header (no other deltas
+/// because Safari doesn't have sec-fetch-*).
+pub fn safari_headers_reload(profile: &StealthProfile, referer: &str) -> Vec<(String, String)> {
+    safari_headers_impl(profile, Some(referer))
+}
+
+/// Build headers for a `window.fetch()` request from JS in Safari.
+pub fn safari_headers_fetch(
+    profile: &StealthProfile,
+    target_url: &str,
+    origin: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut headers = Vec::with_capacity(7);
+    headers.push(("accept".to_string(), "*/*".to_string()));
+    headers.push((
+        "accept-language".to_string(),
+        build_safari_accept_language(&profile.languages),
+    ));
+    headers.push((
+        "accept-encoding".to_string(),
+        "gzip, deflate, br".to_string(),
+    ));
+    headers.push(("user-agent".to_string(), profile.user_agent.clone()));
+    if let Some(o) = origin {
+        headers.push(("origin".to_string(), o.to_string()));
+        headers.push((
+            "referer".to_string(),
+            format!("{}/", o.trim_end_matches('/')),
+        ));
+    }
+    let _ = target_url;
+    headers
+}
+
+fn safari_headers_impl(
+    profile: &StealthProfile,
+    referer: Option<&str>,
+) -> Vec<(String, String)> {
+    // Real Safari iOS header order on a top-level navigation:
+    //   accept, accept-encoding, user-agent, accept-language, [referer]
+    // (Host is a pseudo-header on h2; Cookie is added by the HttpClient layer.)
+    let mut headers = Vec::with_capacity(6);
+
+    headers.push((
+        "accept".to_string(),
+        // Safari's specific Accept ordering — no avif/webp/apng, no signed-exchange.
+        // Per real iOS 18 capture from lexiforest signature.
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".to_string(),
+    ));
+    headers.push((
+        "accept-encoding".to_string(),
+        // Safari has NOT adopted zstd as of iOS 18.4. gzip + deflate + br only.
+        "gzip, deflate, br".to_string(),
+    ));
+    headers.push(("user-agent".to_string(), profile.user_agent.clone()));
+    headers.push((
+        "accept-language".to_string(),
+        build_safari_accept_language(&profile.languages),
+    ));
+    if let Some(r) = referer {
+        headers.push(("referer".to_string(), r.to_string()));
+    }
+    headers
+}
+
+/// Safari Accept-Language uses q=0.9 step (same as Chrome) but with a
+/// different second-language padding pattern. Conservative impl: same as
+/// chrome until we verify the iOS-specific quirk worth modeling.
+fn build_safari_accept_language(languages: &[String]) -> String {
+    build_accept_language(languages)
+}
+
 /// Build accept-language Firefox-style — q=0.5 step instead of q=0.9.
 /// Verified from real Firefox 135 capture.
 fn build_firefox_accept_language(languages: &[String]) -> String {
@@ -721,6 +829,72 @@ mod tests {
     fn accept_language_empty() {
         let result = build_accept_language(&[]);
         assert_eq!(result, "en-US,en;q=0.9");
+    }
+
+    #[test]
+    fn pixel_android_emits_mobile_client_hints() {
+        // Phase 2 (2026-05-12) — verify the pixel_9_pro_chrome_147 preset
+        // wires through to mobile-flavored Sec-CH-UA-* headers.
+        let profile = stealth::presets::pixel_9_pro_chrome_147();
+        assert_eq!(profile.device_class, DeviceClass::MobileAndroid);
+        let headers = chrome_headers_with_accept_ch(&profile);
+        let h: std::collections::HashMap<_, _> = headers.iter().cloned().collect();
+
+        // sec-ch-ua-mobile MUST be ?1 on mobile
+        assert_eq!(
+            h.get("sec-ch-ua-mobile").map(String::as_str),
+            Some("?1"),
+            "Pixel preset must emit sec-ch-ua-mobile: ?1"
+        );
+        // sec-ch-ua-platform MUST be Android
+        assert_eq!(
+            h.get("sec-ch-ua-platform").map(String::as_str),
+            Some("\"Android\""),
+            "Pixel preset must emit sec-ch-ua-platform: \"Android\""
+        );
+        // sec-ch-ua-model MUST be the Pixel display name (not codename)
+        assert_eq!(
+            h.get("sec-ch-ua-model").map(String::as_str),
+            Some("\"Pixel 9 Pro\""),
+            "Pixel preset must emit sec-ch-ua-model: \"Pixel 9 Pro\""
+        );
+        // sec-ch-ua-form-factors MUST be Mobile (Chrome 130+ adds this)
+        assert_eq!(
+            h.get("sec-ch-ua-form-factors").map(String::as_str),
+            Some("\"Mobile\""),
+            "Pixel preset must emit sec-ch-ua-form-factors: \"Mobile\""
+        );
+        // UA string MUST contain "Mobile" token
+        assert!(
+            profile.user_agent.contains("Mobile"),
+            "Pixel UA must contain Mobile token, got: {}",
+            profile.user_agent
+        );
+    }
+
+    #[test]
+    fn desktop_chrome_emits_desktop_client_hints() {
+        // Sanity gate: existing desktop behavior unchanged after Phase 2
+        // (zero-behavior-change invariant).
+        let profile = stealth::presets::chrome_130_macos();
+        assert_eq!(profile.device_class, DeviceClass::Desktop);
+        let headers = chrome_headers_with_accept_ch(&profile);
+        let h: std::collections::HashMap<_, _> = headers.iter().cloned().collect();
+
+        assert_eq!(
+            h.get("sec-ch-ua-mobile").map(String::as_str),
+            Some("?0"),
+            "Desktop must keep emitting sec-ch-ua-mobile: ?0"
+        );
+        assert_eq!(
+            h.get("sec-ch-ua-form-factors").map(String::as_str),
+            Some("\"Desktop\"")
+        );
+        // Model is empty on desktop (it's "" in the profile)
+        assert_eq!(
+            h.get("sec-ch-ua-model").map(String::as_str),
+            Some("\"\"")
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::profile::{MediaDeviceInfo, StealthProfile};
+use crate::profile::{DeviceClass, MediaDeviceInfo, StealthProfile};
 
 fn default_media_devices(seed: &str) -> Vec<MediaDeviceInfo> {
     // Deterministic device IDs based on a seed string
@@ -39,16 +39,16 @@ fn default_media_devices(seed: &str) -> Vec<MediaDeviceInfo> {
 pub fn chrome_130_windows() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
-        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
-        browser_version: "147.0.7727.117".into(),
+        browser_version: "148.0.7778.168".into(),
         os_name: "Windows".into(),
         os_version: "10.0".into(),
         platform: "Win32".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
 
         screen_width: 1920,
         screen_height: 1080,
@@ -74,6 +74,7 @@ pub fn chrome_130_windows() -> StealthProfile {
         ua_model: "".into(),
         ua_wow64: false,
 
+        device_class: DeviceClass::Desktop,
         tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 50,
@@ -105,35 +106,34 @@ pub fn chrome_130_windows() -> StealthProfile {
     }
 }
 
-/// Chrome 147 on macOS 15. (UA bumped 2026-04-27 — anti-bot vendors flag old Chrome
-/// versions. Real Chrome shipped 147 in mid-Apr 2026 per playwright's bundled chromium.
-/// TLS impersonation is chrome_147 — verified byte-identical to Chrome 147 via
-/// tls.peet.ws JA4/Akamai-FP comparison (BoringSSL config relabeled 2026-04-29
-/// after T1B Chrome 147 capture; cipher list and curves were already current).
+/// Chrome 148 on macOS 15. (UA bumped 2026-05-13 — anti-bot vendors flag old Chrome
+/// versions. Real Chrome shipped 148 in early May 2026 per chromiumdash.appspot.com:
+/// current stable = 148.0.7778.168 (Mac/Windows), 148.0.7778.167 (Linux).
+/// TLS impersonation label is still `chrome_147` — internal codename; not on wire.
 ///
-/// **CRITICAL**: navigator.userAgent reports `Chrome/147.0.0.0` (FROZEN minor versions
+/// **CRITICAL**: navigator.userAgent reports `Chrome/148.0.0.0` (FROZEN minor versions
 /// per Chrome's User-Agent reduction since March 2023 / Chrome 110+). The full version
-/// `147.0.7727.117` is ONLY exposed via sec-ch-ua-full-version-list. Sending the full
+/// `148.0.7778.168` is ONLY exposed via sec-ch-ua-full-version-list. Sending the full
 /// version in the UA string is a 100% reliable bot signal — verified 2026-04-27 by
 /// comparing httpbin.org/headers from playwright vs our pipeline.)
 pub fn chrome_130_macos() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
-        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
         // browser_version stores the FULL version — used by sec-ch-ua-full-version-list
         // and by build_sec_ch_ua's major-version split. The UA string above uses
-        // the reduced 147.0.0.0 form per Chrome's UA-reduction policy.
-        browser_version: "147.0.7727.117".into(),
+        // the reduced 148.0.0.0 form per Chrome's UA-reduction policy.
+        browser_version: "148.0.7778.168".into(),
         os_name: "macOS".into(),
         os_version: "15.2".into(),
         platform: "MacIntel".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        app_version: "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
 
-        // Phase 7 — match real Chrome 147 on macOS arm64 (M3 MacBook Pro):
+        // Phase 7 — match real Chrome 148 on macOS arm64 (M3 MacBook Pro):
         // 1512x982 viewport, availHeight 949 (982 - 33 top), colorDepth 30,
         // 8 cpu cores. Verified against Playwright MCP probe_mcp_secure.json.
         screen_width: 1512,
@@ -160,6 +160,7 @@ pub fn chrome_130_macos() -> StealthProfile {
         ua_model: "".into(),
         ua_wow64: false,
 
+        device_class: DeviceClass::Desktop,
         tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 50,
@@ -180,7 +181,7 @@ pub fn chrome_130_macos() -> StealthProfile {
         pointer_type: "fine".into(),
         hover_capability: "hover".into(),
 
-        // Phase 7 — match Chrome 147 macOS arm64 viewport.
+        // Phase 7 — match Chrome 148 macOS arm64 viewport.
         inner_width: 1512,
         inner_height: 871,
         outer_width: 1512,
@@ -196,16 +197,16 @@ pub fn chrome_130_macos() -> StealthProfile {
 pub fn chrome_130_linux() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
-        user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
-        browser_version: "147.0.7727.117".into(),
+        browser_version: "148.0.7778.168".into(),
         os_name: "Linux".into(),
         os_version: "6.1".into(),
         platform: "Linux x86_64".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        app_version: "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
 
         screen_width: 1920,
         screen_height: 1080,
@@ -231,6 +232,7 @@ pub fn chrome_130_linux() -> StealthProfile {
         ua_model: "".into(),
         ua_wow64: false,
 
+        device_class: DeviceClass::Desktop,
         tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 50,
@@ -267,16 +269,16 @@ pub fn chrome_130_linux() -> StealthProfile {
 pub fn chrome_130_ru() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
-        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
-        browser_version: "147.0.7727.117".into(),
+        browser_version: "148.0.7778.168".into(),
         os_name: "Windows".into(),
         os_version: "10.0".into(),
         platform: "Win32".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
         screen_width: 1920, screen_height: 1080,
         screen_avail_width: 1920, screen_avail_height: 1040,
         screen_avail_top: 0,
@@ -292,6 +294,7 @@ pub fn chrome_130_ru() -> StealthProfile {
         platform_version: "15.0.0".into(),
         ua_model: "".into(),
         ua_wow64: false,
+        device_class: DeviceClass::Desktop,
         tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 100, connection_downlink: 8.0,
@@ -312,16 +315,16 @@ pub fn chrome_130_ru() -> StealthProfile {
 pub fn chrome_130_cn() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
-        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
         browser_name: "Chrome".into(),
-        browser_version: "147.0.7727.117".into(),
+        browser_version: "148.0.7778.168".into(),
         os_name: "Windows".into(),
         os_version: "10.0".into(),
         platform: "Win32".into(),
         vendor: "Google Inc.".into(),
         vendor_sub: "".into(),
         product_sub: "20030107".into(),
-        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36".into(),
+        app_version: "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
         screen_width: 1920, screen_height: 1080,
         screen_avail_width: 1920, screen_avail_height: 1040,
         screen_avail_top: 0,
@@ -337,6 +340,7 @@ pub fn chrome_130_cn() -> StealthProfile {
         platform_version: "15.0.0".into(),
         ua_model: "".into(),
         ua_wow64: false,
+        device_class: DeviceClass::Desktop,
         tls_impersonate: "chrome_147".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 150, connection_downlink: 6.0,
@@ -449,6 +453,7 @@ pub fn firefox_135_macos() -> StealthProfile {
         // NSS — substantial work tracked as a future item. Many sites
         // (including the Camoufox-passing leboncoin/disneyplus) flip on
         // UA+headers alone, so this gap is acceptable for Phase B.
+        device_class: DeviceClass::Desktop,
         tls_impersonate: "firefox_135".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 50,
@@ -519,6 +524,7 @@ pub fn firefox_135_windows() -> StealthProfile {
         ua_model: "".into(),
         ua_wow64: false,
 
+        device_class: DeviceClass::Desktop,
         tls_impersonate: "firefox_135".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 50,
@@ -589,6 +595,7 @@ pub fn firefox_135_linux() -> StealthProfile {
         ua_model: "".into(),
         ua_wow64: false,
 
+        device_class: DeviceClass::Desktop,
         tls_impersonate: "firefox_135".into(),
         connection_effective_type: "4g".into(),
         connection_rtt: 50,
@@ -646,6 +653,209 @@ pub fn random_desktop() -> StealthProfile {
     profile.canvas_seed = rng.gen();
     profile.audio_seed = rng.gen();
     profile
+}
+
+/// Chrome 148 on Pixel 9 Pro (Android 15). Phase 2 mobile profile per
+/// `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md`. TLS deltas vs desktop:
+///   - elliptic curves: X25519_KYBER768_DRAFT00 instead of MLKEM768
+///     (Android Chrome lags desktop on PQ rollout; verify against fresh
+///     M147 Pixel capture if a recent rollout is suspected)
+/// Header / UA-CH deltas:
+///   - UA: Pixel-flavored mobile string with "Mobile" token
+///   - Sec-CH-UA-Mobile: ?1
+///   - Sec-CH-UA-Platform: "Android"
+///   - Sec-CH-UA-Model: "Pixel 9 Pro" (display name, not codename `tokay`)
+///   - Sec-CH-UA-Form-Factors: "Mobile"
+/// Hardware / JS-surface deltas (Pixel 9 Pro specs):
+///   - 412×870 viewport, devicePixelRatio = 2.625 (fractional!)
+///   - maxTouchPoints: 5
+///   - platform: "Linux armv81"
+///   - hardwareConcurrency: 8 (Tensor G4 reports 8 from 9 actual cores)
+///   - deviceMemory: 8 (Chrome rounds to spec set {0.25, 0.5, 1, 2, 4, 8})
+///   - WebGL renderer: "ANGLE (Google, Mali-G715 MP7, OpenGL ES 3.2)"
+pub fn pixel_9_pro_chrome_147() -> StealthProfile {
+    StealthProfile {
+        enforce_csp: true,
+        user_agent: "Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro Build/AP4A.250105.002) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36".into(),
+        browser_name: "Chrome".into(),
+        browser_version: "148.0.7778.168".into(),
+        os_name: "Android".into(),
+        os_version: "15".into(),
+        platform: "Linux armv81".into(),
+        vendor: "Google Inc.".into(),
+        vendor_sub: "".into(),
+        product_sub: "20030107".into(),
+        app_version: "5.0 (Linux; Android 15; Pixel 9 Pro Build/AP4A.250105.002) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36".into(),
+
+        // Pixel 9 Pro: 412 × 870 CSS px, fractional DPR 2.625
+        screen_width: 412,
+        screen_height: 870,
+        screen_avail_width: 412,
+        screen_avail_height: 870,
+        screen_avail_top: 0,
+        screen_color_depth: 24,
+        device_pixel_ratio: 2.625,
+        cpu_cores: 8,
+        device_memory: 8,
+        // Real Pixel reports 5 simultaneous touch points
+        max_touch_points: 5,
+
+        // ANGLE-wrapped renderer string (Pixel 9 Tensor G4 has Mali-G715 MP7)
+        webgl_vendor: "Google Inc. (Google)".into(),
+        webgl_renderer: "ANGLE (Google, Mali-G715 MP7, OpenGL ES 3.2)".into(),
+
+        language: "en-US".into(),
+        languages: vec!["en-US".into(), "en".into()],
+        timezone: "America/Los_Angeles".into(),
+
+        // Empty cpu_architecture on Android per UA reduction
+        cpu_architecture: "".into(),
+        cpu_bitness: "64".into(),
+        platform_version: "15.0.0".into(),
+        ua_model: "Pixel 9 Pro".into(),
+        ua_wow64: false,
+
+        device_class: DeviceClass::MobileAndroid,
+        tls_impersonate: "chrome_147_android".into(),
+        connection_effective_type: "4g".into(),
+        connection_rtt: 50,
+        connection_downlink: 10.0,
+
+        // Android Chrome has an EMPTY plugin array — not the 5-plugin
+        // desktop set. This is the single biggest mobile-vs-desktop tell
+        // on Chromium that anti-bot stacks key off.
+        pdf_viewer_enabled: false,
+        plugins_count: 0,
+        mime_types_count: 0,
+
+        canvas_seed: 0xa5a5_d5d5_3c3c_e6e6,
+        audio_seed: 0x9c9c_5e5e_4040_b1b1,
+
+        // No Touch ID / Windows Hello on stock Android; Passkeys via Play
+        // Services exist but isUserVerifyingPlatformAuthenticatorAvailable
+        // returns false on a fresh profile.
+        has_platform_authenticator: false,
+        conditional_mediation: true,
+        allow_http3: false,
+
+        prefers_color_scheme: "light".into(),
+        // Touch pointer on phones, not fine mouse
+        pointer_type: "coarse".into(),
+        // Phones don't hover
+        hover_capability: "none".into(),
+
+        // Match screen dimensions for inner/outer (no browser chrome distinction)
+        inner_width: 412,
+        inner_height: 870,
+        outer_width: 412,
+        outer_height: 870,
+
+        proxy: None,
+        media_devices: default_media_devices("android"),
+        gpu_profile: crate::gpu::apple_m3_macos(), // TODO: add android_mali_g715 GPU profile
+    }
+}
+
+/// Mobile Safari 18 on iPhone 15 Pro (iOS 18.0). Phase 3 mobile profile per
+/// `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md`. Requires Phase 3 TLS work
+/// (separate cipher list / sigalgs / no ECH-ALPS / zlib cert) — without it
+/// the profile produces a Chrome-flavored ClientHello + Safari UA, which is
+/// the #1 instant flag on every anti-bot stack. Use only after Phase 3 lands.
+///
+/// JS surface deltas (per the audit + Apple's "16 declined APIs" list):
+///   - UA: `Mozilla/5.0 (iPhone; CPU iPhone OS 18_0_1 ...) Version/18.0.1 Mobile/15E148 Safari/604.1`
+///   - `navigator.platform: "iPhone"`, `maxTouchPoints: 5`
+///   - `navigator.deviceMemory: undefined` (WebKit doesn't expose it)
+///   - `navigator.hardwareConcurrency: 2` (Safari intentionally caps)
+///   - `navigator.userAgentData: undefined` (Safari has no UA-CH at all)
+///   - `navigator.connection: undefined` (no NetworkInformation)
+///   - No Bluetooth/USB/Serial/HID/Sensor/Battery/MIDI/IdleDetector/WebGPU
+///   - No `PaymentRequest.prototype.hasEnrolledInstrument` (Chrome/Edge-only)
+///   - WebGL renderer: literal `"Apple GPU"` constant (Apple strips model info)
+///   - `window.orientation`: 0 (legacy iOS-only — desktop browsers do NOT have it)
+///   - `DeviceMotionEvent.requestPermission`: present static (iOS 13+)
+///   - `'ontouchstart' in window`: true
+///   - AudioContext sampleRate: 48000
+///   - Screen: 393×852 @ DPR 3 (iPhone 15 Pro)
+pub fn iphone_15_pro_safari_18() -> StealthProfile {
+    StealthProfile {
+        enforce_csp: true,
+        user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0.1 Mobile/15E148 Safari/604.1".into(),
+        browser_name: "Safari".into(),
+        browser_version: "18.0.1".into(),
+        os_name: "iOS".into(),
+        os_version: "18.0.1".into(),
+        platform: "iPhone".into(),
+        vendor: "Apple Computer, Inc.".into(),
+        vendor_sub: "".into(),
+        product_sub: "20030107".into(),
+        app_version: "5.0 (iPhone; CPU iPhone OS 18_0_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0.1 Mobile/15E148 Safari/604.1".into(),
+
+        // iPhone 15 Pro: 393 × 852 CSS px @ DPR 3 (integer)
+        screen_width: 393,
+        screen_height: 852,
+        screen_avail_width: 393,
+        screen_avail_height: 852,
+        screen_avail_top: 0,
+        screen_color_depth: 24,
+        device_pixel_ratio: 3.0,
+        // Safari intentionally caps reported cores to limit fingerprint entropy
+        cpu_cores: 2,
+        // iOS Safari does NOT expose deviceMemory at all — set to 0 here as
+        // a sentinel; the JS bootstrap will return undefined for iOS profiles
+        // regardless of this value.
+        device_memory: 0,
+        max_touch_points: 5,
+
+        // Apple intentionally returns the literal string "Apple GPU" (no model)
+        webgl_vendor: "Apple Inc.".into(),
+        webgl_renderer: "Apple GPU".into(),
+
+        language: "en-US".into(),
+        languages: vec!["en-US".into(), "en".into()],
+        timezone: "America/Los_Angeles".into(),
+
+        // Safari does not send Sec-CH-UA-* at all; these fields are unused
+        // for iOS profiles but kept non-empty for serde compatibility.
+        cpu_architecture: "arm".into(),
+        cpu_bitness: "64".into(),
+        platform_version: "18.0.1".into(),
+        ua_model: "iPhone".into(),
+        ua_wow64: false,
+
+        device_class: DeviceClass::MobileIOS,
+        tls_impersonate: "safari_18_ios".into(), // Phase 3 will wire this up
+        connection_effective_type: "4g".into(),
+        connection_rtt: 50,
+        connection_downlink: 10.0,
+
+        // Mobile Safari has empty plugin array
+        pdf_viewer_enabled: false,
+        plugins_count: 0,
+        mime_types_count: 0,
+
+        canvas_seed: 0xa1b2_c3d4_e5f6_0708,
+        audio_seed: 0x0807_0605_0403_0201,
+
+        // Touch ID / Face ID exists but isUserVerifyingPlatformAuthenticatorAvailable
+        // returns false on a fresh iOS Safari profile (per Apple privacy default)
+        has_platform_authenticator: false,
+        conditional_mediation: true,
+        allow_http3: false,
+
+        prefers_color_scheme: "light".into(),
+        pointer_type: "coarse".into(),
+        hover_capability: "none".into(),
+
+        inner_width: 393,
+        inner_height: 852,
+        outer_width: 393,
+        outer_height: 852,
+
+        proxy: None,
+        media_devices: default_media_devices("ios"),
+        gpu_profile: crate::gpu::apple_m3_macos(), // TODO: ios_apple_a17_pro GPU profile
+    }
 }
 
 #[cfg(test)]
@@ -772,8 +982,8 @@ mod tests {
         let profile = chrome_130_windows();
         // Chrome UA-reduction freezes minor versions to 0; only major is in the UA string.
         // Full version lives in browser_version for sec-ch-ua-full-version-list.
-        assert!(profile.user_agent.contains("147.0.0.0"));
-        assert_eq!(profile.browser_version, "147.0.7727.117");
+        assert!(profile.user_agent.contains("148.0.0.0"));
+        assert_eq!(profile.browser_version, "148.0.7778.168");
     }
 
     #[test]

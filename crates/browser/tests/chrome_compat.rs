@@ -5904,3 +5904,961 @@ async fn kasada_capture_ips_js() {
         Err(_) => println!("timeout"),
     }
 }
+
+/// Tier 3 Tool 2 — Kasada VM dispatcher trace.
+///
+/// Hooks `Function` constructor BEFORE ips.js loads. Each dynamically-created
+/// function (the VM opcode handlers) is wrapped to log invocation args (truncated)
+/// + return value or thrown exception, into `globalThis.__vmTrace`. After the
+/// page loads we dump the last N entries before the first `throw 'ball'` (Kasada's
+/// internal scope-chain miss) or before the synthesized TypeError ("Invalid attempt
+/// to spread non-iterable instance" — the `ao` probe).
+///
+/// Cross-references with kasada_typeerror_stack_capture: the opcode body that
+/// runs IMMEDIATELY before the throw names the property/receiver Kasada was
+/// fetching when our engine diverged. That is the `ao` (or `bot1225`, etc.)
+/// receiver we need to fix.
+#[tokio::test]
+#[ignore = "network: Kasada VM dispatcher trace, ~30s, writes ./kasada_vm_trace.json"]
+async fn kasada_vm_dispatcher_trace() {
+    use browser::Page;
+    use std::time::Duration;
+
+    // Init script: install the Function-constructor hook BEFORE any other
+    // JS runs. Per-handler invocation logging into __vmTrace ring buffer.
+    // Also intercept throws via window.onerror and Promise rejection.
+    let init = r#"
+        (function() {
+            globalThis.__vmTrace = [];
+            globalThis.__vmTraceMax = 4000;          // ring buffer cap
+            globalThis.__vmHandlerSeq = 0;           // unique id per wrapped fn
+            globalThis.__vmFirstThrowAt = -1;        // index of first thrown
+            globalThis.__vmHandlerBodies = {};       // id -> truncated body source
+            globalThis.__vmThrowStacks = [];         // {idx, msg, stack}
+
+            const _origFn = Function;
+            const _record = (entry) => {
+                const t = globalThis.__vmTrace;
+                if (t.length >= globalThis.__vmTraceMax) {
+                    t.splice(0, t.length - globalThis.__vmTraceMax + 1);
+                }
+                t.push(entry);
+            };
+            const _summarize = (v) => {
+                if (v === null) return 'null';
+                if (v === undefined) return 'undefined';
+                const t = typeof v;
+                if (t === 'string') return 's:' + v.slice(0, 40);
+                if (t === 'number' || t === 'boolean') return t[0] + ':' + v;
+                if (t === 'function') return 'fn';
+                if (Array.isArray(v)) return 'a[' + v.length + ']';
+                if (t === 'object') {
+                    try {
+                        const keys = Object.keys(v).slice(0, 4).join(',');
+                        return 'o{' + keys + '}';
+                    } catch (_) { return 'o?'; }
+                }
+                return t;
+            };
+
+            // Wrap Function to instrument each created handler.
+            // Kasada's VM uses two layers:
+            //   outer: new Function('return function(n,e,a,v,i,r){...}')
+            //   call outer() once → returns the arity-6 handler
+            //   the dispatcher then invokes the handler many times
+            //
+            // We wrap the OUTER factory invocation, then recursively wrap
+            // the RETURNED handler (arity 6) so we catch every dispatcher call.
+            const _wrapHandler = (fn, id, source) => {
+                if (typeof fn !== 'function') return fn;
+                if (fn.__vm_wrapped) return fn;
+                globalThis.__vmHandlerBodies[id] = String(source || fn.toString()).slice(0, 240);
+                const wrapped = function(...callArgs) {
+                    const idx = globalThis.__vmTrace.length;
+                    let ret;
+                    try {
+                        ret = fn.apply(this, callArgs);
+                    } catch (e) {
+                        const errMsg = String(e && (e.message || e));
+                        if (globalThis.__vmFirstThrowAt < 0) {
+                            globalThis.__vmFirstThrowAt = idx;
+                        }
+                        globalThis.__vmThrowStacks.push({
+                            idx,
+                            id,
+                            msg: errMsg,
+                            stack: (e && e.stack ? String(e.stack).split('\n').slice(0, 6).join(' | ') : ''),
+                        });
+                        _record({
+                            i: idx, h: id,
+                            a: callArgs.length,
+                            a0: callArgs.length > 0 ? _summarize(callArgs[0]) : '',
+                            r: 'THROW: ' + errMsg.slice(0, 80),
+                        });
+                        throw e;
+                    }
+                    _record({
+                        i: idx, h: id,
+                        a: callArgs.length,
+                        a0: callArgs.length > 0 ? _summarize(callArgs[0]) : '',
+                        r: _summarize(ret),
+                    });
+                    return ret;
+                };
+                try {
+                    Object.defineProperty(wrapped, 'length',
+                        { value: fn.length, configurable: true });
+                    Object.defineProperty(wrapped, 'name',
+                        { value: fn.name || 'h', configurable: true });
+                    Object.defineProperty(wrapped, '__vm_wrapped',
+                        { value: true, configurable: true });
+                } catch (_) {}
+                return wrapped;
+            };
+
+            const _wrappedFn = function Function(...args) {
+                const fn = _origFn.apply(this, args);
+                if (typeof fn !== 'function') return fn;
+                const body = String(args[args.length - 1] || '');
+                const looksLikeFactory =
+                    body.includes("throw 'ball'") ||
+                    body.includes('return function(n,e,a,v,i,r)') ||
+                    body.match(/\bfunction\s*\(n,e,a,v,i,r\)/) ||
+                    body.includes('e(n)[e(n)]=e(n)') ||
+                    body.includes('a(n,e(n)+e(n))') ||
+                    body.includes('2654435769');
+                if (!looksLikeFactory) return fn;
+
+                // The outer factory: when called, returns the actual handler.
+                // We wrap the factory so that the returned handler is itself
+                // wrapped (after the factory runs once, future direct calls
+                // hit the inner wrapped handler via the dispatcher's slot).
+                const factoryId = ++globalThis.__vmHandlerSeq;
+                globalThis.__vmHandlerBodies[factoryId] =
+                    '[FACTORY] ' + body.slice(0, 220);
+                const wrappedFactory = function(...factoryArgs) {
+                    const ret = fn.apply(this, factoryArgs);
+                    // If the factory returns a handler-shaped function (arity 6,
+                    // typical Kasada VM handler), wrap it. If it returns an array
+                    // (e.g. opcode #5 returns [m, r, t] for the TEA cipher), wrap
+                    // each function element.
+                    if (typeof ret === 'function' && ret.length === 6) {
+                        const handlerId = ++globalThis.__vmHandlerSeq;
+                        return _wrapHandler(ret, handlerId, body);
+                    }
+                    if (Array.isArray(ret)) {
+                        return ret.map((el, i) => {
+                            if (typeof el === 'function') {
+                                const handlerId = ++globalThis.__vmHandlerSeq;
+                                return _wrapHandler(el, handlerId,
+                                    '[FROM_ARRAY:' + i + '] ' + body);
+                            }
+                            return el;
+                        });
+                    }
+                    return ret;
+                };
+                try {
+                    Object.defineProperty(wrappedFactory, 'length',
+                        { value: fn.length, configurable: true });
+                    Object.defineProperty(wrappedFactory, 'name',
+                        { value: fn.name || 'h', configurable: true });
+                } catch (_) {}
+                return wrappedFactory;
+            };
+            // Preserve constructor identity so `instanceof Function` and
+            // `Function.prototype` stay consistent.
+            _wrappedFn.prototype = _origFn.prototype;
+            // Replace the global Function reference. WARNING: this MUST run
+            // before ips.js. Page-level scripts that reference Function via
+            // closure (already-resolved) will keep the original, which is
+            // OK for performance — we just won't trace those.
+            try { globalThis.Function = _wrappedFn; } catch (_) {}
+        })();
+    "#;
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(120),
+        Page::navigate_with_init(
+            "https://www.canadagoose.com/",
+            stealth::presets::chrome_130_macos(),
+            2,
+            vec![init.to_string()],
+        ),
+    )
+    .await;
+
+    match page {
+        Ok(Ok(mut p)) => {
+            // Pump the event loop so ips.js fully runs and emits its
+            // characteristic exception (`throw 'ball'` for scope-chain
+            // misses, or our engine's TypeError for `ao` spread probe).
+            for _ in 0..30 {
+                let _ = p.evaluate("0");
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+
+            // Dump trace, throws, handler bodies, total counts.
+            let dump_js = r#"
+                JSON.stringify({
+                    handler_count: globalThis.__vmHandlerSeq || 0,
+                    trace_size: (globalThis.__vmTrace || []).length,
+                    first_throw_at: globalThis.__vmFirstThrowAt,
+                    throw_stacks: (globalThis.__vmThrowStacks || []).slice(0, 10),
+                    // Last 60 entries before the first throw (the slice that
+                    // names the receiver Kasada was probing).
+                    pre_throw_window: (function() {
+                        const t = globalThis.__vmTrace || [];
+                        const at = globalThis.__vmFirstThrowAt;
+                        if (at < 0) return t.slice(-60);
+                        const start = Math.max(0, at - 60);
+                        return t.slice(start, at);
+                    })(),
+                    // First 5 + last 5 handler bodies by id (so we can
+                    // visually map h:N entries in the trace).
+                    handler_bodies_sample: (function() {
+                        const out = {};
+                        const ids = Object.keys(globalThis.__vmHandlerBodies || {})
+                            .map(Number).sort((a,b) => a - b);
+                        for (const id of ids.slice(0, 10).concat(ids.slice(-10))) {
+                            out[id] = globalThis.__vmHandlerBodies[id];
+                        }
+                        return out;
+                    })(),
+                    // ALWAYS include full bodies of any handler that threw,
+                    // PLUS any handler that appears in the pre-throw window.
+                    // These are the receivers we need to fix.
+                    throwing_handler_bodies: (function() {
+                        const out = {};
+                        const wantIds = new Set();
+                        for (const t of (globalThis.__vmThrowStacks || [])) {
+                            wantIds.add(t.id);
+                        }
+                        // Also unique handler ids in the last 100 trace entries
+                        const t = globalThis.__vmTrace || [];
+                        for (const e of t.slice(Math.max(0, t.length - 100))) {
+                            wantIds.add(e.h);
+                        }
+                        for (const id of wantIds) {
+                            out[id] = globalThis.__vmHandlerBodies[id];
+                        }
+                        return out;
+                    })(),
+                })
+            "#;
+            let dump = p.evaluate(dump_js).unwrap_or_default();
+            // Strip outer JSON-encoding quotes from evaluate result
+            let dump = dump.trim();
+            let stripped: String = if dump.starts_with('"') && dump.ends_with('"') {
+                serde_json::from_str(dump).unwrap_or_else(|_| dump.to_string())
+            } else {
+                dump.to_string()
+            };
+            std::fs::write("kasada_vm_trace.json", &stripped).ok();
+            println!("=== Kasada VM dispatcher trace ===");
+            // Print a brief summary; full dump on disk.
+            let parsed: serde_json::Value = serde_json::from_str(&stripped)
+                .unwrap_or(serde_json::Value::Null);
+            if let Some(obj) = parsed.as_object() {
+                println!("handler_count: {}", obj.get("handler_count").map(|v| v.to_string()).unwrap_or_default());
+                println!("trace_size:    {}", obj.get("trace_size").map(|v| v.to_string()).unwrap_or_default());
+                println!("first_throw_at: {}", obj.get("first_throw_at").map(|v| v.to_string()).unwrap_or_default());
+                if let Some(throws) = obj.get("throw_stacks").and_then(|v| v.as_array()) {
+                    println!("\n=== First {} throws ===", throws.len());
+                    for t in throws {
+                        println!("  {}", t);
+                    }
+                }
+                if let Some(window) = obj.get("pre_throw_window").and_then(|v| v.as_array()) {
+                    println!("\n=== Pre-throw window (last 60 ops before first throw) ===");
+                    for entry in window.iter().rev().take(20).rev() {
+                        println!("  {}", entry);
+                    }
+                }
+            }
+            println!("\nFull dump: ./kasada_vm_trace.json (size: {} bytes)", stripped.len());
+        }
+        Ok(Err(e)) => println!("page err: {e}"),
+        Err(_) => println!("timeout"),
+    }
+}
+
+/// Diagnose why a site returns < 1KB HTML in our engine (THIN-BODY in
+/// holistic_sweep classifier). Both cloudflare.com and primevideo.com
+/// fail this way in parallel sweep. Reports the actual HTML, readyState,
+/// body children count, head children count, and any visible CSP errors.
+async fn thin_body_diagnose(url: &str, name: &str) {
+    use browser::Page;
+    use std::time::Duration;
+
+    println!("\n========== {name} ({url}) ==========");
+    let r = tokio::time::timeout(
+        Duration::from_secs(60),
+        Page::navigate(url, stealth::presets::chrome_130_macos(), 2),
+    )
+    .await;
+    match r {
+        Ok(Ok(mut p)) => {
+            let info = p.evaluate(r#"
+                JSON.stringify({
+                    readyState: document.readyState,
+                    bodyLen: (document.body && document.body.innerHTML || '').length,
+                    bodyChildren: document.body ? document.body.children.length : 0,
+                    headChildren: document.head ? document.head.children.length : 0,
+                    scriptCount: document.scripts ? document.scripts.length : 0,
+                    title: document.title,
+                    url: location.href,
+                    bodySnippet: (document.body && document.body.innerHTML || '').slice(0, 400),
+                    htmlSnippet: document.documentElement ? document.documentElement.outerHTML.slice(0, 400) : '',
+                })
+            "#).unwrap_or_default();
+            println!("info: {info}");
+        }
+        Ok(Err(e)) => println!("ERROR: {e}"),
+        Err(_) => println!("TIMEOUT"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "network: THIN-BODY diagnostic for parallel sweep failures"]
+async fn diag_thin_body_sites() {
+    thin_body_diagnose("https://www.cloudflare.com/", "cloudflare").await;
+    thin_body_diagnose("https://www.primevideo.com/", "prime-video").await;
+}
+
+/// PaymentRequest API surface — Tier 1.1 from RESEARCH_2026_05_12.
+/// Must exist on secure-context Chrome profiles. canMakePayment for
+/// Google Pay payment method must resolve true (matches a real Chrome
+/// with the handler registered, no card enrolled). hasEnrolledInstrument
+/// is Chrome/Edge-only and resolves false on a fresh profile.
+/// ApplePaySession MUST be undefined under non-macOS Chrome profiles
+/// (the cardinal sin: ApplePaySession + Chrome UA = instant flag).
+#[tokio::test]
+async fn check_payment_request_surface() {
+    let profile = stealth::chrome_130_linux();
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
+        .await
+        .unwrap();
+    // Synchronous surface checks first.
+    let sync_js = r#"
+        (function() {
+            const res = {};
+            res.PaymentRequest_typeof = typeof PaymentRequest;
+            res.PaymentRequest_length = typeof PaymentRequest === 'function' ? PaymentRequest.length : null;
+            res.PaymentResponse_typeof = typeof PaymentResponse;
+            res.PaymentMethodChangeEvent_typeof = typeof PaymentMethodChangeEvent;
+            res.PaymentRequestUpdateEvent_typeof = typeof PaymentRequestUpdateEvent;
+            res.ApplePaySession_typeof = typeof ApplePaySession;
+            res.canMakePayment_toString = typeof PaymentRequest === 'function'
+                ? PaymentRequest.prototype.canMakePayment.toString()
+                : null;
+            // Constructor validation (sync throws)
+            try { new PaymentRequest([], { total: { label: 'x', amount: { currency: 'USD', value: '1' } } }); res.empty_methods = 'no throw'; }
+            catch (e) { res.empty_methods = e.name; }
+            try { new PaymentRequest([{supportedMethods: 'basic-card'}], {}); res.no_total = 'no throw'; }
+            catch (e) { res.no_total = e.name; }
+            return JSON.stringify(res, null, 2);
+        })()
+    "#;
+    let sync_result = page.evaluate(sync_js).unwrap();
+    println!("PAYMENT REQUEST SYNC CHECK:\n{}", sync_result);
+
+    assert!(sync_result.contains("\"PaymentRequest_typeof\": \"function\""));
+    assert!(sync_result.contains("\"PaymentRequest_length\": 2"));
+    assert!(sync_result.contains("\"PaymentResponse_typeof\": \"function\""));
+    assert!(sync_result.contains("\"PaymentMethodChangeEvent_typeof\": \"function\""));
+    assert!(sync_result.contains("\"PaymentRequestUpdateEvent_typeof\": \"function\""));
+    assert!(
+        sync_result.contains("\"ApplePaySession_typeof\": \"undefined\""),
+        "ApplePaySession must be undefined under Linux Chrome profile (cardinal sin)"
+    );
+    assert!(sync_result.contains("\"empty_methods\": \"TypeError\""));
+    assert!(sync_result.contains("\"no_total\": \"TypeError\""));
+    assert!(
+        sync_result.contains("[native code]"),
+        "PaymentRequest.prototype.canMakePayment.toString() must include [native code]"
+    );
+
+    // Async checks — kick off Promise chain into window.__r, pump microtasks, read back.
+    page.evaluate(
+        r#"window.__r = {};
+        (async function() {
+            const r = window.__r;
+            try {
+                const pr = new PaymentRequest(
+                    [{ supportedMethods: 'https://google.com/pay' }],
+                    { total: { label: 'x', amount: { currency: 'USD', value: '1.00' } } }
+                );
+                r.id_present = typeof pr.id === 'string' && pr.id.length > 0;
+                r.shippingAddress = pr.shippingAddress;
+                r.shippingOption = pr.shippingOption;
+                r.shippingType = pr.shippingType;
+                r.canMakePayment_googlepay = await pr.canMakePayment();
+                r.hasEnrolledInstrument = await pr.hasEnrolledInstrument();
+                try { await pr.show(); r.show_ok = 'unexpected resolve'; }
+                catch (e) { r.show_rejected = e.name; }
+                r.abort_resolved = await pr.abort();
+            } catch (e) { r.ctor_err = e.name + ': ' + e.message; }
+
+            try {
+                const pr2 = new PaymentRequest(
+                    [{ supportedMethods: 'unknown://method' }],
+                    { total: { label: 'x', amount: { currency: 'USD', value: '1.00' } } }
+                );
+                r.canMakePayment_unknown = await pr2.canMakePayment();
+            } catch (e) { r.unknown_err = e.message; }
+
+            try {
+                r.spc = await PaymentRequest.securePaymentConfirmationAvailability();
+            } catch (e) { r.spc_err = e.message; }
+
+            window.__r_done = true;
+        })();"#,
+    )
+    .unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(500))
+        .await
+        .ok();
+    let async_result = page
+        .evaluate("JSON.stringify(window.__r, null, 2)")
+        .unwrap();
+    println!("PAYMENT REQUEST ASYNC CHECK:\n{}", async_result);
+
+    assert!(async_result.contains("\"id_present\": true"));
+    assert!(async_result.contains("\"shippingAddress\": null"));
+    assert!(async_result.contains("\"canMakePayment_googlepay\": true"));
+    assert!(async_result.contains("\"canMakePayment_unknown\": false"));
+    assert!(async_result.contains("\"hasEnrolledInstrument\": false"));
+    assert!(async_result.contains("\"show_rejected\": \"AbortError\""));
+    assert!(async_result.contains("\"spc\": \"unavailable-no-user-verifying-platform-authenticator\""));
+}
+
+/// navigator.getInstalledRelatedApps — Chrome/Edge-only API; absence
+/// under Chrome UA is a tell. Must return Promise<[]> on a fresh profile.
+#[tokio::test]
+async fn check_get_installed_related_apps() {
+    let profile = stealth::chrome_130_linux();
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
+        .await
+        .unwrap();
+    let sync_js = r#"
+        (function() {
+            const res = {};
+            res.typeof_method = typeof navigator.getInstalledRelatedApps;
+            res.toString = typeof navigator.getInstalledRelatedApps === 'function'
+                ? navigator.getInstalledRelatedApps.toString()
+                : null;
+            return JSON.stringify(res, null, 2);
+        })()
+    "#;
+    let sync_result = page.evaluate(sync_js).unwrap();
+    println!("getInstalledRelatedApps SYNC CHECK:\n{}", sync_result);
+    assert!(sync_result.contains("\"typeof_method\": \"function\""));
+    assert!(sync_result.contains("[native code]"));
+
+    page.evaluate(
+        r#"window.__r = null;
+        navigator.getInstalledRelatedApps().then(o => { window.__r = o; });"#,
+    )
+    .unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200))
+        .await
+        .ok();
+    let async_result = page
+        .evaluate(
+            r#"(() => {
+                const r = window.__r;
+                if (!Array.isArray(r)) return 'not-array:' + typeof r;
+                return 'len=' + r.length;
+            })()"#,
+        )
+        .unwrap();
+    println!("getInstalledRelatedApps ASYNC CHECK: {}", async_result);
+    assert_eq!(async_result, "len=0");
+}
+
+/// Tier 1.2 — Function.prototype.toString cross-realm + stack-trace audit.
+///
+/// fingerprint-suite + DataDome's threat-research blog highlight 4 detector
+/// edge cases that defeat naive toString patches:
+///   1. instance.toString + "" coercion (skips Function.prototype.toString)
+///   2. Function.prototype.toString.call(maskedFn) directly
+///   3. Cross-realm: iframe.contentWindow.Function.prototype.toString.call(parentFn)
+///   4. Stack-trace inspection: try { fn.toString.call(undefined) } catch (e) { e.stack }
+///      — must NOT contain Proxy artifacts ("at Object.apply", "at Object.get",
+///      "at Reflect.apply", "at newHandler.<computed>")
+#[tokio::test]
+async fn check_tostring_audit_full() {
+    let profile = stealth::chrome_130_linux();
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
+        .await
+        .unwrap();
+    let js = r#"
+        (function() {
+            const res = {};
+            const targets = [
+                ['canPlayType', () => {
+                    const v = document.createElement('video');
+                    return v.canPlayType;
+                }],
+                ['enumerateDevices', () => navigator.mediaDevices && navigator.mediaDevices.enumerateDevices],
+                ['getBattery', () => navigator.getBattery],
+                ['getInstalledRelatedApps', () => navigator.getInstalledRelatedApps],
+                ['canMakePayment',
+                    () => typeof PaymentRequest === 'function' && PaymentRequest.prototype.canMakePayment],
+                ['plugins.item', () => navigator.plugins && navigator.plugins.item],
+                ['fetch', () => globalThis.fetch],
+            ];
+
+            for (const [label, getter] of targets) {
+                const fn = getter();
+                const r = {};
+                if (typeof fn !== 'function') { r.skip = 'not a function: ' + typeof fn; res[label] = r; continue; }
+
+                // Path 1: implicit + "" coercion
+                try {
+                    const s = fn + "";
+                    r.coerce = s.includes('[native code]') ? 'native' : ('SRC: ' + s.slice(0, 60));
+                } catch (e) { r.coerce_err = e.message; }
+
+                // Path 2: Function.prototype.toString.call(fn)
+                try {
+                    const s = Function.prototype.toString.call(fn);
+                    r.protoCall = s.includes('[native code]') ? 'native' : ('SRC: ' + s.slice(0, 60));
+                } catch (e) { r.protoCall_err = e.message; }
+
+                // Path 3: instance .toString()
+                try {
+                    const s = fn.toString();
+                    r.instance = s.includes('[native code]') ? 'native' : ('SRC: ' + s.slice(0, 60));
+                } catch (e) { r.instance_err = e.message; }
+
+                // Path 4: Object.prototype.toString — should NOT change shape
+                try {
+                    r.objProto = Object.prototype.toString.call(fn);
+                } catch (e) { r.objProto_err = e.message; }
+
+                res[label] = r;
+            }
+
+            // Cross-realm: iframe.contentWindow.Function.prototype.toString
+            try {
+                const ifr = document.createElement('iframe');
+                document.body && document.body.appendChild(ifr);
+                const cw = ifr.contentWindow;
+                if (!cw) { res.iframe = 'no contentWindow'; }
+                else if (!cw.Function || !cw.Function.prototype || !cw.Function.prototype.toString) {
+                    res.iframe = 'no cw.Function.prototype.toString';
+                } else {
+                    const cwTs = cw.Function.prototype.toString;
+                    const fns = {
+                        'parent.fetch': globalThis.fetch,
+                        'parent.canPlayType': document.createElement('video').canPlayType,
+                        'parent.canMakePayment': PaymentRequest && PaymentRequest.prototype.canMakePayment,
+                        'parent.getBattery': navigator.getBattery,
+                    };
+                    res.iframe = {};
+                    for (const [k, fn] of Object.entries(fns)) {
+                        if (typeof fn !== 'function') { res.iframe[k] = 'skip:' + typeof fn; continue; }
+                        try {
+                            const s = cwTs.call(fn);
+                            res.iframe[k] = s.includes('[native code]') ? 'native' : ('SRC: ' + s.slice(0, 60));
+                        } catch (e) { res.iframe[k] = 'ERR: ' + e.message.split('\n')[0]; }
+                    }
+                }
+            } catch (e) { res.iframe_err = e.message; }
+
+            // Stack-trace sanitization
+            const proxyArtifacts = [
+                'at Object.apply', 'at Object.get', 'at Reflect.apply',
+                'at newHandler.', 'at Proxy.', 'at handler.', 'at trap.',
+                '_inPatchedToStr', '_nativeTag', '_origFnToStr', '_patchedFnToStr',
+            ];
+            try {
+                Function.prototype.toString.call(undefined);
+                res.stack = 'unexpected: did not throw';
+            } catch (e) {
+                const stack = String(e.stack || '');
+                const hits = proxyArtifacts.filter(a => stack.includes(a));
+                res.stack = hits.length === 0 ? 'clean' : 'LEAK: ' + hits.join(', ');
+                res.stack_full = stack.split('\n').slice(0, 6).join(' | ');
+            }
+            try {
+                Function.prototype.toString.call({});
+                res.stack_obj = 'unexpected: did not throw';
+            } catch (e) {
+                const stack = String(e.stack || '');
+                const hits = proxyArtifacts.filter(a => stack.includes(a));
+                res.stack_obj = hits.length === 0 ? 'clean' : 'LEAK: ' + hits.join(', ');
+            }
+
+            return JSON.stringify(res, null, 2);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap();
+    println!("TOSTRING AUDIT:\n{}", result);
+
+    // Whole-result invariants: NO path on ANY masked function should leak
+    // raw source. JSON values starting with "SRC:" mean detector got source.
+    assert!(
+        !result.contains("\"coerce\": \"SRC:"),
+        "+ \"\" coercion leaked raw source somewhere: {result}"
+    );
+    assert!(
+        !result.contains("\"protoCall\": \"SRC:"),
+        "Function.prototype.toString.call leaked raw source: {result}"
+    );
+    assert!(
+        !result.contains("\"instance\": \"SRC:"),
+        "instance .toString() leaked raw source: {result}"
+    );
+    // Cross-realm via iframe.contentWindow must also not leak
+    assert!(
+        !result.contains(": \"SRC:"),
+        "cross-realm iframe toString leaked source: {result}"
+    );
+    // Stack must be clean (no Proxy / handler artifacts)
+    assert!(
+        result.contains("\"stack\": \"clean\""),
+        "stack trace from toString.call(undefined) leaked Proxy artifacts: {result}"
+    );
+    assert!(
+        result.contains("\"stack_obj\": \"clean\""),
+        "stack trace from toString.call({{}}) leaked Proxy artifacts: {result}"
+    );
+}
+
+/// Tier 1.5 verification — audio fingerprint differs across stealth profiles.
+/// Real OfflineAudioContext-based fingerprint probes (FPjs, CreepJS) hash
+/// the rendered output. Per-profile audio_seed must produce distinct hashes.
+/// Two profiles with different audio_seed values MUST produce different
+/// audio output, AND the same profile must reproduce the same output (deterministic).
+#[tokio::test]
+async fn check_audio_fingerprint_per_profile() {
+    let render_js = r#"
+        (function() {
+            const ctx = new OfflineAudioContext(1, 5000, 44100);
+            const osc = ctx.createOscillator();
+            osc.type = 'triangle';
+            osc.frequency.value = 10000;
+            const comp = ctx.createDynamicsCompressor();
+            comp.threshold.value = -50;
+            comp.knee.value = 40;
+            comp.ratio.value = 12;
+            comp.attack.value = 0;
+            comp.release.value = 0.25;
+            osc.connect(comp);
+            comp.connect(ctx.destination);
+            osc.start(0);
+            window.__audio_done = false;
+            window.__audio_hash = null;
+            ctx.startRendering().then(buf => {
+                const data = buf.getChannelData(0);
+                let s = 0;
+                // FPjs-canonical reduction: sum of abs values in [4500, 5000]
+                for (let i = 4500; i < Math.min(5000, data.length); i++) s += Math.abs(data[i]);
+                window.__audio_hash = s;
+                window.__audio_done = true;
+            });
+        })()
+    "#;
+    async fn render(profile: stealth::StealthProfile) -> f64 {
+        let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
+            .await
+            .unwrap();
+        page.evaluate(r#"
+            (function() {
+                const ctx = new OfflineAudioContext(1, 5000, 44100);
+                const osc = ctx.createOscillator();
+                osc.type = 'triangle';
+                osc.frequency.value = 10000;
+                const comp = ctx.createDynamicsCompressor();
+                comp.threshold.value = -50;
+                comp.knee.value = 40;
+                comp.ratio.value = 12;
+                comp.attack.value = 0;
+                comp.release.value = 0.25;
+                osc.connect(comp);
+                comp.connect(ctx.destination);
+                osc.start(0);
+                window.__audio_done = false;
+                window.__audio_hash = null;
+                ctx.startRendering().then(buf => {
+                    const data = buf.getChannelData(0);
+                    let s = 0;
+                    for (let i = 4500; i < Math.min(5000, data.length); i++) s += Math.abs(data[i]);
+                    window.__audio_hash = s;
+                    window.__audio_done = true;
+                });
+            })()
+        "#).unwrap();
+        page.evaluate_async("void 0", std::time::Duration::from_millis(500))
+            .await
+            .ok();
+        let raw = page
+            .evaluate(r#"String(window.__audio_hash)"#)
+            .unwrap();
+        raw.parse::<f64>().unwrap_or(f64::NAN)
+    }
+    let _ = render_js; // referenced for documentation
+
+    let h_mac = render(stealth::chrome_130_macos()).await;
+    let h_lin = render(stealth::chrome_130_linux()).await;
+    let h_lin_2 = render(stealth::chrome_130_linux()).await;
+    println!("audio hashes: mac={h_mac} lin={h_lin} lin_again={h_lin_2}");
+
+    assert!(h_mac.is_finite() && h_mac > 0.0, "macOS profile produced no audio output");
+    assert!(h_lin.is_finite() && h_lin > 0.0, "Linux profile produced no audio output");
+    // Different audio_seed → distinct hashes
+    assert!(
+        (h_mac - h_lin).abs() > 1e-6,
+        "audio fingerprint should differ across profiles with distinct audio_seed: mac={h_mac} lin={h_lin}"
+    );
+    // Same profile → reproducible hash (determinism)
+    assert!(
+        (h_lin - h_lin_2).abs() < 1e-6,
+        "same profile should produce identical audio hash: lin={h_lin} lin_again={h_lin_2}"
+    );
+}
+
+/// Tier 4 — function-identity preservation sniff tests.
+/// Per docs/kasada_ips_analysis/UNJZOMUY_INVESTIGATION_2026_05_12.md, the
+/// Kasada `unjzomuybtbyyhwwkdpkxomylnab` sentinel-property throws (5
+/// engine-divergence TypeErrors per the trace) most likely arise from one
+/// of three sites where the same function reference returns a DIFFERENT
+/// object on subsequent access. If any sniff test fails, that's the
+/// divergence site Kasada is detecting; patch it to return stable references.
+#[tokio::test]
+async fn check_function_identity_preservation() {
+    let profile = stealth::chrome_130_macos();
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
+        .await
+        .unwrap();
+    let js = r#"
+        (function() {
+            const res = {};
+
+            // Test 1: navigator.mediaDevices.enumerateDevices identity stability
+            try {
+                const a = navigator.mediaDevices.enumerateDevices;
+                const b = navigator.mediaDevices.enumerateDevices;
+                res.test1_same_ref = (a === b);
+                if (a === b) {
+                    a.unjzomuybtbyyhwwkdpkxomylnab = 'tag';
+                    res.test1_tag_persists = (b.unjzomuybtbyyhwwkdpkxomylnab === 'tag');
+                    delete a.unjzomuybtbyyhwwkdpkxomylnab;
+                } else {
+                    res.test1_tag_persists = 'skipped (refs differ)';
+                }
+            } catch (e) { res.test1_err = e.message; }
+
+            // Test 2: iframe contentWindow getOwnPropertyDescriptor.value identity
+            try {
+                const iframe = document.createElement('iframe');
+                document.body && document.body.appendChild(iframe);
+                const w = iframe.contentWindow;
+                if (!w) { res.test2_skipped = 'no contentWindow'; }
+                else {
+                    const d1 = Object.getOwnPropertyDescriptor(w, 'Function');
+                    const d2 = Object.getOwnPropertyDescriptor(w, 'Function');
+                    if (!d1 || !d2) { res.test2_skipped = 'no Function descriptor'; }
+                    else {
+                        res.test2_same_ref = (d1.value === d2.value);
+                        if (d1.value === d2.value && d1.value) {
+                            d1.value.unjzomuybtbyyhwwkdpkxomylnab = 'tag';
+                            res.test2_tag_persists = (d2.value.unjzomuybtbyyhwwkdpkxomylnab === 'tag');
+                            try { delete d1.value.unjzomuybtbyyhwwkdpkxomylnab; } catch (_) {}
+                        } else {
+                            res.test2_tag_persists = 'skipped (refs differ)';
+                        }
+                    }
+                }
+            } catch (e) { res.test2_err = e.message; }
+
+            // Test 3: Navigator method identity via Object.getOwnPropertyDescriptor
+            try {
+                const proto = navigator.constructor.prototype;
+                const d1 = Object.getOwnPropertyDescriptor(proto, 'sendBeacon');
+                const d2 = Object.getOwnPropertyDescriptor(proto, 'sendBeacon');
+                if (!d1 || !d2) { res.test3_skipped = 'no sendBeacon descriptor'; }
+                else {
+                    res.test3_same_ref = (d1.value === d2.value);
+                    if (d1.value === d2.value && d1.value) {
+                        d1.value.unjzomuybtbyyhwwkdpkxomylnab = 'tag';
+                        res.test3_tag_persists = (d2.value.unjzomuybtbyyhwwkdpkxomylnab === 'tag');
+                        try { delete d1.value.unjzomuybtbyyhwwkdpkxomylnab; } catch (_) {}
+                    } else {
+                        res.test3_tag_persists = 'skipped (refs differ)';
+                    }
+                }
+            } catch (e) { res.test3_err = e.message; }
+
+            // Test 4 (bonus): navigator method via direct property access (the way
+            // most JS uses it). If THIS one differs while test 3 passes, the issue
+            // is in our descriptor wrapper, not the underlying function.
+            try {
+                const a = navigator.sendBeacon;
+                const b = navigator.sendBeacon;
+                res.test4_same_ref = (a === b);
+                if (a === b) {
+                    a.unjzomuybtbyyhwwkdpkxomylnab = 'tag';
+                    res.test4_tag_persists = (b.unjzomuybtbyyhwwkdpkxomylnab === 'tag');
+                    try { delete a.unjzomuybtbyyhwwkdpkxomylnab; } catch (_) {}
+                }
+            } catch (e) { res.test4_err = e.message; }
+
+            // Test 5 (bonus): WebGL parameter — Kasada specifically tags
+            // WebGLRenderingContext.prototype.getParameter via the canvas probe.
+            try {
+                const c = document.createElement('canvas');
+                const g1 = c.getContext('webgl');
+                const g2 = c.getContext('webgl');
+                res.test5_ctx_same = (g1 === g2);
+                if (g1 && g2) {
+                    const fn1 = g1.getParameter;
+                    const fn2 = g2.getParameter;
+                    res.test5_method_same = (fn1 === fn2);
+                }
+            } catch (e) { res.test5_err = e.message; }
+
+            return JSON.stringify(res, null, 2);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap();
+    println!("FUNCTION IDENTITY CHECK:\n{}", result);
+
+    // Failures here directly identify the divergence site:
+    assert!(
+        result.contains("\"test1_same_ref\": true"),
+        "FAIL test1: navigator.mediaDevices.enumerateDevices returns DIFFERENT object on re-access — divergence site #1"
+    );
+    assert!(
+        result.contains("\"test1_tag_persists\": true")
+            || result.contains("\"test1_tag_persists\": \"skipped (refs differ)\""),
+        "FAIL test1: tag did NOT persist on enumerateDevices re-access — even though refs were equal"
+    );
+    assert!(
+        result.contains("\"test3_same_ref\": true")
+            || result.contains("\"test3_skipped\""),
+        "FAIL test3: Navigator.sendBeacon descriptor.value returns DIFFERENT objects on re-access"
+    );
+    assert!(
+        result.contains("\"test4_same_ref\": true"),
+        "FAIL test4: direct navigator.sendBeacon returns DIFFERENT objects on re-access"
+    );
+}
+
+/// iOS Safari profile JS surface check — Phase 3 (synthesis doc Tier 2.3-2.4).
+/// Verifies the `iphone_15_pro_safari_18` preset produces an iOS-shaped JS env:
+///   - 16 declined APIs absent
+///   - userAgentData absent (Safari has no UA-CH)
+///   - hasEnrolledInstrument absent on PaymentRequest (Chrome/Edge-only)
+///   - window.orientation present (legacy iOS-only)
+///   - DeviceMotionEvent.requestPermission static present (iOS 13+)
+///   - ontouchstart on window
+///   - WebGL renderer = "Apple GPU" constant
+#[tokio::test]
+async fn check_ios_safari_surface() {
+    let profile = stealth::presets::iphone_15_pro_safari_18();
+    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
+        .await
+        .unwrap();
+    let js = r#"
+        (function() {
+            const res = {};
+
+            // 16 declined APIs — all must be absent on iOS profile
+            const declined = [
+                "Bluetooth", "USB", "Serial", "HID", "Sensor", "Accelerometer",
+                "Gyroscope", "Magnetometer", "NetworkInformation", "BatteryManager",
+                "IdleDetector",
+            ];
+            res.declined_apis_present = declined.filter(k => typeof globalThis[k] !== "undefined");
+
+            // Navigator absences
+            res.bluetooth_typeof = typeof navigator.bluetooth;
+            res.usb_typeof = typeof navigator.usb;
+            res.serial_typeof = typeof navigator.serial;
+            res.hid_typeof = typeof navigator.hid;
+            res.getBattery_typeof = typeof navigator.getBattery;
+            res.connection_typeof = typeof navigator.connection;
+            res.userAgentData_typeof = typeof navigator.userAgentData;
+            res.deviceMemory_typeof = typeof navigator.deviceMemory;
+            res.requestMIDIAccess_typeof = typeof navigator.requestMIDIAccess;
+
+            // PaymentRequest hasEnrolledInstrument MUST be absent (Chrome-only)
+            res.hasEnrolledInstrument_present = typeof PaymentRequest === "function"
+                ? typeof PaymentRequest.prototype.hasEnrolledInstrument !== "undefined"
+                : "no_PaymentRequest";
+
+            // iOS-only globals
+            res.window_orientation = typeof globalThis.orientation;
+            res.window_orientation_value = globalThis.orientation;
+            res.ontouchstart_present = "ontouchstart" in globalThis;
+
+            // DeviceMotionEvent.requestPermission must exist (iOS 13+ tell)
+            res.deviceMotion_requestPermission =
+                typeof DeviceMotionEvent !== "undefined"
+                && typeof DeviceMotionEvent.requestPermission;
+            res.deviceOrientation_requestPermission =
+                typeof DeviceOrientationEvent !== "undefined"
+                && typeof DeviceOrientationEvent.requestPermission;
+
+            // Profile-driven values from preset
+            res.platform = navigator.platform;
+            res.maxTouchPoints = navigator.maxTouchPoints;
+            res.hardwareConcurrency = navigator.hardwareConcurrency;
+            res.userAgent = navigator.userAgent;
+
+            return JSON.stringify(res, null, 2);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap();
+    println!("iOS SAFARI SURFACE CHECK:\n{}", result);
+
+    // The 16 declined APIs must all be absent
+    assert!(
+        result.contains("\"declined_apis_present\": []"),
+        "iOS profile must strip all 16 declined APIs, got: {result}"
+    );
+
+    // Navigator absences
+    assert!(result.contains("\"bluetooth_typeof\": \"undefined\""));
+    assert!(result.contains("\"usb_typeof\": \"undefined\""));
+    assert!(result.contains("\"serial_typeof\": \"undefined\""));
+    assert!(result.contains("\"hid_typeof\": \"undefined\""));
+    assert!(result.contains("\"getBattery_typeof\": \"undefined\""));
+    assert!(result.contains("\"connection_typeof\": \"undefined\""));
+    assert!(result.contains("\"userAgentData_typeof\": \"undefined\""));
+    assert!(result.contains("\"deviceMemory_typeof\": \"undefined\""));
+
+    // PaymentRequest hasEnrolledInstrument must be absent on Safari
+    assert!(
+        result.contains("\"hasEnrolledInstrument_present\": false"),
+        "iOS profile must NOT expose PaymentRequest.prototype.hasEnrolledInstrument (Chrome/Edge-only): {result}"
+    );
+
+    // iOS-only globals
+    assert!(result.contains("\"window_orientation\": \"number\""));
+    assert!(result.contains("\"window_orientation_value\": 0"));
+    assert!(result.contains("\"ontouchstart_present\": true"));
+
+    // iOS 13+ Device*Event.requestPermission statics
+    assert!(
+        result.contains("\"deviceMotion_requestPermission\": \"function\""),
+        "iOS profile must expose DeviceMotionEvent.requestPermission static"
+    );
+    assert!(
+        result.contains("\"deviceOrientation_requestPermission\": \"function\""),
+        "iOS profile must expose DeviceOrientationEvent.requestPermission static"
+    );
+
+    // Profile-driven
+    assert!(result.contains("\"platform\": \"iPhone\""));
+    assert!(result.contains("\"maxTouchPoints\": 5"));
+    assert!(
+        result.contains("\"hardwareConcurrency\": 2"),
+        "Safari intentionally caps hardwareConcurrency to 2 — got: {result}"
+    );
+    assert!(result.contains("\"userAgent\":") && result.contains("iPhone"));
+}

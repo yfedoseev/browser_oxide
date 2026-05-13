@@ -17,4 +17,4 @@ pub mod qrator;
 pub use behavior::{BehaviorProfile, Handedness, MousePoint, ScrollStyle, WheelTick};
 pub use gpu::GpuProfile;
 pub use presets::*;
-pub use profile::StealthProfile;
+pub use profile::{DeviceClass, StealthProfile};
