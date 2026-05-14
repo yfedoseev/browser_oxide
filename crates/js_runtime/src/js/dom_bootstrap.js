@@ -2044,11 +2044,46 @@
         return fn;
     }
 
+    // Constructors where `new w.X(...)` is genuinely "Illegal constructor"
+    // in real Chrome (DOM interfaces with no exposed constructor). Calls
+    // to `new` on these throw `TypeError: Illegal constructor`.
+    // Constructors NOT in this set are real callable types — for those we
+    // delegate `new` to the parent realm's constructor via `Reflect.construct`
+    // so e.g. `new iframe.contentWindow.Function("return 1")` returns a
+    // function in the iframe realm, matching real Chrome. Kasada probes
+    // `new w.Function(...)` to materialize a fresh-realm function; if we
+    // throw where real Chrome succeeds, that's a definitive headless tell.
+    const _ILLEGAL_CONSTRUCTORS = new Set([
+        "Navigator", "Window", "Document", "HTMLDocument",
+        "Node", "Element", "HTMLElement",
+        "HTMLDivElement", "HTMLSpanElement", "HTMLBodyElement",
+        "HTMLAnchorElement", "HTMLImageElement", "HTMLInputElement",
+        "HTMLFormElement", "HTMLButtonElement", "HTMLSelectElement",
+        "HTMLTextAreaElement", "HTMLCanvasElement", "HTMLScriptElement",
+        "HTMLIFrameElement",
+    ]);
+
     function _mkMirroredConstructor(parentCtor, name, freshGrandparentProto) {
-        // Fresh constructor function — different identity than parent's
-        const fresh = function() {
-            throw new TypeError("Failed to construct '" + name + "': Illegal constructor");
-        };
+        // Fresh constructor function — different identity than parent's.
+        // For DOM-interface types real Chrome throws on `new`; for genuine
+        // callable types (Function/Array/Map/Date/Event/...) we delegate to
+        // the parent constructor via Reflect.construct so the result lives
+        // in our fresh realm (via fresh.prototype = freshProto below).
+        const isIllegal = _ILLEGAL_CONSTRUCTORS.has(name);
+        const fresh = isIllegal
+            ? function() {
+                throw new TypeError("Failed to construct '" + name + "': Illegal constructor");
+            }
+            : function(...args) {
+                try {
+                    return Reflect.construct(parentCtor, args, fresh);
+                } catch (e) {
+                    // Symbol() throws on `new`; re-throw with the parent's
+                    // exact shape (don't reword) so feature-detection that
+                    // catches "Symbol is not a constructor" still matches.
+                    throw e;
+                }
+            };
         try {
             Object.defineProperty(fresh, "name", { value: name, configurable: true });
             Object.defineProperty(fresh, _NATIVE_TAG_SYMBOL, { value: name, configurable: true });
@@ -2162,7 +2197,15 @@
         return { ordered: ordered, directParent: directParent };
     }
 
+    // Module-level cache: every iframe in this realm shares the same set of
+    // mirrored constructors. Kasada's VM tags function/descriptor objects on
+    // first scope-chain walk and re-reads on a later walk; without this cache
+    // every _getIframeWindow() call rebuilt the realm and Kasada's sentinel
+    // property (`unjzomuybtbyyhwwkdpkxomylnab`) was lost on the second read.
+    let _cachedRemoteRealm = null;
+
     function _buildRemoteRealm() {
+        if (_cachedRemoteRealm) return _cachedRemoteRealm;
         const realm = {};
         const sorted = _topoSortMirrored(_MIRRORED_CONSTRUCTORS);
         for (const name of sorted.ordered) {
@@ -2200,6 +2243,7 @@
                 });
             }
         } catch (_) {}
+        _cachedRemoteRealm = realm;
         return realm;
     }
 

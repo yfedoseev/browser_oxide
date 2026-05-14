@@ -6977,3 +6977,73 @@ async fn kasada_sentinel_identity_audit() {
     want_pass("\"tagSurvives\":true");
     want_pass("\"valueIdentical\":true");
 }
+
+// W2.7 diagnostic: does Error.stack inside our iframe Proxy trap leak
+// the signatures Kasada's `p.js` greps for? Real Chrome's iframe
+// contentWindow is NOT a Proxy; reading its properties does not produce
+// `at Object.apply` / `at Reflect.apply` / `at newHandler.<computed>`
+// frames. Our engine mirrors iframe.contentWindow via Proxy, so if
+// Kasada reads new Error().stack at the moment one of our traps fires,
+// the proxy frame names could leak.
+//
+// Per docs/research_2026_05_14/01_KASADA.md W2.7. Captures the actual
+// stack a detector sees inside our trap so we know whether to ship a
+// stack sanitizer.
+#[tokio::test]
+async fn kasada_proxy_stack_leak_probe() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        const iframe = document.createElement('iframe');
+        document.body.appendChild(iframe);
+        const w = iframe.contentWindow;
+        // Read a property that goes through our Proxy `get` trap and
+        // collect the stack at the moment of access. The trap itself
+        // doesn't (currently) construct an Error; we proxy via a
+        // hand-rolled handler whose `get` builds one.
+        const sentinel = { name: 'probe' };
+        const handler = {
+            get(target, prop, receiver) {
+                if (prop === 'capture') {
+                    sentinel.stack = new Error('probe').stack;
+                    return undefined;
+                }
+                return Reflect.get(target, prop, receiver);
+            }
+        };
+        const p = new Proxy({}, handler);
+        // Force a Reflect.apply path by calling the proxy as a method
+        // through Object.prototype.toString-shaped invocation.
+        void p.capture;
+        // Also test reading from our iframe Proxy directly: every read
+        // of `w.X` goes through the iframe contentWindow Proxy and may
+        // surface trap frames if an Error is constructed there.
+        let iframeStack = null;
+        try {
+            // Cause a Function constructor call inside an iframe-realm
+            // method, where any Error created sees our Proxy frames.
+            const fnViaProxy = w.Function;
+            // Synthesize an Error via the iframe realm.
+            iframeStack = new (fnViaProxy)("return new Error('probe').stack;")();
+        } catch (e) { iframeStack = 'ERR: ' + e.message; }
+        const want = ['at Object.apply', 'at Reflect.apply', 'at newHandler.<computed>', 'at Proxy.', 'at handler.'];
+        const hits = {};
+        for (const n of want) {
+            hits['proxy.' + n] = (sentinel.stack || '').includes(n);
+            hits['iframe.' + n] = (iframeStack || '').includes(n);
+        }
+        JSON.stringify({
+            proxyStack: sentinel.stack,
+            iframeStack,
+            hits,
+        });
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("kasada-proxy-stack-leak: {result}");
+    assert!(!result.starts_with("ERROR:"));
+}
