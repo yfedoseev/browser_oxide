@@ -395,29 +395,56 @@ impl Page {
 
         // W2.3 landed: build_sensor_data now routes through build_v3 with
         // session.bm_sz-derived shuffle/substitute seeds (or the
-        // 8_888_888 pre-first-request default). The auto-POST that was
-        // gated during the post-W1.3 regression is back online.
+        // 8_888_888 pre-first-request default).
+        //
+        // POST retry loop: single sensor_data POST returns status=201 but
+        // new_abck=NeedsSensor — Akamai accepts the envelope shape but
+        // the stop-signal threshold (parts[1] in _abck) hasn't been
+        // satisfied yet. Per Hyper SDK's behavioral provider pattern
+        // (02_AKAMAI.md §5.3), POST up to N=8 times with ~500ms gaps
+        // until `_abck` flips Favorable or we hit Invalidated. Each POST
+        // re-drains the behavioural buffer so accumulated events
+        // (synthetic mouse/key from humanize.js + the runCycle stream)
+        // feed forward into the next envelope.
+        const MAX_POSTS: u32 = 8;
+        const POST_GAP_MS: u64 = 500;
+        let mut last_state = akamai::AbckState::NeedsSensor;
+        for attempt in 0..MAX_POSTS {
+            // Drain behavioural events from the page (fresh per attempt).
+            let events_json = self
+                .event_loop
+                .execute_script(akamai::DRAIN_JS)
+                .unwrap_or_default();
+            let drained = akamai::parse_drained(&events_json);
 
-        // 3. Drain behavioural events from the page.
-        let events_json = self
-            .event_loop
-            .execute_script(akamai::DRAIN_JS)
-            .unwrap_or_default();
-        let drained = akamai::parse_drained(&events_json);
+            let new_state = client
+                .send_akamai_sensor_data(
+                    &host,
+                    &self.url,
+                    settings.post_path,
+                    settings.tenant_seed,
+                    drained,
+                )
+                .await
+                .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+            last_state = new_state;
 
-        // 4. Send the POST.
-        let new_state = client
-            .send_akamai_sensor_data(
-                &host,
-                &self.url,
-                settings.post_path,
-                settings.tenant_seed,
-                drained,
-            )
-            .await
-            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+            eprintln!(
+                "[akamai] {host} POST attempt {}/{MAX_POSTS} → {new_state:?}",
+                attempt + 1
+            );
 
-        Ok(new_state)
+            match new_state {
+                akamai::AbckState::Favorable | akamai::AbckState::Invalidated => break,
+                akamai::AbckState::NeedsSensor => {
+                    if attempt + 1 < MAX_POSTS {
+                        tokio::time::sleep(std::time::Duration::from_millis(POST_GAP_MS)).await;
+                    }
+                }
+                _ => break,
+            }
+        }
+        Ok(last_state)
     }
     /// Create a page from an HTML string. Parses HTML, executes inline scripts,
     /// and runs the event loop until idle (or 30s timeout).
