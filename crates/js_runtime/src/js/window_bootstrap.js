@@ -1034,10 +1034,33 @@
         _maskFunction(setter, `set ${name}`);
     };
 
-    _defBatGetter('charging', true);
-    _defBatGetter('chargingTime', 0);
-    _defBatGetter('dischargingTime', Infinity);
-    _defBatGetter('level', 1.0);
+    // Per-session randomized values. The canonical CreepJS tell is
+    // `{level:1, charging:true, chargingTime:0, dischargingTime:Infinity}`
+    // — every headless browser ships that exact combination because the
+    // default constants are intuitive. Real Chrome on a laptop varies:
+    // charging is false ~70% of typical sessions (battery-powered), level
+    // is uniform-ish in [0.20, 0.95], and chargingTime/dischargingTime are
+    // finite when on battery. We seed once at module init so reads are
+    // stable within the page (real BatteryManager doesn't tick by the
+    // second either — events fire on state change).
+    const _batCharging = Math.random() < 0.3; // ~30% plugged in
+    const _batLevel = (() => {
+        const v = 0.20 + Math.random() * 0.75;
+        // Round to 2 decimal places — real Chrome rounds level to 0.01 since
+        // a 2021 privacy reduction (https://crbug.com/661792).
+        return Math.round(v * 100) / 100;
+    })();
+    const _batChargingTime = _batCharging
+        ? Math.round(1800 + Math.random() * 7200) // 30 min – 2.5 h to full
+        : Infinity;
+    const _batDischargingTime = _batCharging
+        ? Infinity
+        : Math.round(3600 + Math.random() * 21600); // 1 – 7 h remaining
+
+    _defBatGetter('charging', _batCharging);
+    _defBatGetter('chargingTime', _batChargingTime);
+    _defBatGetter('dischargingTime', _batDischargingTime);
+    _defBatGetter('level', _batLevel);
     _defBatProp('onchargingchange');
     _defBatProp('onchargingtimechange');
     _defBatProp('ondischargingtimechange');
