@@ -396,22 +396,31 @@ impl Page {
             return Ok(current_state);
         }
 
-        // W1.3 fixed the `_abck` parser to correctly return NeedsSensor on
-        // the canonical `~-1~` first-response shape (was silently mapped to
-        // Favorable, so we never POSTed). With the fix wired to the
-        // existing v2-bestbuy/DalphanDev envelope below, the post-W1 sweep
-        // regressed homedepot/macys/bestbuy-FF/medium-iOS L3 → Akamai-CHL —
-        // Akamai's 2025+ detector flags the static-seed envelope. Until
-        // W2.3 ships the per-session bm_sz-seeded v3 envelope, skip the
-        // POST; parser-side state still tracks correctly.
-        //
-        // To re-enable for v3: delete from `eprintln!` through the matching
-        // `return Ok(current_state)` on the next line.
-        let _ = settings; // silences unused-variable lint while POST is gated.
-        eprintln!(
-            "[akamai] NeedsSensor for {host} — POST skipped (v2 envelope flagged; awaits W2.3 v3)"
-        );
-        Ok(current_state)
+        // W2.3 landed: build_sensor_data now routes through build_v3 with
+        // session.bm_sz-derived shuffle/substitute seeds (or the
+        // 8_888_888 pre-first-request default). The auto-POST that was
+        // gated during the post-W1.3 regression is back online.
+
+        // 3. Drain behavioural events from the page.
+        let events_json = self
+            .event_loop
+            .execute_script(akamai::DRAIN_JS)
+            .unwrap_or_default();
+        let drained = akamai::parse_drained(&events_json);
+
+        // 4. Send the POST.
+        let new_state = client
+            .send_akamai_sensor_data(
+                &host,
+                &self.url,
+                settings.post_path,
+                settings.tenant_seed,
+                drained,
+            )
+            .await
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+
+        Ok(new_state)
     }
     /// Create a page from an HTML string. Parses HTML, executes inline scripts,
     /// and runs the event loop until idle (or 30s timeout).
