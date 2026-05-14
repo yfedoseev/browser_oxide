@@ -145,6 +145,152 @@ pub struct TenantSettings {
     pub post_path: &'static str,
 }
 
+/// Parsed Akamai tenant configuration extracted from a live HTML
+/// response. Per 02_AKAMAI.md §3.4: per-tenant seeds rotate (verified
+/// 2026-05-13: bestbuy 3_224_113 → 1_647_451_213, homedepot
+/// 3_420_213 → 534_393_124). Static registries can't keep up. We must
+/// parse the seed + obfuscated paths from each rendered page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedTenant {
+    /// The integer in `bazadebezolkohpepadr="<digits>"`. Field 5 of the
+    /// v2/v3 sensor_data envelope.
+    pub tenant_seed: i64,
+    /// The deep obfuscated POST path Akamai bootstraps for sensor_data.
+    /// Format examples (per 02_AKAMAI.md §3 table):
+    ///   /iBo5C/hYh/7w3a/LoSr/yK3l/...
+    ///   /R8CjSca6_7i6/TepMG7/yyZyaB/...
+    pub sensor_post_path: String,
+    /// `/akam/<version>/<hash>` pixel bootstrap path.
+    pub pixel_bootstrap_path: Option<String>,
+}
+
+/// Parse Akamai tenant config out of a freshly fetched HTML body.
+///
+/// Returns `Some(ParsedTenant)` iff both the `bazadebezolkohpepadr`
+/// seed AND a deep obfuscated `<script src="...">` POST path are
+/// present. Returns `None` if either is missing — the absence of one
+/// means this host either isn't Akamai-protected or is serving us a
+/// Bot-or-Not / SBSD interstitial that doesn't carry the bootstrap.
+pub fn parse_tenant_from_html(html: &str) -> Option<ParsedTenant> {
+    let tenant_seed = parse_tenant_seed(html)?;
+    let sensor_post_path = parse_sensor_post_path(html)?;
+    let pixel_bootstrap_path = parse_pixel_bootstrap_path(html);
+    Some(ParsedTenant {
+        tenant_seed,
+        sensor_post_path,
+        pixel_bootstrap_path,
+    })
+}
+
+fn parse_tenant_seed(html: &str) -> Option<i64> {
+    let key = "bazadebezolkohpepadr=";
+    let start = html.find(key)? + key.len();
+    let rest = html.get(start..)?;
+    // Accept either `"<digits>"` or `'<digits>'`.
+    let q = rest.chars().next()?;
+    if q != '"' && q != '\'' {
+        return None;
+    }
+    let close = rest[1..].find(q)?;
+    let digits = &rest[1..1 + close];
+    digits.parse::<i64>().ok()
+}
+
+fn parse_sensor_post_path(html: &str) -> Option<String> {
+    // Walk every `<script ... src="..."` occurrence and pick the first
+    // path that:
+    //   - starts with `/`
+    //   - has ≥4 slash-separated segments (the bestbuy capture has 5+)
+    //   - each segment uses [A-Za-z0-9_-]
+    //   - is NOT `/akam/...` (that's the pixel bootstrap, not the
+    //     sensor_data POST path)
+    let mut cursor = 0;
+    while let Some(rel) = html[cursor..].find("<script") {
+        let abs = cursor + rel;
+        cursor = abs + "<script".len();
+        // Find src="..."
+        let after_tag_end = html[cursor..].find('>')?;
+        let tag = &html[cursor..cursor + after_tag_end];
+        let Some(src_idx) = find_attr(tag, "src") else {
+            continue;
+        };
+        let attr = &tag[src_idx..];
+        let q = attr.chars().next()?;
+        if q != '"' && q != '\'' {
+            continue;
+        }
+        let close = attr[1..].find(q)?;
+        let path = &attr[1..1 + close];
+        if !path.starts_with('/') {
+            continue;
+        }
+        if path.starts_with("/akam/") {
+            continue;
+        }
+        let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        if segments.len() < 4 {
+            continue;
+        }
+        if !segments
+            .iter()
+            .all(|seg| seg.chars().all(is_obfuscated_seg_char))
+        {
+            continue;
+        }
+        return Some(path.to_string());
+    }
+    None
+}
+
+fn parse_pixel_bootstrap_path(html: &str) -> Option<String> {
+    let mut cursor = 0;
+    while let Some(rel) = html[cursor..].find("<script") {
+        let abs = cursor + rel;
+        cursor = abs + "<script".len();
+        let after_tag_end = html[cursor..].find('>')?;
+        let tag = &html[cursor..cursor + after_tag_end];
+        let Some(src_idx) = find_attr(tag, "src") else {
+            continue;
+        };
+        let attr = &tag[src_idx..];
+        let q = attr.chars().next()?;
+        if q != '"' && q != '\'' {
+            continue;
+        }
+        let close = attr[1..].find(q)?;
+        let path = &attr[1..1 + close];
+        if !path.starts_with("/akam/") {
+            continue;
+        }
+        // /akam/<version>/<hash> — exactly 3 segments after the leading /
+        let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        if segments.len() != 3 {
+            continue;
+        }
+        if !segments[1].chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        if !segments[2].chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        return Some(path.to_string());
+    }
+    None
+}
+
+/// Locate the start of an attribute value (skipping the attribute name
+/// and `=`). Returns the byte offset of the opening quote relative to
+/// `tag`, or `None` if the attribute isn't present.
+fn find_attr(tag: &str, name: &str) -> Option<usize> {
+    let needle = format!(" {name}=");
+    let pos = tag.find(&needle)?;
+    Some(pos + needle.len())
+}
+
+fn is_obfuscated_seg_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
 pub fn get_tenant_settings(host: &str) -> Option<TenantSettings> {
     if host.contains("bestbuy.com") {
         Some(TenantSettings {
@@ -373,6 +519,57 @@ mod tests {
     #[test]
     fn bot_score_vector_returns_none_without_ak_p() {
         assert!(BotScoreVector::parse("edge; dur=1, origin; dur=44").is_none());
+    }
+
+    #[test]
+    fn parse_tenant_bestbuy_shape() {
+        let html = r#"<!doctype html>
+<html><head>
+<script type="text/javascript" src="/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B"></script>
+<script src="/akam/13/3e35295b"></script>
+<meta name="bazadebezolkohpepadr" content="...">
+</head><body bazadebezolkohpepadr="1647451213"></body></html>"#;
+        let t = parse_tenant_from_html(html).expect("parsed");
+        assert_eq!(t.tenant_seed, 1_647_451_213);
+        assert_eq!(t.sensor_post_path, "/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B");
+        assert_eq!(t.pixel_bootstrap_path.as_deref(), Some("/akam/13/3e35295b"));
+    }
+
+    #[test]
+    fn parse_tenant_homedepot_shape() {
+        let html = r##"<html><head>
+<script src="/R8CjSca6_7i6/TepMG7/yyZyaB/1z5kQJkkNz4V0tS1fY/IjUxRBpiDAI/KRkJCEx/PelsB"></script>
+<script defer src="/akam/13/8a0fbc"></script>
+</head><body bazadebezolkohpepadr="534393124"></body></html>"##;
+        let t = parse_tenant_from_html(html).expect("parsed");
+        assert_eq!(t.tenant_seed, 534_393_124);
+        assert!(t.sensor_post_path.starts_with("/R8CjSca6_7i6/"));
+        assert_eq!(t.pixel_bootstrap_path.as_deref(), Some("/akam/13/8a0fbc"));
+    }
+
+    #[test]
+    fn parse_tenant_returns_none_without_seed() {
+        let html = r#"<html><script src="/foo/bar/baz/qux"></script></html>"#;
+        assert!(parse_tenant_from_html(html).is_none());
+    }
+
+    #[test]
+    fn parse_tenant_skips_akam13_path_for_sensor() {
+        // Only /akam/13/... present; no deep obfuscated path → no
+        // sensor_post_path → None.
+        let html = r#"<html bazadebezolkohpepadr="123"><script src="/akam/13/abc"></script></html>"#;
+        assert!(parse_tenant_from_html(html).is_none());
+    }
+
+    #[test]
+    fn parse_tenant_skips_short_paths() {
+        // 3-segment path is too short to be an Akamai sensor POST path.
+        let html = r#"<html bazadebezolkohpepadr="42">
+<script src="/a/b/c"></script>
+<script src="/x/y/z/w/v/u/t"></script>
+</html>"#;
+        let t = parse_tenant_from_html(html).expect("parsed");
+        assert_eq!(t.sensor_post_path, "/x/y/z/w/v/u/t");
     }
 
     #[test]
