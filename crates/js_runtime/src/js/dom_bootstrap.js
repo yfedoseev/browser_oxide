@@ -2250,10 +2250,44 @@
     function _getIframeWindow(el) {
         let state = _iframeState.get(el);
         if (state) return state.contentWindow;
+        // W3.5 — srcdoc iframes: read the `srcdoc` attribute string so
+        // detectors that introspect `iframe.contentDocument.documentElement
+        // .outerHTML` or `body.innerHTML` see the declared content rather
+        // than an empty document. Full srcdoc semantics (parsed Node tree)
+        // require routing the string through the main HTML parser; this is
+        // a stub that exposes the source text for fingerprint-grade reads.
+        let _srcdoc = "";
+        try {
+            if (el && typeof el.getAttribute === "function") {
+                _srcdoc = el.getAttribute("srcdoc") || "";
+            }
+        } catch (_) {}
+        // Synthetic body/documentElement shells that return the srcdoc as
+        // outerHTML/innerHTML — enough for the common detector probe shape
+        // `String(iframe.contentDocument.body.innerHTML).length > 0`.
+        const _mkHtmlMirror = (tag, inner) => ({
+            tagName: tag.toUpperCase(),
+            nodeType: 1,
+            innerHTML: inner,
+            outerHTML: "<" + tag + ">" + inner + "</" + tag + ">",
+            textContent: "",
+            children: [],
+            childNodes: [],
+            firstChild: null, lastChild: null,
+            parentNode: null,
+            getAttribute() { return null; },
+            setAttribute() {},
+            hasAttribute() { return false; },
+            appendChild(_c) {},
+            removeChild(_c) {},
+        });
+        const _docEl = _srcdoc ? _mkHtmlMirror("html", _srcdoc) : null;
+        const _body = _srcdoc ? _mkHtmlMirror("body", _srcdoc) : null;
+        const _head = _srcdoc ? _mkHtmlMirror("head", "") : null;
         const iframeDoc = {
-            documentElement: null,
-            head: null,
-            body: null,
+            documentElement: _docEl,
+            head: _head,
+            body: _body,
             title: "",
             readyState: "complete",
             visibilityState: "visible",
@@ -2262,7 +2296,13 @@
             querySelector() { return null; },
             querySelectorAll() { return new NodeList([]); },
             getElementById() { return null; },
-            getElementsByTagName() { return new NodeList([]); },
+            getElementsByTagName(tag) {
+                const t = String(tag).toLowerCase();
+                if (_srcdoc && t === "html" && _docEl) return new NodeList([_docEl]);
+                if (_srcdoc && t === "body" && _body) return new NodeList([_body]);
+                if (_srcdoc && t === "head" && _head) return new NodeList([_head]);
+                return new NodeList([]);
+            },
             createElement(tag) { return _document.createElement(tag); },
             createElementNS(ns, tag) { return _document.createElementNS(ns, tag); },
             createEvent(type) { return _document.createEvent(type); },
