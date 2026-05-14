@@ -254,6 +254,106 @@
 
             // 7. Sec-CH-UA-* JS surface absent on Safari — already handled
             //    above via userAgentData getter returning undefined.
+
+            // 8. window.chrome must be absent on iOS Safari. PerimeterX and
+            //    others explicitly probe `typeof window.chrome` — Chrome
+            //    returns "object", Safari "undefined". Research 05_PERIMETERX
+            //    §6.1 names this as one of the iOS kill signals.
+            try { delete globalThis.chrome; } catch (_e) {}
+
+            // 8b. navigator.permissions.query() — Safari 18 supports a much
+            //     narrower permission name set than Chrome. Per WebKit:
+            //     allowed = notifications, push, camera, microphone,
+            //               geolocation, persistent-storage.
+            //     Chrome-only names (midi, accelerometer, gyroscope,
+            //     magnetometer, ambient-light-sensor, background-fetch,
+            //     background-sync, clipboard-read, clipboard-write,
+            //     display-capture, screen-wake-lock, system-wake-lock,
+            //     window-management) must reject with TypeError on Safari
+            //     to match real WebKit behavior. PLAN W1.5 (Plan §0 #6).
+            try {
+                if (globalThis.navigator && globalThis.navigator.permissions) {
+                    const _safariAllowed = new Set([
+                        'notifications', 'push', 'camera', 'microphone',
+                        'geolocation', 'persistent-storage',
+                    ]);
+                    const _PProto = globalThis.navigator.permissions
+                        && Object.getPrototypeOf(globalThis.navigator.permissions);
+                    if (_PProto && typeof _PProto.query === 'function') {
+                        const _origQuery = _PProto.query;
+                        const safariQuery = function query(desc) {
+                            const name = desc && typeof desc === 'object' ? desc.name : undefined;
+                            if (typeof name !== 'string' || !_safariAllowed.has(name)) {
+                                return Promise.reject(new TypeError(
+                                    "Failed to execute 'query' on 'Permissions': "
+                                    + (typeof name === 'string'
+                                        ? "The provided value '" + name + "' is not a valid enum value of type PermissionName."
+                                        : "parameter 1 is not of type 'PermissionDescriptor'.")
+                                ));
+                            }
+                            return _origQuery.call(this, desc);
+                        };
+                        Object.defineProperty(_PProto, 'query', {
+                            value: safariQuery, writable: true, enumerable: false, configurable: true,
+                        });
+                        // Preserve native-shape Function.prototype.toString output
+                        // via the _nativeTag symbol installed by stealth_bootstrap.js.
+                        const _tag = globalThis._nativeTag;
+                        if (_tag) {
+                            try { Object.defineProperty(safariQuery, _tag, { value: 'query', configurable: true }); } catch (_e) {}
+                            try { Object.defineProperty(safariQuery, 'name', { value: 'query', configurable: true }); } catch (_e) {}
+                        }
+                    }
+                }
+            } catch (_e) {}
+
+            // 9. navigator.plugins / navigator.mimeTypes empty on iOS
+            //    (PluginArray length 0 is the canonical mobile-Safari shape).
+            try {
+                if (globalThis.navigator) {
+                    const _emptyPlugins = Object.create(globalThis.PluginArray ? globalThis.PluginArray.prototype : null);
+                    Object.defineProperty(_emptyPlugins, 'length', { get: () => 0, enumerable: true });
+                    Object.defineProperty(_emptyPlugins, 'item', {
+                        value: function item() { return null; },
+                        writable: true, enumerable: false, configurable: true,
+                    });
+                    Object.defineProperty(_emptyPlugins, 'namedItem', {
+                        value: function namedItem() { return null; },
+                        writable: true, enumerable: false, configurable: true,
+                    });
+                    Object.defineProperty(_emptyPlugins, 'refresh', {
+                        value: function refresh() {},
+                        writable: true, enumerable: false, configurable: true,
+                    });
+                    Object.defineProperty(_emptyPlugins, Symbol.iterator, {
+                        value: function* () {},
+                        writable: true, enumerable: false, configurable: true,
+                    });
+                    Object.defineProperty(_NavProto, 'plugins', {
+                        get: function() { return _emptyPlugins; },
+                        configurable: true, enumerable: false,
+                    });
+                    const _emptyMimeTypes = Object.create(globalThis.MimeTypeArray ? globalThis.MimeTypeArray.prototype : null);
+                    Object.defineProperty(_emptyMimeTypes, 'length', { get: () => 0, enumerable: true });
+                    Object.defineProperty(_emptyMimeTypes, 'item', {
+                        value: function item() { return null; },
+                        writable: true, enumerable: false, configurable: true,
+                    });
+                    Object.defineProperty(_emptyMimeTypes, 'namedItem', {
+                        value: function namedItem() { return null; },
+                        writable: true, enumerable: false, configurable: true,
+                    });
+                    Object.defineProperty(_NavProto, 'mimeTypes', {
+                        get: function() { return _emptyMimeTypes; },
+                        configurable: true, enumerable: false,
+                    });
+                    // pdfViewerEnabled is false on mobile (no integrated PDF viewer)
+                    Object.defineProperty(_NavProto, 'pdfViewerEnabled', {
+                        get: function() { return false; },
+                        configurable: true, enumerable: false,
+                    });
+                }
+            } catch (_e) {}
         }
     } catch (_e) { /* profile-conditional installs are best-effort */ }
 
