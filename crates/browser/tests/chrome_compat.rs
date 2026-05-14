@@ -6978,6 +6978,58 @@ async fn kasada_sentinel_identity_audit() {
     want_pass("\"valueIdentical\":true");
 }
 
+// W3.2 — Cross-origin iframe postMessage round-trip. Cloudflare Managed
+// Challenge mounts the iframe from challenges.cloudflare.com and
+// communicates with the parent via postMessage. We don't load a real
+// CF iframe here (network + CF-side fingerprinting would dominate);
+// instead verify the iframe Proxy's postMessage delivers as a parent-
+// realm MessageEvent. PLAN W3.2.
+#[tokio::test]
+async fn iframe_postmessage_round_trip_via_proxy() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        // Set up parent-side listener.
+        let received = null;
+        window.addEventListener('message', (e) => {
+            // First message we observe is the one our iframe synthesized.
+            if (received === null) received = String(e.data);
+        });
+        // Mount iframe; trigger postMessage from inside iframe.contentWindow.
+        const ifr = document.createElement('iframe');
+        document.body.appendChild(ifr);
+        const cw = ifr.contentWindow;
+        if (!cw) { JSON.stringify({err: 'no contentWindow'}); }
+        else {
+            cw.postMessage('hello-from-iframe', '*');
+            // Drain the microtask: postMessage delivers via Promise.resolve()
+            // in dom_bootstrap.js's iframe Proxy. Wait one turn.
+            Promise.resolve().then(() => {
+                received_microtask_drained = true;
+            });
+        }
+        JSON.stringify({ received, hasCw: cw != null });
+    "#;
+    let immediate = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("iframe postmessage immediate: {immediate}");
+    // After microtask drain, the listener should have fired.
+    let after = page.evaluate("String(received)").unwrap_or_default();
+    eprintln!("iframe postmessage after-drain: {after}");
+    assert!(
+        immediate.contains("\"hasCw\":true"),
+        "iframe contentWindow missing: {immediate}"
+    );
+    assert!(
+        after.contains("hello-from-iframe"),
+        "postMessage didn't deliver to parent listener; got {after}"
+    );
+}
+
 // W2.7 diagnostic: does Error.stack inside our iframe Proxy trap leak
 // the signatures Kasada's `p.js` greps for? Real Chrome's iframe
 // contentWindow is NOT a Proxy; reading its properties does not produce
