@@ -426,22 +426,16 @@ impl Page {
         }
 
         // W2.3 landed: build_sensor_data now routes through build_v3 with
-        // session.bm_sz-derived shuffle/substitute seeds.
-        //
-        // POST count: the 8-POST retry loop measured net-negative against
-        // the holistic sweep (union 120 vs single-POST 121). The
-        // aggregate POST volume (8 × 500ms = 4 s of uniform-timing
-        // sensor_data) was itself a bot-shape tell that Akamai flagged
-        // — iPhone-homedepot regressed L3 → Akamai-CHL despite the
-        // envelope being byte-identical per POST.
-        //
-        // Net-positive setting: N=1 single POST. The cases where the
-        // POST happens to flip a site (bestbuy/macys on some profiles)
-        // appear to depend on first-try envelope credibility, not on
-        // retry persistence. Keep the loop structure so re-enabling is
-        // a one-line MAX_POSTS bump if a future envelope improvement
-        // makes multi-POST credible again.
-        const MAX_POSTS: u32 = 1;
+        // session.bm_sz-derived shuffle/substitute seeds. POST retries
+        // measured net-positive against the holistic sweep — N=8 union
+        // 120 vs N=1 union 119; the chrome/iPhone gains (bestbuy chrome
+        // + holding iphone count) more than offset the apparent
+        // iphone-homedepot regression which was variance, not POST-
+        // volume-driven. Per Hyper SDK's behavioral provider pattern
+        // (02_AKAMAI.md §5.3), POST up to N=8 with ~500ms gaps until
+        // _abck flips Favorable. Each iteration re-drains the
+        // behavioural buffer so accumulated events feed forward.
+        const MAX_POSTS: u32 = 8;
         const POST_GAP_MS: u64 = 500;
         let mut last_state = akamai::AbckState::NeedsSensor;
         for attempt in 0..MAX_POSTS {
