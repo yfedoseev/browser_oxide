@@ -488,25 +488,34 @@ fn classify(html: &str) -> String {
     let lower = html.to_lowercase();
     let len = html.len();
 
-    // Vendor-specific interstitial title strings. These appear ONLY on
-    // a real challenge page; they're never present on rendered content.
-    // Highest-confidence signals — fire at any size.
-    let interstitial_titles: &[(&str, &str)] = &[
-        ("just a moment", "Cloudflare-CHL"),
-        ("checking your browser", "Cloudflare-CHL"),
+    // Unambiguous interstitial tokens — CSS class names, URL paths, and
+    // encoded variables that don't legitimately appear in rendered
+    // content. Fire at any body size.
+    let unambiguous_titles: &[(&str, &str)] = &[
         ("cf-browser-verification", "Cloudflare-CHL"),
         ("/_sec/cp_challenge", "Akamai-sec-cpt-CHL"),
-        ("captcha-delivery.com", "DataDome-CHL"),
         ("ddcaptchaencoded", "DataDome-CHL"),
-        ("press &amp; hold", "PerimeterX-PaH"),
         ("px-captcha", "PerimeterX-CHL"),
-        ("pardon our interruption", "Akamai-CHL"),
     ];
-    for (n, t) in interstitial_titles {
+    for (n, t) in unambiguous_titles {
         if lower.contains(n) {
             return t.to_string();
         }
     }
+    // English-phrase interstitial markers — these CAN appear in normal
+    // page text (article body, embedded loading widgets, cookie banner,
+    // privacy policy). Reuters' 1.1 MB rendered home page contains
+    // "just a moment" or "checking your browser" somewhere in its
+    // content, causing a false-positive Cloudflare-CHL classification
+    // when no challenge is actually being served. Only consult these
+    // when the body is interstitial-sized.
+    let phrase_titles: &[(&str, &str)] = &[
+        ("just a moment", "Cloudflare-CHL"),
+        ("checking your browser", "Cloudflare-CHL"),
+        ("captcha-delivery.com", "DataDome-CHL"),
+        ("press &amp; hold", "PerimeterX-PaH"),
+        ("pardon our interruption", "Akamai-CHL"),
+    ];
 
     // Vendor "fingerprint markers" — these appear in BOTH normal pages
     // (as analytics/SDK references) and on challenge interstitials. They
@@ -524,6 +533,11 @@ fn classify(html: &str) -> String {
         ("access denied", "BLOCKED"),
     ];
     if len < interstitial_size_threshold {
+        for (n, t) in phrase_titles {
+            if lower.contains(n) {
+                return t.to_string();
+            }
+        }
         for (n, t) in small_body_markers {
             if lower.contains(n) {
                 return t.to_string();
@@ -591,6 +605,35 @@ mod classifier_tests {
     fn datadome_interstitial_is_chl() {
         let html = r#"<html><body><script src="https://geo.captcha-delivery.com/captcha/check"></script></body></html>"#;
         assert_eq!(classify(html), "DataDome-CHL");
+    }
+
+    #[test]
+    fn large_rendered_page_with_just_a_moment_phrase_is_not_chl() {
+        // reuters.com shape (2026-05-14): 1.1 MB rendered news home page
+        // containing the phrase "just a moment" somewhere in article
+        // copy / embedded loading widget text. Pre-fix the classifier
+        // flagged this as Cloudflare-CHL on every profile, producing a
+        // bogus universal-block tally for reuters.
+        let mut html = String::from("<html><body>");
+        html.push_str("<p>If you want to know more, give us just a moment to load.</p>");
+        for _ in 0..30000 {
+            html.push_str("<div>actual news article paragraph</div>");
+        }
+        html.push_str("</body></html>");
+        assert!(html.len() > 100 * 1024);
+        assert_eq!(classify(&html), "L3-RENDERED");
+    }
+
+    #[test]
+    fn large_rendered_page_with_checking_your_browser_phrase_is_not_chl() {
+        let mut html = String::from("<html><body>");
+        html.push_str("<p>We are checking your browser for compatibility.</p>");
+        for _ in 0..30000 {
+            html.push_str("<div>news content</div>");
+        }
+        html.push_str("</body></html>");
+        assert!(html.len() > 100 * 1024);
+        assert_eq!(classify(&html), "L3-RENDERED");
     }
 
     #[test]
