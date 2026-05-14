@@ -161,23 +161,48 @@
         }
     }
 
-    // Fire a `mousemove` at a given client coordinate. Dispatched on
-    // window + document + body — DataDome's tags.js (per W6a research)
-    // listens at `window` not `document`, and our prior dispatch only
-    // hit document+body so DataDome's empty-coord-list scoring caught
-    // us. Now all three event targets receive it.
+    // Fire a `mousemove` + `pointermove` pair at a given client coordinate.
+    // Dispatched on window + document + body — DataDome's tags.js listens at
+    // `window` (per W6a research) and harvests events from both event types
+    // into `_initialCoordsList` (per 03_DATADOME.md §3.11). Real Chrome
+    // dispatches mousemove and pointermove together for the same physical
+    // motion. Firing only `mousemove` left half of DataDome's coord buffer
+    // empty, contributing to the silent-path penalty.
     function _fireMove(x, y, prev) {
-        const ev = new MouseEvent('mousemove', {
+        const cx = Math.round(x), cy = Math.round(y);
+        const mx = prev ? Math.round(x - prev[0]) : 0;
+        const my = prev ? Math.round(y - prev[1]) : 0;
+        const mouseEv = new MouseEvent('mousemove', {
             bubbles: true, cancelable: true, view: window,
-            clientX: Math.round(x), clientY: Math.round(y),
-            screenX: Math.round(x), screenY: Math.round(y) + 90,
-            movementX: prev ? Math.round(x - prev[0]) : 0,
-            movementY: prev ? Math.round(y - prev[1]) : 0,
+            clientX: cx, clientY: cy,
+            screenX: cx, screenY: cy + 90,
+            movementX: mx, movementY: my,
             button: 0, buttons: 0,
         });
-        try { _dispatch(window, ev); } catch (_) {}
-        _dispatch(document, ev);
-        _dispatch(body, ev);
+        try { _dispatch(window, mouseEv); } catch (_) {}
+        _dispatch(document, mouseEv);
+        _dispatch(body, mouseEv);
+        // PointerEvent paired emission. Pointer events were added in Chrome
+        // 55 and are the modern primary pointer input event; DataDome and
+        // newer fingerprinters listen here in addition to legacy mousemove.
+        try {
+            const PE = (typeof PointerEvent === 'function') ? PointerEvent : null;
+            if (PE) {
+                const pEv = new PE('pointermove', {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: cx, clientY: cy,
+                    screenX: cx, screenY: cy + 90,
+                    movementX: mx, movementY: my,
+                    button: -1, buttons: 0,
+                    pointerType: 'mouse', pointerId: 1,
+                    isPrimary: true, pressure: 0,
+                    width: 1, height: 1,
+                });
+                try { _dispatch(window, pEv); } catch (_) {}
+                _dispatch(document, pEv);
+                _dispatch(body, pEv);
+            }
+        } catch (_) {}
         _akRecMouse(x, y, 0, 0); // 0 = move, button 0 = left
     }
 
@@ -268,56 +293,97 @@
     (function _seedHistoricalCoords() {
         const vw = (window.innerWidth || 1920);
         const vh = (window.innerHeight || 1080);
-        // Sigma-lognormal-ish: cluster near a likely starting region
-        // (screen center-right where the previous-tab close button
-        // would be) with realistic per-step deltas.
-        let x = vw * 0.5 + (Math.random() - 0.5) * 80;
-        let y = vh * 0.4 + (Math.random() - 0.5) * 80;
-        const points = 12;
-        // Spread the historical timestamps from -1800ms to -100ms
-        // before "now" (= _akT0 = humanize load time).
-        for (let i = 0; i < points; i++) {
-            const dt = -1800 + (i / (points - 1)) * 1700; // -1800..-100
-            // Smooth muscle-impulse-like path: sigma-lognormal velocity
-            // → smaller steps near the start and end, larger in the
-            // middle. Approximation: triangular speed window.
-            const phase = Math.abs(i / (points - 1) - 0.5) * 2; // 0..1, 0 in middle
-            const speed = 1 - phase * 0.7; // 0.3 at edges, 1.0 in middle
-            const dx = (Math.random() - 0.5) * 80 * speed;
-            const dy = (Math.random() - 0.5) * 80 * speed;
-            x = Math.max(0, Math.min(vw, x + dx));
-            y = Math.max(0, Math.min(vh, y + dy));
-            // Push the historical event directly into the buffer with
-            // its negative timestamp. _akT() returns positive elapsed
-            // since _akT0; we hand-craft a record matching the schema.
+        // Source the trajectory from the Rust sigma-lognormal generator
+        // (`crates/stealth/src/behavior.rs::mouse_trajectory` — Plamondon
+        // Kinematic Theory, 2-7 strokes, BeCAPTCHA-Mouse-validated σ/μ
+        // distributions, pink-tremor noise). The JS-side triangular
+        // approximation this replaces was distinguishable from real
+        // human motion to the RF classifier downstream of HUMAN/Kasada/
+        // DataDome — research 08_BEHAVIORAL.md §1.6.
+        const fromX = vw * 0.5 + (Math.random() - 0.5) * 80;
+        const fromY = vh * 0.4 + (Math.random() - 0.5) * 80;
+        const toX = vw * 0.45 + (Math.random() - 0.5) * 200;
+        const toY = vh * 0.55 + (Math.random() - 0.5) * 200;
+        const targetW = 40 + Math.random() * 40;
+        let traj = [];
+        try {
+            const ops = Deno && Deno.core && Deno.core.ops;
+            if (ops && typeof ops.op_behavior_mouse_trajectory === 'function') {
+                const raw = ops.op_behavior_mouse_trajectory(fromX, fromY, toX, toY, targetW);
+                traj = JSON.parse(raw || '[]');
+            }
+        } catch (_) {}
+        // Fallback if op is unavailable: produce a minimal-but-plausible
+        // 12-point linear path so behavior is never empty.
+        if (!Array.isArray(traj) || traj.length === 0) {
+            traj = [];
+            const n = 12;
+            for (let i = 0; i < n; i++) {
+                const u = i / (n - 1);
+                traj.push({
+                    t_ms: u * 1000,
+                    x: fromX + (toX - fromX) * u,
+                    y: fromY + (toY - fromY) * u,
+                });
+            }
+        }
+        // Project the trajectory onto the historical window
+        // [-1800ms, -100ms] before _akT0. Trajectory's own t_ms ranges
+        // from 0 to ~total_ms; rescale linearly. Subsample if the
+        // trajectory has more points than the buffer can hold.
+        const maxT = traj.length > 0 ? traj[traj.length - 1].t_ms : 1;
+        const stride = Math.max(1, Math.ceil(traj.length / 14));
+        let lastX = fromX | 0, lastY = fromY | 0;
+        for (let i = 0; i < traj.length; i += stride) {
+            const p = traj[i];
+            const u = p.t_ms / Math.max(1, maxT);
+            const dt = -1800 + u * 1700;
+            const x = Math.max(0, Math.min(vw, p.x)) | 0;
+            const y = Math.max(0, Math.min(vh, p.y)) | 0;
             if (_akEvents.mouse.length < 200) {
                 _akEvents.mouse.push({
-                    x: x | 0, y: y | 0, t: Math.round(dt),
+                    x: x, y: y, t: Math.round(dt),
                     kind: 0, button: 0,
                 });
             }
             _akEvents.counters.mouse++;
+            lastX = x; lastY = y;
         }
-        // Also fire ONE synchronous mousemove now (t=0 on the buffer)
-        // so live addEventListener('mousemove') subscribers see at
-        // least one real event before any setTimeouts get a chance.
+        // Fire a synchronous mousemove + pointermove pair NOW so live
+        // addEventListener subscribers (DataDome tags.js, PerimeterX
+        // sensor) see at least one event before any setTimeouts get a
+        // chance. Pairing matches real Chrome's per-physical-event emission.
         try {
-            const ev = new MouseEvent('mousemove', {
+            const evOpts = {
                 bubbles: true, cancelable: true, view: window,
-                clientX: x | 0, clientY: y | 0,
-                screenX: x | 0, screenY: (y | 0) + 90,
+                clientX: lastX, clientY: lastY,
+                screenX: lastX, screenY: lastY + 90,
                 movementX: 1, movementY: 0,
                 button: 0, buttons: 0,
-            });
-            try { Object.defineProperty(ev, 'isTrusted', { value: true, configurable: true }); } catch (_) {}
-            try { window.dispatchEvent(ev); } catch (_) {}
-            try { document.dispatchEvent(ev); } catch (_) {}
-            try { body.dispatchEvent(ev); } catch (_) {}
+            };
+            const mev = new MouseEvent('mousemove', evOpts);
+            try { Object.defineProperty(mev, 'isTrusted', { value: true, configurable: true }); } catch (_) {}
+            try { window.dispatchEvent(mev); } catch (_) {}
+            try { document.dispatchEvent(mev); } catch (_) {}
+            try { body.dispatchEvent(mev); } catch (_) {}
+            const PE = (typeof PointerEvent === 'function') ? PointerEvent : null;
+            if (PE) {
+                const pev = new PE('pointermove', {
+                    ...evOpts,
+                    button: -1,
+                    pointerType: 'mouse', pointerId: 1,
+                    isPrimary: true, pressure: 0, width: 1, height: 1,
+                });
+                try { Object.defineProperty(pev, 'isTrusted', { value: true, configurable: true }); } catch (_) {}
+                try { window.dispatchEvent(pev); } catch (_) {}
+                try { document.dispatchEvent(pev); } catch (_) {}
+                try { body.dispatchEvent(pev); } catch (_) {}
+            }
         } catch (_) {}
         // Capture the final position so runCycle's deltas pick up
         // from where this seeding left off.
         try {
-            globalThis.__akamai_events._lastPos = [x | 0, y | 0];
+            globalThis.__akamai_events._lastPos = [lastX, lastY];
         } catch (_) {}
     })();
 
