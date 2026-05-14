@@ -361,17 +361,49 @@ impl Page {
             Err(_) => return Ok(akamai::AbckState::Unknown),
         };
 
-        // 1. Detect if this host is Akamai-protected and what its settings
-        //    are. Only POST when we have a known tenant — the previous
-        //    fallback (tenant_seed=0, post_path=/akam/13/sensor_data) fired
-        //    on ANY host that issued an _abck cookie, including ones that
-        //    use Akamai for caching but not Bot Manager (wellsfargo.com,
-        //    irs.gov, etc.). Those POSTs returned 404/403 and burned the
-        //    sweep budget. W2.2 will replace this with a dynamic parser
-        //    that recovers per-host config from the rendered HTML.
-        let settings = match akamai::get_tenant_settings(&host) {
+        // 1. Detect tenant config. Try static registry first (fast path
+        //    for known bestbuy / homedepot), then fall back to parsing
+        //    the rendered HTML via akamai::parse_tenant_from_html (W2.2)
+        //    so we can auto-discover new Akamai tenants (macys, hotels,
+        //    etc.) without code changes.
+        //
+        //    A host with neither registry hit nor HTML-parsed tenant is
+        //    treated as not-Bot-Manager-protected — return Unknown so
+        //    we don't spuriously POST to /akam/13/sensor_data 404 (the
+        //    failure mode that burned the aborted mid-sweep run).
+        let static_settings = akamai::get_tenant_settings(&host);
+        let parsed_owned;
+        let settings_ref: &akamai::TenantSettings = match static_settings.as_ref() {
             Some(s) => s,
-            None => return Ok(akamai::AbckState::Unknown),
+            None => {
+                let html = self.content();
+                match akamai::parse_tenant_from_html(&html) {
+                    Some(pt) => {
+                        eprintln!(
+                            "[akamai] discovered tenant for {host}: seed={} sensor_path={}",
+                            pt.tenant_seed, pt.sensor_post_path
+                        );
+                        parsed_owned = akamai::TenantSettings {
+                            tenant_seed: pt.tenant_seed,
+                            // Box::leak the dynamic path so the
+                            // existing &'static str API is preserved
+                            // without a broader refactor; the leak is
+                            // per-host (small, bounded by sites we hit)
+                            // and the leaked memory is alive for the
+                            // process lifetime anyway since the static
+                            // registry strings are already &'static.
+                            post_path: Box::leak(pt.sensor_post_path.into_boxed_str()),
+                        };
+                        &parsed_owned
+                    }
+                    None => return Ok(akamai::AbckState::Unknown),
+                }
+            }
+        };
+        // Re-borrow as owned for downstream usage.
+        let settings = akamai::TenantSettings {
+            tenant_seed: settings_ref.tenant_seed,
+            post_path: settings_ref.post_path,
         };
 
         // 2. Check if we actually NEED to send sensor_data.
