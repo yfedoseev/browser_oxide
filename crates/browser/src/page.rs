@@ -361,20 +361,17 @@ impl Page {
             Err(_) => return Ok(akamai::AbckState::Unknown),
         };
 
-        // 1. Detect if this host is Akamai-protected and what its settings are.
+        // 1. Detect if this host is Akamai-protected and what its settings
+        //    are. Only POST when we have a known tenant — the previous
+        //    fallback (tenant_seed=0, post_path=/akam/13/sensor_data) fired
+        //    on ANY host that issued an _abck cookie, including ones that
+        //    use Akamai for caching but not Bot Manager (wellsfargo.com,
+        //    irs.gov, etc.). Those POSTs returned 404/403 and burned the
+        //    sweep budget. W2.2 will replace this with a dynamic parser
+        //    that recovers per-host config from the rendered HTML.
         let settings = match akamai::get_tenant_settings(&host) {
             Some(s) => s,
-            None => {
-                // Fallback: check if _abck is in the jar for this host.
-                let state = client.akamai_sessions.abck_state(&host).await;
-                if state.is_none() {
-                    return Ok(akamai::AbckState::Unknown);
-                }
-                akamai::TenantSettings {
-                    tenant_seed: 0,
-                    post_path: "/akam/13/sensor_data",
-                }
-            }
+            None => return Ok(akamai::AbckState::Unknown),
         };
 
         // 2. Check if we actually NEED to send sensor_data.
