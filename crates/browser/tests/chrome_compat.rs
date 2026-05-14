@@ -6862,3 +6862,118 @@ async fn check_ios_safari_surface() {
     );
     assert!(result.contains("\"userAgent\":") && result.contains("iPhone"));
 }
+
+// ================================================================
+// Kasada sentinel identity audit — pinpoints which engine site
+// fails to preserve Kasada's `unjzomuybtbyyhwwkdpkxomylnab` sentinel
+// property across two reads of the same conceptual identity.
+//
+// Per docs/research_2026_05_14/01_KASADA.md §1.5, three probes:
+//   T1 — WebIDL method identity via prototype lookup
+//        (`navigator.mediaDevices.enumerateDevices`).
+//   T2 — iframe Function descriptor identity via
+//        `getOwnPropertyDescriptor(iframe.contentWindow, 'Function')`.
+//        Refined as the medium-high probability culprit after W1.1's
+//        _buildRemoteRealm cache landed without flipping any Kasada
+//        site in the post-W1 sweep.
+//   T3 — Navigator.prototype data-property identity
+//        (`Object.getOwnPropertyDescriptor(NavProto, 'sendBeacon').value`).
+//
+// Expected real-Chrome result for all three: identical=true,
+// tagSurvives=true. Our engine should match. The first probe to
+// return `identical=false` or `tagSurvives=false` is the divergence
+// site that loses Kasada's sentinel.
+//
+// This test does NOT assert pass/fail yet — its purpose is to
+// surface the divergence empirically so the next patch targets the
+// specific site. Read the eprintln output.
+// ================================================================
+#[tokio::test]
+async fn kasada_sentinel_identity_audit() {
+    let mut page = Page::from_html_with_url(
+        &html("<div id='canvas'></div>"),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        const out = { mediaDevices: null, iframeDesc: null, navProto: null };
+
+        // T1: WebIDL method identity stability
+        try {
+            const a = navigator.mediaDevices.enumerateDevices;
+            const b = navigator.mediaDevices.enumerateDevices;
+            let tagSurvives;
+            try { a.__test_tag = 42; tagSurvives = (b.__test_tag === 42); }
+            catch (e) { tagSurvives = 'threw: ' + e.message; }
+            out.mediaDevices = { identical: a === b, tagSurvives };
+        } catch (e) {
+            out.mediaDevices = { err: e.message };
+        }
+
+        // T2: iframe Function descriptor value identity (the high-confidence
+        // sentinel-loss site per the research doc).
+        try {
+            const iframe = document.createElement('iframe');
+            document.body.appendChild(iframe);
+            const w = iframe.contentWindow;
+            const d1 = Object.getOwnPropertyDescriptor(w, 'Function');
+            const d2 = Object.getOwnPropertyDescriptor(w, 'Function');
+            let tagSurvives;
+            if (d1 && d2) {
+                try { d1.value.__test_tag = 42; tagSurvives = (d2.value.__test_tag === 42); }
+                catch (e) { tagSurvives = 'threw: ' + e.message; }
+            } else {
+                tagSurvives = 'no_desc';
+            }
+            out.iframeDesc = {
+                d1isObj: typeof d1 === 'object' && d1 !== null,
+                d2isObj: typeof d2 === 'object' && d2 !== null,
+                valueIdentical: !!(d1 && d2 && d1.value === d2.value),
+                tagSurvives,
+            };
+        } catch (e) {
+            out.iframeDesc = { err: e.message };
+        }
+
+        // T3: Navigator.prototype data-property identity (sendBeacon).
+        try {
+            const proto = navigator.constructor.prototype;
+            const d1 = Object.getOwnPropertyDescriptor(proto, 'sendBeacon');
+            const d2 = Object.getOwnPropertyDescriptor(proto, 'sendBeacon');
+            const a = d1 && d1.value, b = d2 && d2.value;
+            let tagSurvives;
+            if (a && b) {
+                try { a.__test_tag = 42; tagSurvives = (b.__test_tag === 42); }
+                catch (e) { tagSurvives = 'threw: ' + e.message; }
+            } else {
+                tagSurvives = 'no_method';
+            }
+            out.navProto = {
+                present: a != null && b != null,
+                identical: a === b,
+                tagSurvives,
+            };
+        } catch (e) {
+            out.navProto = { err: e.message };
+        }
+
+        JSON.stringify(out);
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("kasada-sentinel-audit: {result}");
+    assert!(!result.starts_with("ERROR:"), "evaluation failed: {result}");
+    // The audit is informational. Assertions below mark the result so the
+    // test surfaces a clear failure if any probe loses identity. Update
+    // these assertions once the divergence site is patched.
+    let want_pass = |needle: &str| {
+        assert!(
+            result.contains(needle),
+            "kasada sentinel audit: expected {needle:?} — got: {result}"
+        );
+    };
+    want_pass("\"identical\":true");
+    want_pass("\"tagSurvives\":true");
+    want_pass("\"valueIdentical\":true");
+}
