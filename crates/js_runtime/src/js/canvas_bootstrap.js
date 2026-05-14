@@ -741,10 +741,32 @@
         constructor() { super(); this.maxChannelCount = 2; }
     }
 
+    // W3.4 — per-session randomization of AudioContext fingerprintable
+    // surface. Real Chrome's sampleRate is 44100 on most hardware and
+    // 48000 on some (~20% of laptops, ~50% of pro audio gear).
+    // baseLatency and outputLatency reflect hardware-buffer + scheduler
+    // jitter — pinning them to constants is the canonical headless tell.
+    // Seed once per page so reads stay stable (real Chrome doesn't
+    // change these mid-session either).
+    const _audioSampleRate = (Math.random() < 0.80) ? 44100 : 48000;
+    const _audioBaseLatency = (() => {
+        // Real Chrome reports baseLatency in [0.005, 0.030] sec range
+        // depending on output device. Quantize to 1ms granularity.
+        const v = 0.005 + Math.random() * 0.025;
+        return Math.round(v * 1000) / 1000;
+    })();
+    const _audioOutputLatency = (() => {
+        // outputLatency > baseLatency typically. Add 5-30ms on top.
+        const v = _audioBaseLatency + 0.005 + Math.random() * 0.025;
+        return Math.round(v * 1000) / 1000;
+    })();
+
     class BaseAudioContext extends EventTarget {
         constructor() {
             super();
-            this.sampleRate = 44100;
+            this.sampleRate = _audioSampleRate;
+            this.baseLatency = _audioBaseLatency;
+            this.outputLatency = _audioOutputLatency;
             this.state = "running";
             this.currentTime = 0;
             this.destination = new AudioDestinationNode();
@@ -784,8 +806,8 @@
         constructor(channels, length, sampleRate) {
             super();
             this._channels = channels || 1;
-            this._length = length || 44100;
-            this.sampleRate = sampleRate || 44100;
+            this._length = length || _audioSampleRate;
+            this.sampleRate = sampleRate || _audioSampleRate;
             this._oscType = "triangle";
             this._oscFreq = 10000;
             this._compThreshold = -24;
