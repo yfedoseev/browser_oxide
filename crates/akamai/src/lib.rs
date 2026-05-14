@@ -138,6 +138,75 @@ impl BotScoreVector {
     }
 }
 
+/// Parse Akamai's `bm_sz` cookie into per-session PRNG seeds for the
+/// v3 sensor_data envelope.
+///
+/// Format per 02_AKAMAI.md §1.2 (`Max-Age=14400`, 4 h rotation):
+///
+/// ```text
+/// bm_sz = <hex>~<base64>~<shuffle_seed>~<substitute_seed>
+/// ```
+///
+/// The two trailing integers are the shuffle + substitute LCG seeds
+/// for the Fisher-Yates shuffle / alphabet-substitute step of v3.
+/// Pre-rotation captures: bestbuy `~3686980~3291191`, homedepot
+/// `~3619139~4605488`, macys `~3224898~3356741`. The DalphanDev
+/// constants `3_289_904` / `3_683_632` we hard-coded in
+/// `build_v2_bestbuy` happened to match bestbuy in April 2026 — they
+/// no longer do.
+///
+/// Returns `None` if the cookie is malformed or lacks the two trailing
+/// integers. Caller should fall back to `(8_888_888, 8_888_888)` per
+/// glizzykingdreko's note: "Before the first request, a default of
+/// 8888888 is used."
+pub fn parse_bm_sz(cookie: &str) -> Option<(i64, i64)> {
+    let parts: Vec<&str> = cookie.split('~').collect();
+    if parts.len() < 4 {
+        return None;
+    }
+    // The last two `~`-delimited segments must be parseable as i64.
+    let n = parts.len();
+    let substitute = parts.get(n - 1).and_then(|s| s.parse().ok())?;
+    let shuffle = parts.get(n - 2).and_then(|s| s.parse().ok())?;
+    Some((shuffle, substitute))
+}
+
+/// Build a v3 sensor_data envelope using per-session `bm_sz`-derived
+/// seeds. Format is otherwise identical to v2 (same cleartext, same
+/// counter tuple, same outer structure). Only the LCG seeds for the
+/// shuffle and substitute steps differ — and that's the entire point:
+/// Akamai's edge re-derives the same seeds from the bm_sz it issued,
+/// then validates our envelope decrypted/dechuffled cleanly.
+///
+/// Pass the `bm_sz` cookie value directly; this function parses it.
+/// Falls back to `(8_888_888, 8_888_888)` if parsing fails or the
+/// cookie isn't yet set (per glizzykingdreko's pre-first-request
+/// default note).
+pub fn build_v3(
+    cleartext: &str,
+    tenant_seed: i64,
+    counter_tuple: &str,
+    bm_sz_cookie: Option<&str>,
+) -> String {
+    let (shuffle_seed, substitute_seed) = match bm_sz_cookie {
+        Some(c) => parse_bm_sz(c).unwrap_or((8_888_888, 8_888_888)),
+        None => (8_888_888, 8_888_888),
+    };
+    // Seeds come out of bm_sz as i64 but the LCG is u32-keyed. Clamp to
+    // u32 range (Akamai's seeds are 7-digit decimal — comfortably under
+    // u32::MAX). Negative seeds would be malformed; force-positive
+    // before truncation.
+    let shuffle_u32 = shuffle_seed.unsigned_abs().min(u32::MAX as u64) as u32;
+    let substitute_u32 = substitute_seed.unsigned_abs().min(u32::MAX as u64) as u32;
+    build_v2_bestbuy(
+        cleartext,
+        tenant_seed,
+        counter_tuple,
+        shuffle_u32,
+        substitute_u32,
+    )
+}
+
 /// Static registry of known Akamai tenants and their magic constants.
 /// T3A-A6 milestone: autonomous bypass for BestBuy.
 pub struct TenantSettings {
@@ -370,12 +439,16 @@ pub fn build_sensor_data(
         accel_count: session.accel_count,
         orientation_count: 0,
     };
-    build_v2_bestbuy(
+    // W2.3 — v3 envelope: use the bm_sz-derived shuffle/substitute seeds
+    // when the cookie is observed; otherwise fall back to the pre-first-
+    // request default (8_888_888) per glizzykingdreko's spec. The DalphanDev
+    // constants we previously hardcoded matched bestbuy in April 2026 but
+    // have since rotated (seeds rotate every 4h with bm_sz Max-Age=14400).
+    build_v3(
         &cleartext,
         tenant_seed,
         &counter.as_field7(),
-        3_289_904, // shuffle seed (DalphanDev default)
-        3_683_632, // substitute seed (DalphanDev default)
+        session.bm_sz.as_deref(),
     )
 }
 
@@ -545,6 +618,52 @@ mod tests {
         assert_eq!(t.tenant_seed, 534_393_124);
         assert!(t.sensor_post_path.starts_with("/R8CjSca6_7i6/"));
         assert_eq!(t.pixel_bootstrap_path.as_deref(), Some("/akam/13/8a0fbc"));
+    }
+
+    #[test]
+    fn parse_bm_sz_bestbuy_shape() {
+        let cookie = "09BAC960F59A5E0209ED39333915B267~YAAQsTfLF66wrQSeAQAAWg0dJR9I6lX~3686980~3291191";
+        let (shuffle, substitute) = parse_bm_sz(cookie).expect("parsed");
+        assert_eq!(shuffle, 3_686_980);
+        assert_eq!(substitute, 3_291_191);
+    }
+
+    #[test]
+    fn parse_bm_sz_homedepot_shape() {
+        let cookie = "abc~base64blob~3619139~4605488";
+        let (shuffle, substitute) = parse_bm_sz(cookie).expect("parsed");
+        assert_eq!(shuffle, 3_619_139);
+        assert_eq!(substitute, 4_605_488);
+    }
+
+    #[test]
+    fn parse_bm_sz_returns_none_when_too_short() {
+        assert!(parse_bm_sz("only~two").is_none());
+        assert!(parse_bm_sz("").is_none());
+    }
+
+    #[test]
+    fn parse_bm_sz_returns_none_when_trailing_non_numeric() {
+        assert!(parse_bm_sz("hex~base64~notanumber~3291191").is_none());
+        assert!(parse_bm_sz("hex~base64~3686980~notanumber").is_none());
+    }
+
+    #[test]
+    fn build_v3_uses_default_seeds_when_no_bm_sz() {
+        // No bm_sz cookie → falls back to (8_888_888, 8_888_888).
+        let cleartext = "test-cleartext-payload-of-modest-length-with-some-bytes";
+        let v3_no_cookie = build_v3(cleartext, 12345, "1,0,0,0,0,0", None);
+        let v3_unparseable = build_v3(cleartext, 12345, "1,0,0,0,0,0", Some("malformed"));
+        // Both should produce the same envelope (default seeds).
+        assert_eq!(v3_no_cookie, v3_unparseable);
+    }
+
+    #[test]
+    fn build_v3_diverges_for_different_seeds() {
+        let cleartext = "test-cleartext-payload-of-modest-length-with-some-bytes";
+        let a = build_v3(cleartext, 12345, "1,0,0,0,0,0", Some("h~b~111~222"));
+        let b = build_v3(cleartext, 12345, "1,0,0,0,0,0", Some("h~b~333~444"));
+        assert_ne!(a, b, "different bm_sz seeds must produce different envelopes");
     }
 
     #[test]
