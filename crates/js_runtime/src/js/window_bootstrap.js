@@ -4860,8 +4860,25 @@
             load() { return Promise.resolve(this); }
         };
 
-        // document.fonts (FontFaceSet)
+        // document.fonts (FontFaceSet) — iterator yields actual FontFace
+        // entries (real Chrome's `for (const f of document.fonts)` yields
+        // FontFace instances for every loaded face). Pre-W3.7 our iterators
+        // returned empty, which is the canonical headless "no faces ever
+        // loaded" tell. PLAN identifies as a blind Kasada `ao` candidate.
         if (globalThis.document) {
+            // Materialize FontFace instances once for the system font list.
+            const _fontFaces = _fonts.map(family => {
+                const f = new globalThis.FontFace(family, 'local("' + family + '")');
+                f.status = 'loaded';
+                f.weight = 'normal';
+                f.style = 'normal';
+                f.stretch = 'normal';
+                f.unicodeRange = 'U+0-10FFFF';
+                f.variant = 'normal';
+                f.featureSettings = 'normal';
+                f.display = 'auto';
+                return f;
+            });
             Object.defineProperty(globalThis.document, 'fonts', {
                 value: {
                     check(font, text) {
@@ -4876,16 +4893,29 @@
                     },
                     ready: Promise.resolve(),
                     status: "loaded",
-                    forEach() {},
-                    entries() { return [][Symbol.iterator](); },
-                    keys() { return [][Symbol.iterator](); },
-                    values() { return [][Symbol.iterator](); },
-                    [Symbol.iterator]() { return [][Symbol.iterator](); },
-                    size: _fonts.length,
-                    add() {},
-                    delete() { return false; },
-                    has() { return true; },
-                    clear() {},
+                    forEach(cb, thisArg) {
+                        for (const f of _fontFaces) cb.call(thisArg, f, f, this);
+                    },
+                    entries() {
+                        // FontFaceSet.entries yields [face, face] pairs per spec.
+                        const arr = _fontFaces.map(f => [f, f]);
+                        return arr[Symbol.iterator]();
+                    },
+                    keys() { return _fontFaces[Symbol.iterator](); },
+                    values() { return _fontFaces[Symbol.iterator](); },
+                    [Symbol.iterator]() { return _fontFaces[Symbol.iterator](); },
+                    size: _fontFaces.length,
+                    add(face) {
+                        if (face && !_fontFaces.includes(face)) _fontFaces.push(face);
+                        return this;
+                    },
+                    delete(face) {
+                        const i = _fontFaces.indexOf(face);
+                        if (i >= 0) { _fontFaces.splice(i, 1); return true; }
+                        return false;
+                    },
+                    has(face) { return _fontFaces.includes(face); },
+                    clear() { _fontFaces.length = 0; },
                     addEventListener() {},
                     removeEventListener() {},
                 },
