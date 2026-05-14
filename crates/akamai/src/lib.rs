@@ -62,6 +62,82 @@ pub use drain::{parse_drained, Drained, DRAIN_JS};
 pub use payload::build_cleartext;
 pub use session::{AbckState, AkamaiSession, AkamaiSessionStore};
 
+/// Decoded Akamai `Server-Timing: ak_p` BotScoreVector.
+///
+/// Akamai's edge appends a `Server-Timing: ak_p; desc="..."` header to
+/// every response from a Bot Manager-protected origin. The `desc`
+/// value carries six underscore-separated risk sub-scores per
+/// 02_AKAMAI.md §10:
+///
+/// ```text
+/// desc="<request_id>_<timestamp>_<score_a>_<score_b>_<score_c>_<score_d>_<score_e>_<score_f>-"
+/// ```
+///
+/// Lower scores → more human. A jump in any sub-score across runs is a
+/// regression signal that pinpoints which engine fingerprint we just
+/// broke. Used as a passive diagnostic; never as a gating condition.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BotScoreVector {
+    pub request_id: Option<String>,
+    pub timestamp: Option<u64>,
+    pub score_a: u32,
+    pub score_b: u32,
+    pub score_c: u32,
+    pub score_d: u32,
+    pub score_e: u32,
+    pub score_f: u32,
+}
+
+impl BotScoreVector {
+    /// Parse a raw `Server-Timing` header value containing `ak_p; desc="..."`.
+    /// Returns `None` if the header doesn't contain an `ak_p` entry or the
+    /// `desc` value isn't the expected `_`-separated tuple.
+    ///
+    /// A `Server-Timing` header may concatenate multiple metrics with
+    /// commas; we scan for the `ak_p` entry specifically. Quoted `desc=`
+    /// values may or may not include the trailing dash sentinel.
+    pub fn parse(server_timing: &str) -> Option<Self> {
+        for entry in server_timing.split(',') {
+            let entry = entry.trim();
+            if !entry.starts_with("ak_p") {
+                continue;
+            }
+            // Find `desc=` segment (case-insensitive).
+            let desc_idx = entry
+                .to_ascii_lowercase()
+                .find("desc=")
+                .map(|i| i + "desc=".len());
+            let desc_value = match desc_idx {
+                Some(i) => entry[i..].trim_matches('"').trim_matches('\''),
+                None => continue,
+            };
+            // The trailing `-` is a sentinel; strip if present.
+            let stripped = desc_value.trim_end_matches('-');
+            let parts: Vec<&str> = stripped.split('_').collect();
+            if parts.len() < 8 {
+                return None;
+            }
+            return Some(BotScoreVector {
+                request_id: parts.first().filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                timestamp: parts.get(1).and_then(|s| s.parse().ok()),
+                score_a: parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0),
+                score_b: parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0),
+                score_c: parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(0),
+                score_d: parts.get(5).and_then(|s| s.parse().ok()).unwrap_or(0),
+                score_e: parts.get(6).and_then(|s| s.parse().ok()).unwrap_or(0),
+                score_f: parts.get(7).and_then(|s| s.parse().ok()).unwrap_or(0),
+            });
+        }
+        None
+    }
+
+    /// Sum of all six sub-scores. A useful single-number proxy for
+    /// "how bot-shaped did Akamai think this request was".
+    pub fn total(&self) -> u32 {
+        self.score_a + self.score_b + self.score_c + self.score_d + self.score_e + self.score_f
+    }
+}
+
 /// Static registry of known Akamai tenants and their magic constants.
 /// T3A-A6 milestone: autonomous bypass for BestBuy.
 pub struct TenantSettings {
@@ -264,6 +340,39 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(c.as_field7(), "5,18,0,0,1,323");
+    }
+
+    #[test]
+    fn bot_score_vector_parses_real_capture() {
+        // From 02_AKAMAI.md §10: hotels.com response shows
+        // `ak_p; desc="0.75951eb8.1778739141_1778739141_14_144_0_0_0_0-"`
+        // → request_id="0.75951eb8.1778739141", timestamp=1778739141,
+        //   scores = 14, 144, 0, 0, 0, 0. The `144` is the elevated
+        //   detection score that drove the 429.
+        let h = r#"ak_p; desc="0.75951eb8.1778739141_1778739141_14_144_0_0_0_0-""#;
+        let v = BotScoreVector::parse(h).expect("parse");
+        assert_eq!(v.request_id.as_deref(), Some("0.75951eb8.1778739141"));
+        assert_eq!(v.timestamp, Some(1778739141));
+        assert_eq!(v.score_a, 14);
+        assert_eq!(v.score_b, 144);
+        assert_eq!(v.score_c, 0);
+        assert_eq!(v.score_d, 0);
+        assert_eq!(v.score_e, 0);
+        assert_eq!(v.score_f, 0);
+        assert_eq!(v.total(), 158);
+    }
+
+    #[test]
+    fn bot_score_vector_handles_multi_metric_header() {
+        let h = r#"edge; dur=1, origin; dur=44, ak_p; desc="rid_1234567890_28_257_0_0_0_0-""#;
+        let v = BotScoreVector::parse(h).expect("parse");
+        assert_eq!(v.score_a, 28);
+        assert_eq!(v.score_b, 257);
+    }
+
+    #[test]
+    fn bot_score_vector_returns_none_without_ak_p() {
+        assert!(BotScoreVector::parse("edge; dur=1, origin; dur=44").is_none());
     }
 
     #[test]
