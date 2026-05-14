@@ -55,6 +55,7 @@
 pub mod crypto;
 pub mod drain;
 pub mod payload;
+pub mod sec_cpt;
 pub mod session;
 
 pub use crypto::{build_v2_bestbuy, build_v2_dalphan, sha256_b64};

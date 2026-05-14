@@ -1,0 +1,189 @@
+//! W4.2 — Akamai sec-cpt proof-of-work challenge solver.
+//!
+//! When Akamai's Bot Manager Premier "Strict Response" threshold fires,
+//! the response is HTTP 428 with body containing a sec-cpt challenge:
+//!
+//! ```json
+//! {
+//!   "token":      "AAQAAAAJ...",          // ~430-char base64 token
+//!   "timestamp":  1713283747,             // unix epoch
+//!   "nonce":      "ebccdb479fcb92636fbc", // 20-hex-char random
+//!   "difficulty": 15000,                  // PoW target
+//!   "count":      1,                      // number of answers required
+//!   "timeout":    1000,                   // ms per answer attempt
+//!   "cpu":        false,                  // CPU-only (no GPU)
+//!   "verify_url": "/_sec/cp_challenge/verify"
+//! }
+//! ```
+//!
+//! For the `crypto` provider (pure PoW), each answer is a base-16 float
+//! `r = "0.<hexdigits>"` such that:
+//!
+//! ```text
+//! input = sec + str(timestamp) + nonce + str(difficulty + i)
+//! h = sha256(input + r)
+//! output = 0
+//! for b in h: output = ((output << 8) | b) & 0xFFFFFFFF; output = output % (difficulty + i)
+//! return r if output == 0 else retry
+//! ```
+//!
+//! Note the rolling-hash reduction (not `int(h, 16) % D`): each byte
+//! gets shifted-then-modded-once before the next byte joins. This lets
+//! Akamai grow the difficulty per answer index without changing the
+//! base sha256 step.
+//!
+//! Algorithm verified against hyper-sdk-go/akamai/sec_cpt.go's
+//! `generateSecCptAnswers`. Typical cost at difficulty=15000 is
+//! ~5 ms / answer on one CPU core; Akamai's `chlg_duration` enforced
+//! wait (5–30 s) is the real time floor.
+//!
+//! Per docs/research_2026_05_14/02_AKAMAI.md §5.
+
+use rand::Rng;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+/// sec-cpt challenge payload as decoded from the 428 response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecCptChallenge {
+    pub token: String,
+    pub timestamp: u64,
+    pub nonce: String,
+    pub difficulty: u64,
+    pub count: u32,
+    #[serde(default = "default_timeout")]
+    pub timeout: u32,
+    #[serde(default)]
+    pub cpu: bool,
+    pub verify_url: String,
+}
+
+fn default_timeout() -> u32 {
+    1000
+}
+
+/// Verification body posted to `/_sec/verify?provider=crypto`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecCptAnswerSubmission {
+    pub token: String,
+    pub answers: Vec<String>,
+}
+
+/// Solve the `crypto` provider PoW for the given challenge. The `sec`
+/// argument is the leading-`~` portion of the `sec_cpt` cookie (the
+/// part before the first `~`). Returns Vec<answer-string> of length
+/// `challenge.count`.
+///
+/// `sec` is the leading portion of the sec_cpt cookie value (before
+/// the first `~`). It's used as challenge input prefix; the cookie
+/// itself is set by the 428-bearing response.
+pub fn solve_crypto(challenge: &SecCptChallenge, sec: &str) -> Vec<String> {
+    let mut answers = Vec::with_capacity(challenge.count as usize);
+    for i in 0..challenge.count {
+        let target_d = challenge.difficulty + i as u64;
+        let prefix = format!("{}{}{}{}", sec, challenge.timestamp, challenge.nonce, target_d);
+        let answer = find_answer(&prefix, target_d);
+        answers.push(answer);
+    }
+    answers
+}
+
+/// Find a base-16 float `r` such that the rolling-hash reduction of
+/// `sha256(prefix + r)` produces 0 modulo `difficulty`. Tries random
+/// candidates until one satisfies; expected attempts ≈ difficulty/256.
+fn find_answer(prefix: &str, difficulty: u64) -> String {
+    let mut rng = rand::thread_rng();
+    loop {
+        // Real Akamai uses Math.random().toString(16) → "0.<hex>".
+        // Generate a hex float of similar length (~13 hex chars after the dot).
+        let frac: u64 = rng.gen::<u64>() & 0x000F_FFFF_FFFF_FFFF;
+        let candidate = format!("0.{:013x}", frac);
+
+        let mut hasher = Sha256::new();
+        hasher.update(prefix.as_bytes());
+        hasher.update(candidate.as_bytes());
+        let h = hasher.finalize();
+
+        // Rolling-hash reduction per hyper-sdk-go.
+        let mut output: u64 = 0;
+        for &b in h.iter() {
+            output = ((output << 8) | b as u64) & 0xFFFF_FFFF;
+            output %= difficulty;
+        }
+        if output == 0 {
+            return candidate;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn solves_low_difficulty_within_seconds() {
+        // Use a difficulty low enough that the test always finishes
+        // (~256 attempts on average) but not so trivial it passes by
+        // accident. 256 = "first reduction pass terminates immediately".
+        let chal = SecCptChallenge {
+            token: "test-token".into(),
+            timestamp: 1_713_283_747,
+            nonce: "ebccdb479fcb92636fbc".into(),
+            difficulty: 256,
+            count: 1,
+            timeout: 1000,
+            cpu: false,
+            verify_url: "/_sec/cp_challenge/verify".into(),
+        };
+        let answers = solve_crypto(&chal, "secprefix");
+        assert_eq!(answers.len(), 1);
+        let r = &answers[0];
+        assert!(r.starts_with("0."), "answer should be base-16 float: {r}");
+
+        // Verify the answer satisfies the rolling-hash check.
+        let prefix = format!("{}{}{}{}", "secprefix", chal.timestamp, chal.nonce, chal.difficulty);
+        let mut h = Sha256::new();
+        h.update(prefix.as_bytes());
+        h.update(r.as_bytes());
+        let digest = h.finalize();
+        let mut output: u64 = 0;
+        for &b in digest.iter() {
+            output = ((output << 8) | b as u64) & 0xFFFF_FFFF;
+            output %= 256;
+        }
+        assert_eq!(output, 0, "rolling-hash reduction not 0 for answer {r}");
+    }
+
+    #[test]
+    fn produces_distinct_answers_per_count() {
+        let chal = SecCptChallenge {
+            token: "test-token".into(),
+            timestamp: 1_713_283_747,
+            nonce: "ebccdb479fcb92636fbc".into(),
+            difficulty: 256,
+            count: 3,
+            timeout: 1000,
+            cpu: false,
+            verify_url: "/_sec/cp_challenge/verify".into(),
+        };
+        let answers = solve_crypto(&chal, "secprefix");
+        assert_eq!(answers.len(), 3);
+        // Different answer indices have different target difficulties
+        // (256, 257, 258) so the answers should not all match.
+        assert!(
+            !(answers[0] == answers[1] && answers[1] == answers[2]),
+            "expected distinct answers, got {answers:?}"
+        );
+    }
+
+    #[test]
+    fn submission_serializes_to_token_answers_shape() {
+        let s = SecCptAnswerSubmission {
+            token: "AAQ...".into(),
+            answers: vec!["0.1abc".into(), "0.2def".into()],
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"token\":\"AAQ...\""));
+        assert!(json.contains("\"answers\":[\"0.1abc\",\"0.2def\"]"));
+    }
+}
