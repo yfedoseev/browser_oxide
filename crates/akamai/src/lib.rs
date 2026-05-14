@@ -133,8 +133,15 @@ pub fn build_sensor_data(
     tenant_seed: i64,
 ) -> String {
     let cleartext = build_cleartext(profile, session, request_url);
+    // Derive key_down / key_up from the session's drained key buffer.
+    // kind=0 → down, kind=1 → up, kind=2 → press (counted on neither side
+    // per spec — synthetic keypress events are deprecated and absent in
+    // real Chrome 147 captures).
+    let key_down_count = session.key_buf.iter().filter(|e| e.kind == 0).count() as u32;
+    let key_up_count = session.key_buf.iter().filter(|e| e.kind == 1).count() as u32;
     let counter = CounterTuple {
-        key_count: session.key_count,
+        key_down_count,
+        key_up_count,
         mouse_count: session.mouse_count,
         touch_count: session.touch_count,
         scroll_count: session.scroll_count,
@@ -187,9 +194,19 @@ pub struct TouchEvent {
 }
 
 /// Counter-tuple for sensor_data field 7.
+///
+/// Real Chrome 147 captures emit 6 distinct counters per field 7:
+/// `"<key_down>,<key_up>,<mouse>,<touch>,<scroll>,<accel>"`. Pre-W2.4
+/// our `key_count` was duplicated into slots 0 and 1, producing
+/// `"K,K,M,T,S,A"` which Akamai scored as bot-shaped because real
+/// keyboards generate `key_down >= key_up` (every keyup is preceded
+/// by a keydown, but a keydown without a subsequent keyup signals
+/// long-hold keys / repeats / focus loss). Two-counter shape is the
+/// canonical capture `"5,18,0,0,1,323"`.
 #[derive(Debug, Clone, Default)]
 pub struct CounterTuple {
-    pub key_count: u32,
+    pub key_down_count: u32,
+    pub key_up_count: u32,
     pub mouse_count: u32,
     pub touch_count: u32,
     pub scroll_count: u32,
@@ -198,15 +215,13 @@ pub struct CounterTuple {
 }
 
 impl CounterTuple {
-    /// Format as `"<key>,<key2>,<mouse>,<touch>,<scroll>,<accel>"` —
-    /// the order observed in real captures (e.g. "5,18,0,0,1,323").
-    /// Note: real captures show 6 slots; second slot is sometimes a
-    /// separate key-press counter.
+    /// Format as `"<key_down>,<key_up>,<mouse>,<touch>,<scroll>,<accel>"`
+    /// per real Chrome 147 capture order.
     pub fn as_field7(&self) -> String {
         format!(
             "{},{},{},{},{},{}",
-            self.key_count,
-            self.key_count, // second slot — same value in observed captures
+            self.key_down_count,
+            self.key_up_count,
             self.mouse_count,
             self.touch_count,
             self.scroll_count,
@@ -221,19 +236,35 @@ mod tests {
 
     #[test]
     fn counter_tuple_first_post_shape() {
-        // Real Chrome 147 capture #1: "16,0,0,0,0,0". 6 slots.
-        let mut c = CounterTuple::default();
-        c.key_count = 16;
+        // Real Chrome 147 capture #1: "16,0,0,0,0,0". 6 slots — typing
+        // 16 keys without releasing (sticky-key hold or window focus
+        // lost between down and up).
+        let c = CounterTuple {
+            key_down_count: 16,
+            ..Default::default()
+        };
         let s = c.as_field7();
         assert_eq!(s.split(',').count(), 6);
-        assert!(s.starts_with("16,"), "expected first slot = 16, got {s}");
+        assert_eq!(s, "16,0,0,0,0,0");
     }
 
-    // NOTE: Capture #2 was "5,18,0,0,1,323" — open question: does
-    // slot 0 = key_count or some other counter, and slot 1 = mouse?
-    // The current as_field7() emits slot 0 = key_count twice (a
-    // wrong-but-bounded placeholder); A3 will pin semantics by
-    // reading xiaoweigege's akamai2.0.js source for the v2 format.
+    #[test]
+    fn counter_tuple_capture_2_shape() {
+        // Real Chrome 147 capture #2: "5,18,0,0,1,323". W2.4 — first
+        // two slots are distinct counters, not duplicated key_count.
+        // 5 keys down, 18 keys up (long-hold release flurry), 1 scroll,
+        // 323 accel events.
+        let c = CounterTuple {
+            key_down_count: 5,
+            key_up_count: 18,
+            mouse_count: 0,
+            touch_count: 0,
+            scroll_count: 1,
+            accel_count: 323,
+            ..Default::default()
+        };
+        assert_eq!(c.as_field7(), "5,18,0,0,1,323");
+    }
 
     #[test]
     fn end_to_end_build_produces_bestbuy_envelope() {
