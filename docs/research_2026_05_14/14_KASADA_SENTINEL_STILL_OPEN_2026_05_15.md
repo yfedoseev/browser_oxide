@@ -200,6 +200,73 @@ between these two regimes*, which determines whether canadagoose is a
 targeted fix or a multi-day program. That is the single most valuable
 diagnostic remaining and it is now scaffolded + running.
 
+## DECISIVE RESULT — clean production probe (2026-05-15)
+
+`kasada_sentinel_identity_clean` (Object.prototype sentinel trap, **NO
+Function wrapper** — §9.3-safe, production-representative) against live
+canadagoose:
+
+```
+tags: 80          (Kasada tagged 80 of its own VM closures)
+miss: 80
+missTaggedElsewhere: 0   (ZERO missed objects were ever tagged)
+tagSample src:  "function(){var p=t();p.V[3]=arguments;for(var f=0;
+                 f<arguments.length;f++)p.V[f+4…"   ← Kasada VM trampolines
+missSample src: slice/concat/apply/floor/createElement/appendChild
+                "[native code]"  +  "function anonymous(\n){return…"
+```
+
+**Every sentinel MISS is a legitimate native built-in** (`slice`,
+`concat`, `apply`, `floor`, `createElement`, `appendChild`) plus
+`new Function()` results. That is **correct, expected behavior**:
+Kasada's call opcodes (18/26) do `if (l[sentinel] && l[sentinel].I===l)`
+to decide *"is `l` one of my trampolined VM closures (tagged) or a real
+native function (untagged) I should call directly?"*. Reading
+`slice[sentinel] === undefined` and branching to "native call" is
+exactly what the VM is supposed to do — and it happens identically in
+real Chrome.
+
+`missTaggedElsewhere: 0` + 80 healthy tags means **our engine does NOT
+lose tagged-closure identity in production.** The earlier 60/60
+`everTaggedId:-1` result was 100% the `kasada_vm_dispatcher_trace`
+Function-wrapper artifact (the §9.3 caveat, now empirically confirmed).
+
+### Regime determination: it is Regime 2 (cascading value divergence)
+
+Per the two-root-cause model above, the clean probe shows **no
+lost-identity miss** → **Regime 2**. The Kasada VM *executes correctly*
+in our engine (80 closures created, tagged, dispatched). canadagoose
+still returns **429** (captured: `reload response headers (429)` +
+`ips.js` served) because the **fingerprint + behavioral signals the VM
+collects score as bot** — not because of any JS crash, missing API, or
+identity loss.
+
+**This eliminates the "multi-day VM emulation" framing for
+canadagoose/hyatt/realtor.** They do not need W4.5 VM reimplementation.
+They need fingerprint-divergence closure. The single known concrete
+divergence is the **AudioContext hash (`140.05` ours vs `~124.04`
+Chrome)** — a DynamicsCompressor byte-parity gap. Other candidate
+inputs: behavioral (sigma-lognormal is wired but Kasada scores 2nd-
+derivative jerk distribution), `performance.now` jitter, WebGL
+precision readback, and TLS/H2 (already byte-perfect per prior work).
+
+### Revised next-session priority (much higher ROI than VM emulation)
+
+1. **Audio FP byte-parity** — get the OfflineAudioContext hash to
+   Chrome 147's exact value. Our `crates/canvas/src/audio.rs` already
+   ports Blink's DynamicsCompressorKernel; the 140 vs 124 delta is a
+   coefficient/rounding gap, not a missing feature. Closing this is
+   the highest-probability single lever for all 3 Kasada sites and is
+   *days, not weeks* — far cheaper than VM emulation.
+2. Behavioral jerk-profile audit (Kasada scores the 2nd derivative of
+   the sigma-lognormal path; verify our sampling preserves it).
+3. Re-sweep canadagoose after each — the 429→200 flip is the verifier.
+
+This is the most important finding of the 2026-05-15 session: the
+Kasada universal block is a *fingerprint-parity* problem (tractable,
+days) — NOT a *VM-emulation* problem (intractable, weeks). The prior
+handoffs' "multi-day VM-emulation" framing is **retired**.
+
 ## What IS shipped (so this doc isn't misread as "nothing works")
 
 W1.1–W1.10, W2.6/2.7/2.8, Akamai `_abck` parser + dynamic tenant +
