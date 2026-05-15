@@ -1513,14 +1513,17 @@
     Object.defineProperty(Document.prototype, 'webkitHidden', { get() { return false; }, enumerable: false, configurable: true });
 
     if (globalThis.navigator) {
-        // Match Chrome's exact descriptor for webdriver: false, non-enumerable.
-        // (All other navigator.* getters are installed once above, reading
-        // lazily from the stealth profile — do NOT re-install them here.
-        // A duplicate _defNav('languages', () => _pJson(...)) returned a
-        // fresh unfrozen array each call, breaking nav_languages_is_frozen.)
+        // Match Chrome 148's exact descriptor for webdriver:
+        //   { get: ƒ, set: undefined, enumerable: true, configurable: true }
+        // BotD detector #16 (and Castle, per docs/research_2026_05_14/
+        // 11_DETECTION_SIGNAL_CATALOG_2026_05_14.md T1.4) verifies the
+        // enumerable bit specifically — the older `enumerable: false`
+        // here was a divergence. Real Chrome's webdriver getter is
+        // owned-on-prototype and IS enumerable (visible to for..in on
+        // Navigator.prototype).
         Object.defineProperty(_NavProto, 'webdriver', {
             get: () => false,
-            enumerable: false,
+            enumerable: true,
             configurable: true
         });
 
