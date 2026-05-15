@@ -8097,3 +8097,56 @@ async fn kasada_proxy_stack_leak_probe() {
     eprintln!("kasada-proxy-stack-leak: {result}");
     assert!(!result.starts_with("ERROR:"));
 }
+
+/// DECISIVE: does Kasada's `spd` probe see real numbers or "n/a" in
+/// PRODUCTION (no Function-wrapper instrumentation)? The captured
+/// error-blob showed spd = all "n/a" but that blob came from the
+/// Fn-wrapper trace test (§9.3 artifact). spd feeds the dominant
+/// 30-40% browser-fingerprint weight of Kasada's /tl ML score; all-
+/// "n/a" is a glaring bot tell. This test reads exactly what the spd
+/// probe reads — iframe.contentWindow.screen.{availWidth,availHeight,
+/// width,height} + iframe.contentWindow.{innerWidth,innerHeight,
+/// outerWidth,outerHeight} — with NO wrapper, mirroring the probe's
+/// try/catch→"n/a" shape. Real numbers ⇒ spd-n/a was a wrapper
+/// artifact (not a production issue). "n/a" ⇒ a real, fixable,
+/// non-tooling-gated lever on the Kasada score.
+#[tokio::test]
+async fn kasada_spd_probe_production_clean() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+          const iframe = document.createElement('iframe');
+          iframe.srcdoc = '';
+          document.body.appendChild(iframe);
+          const w = iframe.contentWindow;
+          const rd = (f) => { try { const v = f(); return (v===undefined||v===null||Number.isNaN(v))?"n/a":v; } catch(e){ return "n/a"; } };
+          const spd = {
+            availWidth:  rd(()=>w.screen.availWidth),
+            availHeight: rd(()=>w.screen.availHeight),
+            width:       rd(()=>w.screen.width),
+            height:      rd(()=>w.screen.height),
+            innerWidth:  rd(()=>w.innerWidth),
+            innerHeight: rd(()=>w.innerHeight),
+            outerWidth:  rd(()=>w.outerWidth),
+            outerHeight: rd(()=>w.outerHeight),
+          };
+          return JSON.stringify(spd);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("kasada-spd-production-clean: {result}");
+    assert!(!result.starts_with("ERROR:"));
+    // The load-bearing assertion: NONE of the 8 spd fields may be
+    // "n/a" in production. Any "n/a" is a real Kasada-ML fingerprint
+    // divergence (not a wrapper artifact) and must be fixed.
+    assert!(
+        !result.contains("\"n/a\""),
+        "spd probe returns n/a in PRODUCTION — real Kasada-ML fingerprint divergence: {result}"
+    );
+}
