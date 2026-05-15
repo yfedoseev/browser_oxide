@@ -257,6 +257,10 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
     runtime.op_state().borrow_mut().put(TimerState::new());
     runtime.op_state().borrow_mut().put(FetchState::new(None));
     runtime.op_state().borrow_mut().put(CanvasState::new());
+    // PerfState is required by perf_extension's ops. Without it,
+    // worker code that calls `performance.now()` or similar panics
+    // inside gotham_state with "required type ... is not present".
+    runtime.op_state().borrow_mut().put(PerfState::default());
     // Inject DomState even in workers (stubbed) to hold the stealth profile
     // so op_has_stealth_profile() works in the worker isolate.
     let mut dom_state = DomState::new(dom::Dom::new());
