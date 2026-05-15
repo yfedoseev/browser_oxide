@@ -5499,8 +5499,11 @@
     // throws `Cannot read properties of undefined (reading '…')` and
     // the resulting error fingerprint is the "headless" signal.
     // Spec: https://w3c.github.io/media-capabilities/
+    // Gated to non-Gecko UAs: Firefox's MediaCapabilities returns
+    // {supported: true} for fewer codec families and exact shape match
+    // is hard to fake. Pre-v3 firefox passes without this surface.
     // ================================================================
-    {
+    if (!/Firefox\/|Gecko\/20100101/.test(_p("user_agent", ""))) {
         const _supportedDecodingTypes = new Set([
             "file", "media-source", "webrtc"
         ]);
@@ -5594,13 +5597,16 @@
     }
 
     // ================================================================
-    // HTMLVideoElement.prototype.requestVideoFrameCallback — Chrome-only
-    // method (Chrome 83+, Safari 16+, Firefox 132+). Kasada and CreepJS
-    // probe for it as a strong "real Chrome" signal. Without it, the
-    // probe throws on `typeof v.requestVideoFrameCallback === "function"`.
-    // Spec: https://wicg.github.io/video-rvfc/
+    // HTMLVideoElement.prototype.requestVideoFrameCallback — Chrome/Safari.
+    // Firefox added it in 132 but with subtly different metadata shape.
+    // Adding our Chrome-shaped impl to a Firefox profile creates a tell
+    // detected by PerimeterX (firefox v3 regressed wayfair). Gate to
+    // non-Gecko profiles. Spec: https://wicg.github.io/video-rvfc/
     // ================================================================
-    if (typeof globalThis.HTMLVideoElement !== "undefined" &&
+    const _isGeckoUA = /Firefox\/|Gecko\/20100101/.test(
+        _p("user_agent", "")
+    );
+    if (!_isGeckoUA && typeof globalThis.HTMLVideoElement !== "undefined" &&
         typeof globalThis.HTMLVideoElement.prototype.requestVideoFrameCallback !== "function") {
         let _rvfcSeq = 1;
         const _pendingRvfc = new Map();
