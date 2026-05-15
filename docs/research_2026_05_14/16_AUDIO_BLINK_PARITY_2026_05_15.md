@@ -118,6 +118,46 @@ still curve-fit, not Blink-exact. Honest status: improves the Kasada
 audio signal, does not by itself guarantee the canadagoose 429→200
 flip (re-sweep is the verifier).
 
+## Cross-cutting leverage (discovered 2026-05-15)
+
+Audio FP parity is load-bearing for **two** vendor families, not one:
+
+- **Kasada** (canadagoose/hyatt/realtor) — Regime-2 fingerprint
+  divergence; audio is the known concrete input.
+- **DataDome `boring_challenge`** (etsy/tripadvisor/wsj/reuters) —
+  `crates/browser/src/datadome_handler.rs` (W3.8) already has the
+  interstitial detector+parser (`detect_datadome_interstitial`,
+  tested against a real reuters `dd={…}` body) but its own header
+  comment states the solver needs "Picasso canvas + audio
+  fingerprint." Same audio kernel.
+
+So the single `audio.rs` makeup-gain fix has **up to 7-site leverage**
+(3 Kasada + 4 DataDome-interstitial), making it the highest-ROI lever
+in the entire remaining program — strictly ahead of W4.2/W3.8 in
+ordering because both depend on audio FP being Chrome-correct first.
+
+### W3.8 precise status (so it isn't re-scoped from scratch)
+
+- `detect_datadome_interstitial(body) -> Option<DdInterstitial>`:
+  **DONE + unit-tested** (reuters real body) — parses rt/cid/hsh/b/s/
+  e/host/cookie from the `var dd={…}` literal.
+- **NOT wired**: `pub mod datadome_handler;` exists in lib.rs but
+  `detect_datadome_interstitial` is never called in the navigation
+  path. Wiring it (call on 403 + <2 KB body + contains
+  `captcha-delivery.com`) is ~20 LOC and gives a clear
+  "DataDome-interstitial" classification instead of the current
+  CSP-refusal symptom.
+- **Solver missing**: needs (a) Chrome-correct audio+canvas FP [this
+  doc], (b) eval the `i.js`/`c.js` challenge body, (c) round-trip the
+  `datadome=` cookie. ~150 LOC AFTER audio parity lands.
+- **yelp is NOT in this class**: research `03_DATADOME.md` shows
+  yelp returns `rt:'c', t:'bv'` = blacklist-verified IP hard-ban
+  ("no solve helps"). Per PLAN §5.2 + memory [[proxy_not_the_problem]]
+  this requires a Playwright-MCP A/B from the same IP to decide
+  engine-vs-operational; if MCP also fails yelp, it is operational
+  (out of engine scope, like douyin) — its pre-W1 iphone pass was a
+  probabilistic DataDome non-challenge, not a stable capability.
+
 ## Sources
 - Chromium Blink `DynamicsCompressorKernel.cpp`
   (chromium.googlesource.com/chromium/blink, Source/platform/audio/)
