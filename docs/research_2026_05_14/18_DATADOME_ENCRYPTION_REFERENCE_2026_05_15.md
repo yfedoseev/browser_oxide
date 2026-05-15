@@ -142,5 +142,51 @@ _encodePayload(byteArr, salt, enc):
 
 Steps 2-5 are pure deterministic Rust + tests (no network, no V8) —
 ideal loop-iteration units. Step 6 is the integration + the signal-map
-sub-problem. 4-site union impact (etsy/tripadvisor/wsj/reuters); yelp
-excluded (`t:'bv'` IP hard-ban).
+sub-problem.
+
+## SCOPE CORRECTION (2026-05-15, from 03_DATADOME §4.5 + live captures)
+
+The earlier "4-site (etsy/tripadvisor/wsj/reuters)" framing is WRONG.
+Per §4.5 and the 2026-05-14 live `curl -I` captures:
+
+| Site | Status | Challenge type | W3.8-interstitial applies? |
+|---|---|---|---|
+| **etsy.com** | 403 | `rt:'i'` interstitial | **YES** |
+| **tripadvisor.com** | 403 | `rt:'i'` interstitial | **YES** |
+| wsj.com | 401 | slider, `x-dd-b:1` | NO — slider path |
+| reuters.com | 401 | slider, `x-dd-b:1` | NO — slider path |
+| yelp.com | 403 | slider, IP-banned | NO — `t:'bv'` |
+| leboncoin.fr | 200 | silent pass | n/a |
+
+So the byte-parity-verified interstitial encoder targets **2 sites
+(etsy, tripadvisor)**. wsj/reuters need the *slider* path
+(`/captcha/check` + 31 movement features over `_initialCoordsList` +
+WASM `boring_challenge` + hash-chain) — a strictly harder, separate
+solver. Steps 2-5 (encoder) were still correct and necessary; the
+union-impact claim is corrected to **2 sites**, not 4.
+
+### Interstitial path ALSO needs the WASM `boring_challenge`
+
+§4.5: "WASM `boring_challenge` result (interstitial path only)". The
+interstitial submission includes a result computed by DataDome's own
+WASM blob (Picasso canvas + audio FP), fetched+instantiated by
+`ct.captcha-delivery.com/i.js`. **Good news**: our engine has real V8
+WebAssembly (verified via `kasada_wasm_audit` this session —
+`WebAssembly.{compile,instantiate,Module,Memory,Global,Table,Instance}`
+all functional; `window_bootstrap.js` adds the `*Streaming` wrappers).
+So the tractable path is to **execute `i.js` in our context** (it
+fetches + runs the boring_challenge WASM natively — we do NOT
+reimplement the WASM), capture its output, feed it + the §3 signal map
+into the byte-parity-verified `DdEncryptor`, POST to
+`<host>/interstitial/`, and consume the `{"cookie":...,"view":
+"redirect","url":...}` response. The audio FP (Chrome-parity, fixed
+this session) and canvas feed the boring_challenge — another reason
+the audio fix was load-bearing cross-vendor.
+
+Net: W3.8 interstitial = **2 sites, fully tractable in-engine** (no
+external solver, no API): crypto done+verified, WASM native, signal
+map documented (§3), i.js executes in our real JS+WASM context. The
+remaining sub-problems are (a) the daily-rotated 6-char wire-key dict
+for the signal map encryption (live tags.js/i.js capture or AST), and
+(b) `datadome_handler` HTTP wiring. yelp excluded (`t:'bv'` IP
+hard-ban); wsj/reuters are a separate slider-path task.
