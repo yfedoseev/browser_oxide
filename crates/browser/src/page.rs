@@ -1117,6 +1117,21 @@ impl Page {
             .map(|(_, v)| v.clone())
             .collect();
         let html = resp.text();
+        // W3.8 — surface DataDome interstitials as a structured signal.
+        // The `var dd={…}` 403 body (etsy/tripadvisor/wsj/reuters) was
+        // previously only visible as a downstream CSP-refusal symptom
+        // (we mis-route the document-level challenge as a child iframe
+        // and frame-src correctly refuses geo.captcha-delivery.com).
+        // Detection is wired here (log-only, no flow change yet —
+        // matches the vendor-detect convention above); the solver needs
+        // Chrome-correct audio+canvas FP (see docs/research_2026_05_14/
+        // 16_AUDIO_BLINK_PARITY) before it can round-trip the cookie.
+        if let Some(dd) = crate::datadome_handler::detect_datadome_interstitial(&html) {
+            eprintln!(
+                "[vendor-detect] datadome-interstitial rt={} host={} cid={} on {}",
+                dd.rt, dd.host, dd.cid, resp.url
+            );
+        }
         let resp_url = resp.url.clone();
         let timings = resp.timings.clone();
         let mut page = Self::navigate_loop_internal(

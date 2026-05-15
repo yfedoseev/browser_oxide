@@ -118,6 +118,29 @@ still curve-fit, not Blink-exact. Honest status: improves the Kasada
 audio signal, does not by itself guarantee the canadagoose 429→200
 flip (re-sweep is the verifier).
 
+## Verifier result (2026-05-15): audio necessary, NOT sufficient
+
+`kasada_canadagoose_diagnostic` re-run with the Chrome-parity audio fix
+(123.97) committed: canadagoose **still returns 429**. The audio FP was
+a real divergence (now closed) but is not the sole Regime-2 input.
+
+Incidental finding: `[net] H2 connection failed for www.canadagoose.com:
+ALPN negotiated http/1.1, not h2`. This is a **symptom, not a cause** —
+our ALPN offer is correct (`\x02h2\x08http/1.1`, h2-first, identical to
+Chrome) and h2 works on the other 117 chrome sites. Kasada's edge
+serves the *challenge* response over http/1.1 once it has already
+decided to challenge (the 429 precedes/accompanies the h1 downgrade in
+the trace). A real Chrome that passes Kasada gets h2 because it is not
+flagged. Do not chase the h2 downgrade as the root cause.
+
+⇒ Next: the remaining Regime-2 input(s) must be identified. The cheapest
+discriminator is the **Kasada error/reporting blob** — Kasada POSTs an
+encoded payload to `reporting.cdndex.io/error` (or the `/tl` failure
+path) that names which environment probe scored as non-Chrome. The
+`kasada_error_blob_capture` test captures it. Decoding it converts
+"some Regime-2 input" into "probe X failed" — the same discriminator
+strategy that worked for the sentinel question.
+
 ## Cross-cutting leverage (discovered 2026-05-15)
 
 Audio FP parity is load-bearing for **two** vendor families, not one:
