@@ -87,14 +87,118 @@ realistic resolutions are:
   into "object X at site Y loses identity", which is then a targeted
   JS fix.
 
-## Recommended next experiment (for the next session)
+## REFINED FINDING (2026-05-15, live canadagoose trace re-run)
 
-Extend `kasada_vm_dispatcher_trace` to, at handler-8 (write) and
-handler-10 (read) invocations whose key === the sentinel string,
-record `Object.prototype.toString.call(target)`, a WeakRef identity
-tag, and the realm marker. Then a single canadagoose run yields the
-exact object whose identity we fail to preserve. That is the load-
-bearing unknown; everything else in the W-plan is already shipped.
+The eval-source interceptor added this session captured **0** entries:
+`sentinel_evals: []`. The sentinel name is **not an eval literal** — the
+Kasada VM reconstructs `unjzomuybtbyyhwwkdpkxomylnab` from its XOR'd
+bytecode string table, so source-grepping the eval text can never see
+it. That approach is a dead end; do not pursue it.
+
+The real signal is in the **throwing handler bodies** (handlers 18 & 26,
+the closure-creation opcodes):
+
+```js
+h18: function(n,e,a,v,i,r){
+  var o=e(n), l=e(n), _=e(n), h=r[4];          // h = the sentinel string
+  if (l[h] && l[h].I === l) {                   // <-- THROWS: l is undefined
+    n.V = [ l[h].E,                             // entrypoint
+            { w:o, S:l, V:n.V, h:[], Q:l[h].Q,  // new scope frame
+              k: n.K?.get(l[h].k) },
+            void 0,
+            function(){return arguments}.apply(void 0,_) ];
+    ...
+h26: function(n,e,a,v,i,r){
+  e(n)[e(n)]=e(n);                              // member store
+  var o=e(n), l=e(n), _=e(n), h=r[4];
+  if (l[h] && l[h].I === l) { ...same shape... }
+```
+
+`r[4]` is the sentinel string. `l = e(n)` is the **callee function**
+the VM is about to invoke. `l[sentinel]` is Kasada's per-function
+*closure-identity record*: `{ I: l (self-ref), E: entrypoint,
+Q: scope-chain, k: key }`. The opcode reads it to build the call
+frame. The throw `Cannot read properties of undefined (reading
+'unjzomuy…')` means **`l` itself is `undefined`** — an upstream opcode
+that should have produced the VM function reference produced
+`undefined` in our engine.
+
+### Sharper hypothesis (actionable for next session)
+
+The VM's *first* function must be tagged by Kasada's bootstrap:
+`bootstrapFn[sentinel] = { I: bootstrapFn, E:…, Q:…, k:… }`. If
+`bootstrapFn` is a **global we return as a fresh wrapper per access**
+(a masked native fn, a getter-returned bound fn, a Proxy-trapped fn),
+then Kasada tags instance A, the VM later re-fetches the global and
+gets instance B, `B[sentinel]` is `undefined`, and the whole closure
+chain collapses → `l` is `undefined` at the first call opcode.
+
+W1.1 fixed the *iframe realm* case. The generalization: audit **every
+global function reachable from Kasada's bootstrap that our engine
+hands out non-identity-stable**. Prime suspects, in order:
+1. `_maskFunction`-wrapped globals — does the wrapper re-create per
+   read, or is it a stable own value? (It defines `toString`/name on
+   the *original* fn, so identity should be stable — verify the fn
+   isn't itself behind a getter.)
+2. Any `Object.defineProperty(…, { get(){ return <fresh fn> } })` on
+   a global Kasada touches (`eval`, `Function`, `setTimeout`,
+   `Object`, `Array`, `Promise`, `Reflect`, DOM ctors).
+3. Indirect-vs-direct `eval` returning different function identities.
+
+### Concrete next experiment
+
+Add a **global sentinel-property trap** to the trace init script
+(before ips.js):
+
+```js
+let _SENT='unjzomuybtbyyhwwkdpkxomylnab', _tags=[];
+Object.defineProperty(Object.prototype,_SENT,{
+  configurable:true,
+  set(v){ _tags.push({op:'set',
+           recv:Object.prototype.toString.call(this),
+           ctor:this&&this.constructor&&this.constructor.name});
+          Object.defineProperty(this,_SENT,
+            {value:v,writable:true,configurable:true}); },
+  get(){ return undefined; }
+});
+globalThis.__sentinelTags=_tags;
+```
+
+Dump `__sentinelTags`. Every `set` names the object Kasada tags.
+Cross-reference with the throw: the tagged object whose identity we
+fail to return on re-fetch is the bug. This is a *property* trap (the
+sentinel string IS known at runtime) and unlike the eval interceptor
+it WILL fire, because Kasada assigns `obj[sentinel]=…` via normal
+member-store, which goes through `Object.prototype`'s setter when the
+object has no own `sentinel`.
+
+## Two-root-cause model (important for scoping the fix)
+
+`l = e(n)` decodes a VM operand (register/constant-pool index). `l`
+being `undefined` has exactly two possible origins:
+
+1. **Lost object identity** — Kasada tagged function F (instance A);
+   the VM re-fetched F and our engine returned instance B; `B[sentinel]`
+   is absent. Detectable by the sentinel-property trap (a `get` miss
+   with `everTaggedId:-1` on a function). **If the trap shows this, the
+   fix is targeted** (make that one global identity-stable, like W1.1
+   did for the iframe realm).
+
+2. **Cascading value divergence** — an *earlier* fingerprint probe
+   (audio hash, WebGL readback, timing jitter, canvas, perf) returned a
+   value our engine computes differently from Chrome; Kasada's VM
+   branches on it, the register file diverges, and `l` ends up
+   `undefined` with no single lost object. The trap shows **no** miss
+   in this case. Known divergent inputs that could feed this: audio FP
+   `140.05` vs Chrome `~124.04` (multi-day DynamicsCompressor parity),
+   `performance.now` jitter, WebGL precision. **If the trap shows no
+   miss, this is the regime** — and the only resolutions are full VM
+   emulation (W4.5) or byte-perfect probe parity. Both multi-day.
+
+The trap experiment is decisive precisely because it *discriminates
+between these two regimes*, which determines whether canadagoose is a
+targeted fix or a multi-day program. That is the single most valuable
+diagnostic remaining and it is now scaffolded + running.
 
 ## What IS shipped (so this doc isn't misread as "nothing works")
 
