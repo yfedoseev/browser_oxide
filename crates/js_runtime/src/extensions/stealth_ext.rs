@@ -145,12 +145,43 @@ pub fn op_is_secure_context(#[state] state: &StealthState) -> bool {
     state.is_secure_context
 }
 
+/// Generate a humanlike sigma-lognormal mouse trajectory from
+/// `(from_x, from_y)` to `(to_x, to_y)` with target width `target_w`
+/// (drives Fitts's-Law movement time). Returns a JSON array of
+/// `{t_ms, x, y}` points sampled at ~125 Hz (8 ms cadence).
+///
+/// Used by `humanize.js` to pre-populate the synthetic mouse event
+/// buffer (`__akamai_events.mouse`) with statistically correct
+/// trajectories before any anti-bot script reads it. The Rust
+/// implementation in `crates/stealth/src/behavior.rs` is a real
+/// Plamondon Sigma-Lognormal generator (2-7 strokes, per-stroke σ/μ
+/// from BeCAPTCHA-Mouse-validated distributions, pink-tremor noise)
+/// — strictly stronger than the JS-side triangular approximation it
+/// replaces. Defeats the RF mouse classifier used downstream by
+/// HUMAN/PerimeterX, Kasada (sensor VM), DataDome (slider scorer),
+/// and Akamai (sensor_data field 65).
+#[op2]
+#[string]
+pub fn op_behavior_mouse_trajectory(
+    from_x: f32,
+    from_y: f32,
+    to_x: f32,
+    to_y: f32,
+    target_w: f32,
+) -> String {
+    let profile = stealth::behavior::BehaviorProfile::default();
+    let points =
+        stealth::behavior::mouse_trajectory((from_x, from_y), (to_x, to_y), target_w, &profile);
+    serde_json::to_string(&points).unwrap_or_else(|_| "[]".to_string())
+}
+
 deno_core::extension!(
     stealth_extension,
     ops = [
         op_get_profile_value,
         op_has_stealth_profile,
         op_cross_origin_isolated,
-        op_is_secure_context
+        op_is_secure_context,
+        op_behavior_mouse_trajectory,
     ],
 );

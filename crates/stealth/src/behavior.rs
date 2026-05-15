@@ -132,7 +132,7 @@ impl BehaviorProfile {
 // ================================================================
 
 /// One sample point on a humanized mouse trajectory.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MousePoint {
     pub t_ms: f32,
     pub x: f32,
