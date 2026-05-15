@@ -363,10 +363,39 @@ mod tests {
         let b = mk();
         assert_eq!(a, b, "encryptor must be deterministic for a pinned salt");
         assert!(!a.is_empty());
-        // 'xt1' skipped ⇒ only 3 signals encoded; sanity on length
-        // (3 signals → buffer grows; payload is base64-ish, len > 0).
-        assert!(a.len() >= 8, "payload implausibly short: {a:?}");
         // Custom-base64 output is ASCII printable.
         assert!(a.bytes().all(|c| (45..=122).contains(&c)));
+    }
+
+    #[test]
+    fn byte_parity_vs_glizzykingdreko_node_reference() {
+        // Fixture captured 2026-05-15 from a one-off run of the
+        // authoritative Node reference
+        // (glizzykingdreko/datadome-encryption src/encryption.js,
+        // challengeType='interstitial') with a PINNED salt so the
+        // result is fully deterministic:
+        //
+        //   const e = new DataDomeEncryptor(
+        //       "14D062F60A4BDE8CE8647DFC720349", "test-cid-abc",
+        //       424242, 'interstitial');
+        //   e.add("iaG6RD","1.16.2"); e.add("PUuTxz",0);
+        //   e.add("flagk",true);      e.add("xt1",9);  // skipped
+        //   e.encrypt()  ->  the EXPECTED string below (len 58)
+        //
+        // This is the load-bearing correctness test: byte-exact match
+        // with the reference proves our port (primitives + PRNG +
+        // buffer + payload) is faithful end-to-end.
+        const EXPECTED: &str = "r-aCk21w_gy22p95upHvmSEliaBlfgcgzBeEwuIr3dk0D6HtzqBFgBcQtE";
+        let mut e =
+            DdEncryptor::new_interstitial("14D062F60A4BDE8CE8647DFC720349", "test-cid-abc", 424242);
+        e.add("iaG6RD", DdValue::Str("1.16.2".into()));
+        e.add("PUuTxz", DdValue::Int(0));
+        e.add("flagk", DdValue::Bool(true));
+        e.add("xt1", DdValue::Int(9));
+        let got = e.finish();
+        assert_eq!(
+            got, EXPECTED,
+            "Rust port diverges from glizzykingdreko Node reference"
+        );
     }
 }
