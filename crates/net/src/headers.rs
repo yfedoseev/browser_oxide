@@ -56,14 +56,15 @@ pub fn nav_headers_fetch(
 /// (those only appear on follow-up requests after the server
 /// advertises `Accept-CH` in a response).
 ///
-/// Empirical Chrome 146 order — captured from the developer's
-/// machine via `tls.peet.ws/api/all` decoded HEADERS frame:
-/// 1. upgrade-insecure-requests
-/// 2. user-agent
-/// 3. accept
-/// 4. sec-ch-ua
-/// 5. sec-ch-ua-mobile
-/// 6. sec-ch-ua-platform
+/// Canonical Chrome 133/136/142 order per curl-impersonate signatures
+/// (`tests/signatures/chrome_142.0.7444.176.yaml` and predecessors —
+/// cross-version consistent for at least Chrome 133+):
+/// 1. sec-ch-ua
+/// 2. sec-ch-ua-mobile
+/// 3. sec-ch-ua-platform
+/// 4. upgrade-insecure-requests
+/// 5. user-agent
+/// 6. accept
 /// 7. sec-fetch-site
 /// 8. sec-fetch-mode
 /// 9. sec-fetch-user
@@ -72,11 +73,8 @@ pub fn nav_headers_fetch(
 /// 12. accept-language
 /// 13. priority
 ///
-/// This order differs from a common misconception (documented
-/// elsewhere as "sec-ch-ua first") — actual Chrome puts the
-/// `upgrade-insecure-requests` / `user-agent` / `accept` triplet
-/// before the `sec-ch-ua` group. Earlier in this session we had the
-/// order reversed; the live capture corrected us.
+/// High-entropy Client Hints (when `Accept-CH`-upgraded) splice in
+/// between sec-ch-ua-platform and upgrade-insecure-requests.
 pub fn chrome_headers(profile: &StealthProfile) -> Vec<(String, String)> {
     chrome_headers_impl(profile, false)
 }
@@ -230,29 +228,19 @@ fn chrome_headers_impl(
 ) -> Vec<(String, String)> {
     let mut headers = Vec::with_capacity(if include_high_entropy { 20 } else { 13 });
 
-    // 1. upgrade-insecure-requests
-    headers.push(("upgrade-insecure-requests".to_string(), "1".to_string()));
-
-    // 2. user-agent
-    headers.push(("user-agent".to_string(), profile.user_agent.clone()));
-
-    // 3. accept
-    headers.push((
-        "accept".to_string(),
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7".to_string(),
-    ));
-
-    // 4. sec-ch-ua (Client Hints, low-entropy — always sent)
+    // 1. sec-ch-ua (Client Hints, low-entropy — always sent, FIRST per Chrome 133+)
     let sec_ch_ua = build_sec_ch_ua(profile);
     headers.push(("sec-ch-ua".to_string(), sec_ch_ua.clone()));
     let is_mobile = matches!(
         profile.device_class,
         DeviceClass::MobileAndroid | DeviceClass::MobileIOS
     );
+    // 2. sec-ch-ua-mobile
     headers.push((
         "sec-ch-ua-mobile".to_string(),
         if is_mobile { "?1" } else { "?0" }.to_string(),
     ));
+    // 3. sec-ch-ua-platform
     headers.push((
         "sec-ch-ua-platform".to_string(),
         format!("\"{}\"", profile.os_name),
@@ -309,7 +297,19 @@ fn chrome_headers_impl(
         headers.push(("sec-ch-device-memory".to_string(), format!("{dm}")));
     }
 
-    // 5. sec-fetch headers
+    // 4. upgrade-insecure-requests
+    headers.push(("upgrade-insecure-requests".to_string(), "1".to_string()));
+
+    // 5. user-agent
+    headers.push(("user-agent".to_string(), profile.user_agent.clone()));
+
+    // 6. accept
+    headers.push((
+        "accept".to_string(),
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7".to_string(),
+    ));
+
+    // 7. sec-fetch headers
     headers.push(("sec-fetch-site".to_string(), "none".to_string()));
     headers.push(("sec-fetch-mode".to_string(), "navigate".to_string()));
     headers.push(("sec-fetch-user".to_string(), "?1".to_string()));
@@ -625,26 +625,40 @@ fn safari_headers_impl(
     profile: &StealthProfile,
     referer: Option<&str>,
 ) -> Vec<(String, String)> {
-    // Real Safari iOS header order on a top-level navigation:
-    //   accept, accept-encoding, user-agent, accept-language, [referer]
+    // Canonical Safari iOS 18.4 header order per
+    // curl-impersonate `tests/signatures/safari_18.4_iOS.yaml`:
+    //   1. sec-fetch-dest: document
+    //   2. user-agent
+    //   3. accept
+    //   4. sec-fetch-site: none
+    //   5. sec-fetch-mode: navigate
+    //   6. accept-language
+    //   7. priority: u=0, i
+    //   8. accept-encoding
     // (Host is a pseudo-header on h2; Cookie is added by the HttpClient layer.)
-    let mut headers = Vec::with_capacity(6);
+    // Note: Safari DOES send sec-fetch-{dest,site,mode} on top-level
+    // navigations (since 16.4) but NOT sec-fetch-user. zstd absent (iOS 18
+    // hasn't adopted it; iOS 26 ships it).
+    let mut headers = Vec::with_capacity(9);
 
+    headers.push(("sec-fetch-dest".to_string(), "document".to_string()));
+    headers.push(("user-agent".to_string(), profile.user_agent.clone()));
     headers.push((
         "accept".to_string(),
         // Safari's specific Accept ordering — no avif/webp/apng, no signed-exchange.
-        // Per real iOS 18 capture from lexiforest signature.
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".to_string(),
     ));
-    headers.push((
-        "accept-encoding".to_string(),
-        // Safari has NOT adopted zstd as of iOS 18.4. gzip + deflate + br only.
-        "gzip, deflate, br".to_string(),
-    ));
-    headers.push(("user-agent".to_string(), profile.user_agent.clone()));
+    let site = if referer.is_some() { "same-origin" } else { "none" };
+    headers.push(("sec-fetch-site".to_string(), site.to_string()));
+    headers.push(("sec-fetch-mode".to_string(), "navigate".to_string()));
     headers.push((
         "accept-language".to_string(),
         build_safari_accept_language(&profile.languages),
+    ));
+    headers.push(("priority".to_string(), "u=0, i".to_string()));
+    headers.push((
+        "accept-encoding".to_string(),
+        "gzip, deflate, br".to_string(),
     ));
     if let Some(r) = referer {
         headers.push(("referer".to_string(), r.to_string()));

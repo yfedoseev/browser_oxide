@@ -271,9 +271,13 @@ mod tests {
     fn test_ja4h_hdr_hash_reference() {
         let profile = stealth::presets::chrome_130_macos();
         let s = nav_ja4h_for(&profile);
-        println!("Computed JA4H: {}", s);
-        // Expected hash from tls.peet.ws capture: 8daaf6152771
-        assert!(s.contains("_0e897bb088aa_"), "JA4H hash mismatch: expected 0e897bb088aa in {s}");
+        // Canonical hash for Chrome 133+ navigation header order
+        // (sec-ch-ua trio FIRST per curl-impersonate
+        // tests/signatures/chrome_142.0.7444.176.yaml).
+        assert!(
+            s.contains("_0c2c1d640f3e_"),
+            "JA4H hash mismatch: expected 0c2c1d640f3e in {s}"
+        );
     }
 
     #[test]
