@@ -1,10 +1,10 @@
 use crate::iframe;
 use crate::script_runner;
 use crate::stylesheet_collector;
+use akamai;
 use dom::Dom;
 use event_loop::{BrowserEventLoop, IdleReason};
 use js_runtime::{runtime::BrowserRuntimeOptions, BrowserJsRuntime};
-use akamai;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -90,10 +90,7 @@ impl V8DeadlineWatcher {
                     deadline.as_millis()
                 );
                 let ok = isolate.terminate_execution();
-                eprintln!(
-                    "[V8DeadlineWatcher] terminate_execution returned {}",
-                    ok
-                );
+                eprintln!("[V8DeadlineWatcher] terminate_execution returned {}", ok);
             }
         });
         Self {
@@ -237,15 +234,12 @@ impl Page {
         // Build a minimal headers map from what we have on the live page.
         // The body+server signal alone is enough for our detector when the
         // orchestrator's inline blob is present (most common case).
-        let mut hdrs: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let mut hdrs: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         // We don't have the response headers here, but the body marker is
         // a strong enough signal — synthesize `server: cloudflare` so our
         // body-fallback path fires. Safe: detect_challenge requires either
         // the canonical header OR (body marker AND server: cloudflare).
-        if body.contains("_cf_chl_opt")
-            || body.contains("/cdn-cgi/challenge-platform/")
-        {
+        if body.contains("_cf_chl_opt") || body.contains("/cdn-cgi/challenge-platform/") {
             hdrs.insert("server".into(), "cloudflare".into());
         }
 
@@ -262,7 +256,10 @@ impl Page {
         // Fast-fail interactive Turnstile — V1 cannot solve it without a
         // captcha service plug-in.
         if !ctx.kind.v1_solvable() {
-            eprintln!("[cloudflare] kind {:?} is not V1-solvable — skipping orchestrator runner", ctx.kind);
+            eprintln!(
+                "[cloudflare] kind {:?} is not V1-solvable — skipping orchestrator runner",
+                ctx.kind
+            );
             return Some(ctx);
         }
 
@@ -323,8 +320,7 @@ impl Page {
         // Drive the event loop in short bursts and check for clearance.
         // 10 s budget total — Managed Challenge typically completes in 2-6 s
         // for a fingerprint-correct browser.
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut cleared = false;
         while std::time::Instant::now() < deadline {
             let _ = self
@@ -348,7 +344,9 @@ impl Page {
                 )
                 .unwrap_or_default();
             if pending.trim() == "1" {
-                eprintln!("[cloudflare] orchestrator queued __pendingNavigation — yielding to outer loop");
+                eprintln!(
+                    "[cloudflare] orchestrator queued __pendingNavigation — yielding to outer loop"
+                );
                 break;
             }
         }
@@ -372,6 +370,26 @@ impl Page {
             Ok(u) => u.host_str().unwrap_or("").to_string(),
             Err(_) => return Ok(akamai::AbckState::Unknown),
         };
+
+        // sec-cpt guard (evidence-backed, homedepot nav-trace
+        // 2026-05-15, doc 20): when the page is an Akamai sec-cpt PoW
+        // interstitial (the `<div id="sec-if-cpt-container">` bundle),
+        // the BMP `sensor_data` flow below POSTs the WRONG payload type
+        // to the sec-cpt verify endpoint — Akamai 201s but never clears
+        // `_abck`, looping forever. The sec-cpt bundle runs its own
+        // challenge JS; our BMP POST only adds rejected, conflicting
+        // traffic. Skip the BMP sensor path here and let the bundle's
+        // own flow be the sole actor. Plain BMP pages (no sec-cpt
+        // container) are unaffected — bestbuy still flips Favorable.
+        {
+            let body = self.content();
+            if body.contains("sec-if-cpt-container") || body.contains("sec-cpt-if") {
+                eprintln!(
+                    "[akamai] sec-cpt interstitial detected for {host} — skipping BMP sensor_data POST (wrong payload for sec-cpt verify endpoint; bundle self-solves)"
+                );
+                return Ok(akamai::AbckState::NeedsSecCpt);
+            }
+        }
 
         // 1. Detect tenant config. Try static registry first (fast path
         //    for known bestbuy / homedepot), then fall back to parsing
@@ -713,9 +731,7 @@ impl Page {
         // `globalThis.__boxide.__documentReadyState = ...` assignments preserve
         // enumerable=false (writable=true, descriptor inherited).
         event_loop
-            .execute_script(
-                "globalThis._boxide.__documentReadyState = 'loading';",
-            )
+            .execute_script("globalThis._boxide.__documentReadyState = 'loading';")
             .ok();
 
         // Fire DOMContentLoaded and load events — many scripts wait for these
@@ -1085,7 +1101,10 @@ impl Page {
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
 
         if resp.status == 498 || resp.status == 403 || resp.status == 429 {
-            eprintln!("[navigate] Initial challenge response headers ({}):", resp.status);
+            eprintln!(
+                "[navigate] Initial challenge response headers ({}):",
+                resp.status
+            );
             for (k, v) in &resp.headers {
                 eprintln!("  {}: {}", k, v);
             }
@@ -1107,9 +1126,11 @@ impl Page {
             eprintln!("[vendor-detect] wbaas on {}", resp.url);
         }
         // Akamai BMP marker: _abck cookie set. Use header parse.
-        if resp.headers.iter().any(|(k, v)| {
-            k.eq_ignore_ascii_case("set-cookie") && v.starts_with("_abck=")
-        }) {
+        if resp
+            .headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("set-cookie") && v.starts_with("_abck="))
+        {
             eprintln!("[vendor-detect] akamai-bmp _abck set on {}", resp.url);
         }
         // Collect response-header CSP value(s) before consuming `resp`.
@@ -1161,7 +1182,9 @@ impl Page {
         )
         .await?;
 
-        page.event_loop().runtime_mut().record_resource_timing(timings);
+        page.event_loop()
+            .runtime_mut()
+            .record_resource_timing(timings);
         Ok(page)
     }
 
@@ -1263,7 +1286,9 @@ impl Page {
 
         let mut current_html = html;
         let mut current_url = resp_url;
-        let mut current_storage: Option<std::collections::HashMap<String, std::collections::HashMap<String, String>>> = None;
+        let mut current_storage: Option<
+            std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+        > = None;
         let mut last_accept_ch_upgrade = accept_ch_upgrade;
         let mut accept_ch_retry_done = false;
 
@@ -1296,26 +1321,38 @@ impl Page {
             .as_deref()
         {
             // Kasada-protected (high-tier).
-            Some(h) if h.ends_with("canadagoose.com")
-                || h.ends_with("hyatt.com")
-                || h.ends_with("ticketmaster.com")
-                || h.ends_with("footlocker.com")
-                || h.ends_with("veve.me") => 45_000,
+            Some(h)
+                if h.ends_with("canadagoose.com")
+                    || h.ends_with("hyatt.com")
+                    || h.ends_with("ticketmaster.com")
+                    || h.ends_with("footlocker.com")
+                    || h.ends_with("veve.me") =>
+            {
+                45_000
+            }
             // SPA shells — heavy React/Vue hydration.
-            Some(h) if h.ends_with("twitter.com")
-                || h.ends_with("x.com")
-                || h.ends_with("hulu.com")
-                || h.ends_with("yandex.ru")
-                || h.ends_with("hm.com")
-                || h.ends_with("khanacademy.org")
-                || h.ends_with("spotify.com") => 90_000,
+            Some(h)
+                if h.ends_with("twitter.com")
+                    || h.ends_with("x.com")
+                    || h.ends_with("hulu.com")
+                    || h.ends_with("yandex.ru")
+                    || h.ends_with("hm.com")
+                    || h.ends_with("khanacademy.org")
+                    || h.ends_with("spotify.com") =>
+            {
+                90_000
+            }
             // Akamai BMP-protected.
-            Some(h) if h.ends_with("bestbuy.com")
-                || h.ends_with("homedepot.com")
-                || h.ends_with("nike.com")
-                || h.ends_with("adidas.com")
-                || h.ends_with("samsclub.com")
-                || h.ends_with("walmart.com") => 25_000,
+            Some(h)
+                if h.ends_with("bestbuy.com")
+                    || h.ends_with("homedepot.com")
+                    || h.ends_with("nike.com")
+                    || h.ends_with("adidas.com")
+                    || h.ends_with("samsclub.com")
+                    || h.ends_with("walmart.com") =>
+            {
+                25_000
+            }
             _ => 15_000,
         };
         let mut nav_budget = Duration::from_millis(
@@ -1409,10 +1446,8 @@ impl Page {
                 iter,
                 remaining.as_millis()
             );
-            let _watcher = V8DeadlineWatcher::new(
-                page.event_loop().runtime_mut().isolate_handle(),
-                remaining,
-            );
+            let _watcher =
+                V8DeadlineWatcher::new(page.event_loop().runtime_mut().isolate_handle(), remaining);
 
             // Drain the event loop. Use the remaining nav budget (floored at 8s)
             // so that heavy PoW challenges (Kasada KPSDK takes 30+ seconds) can
@@ -1424,20 +1459,14 @@ impl Page {
                 let remaining = nav_budget.saturating_sub(nav_t0.elapsed());
                 remaining.max(Duration::from_secs(8))
             };
-            if let Err(e) = page
-                .event_loop()
-                .run_until_idle(drain_timeout)
-                .await
-            {
+            if let Err(e) = page.event_loop().run_until_idle(drain_timeout).await {
                 tracing::warn!(error = %e, "navigate event loop error");
             }
 
             // If the watcher fired (or if we reached idle naturally), ensure
             // the isolate is ready for further script execution (draining
             // events, classification, etc.).
-            page.event_loop()
-                .runtime_mut()
-                .cancel_terminate_execution();
+            page.event_loop().runtime_mut().cancel_terminate_execution();
 
             // Phase A.1 — Adaptive budget. Two paths after the first iteration:
             //
@@ -1456,9 +1485,7 @@ impl Page {
             if iter == start_iter {
                 let body_len: usize = page
                     .event_loop()
-                    .execute_script(
-                        "document.body ? document.body.outerHTML.length : 0",
-                    )
+                    .execute_script("document.body ? document.body.outerHTML.length : 0")
                     .unwrap_or_default()
                     .parse()
                     .unwrap_or(0);
@@ -1569,40 +1596,46 @@ impl Page {
                 }
             }
 
-        // 3. Selective CSP bypass for known anti-bot challenge domains.
-        // Walmart / Canada Goose / Hyatt / Realtor / Foot Locker etc. CSPs
-        // often block their own Akamai/Kasada trackers in emulated
-        // environments due to origin/nonce mismatches. Without the bypass
-        // we get body=0 because the ips.js script we'd LOAD to solve the
-        // challenge is the very thing CSP refuses (caught on hyatt.com
-        // 2026-05-10 round-3 sweep — went Kasada-CHL → THIN-BODY when
-        // body=0 because CSP refused to load the ips.js script).
-        if current_url.contains("walmart.com")
-            || current_url.contains("canadagoose.com")
-            || current_url.contains("hyatt.com")
-            || current_url.contains("realtor.com")
-            || current_url.contains("footlocker.com")
-            || current_url.contains("ticketmaster.com")
-            || current_url.contains("udemy.com") {
-            tracing::info!(url = %current_url, "applying selective CSP bypass for anti-bot domain");
-            let mut rt = page.event_loop().runtime_mut();
-            let op_state = rt.op_state();
-            let mut state = op_state.borrow_mut();
-            if let Some(stealth_state) = state.try_borrow_mut::<js_runtime::extensions::stealth_ext::StealthState>() {
-                if let Some(profile) = &mut stealth_state.profile {
-                    profile.enforce_csp = false;
+            // 3. Selective CSP bypass for known anti-bot challenge domains.
+            // Walmart / Canada Goose / Hyatt / Realtor / Foot Locker etc. CSPs
+            // often block their own Akamai/Kasada trackers in emulated
+            // environments due to origin/nonce mismatches. Without the bypass
+            // we get body=0 because the ips.js script we'd LOAD to solve the
+            // challenge is the very thing CSP refuses (caught on hyatt.com
+            // 2026-05-10 round-3 sweep — went Kasada-CHL → THIN-BODY when
+            // body=0 because CSP refused to load the ips.js script).
+            if current_url.contains("walmart.com")
+                || current_url.contains("canadagoose.com")
+                || current_url.contains("hyatt.com")
+                || current_url.contains("realtor.com")
+                || current_url.contains("footlocker.com")
+                || current_url.contains("ticketmaster.com")
+                || current_url.contains("udemy.com")
+            {
+                tracing::info!(url = %current_url, "applying selective CSP bypass for anti-bot domain");
+                let mut rt = page.event_loop().runtime_mut();
+                let op_state = rt.op_state();
+                let mut state = op_state.borrow_mut();
+                if let Some(stealth_state) =
+                    state.try_borrow_mut::<js_runtime::extensions::stealth_ext::StealthState>()
+                {
+                    if let Some(profile) = &mut stealth_state.profile {
+                        profile.enforce_csp = false;
+                    }
                 }
             }
-        }
 
-        // Phase A.5 — Akamai sensor_data POST.
-        let akamai_state = page.handle_akamai_flow(&client).await.unwrap_or(akamai::AbckState::Unknown);
+            // Phase A.5 — Akamai sensor_data POST.
+            let akamai_state = page
+                .handle_akamai_flow(&client)
+                .await
+                .unwrap_or(akamai::AbckState::Unknown);
 
-        // W7 / Cloudflare V1 — orchestrator runner. Detect Managed/JS
-        // Challenge from the rendered body and drive the event loop until
-        // cf_clearance is issued (or the 10 s budget expires). The outer
-        // cookie-delta retry path picks up cf_clearance and re-fetches.
-        let _cf_ctx = page.handle_cloudflare_flow(&client).await;
+            // W7 / Cloudflare V1 — orchestrator runner. Detect Managed/JS
+            // Challenge from the rendered body and drive the event loop until
+            // cf_clearance is issued (or the 10 s budget expires). The outer
+            // cookie-delta retry path picks up cf_clearance and re-fetches.
+            let _cf_ctx = page.handle_cloudflare_flow(&client).await;
 
             if pending_info.is_empty() {
                 // Post-settle cookie-delta retry: if the cookie jar gained new
@@ -1614,19 +1647,25 @@ impl Page {
                 //
                 // PHASE J: also retry if the origin just upgraded to Accept-CH
                 // (Wildberries parity). Only retry ONCE for the upgrade.
-                if (page.is_anti_bot_challenge() || (last_accept_ch_upgrade && !accept_ch_retry_done)) && iter + 1 < iterations {
+                if (page.is_anti_bot_challenge()
+                    || (last_accept_ch_upgrade && !accept_ch_retry_done))
+                    && iter + 1 < iterations
+                {
                     let cookies_after: String = if let Some(p) = parsed_current.as_ref() {
                         client.cookies_for_url(p).await.unwrap_or_default()
                     } else {
                         String::new()
                     };
-                    
-                    let mut should_retry = (cookies_after != cookies_before && !cookies_after.is_empty())
+
+                    let mut should_retry = (cookies_after != cookies_before
+                        && !cookies_after.is_empty())
                         || (last_accept_ch_upgrade && !accept_ch_retry_done);
 
                     // Special case for Akamai: if we are already favorable, DON'T retry
                     // just because the cookie value changed (it always does).
-                    if akamai_state == akamai::AbckState::Favorable && !(last_accept_ch_upgrade && !accept_ch_retry_done) {
+                    if akamai_state == akamai::AbckState::Favorable
+                        && !(last_accept_ch_upgrade && !accept_ch_retry_done)
+                    {
                         should_retry = false;
                     }
 
@@ -1801,8 +1840,11 @@ impl Page {
                             } else {
                                 false
                             };
-                            let mut reload_hdrs =
-                                net::headers::nav_headers_reload(&profile, &current_url, accept_ch_upgraded);
+                            let mut reload_hdrs = net::headers::nav_headers_reload(
+                                &profile,
+                                &current_url,
+                                accept_ch_upgraded,
+                            );
                             for (k, v) in &kpsdk {
                                 reload_hdrs.push((k.clone(), v.clone()));
                             }
@@ -1923,7 +1965,8 @@ impl Page {
                 // this gap, Kasada's per-IP rate limiter returns 429 on the
                 // refetch (verified 2026-04-27 on hyatt.com). 250ms baseline
                 // + small jitter mimics the natural human-action gap.
-                let jitter_ms = 250 + (std::time::Instant::now().elapsed().as_nanos() & 0xFF) as u64;
+                let jitter_ms =
+                    250 + (std::time::Instant::now().elapsed().as_nanos() & 0xFF) as u64;
                 tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
                 let refetch_js = format!(
                     r#"
@@ -2053,8 +2096,11 @@ impl Page {
                     } else {
                         false
                     };
-                    let mut reload_hdrs =
-                        net::headers::nav_headers_reload(&profile, &current_url, accept_ch_upgraded);
+                    let mut reload_hdrs = net::headers::nav_headers_reload(
+                        &profile,
+                        &current_url,
+                        accept_ch_upgraded,
+                    );
                     for (k, v) in &harvested_kpsdk {
                         reload_hdrs.push((k.clone(), v.clone()));
                     }
@@ -2136,7 +2182,15 @@ impl Page {
         client: &net::HttpClient,
         init_scripts: &[String],
     ) -> Result<Self, deno_core::error::AnyError> {
-        Self::build_page_with_scripts_init_and_storage(html, url, profile, client, init_scripts, None).await
+        Self::build_page_with_scripts_init_and_storage(
+            html,
+            url,
+            profile,
+            client,
+            init_scripts,
+            None,
+        )
+        .await
     }
 
     async fn build_page_with_scripts_init_and_storage(
@@ -2145,7 +2199,9 @@ impl Page {
         profile: &stealth::StealthProfile,
         client: &net::HttpClient,
         init_scripts: &[String],
-        storage: Option<std::collections::HashMap<String, std::collections::HashMap<String, String>>>,
+        storage: Option<
+            std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+        >,
     ) -> Result<Self, deno_core::error::AnyError> {
         let dom = html_parser::parse_html(html);
         let scripts = script_runner::find_scripts(&dom);
@@ -2569,7 +2625,10 @@ impl Page {
                                     if let Some(host) = u.host_str() {
                                         // Parse x-kpsdk-im from the script URL if present
                                         let im = if let Some(query) = src.split('?').nth(1) {
-                                            query.split('&').find(|p| p.starts_with("x-kpsdk-im=")).map(|p| p[11..].to_string())
+                                            query
+                                                .split('&')
+                                                .find(|p| p.starts_with("x-kpsdk-im="))
+                                                .map(|p| p[11..].to_string())
                                         } else {
                                             None
                                         };
@@ -2578,15 +2637,22 @@ impl Page {
                                         let host_str = host.to_string();
                                         let prefix_str = parts[0].to_string();
                                         tokio::spawn(async move {
-                                            client_clone.learn_kasada_prefix(&host_str, &prefix_str).await;
+                                            client_clone
+                                                .learn_kasada_prefix(&host_str, &prefix_str)
+                                                .await;
                                             if let Some(im_val) = im {
-                                                client_clone.kasada_sessions().store_im(&host_str, im_val).await;
+                                                client_clone
+                                                    .kasada_sessions()
+                                                    .store_im(&host_str, im_val)
+                                                    .await;
                                             }
                                             // Realistic DT token (captured from real browser)
                                             client_clone.kasada_sessions().store_dt(&host_str, "11qox8sw33mzd5rx62nvw43pjz99vza39w0a3lycjlwbby5126x2thw75s".to_string()).await;
-                                            
+
                                             // Trigger /mfc fetch if needed
-                                            client_clone.fetch_kasada_mfc_if_needed(&host_str).await;
+                                            client_clone
+                                                .fetch_kasada_mfc_if_needed(&host_str)
+                                                .await;
                                         });
                                     }
                                 }
@@ -2767,7 +2833,13 @@ impl Page {
                     }
                 } else if src.starts_with("javascript:") {
                     // javascript:; or similar — create a blank frame so it can be written to
-                    match iframe::ChildIframe::from_srcdoc(info.node_id, "<!DOCTYPE html><html><body></body></html>", &profile).await {
+                    match iframe::ChildIframe::from_srcdoc(
+                        info.node_id,
+                        "<!DOCTYPE html><html><body></body></html>",
+                        &profile,
+                    )
+                    .await
+                    {
                         Ok(child) => children.push(child),
                         Err(e) => tracing::warn!(error = %e, "iframe javascript blank error"),
                     }
@@ -2780,9 +2852,7 @@ impl Page {
         // Drop the watcher first to stop the thread; then cancel any
         // pending termination on the isolate.
         drop(_build_watcher);
-        event_loop
-            .runtime_mut()
-            .cancel_terminate_execution();
+        event_loop.runtime_mut().cancel_terminate_execution();
 
         Ok(Self {
             event_loop,
@@ -2956,10 +3026,20 @@ mod tests {
         )
         .await
         .unwrap();
-        let cw = page.evaluate("document.documentElement.clientWidth").unwrap();
-        let ch = page.evaluate("document.documentElement.clientHeight").unwrap();
-        assert_eq!(cw, "1920", "documentElement.clientWidth must equal innerWidth, got {cw}");
-        assert_eq!(ch, "1080", "documentElement.clientHeight must equal innerHeight, got {ch}");
+        let cw = page
+            .evaluate("document.documentElement.clientWidth")
+            .unwrap();
+        let ch = page
+            .evaluate("document.documentElement.clientHeight")
+            .unwrap();
+        assert_eq!(
+            cw, "1920",
+            "documentElement.clientWidth must equal innerWidth, got {cw}"
+        );
+        assert_eq!(
+            ch, "1080",
+            "documentElement.clientHeight must equal innerHeight, got {ch}"
+        );
     }
 
     /// Akamai sensor probes `window.ApplePaySession` on macOS UA. Real
@@ -2978,7 +3058,10 @@ mod tests {
         .await
         .unwrap();
         let t = page.evaluate("typeof ApplePaySession").unwrap();
-        assert_eq!(t, "function", "macOS profile must expose ApplePaySession constructor");
+        assert_eq!(
+            t, "function",
+            "macOS profile must expose ApplePaySession constructor"
+        );
         let cmp = page.evaluate("ApplePaySession.canMakePayments()").unwrap();
         assert_eq!(cmp, "true");
         let v = page.evaluate("ApplePaySession.supportsVersion(3)").unwrap();
@@ -2988,14 +3071,14 @@ mod tests {
     #[tokio::test]
     async fn apple_pay_session_absent_on_windows_profile() {
         let profile = stealth::presets::chrome_130_windows();
-        let mut page = Page::from_html(
-            "<html><head></head><body></body></html>",
-            Some(profile),
-        )
-        .await
-        .unwrap();
+        let mut page = Page::from_html("<html><head></head><body></body></html>", Some(profile))
+            .await
+            .unwrap();
         let t = page.evaluate("typeof ApplePaySession").unwrap();
-        assert_eq!(t, "undefined", "Windows profile must NOT expose ApplePaySession");
+        assert_eq!(
+            t, "undefined",
+            "Windows profile must NOT expose ApplePaySession"
+        );
     }
 
     /// macOS profile: Helvetica Neue and Arial are both installed,
@@ -3030,10 +3113,22 @@ mod tests {
             })()
         "#;
         let r = page.evaluate(script).unwrap();
-        assert!(r.contains("\"arial_installed\":true"), "Arial must be installed on macOS: {r}");
-        assert!(r.contains("\"hn_installed\":true"), "Helvetica Neue must be installed on macOS: {r}");
-        assert!(r.contains("\"distinct_from_arial\":true"), "HN must differ from Arial: {r}");
-        assert!(r.contains("\"calibri_not_installed_on_macos\":true"), "Calibri must not be installed on macOS: {r}");
+        assert!(
+            r.contains("\"arial_installed\":true"),
+            "Arial must be installed on macOS: {r}"
+        );
+        assert!(
+            r.contains("\"hn_installed\":true"),
+            "Helvetica Neue must be installed on macOS: {r}"
+        );
+        assert!(
+            r.contains("\"distinct_from_arial\":true"),
+            "HN must differ from Arial: {r}"
+        );
+        assert!(
+            r.contains("\"calibri_not_installed_on_macos\":true"),
+            "Calibri must not be installed on macOS: {r}"
+        );
     }
 
     /// Canvas-based font detection: measureText widths must differ between
@@ -3062,8 +3157,14 @@ mod tests {
             })()
         "#;
         let r = page.evaluate(script).unwrap();
-        assert!(r.contains("\"ab\":true"), "Arial must measure differently than sans-serif: {r}");
-        assert!(r.contains("\"bc\":true"), "Helvetica Neue must measure differently than Arial: {r}");
+        assert!(
+            r.contains("\"ab\":true"),
+            "Arial must measure differently than sans-serif: {r}"
+        );
+        assert!(
+            r.contains("\"bc\":true"),
+            "Helvetica Neue must measure differently than Arial: {r}"
+        );
     }
 
     #[tokio::test]
