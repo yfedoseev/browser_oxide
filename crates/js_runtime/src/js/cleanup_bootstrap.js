@@ -389,12 +389,12 @@
                 if (typeof globalThis.clearTimeout === 'function'
                     && globalThis.clearInterval === globalThis.clearTimeout) {
                     const _ct = globalThis.clearTimeout;
-                    globalThis.clearInterval = function clearInterval(id) { return _ct(id); };
+                    globalThis.clearInterval = { clearInterval(id) { return _ct(id); } }.clearInterval;
                 }
                 if (typeof globalThis.scrollTo === 'function'
                     && globalThis.scroll === globalThis.scrollTo) {
                     const _st = globalThis.scrollTo;
-                    globalThis.scroll = function scroll(x, y) { return _st.apply(this, arguments); };
+                    globalThis.scroll = { scroll() { return _st.apply(this, arguments); } }.scroll;
                 }
                 if (typeof globalThis.DOMMatrix === 'function'
                     && globalThis.DOMMatrixReadOnly === globalThis.DOMMatrix) {
@@ -402,19 +402,54 @@
                 }
             } catch (_e) {}
 
-            // chrome.app.* are raw-source JS stubs (Kasada `sbi` probe
-            // dumped `String(chrome.app.getDetails)` =
-            // "function getDetails() { return null; }"). Real Chrome:
-            // `function getDetails() { [native code] }`.
+            // Native NON-constructor functions must have NO own
+            // `prototype` and must be non-constructable (`new fetch()`
+            // throws in Chrome). A CLEAN production probe
+            // (kasada_native_fn_shape_clean_probe — no capture shim)
+            // confirmed setTimeout/setInterval/clearTimeout/
+            // clearInterval/queueMicrotask/structuredClone are plain
+            // `function` decls → carry `.prototype` + are
+            // constructable (CreepJS/Castle bot signal; doc-11 §line94
+            // "✓ via _defProtoMethod" was stale for these GLOBALS).
+            // `function f(){}`'s `.prototype` is non-configurable so
+            // `delete` fails — the only fix is to REPLACE with a
+            // method-shorthand (`{[k](){}}[k]`): no `.prototype`,
+            // non-constructable, name===k. Forwarding wrapper
+            // preserves behavior (none use `this`/`new`). Only the
+            // probe-confirmed-broken set is touched; already-correct
+            // async/shorthand natives (fetch/atob/btoa/scrollTo/
+            // reportError/console.*) are left alone.
+            const _natMethod = (holder, key, nm) => {
+                try {
+                    const o = holder && holder[key];
+                    if (typeof o !== 'function') return;
+                    if (!Object.prototype.hasOwnProperty.call(o, 'prototype')) {
+                        _mask(o, nm || key);
+                        return;
+                    }
+                    const w = { [key]() { return o.apply(this, arguments); } }[key];
+                    _mask(w, nm || key);
+                    try { holder[key] = w; } catch (_e2) {}
+                } catch (_e2) {}
+            };
+            for (const _k of ['setTimeout', 'setInterval', 'clearTimeout',
+                'clearInterval', 'queueMicrotask', 'structuredClone']) {
+                _natMethod(globalThis, _k);
+            }
             try {
                 const _ca = globalThis.chrome && globalThis.chrome.app;
                 if (_ca) {
                     for (const _m of ['getDetails', 'getIsInstalled',
                         'installState', 'runningState']) {
-                        if (typeof _ca[_m] === 'function') _mask(_ca[_m], _m);
+                        _natMethod(_ca, _m);
                     }
                 }
             } catch (_e) {}
+
+            // (chrome.app.* are handled by _natMethod above — it both
+            // native-masks toString [Kasada `sbi` probe leaked
+            // "function getDetails() { return null; }"] and removes the
+            // illegal `.prototype`/constructability.)
             // The exact 47 names the fresh sensor probed, plus adjacent
             // standard constructors Kasada rotates through — all are
             // genuinely `[native code]` in real Chrome, so masking any

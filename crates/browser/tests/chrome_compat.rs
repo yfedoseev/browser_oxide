@@ -8257,3 +8257,55 @@ async fn kasada_sfc_constructors_native_masked() {
         "sfc constructors leak non-native/wrong-name toString: {result}"
     );
 }
+
+/// CLEAN production probe (NO fetch-capture shim) of native-function
+/// shape. Real Chrome native NON-constructor functions have NO own
+/// `prototype` property (`fetch.hasOwnProperty('prototype')===false`)
+/// — a well-known CreepJS/Castle bot signal. Our polyfills are real JS
+/// functions and carry one. The /tl `dip` field flagged this but the
+/// captured value was partly the test's own fetch shim; this probe
+/// resolves real-vs-artifact in production. Reports shapes (does not
+/// assert pass/fail) so the fix is driven by measured truth, not a
+/// guess (validated spd/console clean-probe discipline).
+#[tokio::test]
+async fn kasada_native_fn_shape_clean_probe() {
+    let result = check(
+        r#"(function(){
+            const methods = ["fetch","atob","btoa","setTimeout","setInterval",
+              "clearTimeout","clearInterval","queueMicrotask",
+              "structuredClone","reportError","scrollTo","scroll"];
+            const ctors = ["Worker","Blob","URL","Promise","Array"];
+            const leaks = [];
+            const chk = (n, fn, wantProto) => {
+              const hasProto = Object.prototype.hasOwnProperty.call(fn, "prototype");
+              if (hasProto !== wantProto)
+                leaks.push(n + ":proto=" + hasProto + "(want" + wantProto + ")");
+              // Non-constructors must also be non-constructable.
+              if (!wantProto) {
+                let ctorable = true;
+                try { Reflect.construct(fn, []); } catch (_e) { ctorable = false; }
+                if (ctorable) leaks.push(n + ":constructable");
+              }
+            };
+            for (const m of methods) {
+              const fn = globalThis[m];
+              if (typeof fn === "function") chk(m, fn, false);
+            }
+            for (const c of ctors) {
+              const fn = globalThis[c];
+              if (typeof fn === "function") chk(c, fn, true);
+            }
+            if (globalThis.console && typeof console.log === "function")
+              chk("console.log", console.log, false);
+            return JSON.stringify(leaks);
+        })()"#,
+    )
+    .await;
+    eprintln!("kasada-native-fn-shape: {result}");
+    // Chrome: native non-constructor functions have NO own `prototype`
+    // and are non-constructable; constructors keep `prototype`.
+    assert_eq!(
+        result, "[]",
+        "native-fn shape divergence (proto/constructability): {result}"
+    );
+}
