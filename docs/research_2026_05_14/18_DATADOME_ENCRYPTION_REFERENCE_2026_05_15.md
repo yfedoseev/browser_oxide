@@ -190,3 +190,50 @@ remaining sub-problems are (a) the daily-rotated 6-char wire-key dict
 for the signal map encryption (live tags.js/i.js capture or AST), and
 (b) `datadome_handler` HTTP wiring. yelp excluded (`t:'bv'` IP
 hard-ban); wsj/reuters are a separate slider-path task.
+
+## ARCHITECTURE PIVOT (2026-05-15) — in-engine i.js execution, not Rust reimpl
+
+Key realization: we have a **real V8 JS engine + native WASM + a
+Chrome-faithful navigator/screen/Intl/audio surface** (the entire
+W1/audio/behavioral body of work). Therefore the SIMPLEST and most
+robust W3.8 path is NOT to reimplement the §3 signal map + daily
+wire-key dict + crypto in Rust and POST it ourselves — it is to **let
+DataDome's own `i.js` execute natively in our engine**:
+
+1. `datadome_handler` detects the 403 + `rt:'i'` body (DONE — wired).
+2. Treat the interstitial body **as an executable document** (not an
+   error page): parse it, run its `<script src=".../i.js">`.
+3. `i.js` reads our (already Chrome-correct) navigator/screen/Intl
+   surface, fetches+instantiates the `boring_challenge` WASM in our
+   native V8 WASM, computes Picasso-canvas + audio FP (audio now
+   Chrome-parity — committed this session), builds the §3 signal map
+   with **the daily keys it loaded itself** (no wire-key dict needed —
+   i.js has them), encrypts via its own routine, and POSTs to
+   `<host>/interstitial/`.
+4. Response `{cookie, view:"redirect", url}` → set the `datadome=`
+   cookie, follow `url`, re-issue the original request.
+
+This **sidesteps the two hardest sub-problems entirely**: the
+daily-rotated 6-char wire-key dictionary (i.js carries it) and the §3
+signal-map reimplementation (i.js reads our live surface). It directly
+leverages the already-built capabilities (real JS, native WASM,
+Chrome-faithful surface, Chrome-parity audio). The Rust `DdEncryptor`
+(byte-parity-verified) is retained as **insurance** for an out-of-page
+solve if in-engine execution proves infeasible — but is not the
+primary path.
+
+### Remaining W3.8 work, re-prioritized
+
+| Sub-problem | Old plan (Rust reimpl) | New plan (in-engine) |
+|---|---|---|
+| §3 signal map | port ~40 fields from StealthProfile | **i.js reads our surface** (free) |
+| daily wire-key dict | live capture / AST (fragile, rotates) | **i.js carries it** (free) |
+| crypto encode | DdEncryptor (done, verified) | **i.js does it** (DdEncryptor = insurance) |
+| boring_challenge WASM | (couldn't reimpl) | **native V8 WASM runs it** (free) |
+| **the actual work** | — | **`datadome_handler`: execute the 403 interstitial body as a document, allow i.js's same-origin-ish network round-trip (not CSP-refuse it as a child iframe — the prior symptom), consume {cookie,view,url}, set cookie, re-nav** |
+
+The single remaining engineering task is the handler wiring + treating
+the interstitial 403 body as executable. Crypto/signals/WASM are all
+either done+verified or free-via-native-execution. This is the correct,
+leverage-maximizing scoping and supersedes the §"Port plan" steps for
+the primary path.
