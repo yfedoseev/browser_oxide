@@ -2314,6 +2314,26 @@
             close() { return _document.close(); },
         };
         const remoteRealm = _buildRemoteRealm();
+        // Group E (Kasada audit 12_KASADA_FINGERPRINT_ERROR_AUDIT_2026_05_14.md):
+        // captured blob field `spd` returned `"n/a"` for all 8 screen +
+        // viewport dimensions read off iframe.contentWindow. Real Chrome
+        // returns numbers. Pre-populate the iframe locals with explicit
+        // screen + viewport mirrors so the probe gets numbers without
+        // walking the Proxy fallthrough chain (which previously returned
+        // the parent Screen instance whose getters were brand-checked).
+        const _parentScreen = globalThis.screen || {};
+        const _iframeScreen = {
+            availWidth:  _parentScreen.availWidth  || 1920,
+            availHeight: _parentScreen.availHeight || 1080,
+            width:       _parentScreen.width       || 1920,
+            height:      _parentScreen.height      || 1080,
+            availLeft:   _parentScreen.availLeft   || 0,
+            availTop:    _parentScreen.availTop    || 0,
+            colorDepth:  _parentScreen.colorDepth  || 24,
+            pixelDepth:  _parentScreen.pixelDepth  || 24,
+            orientation: _parentScreen.orientation,
+            isExtended:  false,
+        };
         const iframeLocals = {
             document: iframeDoc,
             location: { href: "about:blank" },
@@ -2321,6 +2341,13 @@
             top: globalThis,
             self: null,
             frames: [],
+            screen: _iframeScreen,
+            innerWidth:  globalThis.innerWidth  || 1920,
+            innerHeight: globalThis.innerHeight || 1080,
+            outerWidth:  globalThis.outerWidth  || 1920,
+            outerHeight: globalThis.outerHeight || 1080,
+            devicePixelRatio: globalThis.devicePixelRatio || 1,
+            scrollX: 0, scrollY: 0, pageXOffset: 0, pageYOffset: 0,
             postMessage(msg, origin) {
                 Promise.resolve().then(() => {
                     globalThis.dispatchEvent(new MessageEvent("message", { data: msg, origin: origin || "" }));
