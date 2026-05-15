@@ -130,7 +130,9 @@ async fn fetch_one(url: &str) -> (String, usize, u64, u64) {
 
 // Sentinel used by the error path to keep the tuple shape uniform. Not
 // actually a real drop measurement — the page never existed.
-fn page_drop_marker() -> u64 { 0 }
+fn page_drop_marker() -> u64 {
+    0
+}
 
 /// Define a site test. Each test prints two lines so post-run aggregation
 /// can compute both navigation time AND between-test gap (which surfaces
@@ -170,115 +172,375 @@ macro_rules! site {
 }
 
 // ----- Search engines -----
-site!(h_search_google, "search", "google", "https://www.google.com/");
+site!(
+    h_search_google,
+    "search",
+    "google",
+    "https://www.google.com/"
+);
 site!(h_search_bing, "search", "bing", "https://www.bing.com/");
-site!(h_search_duckduckgo, "search", "duckduckgo", "https://duckduckgo.com/");
+site!(
+    h_search_duckduckgo,
+    "search",
+    "duckduckgo",
+    "https://duckduckgo.com/"
+);
 site!(h_search_yandex, "search", "yandex", "https://ya.ru/");
 site!(h_search_yahoo, "search", "yahoo", "https://www.yahoo.com/");
-site!(h_search_brave, "search", "brave", "https://search.brave.com/");
-site!(h_search_ecosia, "search", "ecosia", "https://www.ecosia.org/");
-site!(h_search_startpage, "search", "startpage", "https://www.startpage.com/");
+site!(
+    h_search_brave,
+    "search",
+    "brave",
+    "https://search.brave.com/"
+);
+site!(
+    h_search_ecosia,
+    "search",
+    "ecosia",
+    "https://www.ecosia.org/"
+);
+site!(
+    h_search_startpage,
+    "search",
+    "startpage",
+    "https://www.startpage.com/"
+);
 
 // ----- Reference & wiki -----
-site!(h_ref_wikipedia_en, "reference", "wikipedia-en", "https://en.wikipedia.org/wiki/Main_Page");
-site!(h_ref_wiktionary, "reference", "wiktionary", "https://en.wiktionary.org/");
-site!(h_ref_stackoverflow, "reference", "stackoverflow", "https://stackoverflow.com/");
+site!(
+    h_ref_wikipedia_en,
+    "reference",
+    "wikipedia-en",
+    "https://en.wikipedia.org/wiki/Main_Page"
+);
+site!(
+    h_ref_wiktionary,
+    "reference",
+    "wiktionary",
+    "https://en.wiktionary.org/"
+);
+site!(
+    h_ref_stackoverflow,
+    "reference",
+    "stackoverflow",
+    "https://stackoverflow.com/"
+);
 site!(h_ref_github, "reference", "github", "https://github.com/");
-site!(h_ref_mdn, "reference", "mdn", "https://developer.mozilla.org/");
+site!(
+    h_ref_mdn,
+    "reference",
+    "mdn",
+    "https://developer.mozilla.org/"
+);
 
 // ----- News -----
 site!(h_news_bbc, "news", "bbc", "https://www.bbc.com/");
 site!(h_news_cnn, "news", "cnn", "https://www.cnn.com/");
-site!(h_news_nytimes, "news", "nytimes", "https://www.nytimes.com/");
-site!(h_news_reuters, "news", "reuters", "https://www.reuters.com/");
-site!(h_news_guardian, "news", "guardian", "https://www.theguardian.com/");
-site!(h_news_washingtonpost, "news", "washingtonpost", "https://www.washingtonpost.com/");
+site!(
+    h_news_nytimes,
+    "news",
+    "nytimes",
+    "https://www.nytimes.com/"
+);
+site!(
+    h_news_reuters,
+    "news",
+    "reuters",
+    "https://www.reuters.com/"
+);
+site!(
+    h_news_guardian,
+    "news",
+    "guardian",
+    "https://www.theguardian.com/"
+);
+site!(
+    h_news_washingtonpost,
+    "news",
+    "washingtonpost",
+    "https://www.washingtonpost.com/"
+);
 site!(h_news_wsj, "news", "wsj", "https://www.wsj.com/");
-site!(h_news_bloomberg, "news", "bloomberg", "https://www.bloomberg.com/");
-site!(h_news_economist, "news", "economist", "https://www.economist.com/");
+site!(
+    h_news_bloomberg,
+    "news",
+    "bloomberg",
+    "https://www.bloomberg.com/"
+);
+site!(
+    h_news_economist,
+    "news",
+    "economist",
+    "https://www.economist.com/"
+);
 site!(h_news_ft, "news", "ft", "https://www.ft.com/");
 
 // ----- Social -----
 site!(h_soc_reddit, "social", "reddit", "https://www.reddit.com/");
 site!(h_soc_twitter, "social", "twitter", "https://twitter.com/");
 site!(h_soc_x, "social", "x-com", "https://x.com/");
-site!(h_soc_linkedin, "social", "linkedin", "https://www.linkedin.com/");
-site!(h_soc_facebook, "social", "facebook", "https://www.facebook.com/");
-site!(h_soc_instagram, "social", "instagram", "https://www.instagram.com/");
-site!(h_soc_pinterest, "social", "pinterest", "https://www.pinterest.com/");
+site!(
+    h_soc_linkedin,
+    "social",
+    "linkedin",
+    "https://www.linkedin.com/"
+);
+site!(
+    h_soc_facebook,
+    "social",
+    "facebook",
+    "https://www.facebook.com/"
+);
+site!(
+    h_soc_instagram,
+    "social",
+    "instagram",
+    "https://www.instagram.com/"
+);
+site!(
+    h_soc_pinterest,
+    "social",
+    "pinterest",
+    "https://www.pinterest.com/"
+);
 site!(h_soc_tumblr, "social", "tumblr", "https://www.tumblr.com/");
 site!(h_soc_quora, "social", "quora", "https://www.quora.com/");
-site!(h_soc_threads, "social", "threads", "https://www.threads.net/");
+site!(
+    h_soc_threads,
+    "social",
+    "threads",
+    "https://www.threads.net/"
+);
 
 // ----- Amazon -----
 site!(h_amz_com, "amazon", "amazon-com", "https://www.amazon.com/");
-site!(h_amz_uk, "amazon", "amazon-co-uk", "https://www.amazon.co.uk/");
+site!(
+    h_amz_uk,
+    "amazon",
+    "amazon-co-uk",
+    "https://www.amazon.co.uk/"
+);
 site!(h_amz_de, "amazon", "amazon-de", "https://www.amazon.de/");
 site!(h_amz_fr, "amazon", "amazon-fr", "https://www.amazon.fr/");
 site!(h_amz_jp, "amazon", "amazon-jp", "https://www.amazon.co.jp/");
 site!(h_amz_in, "amazon", "amazon-in", "https://www.amazon.in/");
 site!(h_amz_ca, "amazon", "amazon-ca", "https://www.amazon.ca/");
-site!(h_amz_au, "amazon", "amazon-com-au", "https://www.amazon.com.au/");
+site!(
+    h_amz_au,
+    "amazon",
+    "amazon-com-au",
+    "https://www.amazon.com.au/"
+);
 
 // ----- Stores -----
 site!(h_store_ebay, "stores", "ebay", "https://www.ebay.com/");
 site!(h_store_etsy, "stores", "etsy", "https://www.etsy.com/");
-site!(h_store_walmart, "stores", "walmart", "https://www.walmart.com/");
-site!(h_store_target, "stores", "target", "https://www.target.com/");
-site!(h_store_bestbuy, "stores", "bestbuy", "https://www.bestbuy.com/");
-site!(h_store_homedepot, "stores", "homedepot", "https://www.homedepot.com/");
-site!(h_store_costco, "stores", "costco", "https://www.costco.com/");
-site!(h_store_shopify, "stores", "shopify", "https://www.shopify.com/");
-site!(h_store_alibaba, "stores", "alibaba", "https://www.alibaba.com/");
-site!(h_store_aliexpress, "stores", "aliexpress", "https://www.aliexpress.com/");
+site!(
+    h_store_walmart,
+    "stores",
+    "walmart",
+    "https://www.walmart.com/"
+);
+site!(
+    h_store_target,
+    "stores",
+    "target",
+    "https://www.target.com/"
+);
+site!(
+    h_store_bestbuy,
+    "stores",
+    "bestbuy",
+    "https://www.bestbuy.com/"
+);
+site!(
+    h_store_homedepot,
+    "stores",
+    "homedepot",
+    "https://www.homedepot.com/"
+);
+site!(
+    h_store_costco,
+    "stores",
+    "costco",
+    "https://www.costco.com/"
+);
+site!(
+    h_store_shopify,
+    "stores",
+    "shopify",
+    "https://www.shopify.com/"
+);
+site!(
+    h_store_alibaba,
+    "stores",
+    "alibaba",
+    "https://www.alibaba.com/"
+);
+site!(
+    h_store_aliexpress,
+    "stores",
+    "aliexpress",
+    "https://www.aliexpress.com/"
+);
 site!(h_store_asos, "stores", "asos", "https://www.asos.com/");
 site!(h_store_ikea, "stores", "ikea", "https://www.ikea.com/");
-site!(h_store_wayfair, "stores", "wayfair", "https://www.wayfair.com/");
+site!(
+    h_store_wayfair,
+    "stores",
+    "wayfair",
+    "https://www.wayfair.com/"
+);
 site!(h_store_macys, "stores", "macys", "https://www.macys.com/");
 site!(h_store_zara, "stores", "zara", "https://www.zara.com/");
 site!(h_store_hm, "stores", "h-m", "https://www2.hm.com/");
-site!(h_store_uniqlo, "stores", "uniqlo", "https://www.uniqlo.com/");
+site!(
+    h_store_uniqlo,
+    "stores",
+    "uniqlo",
+    "https://www.uniqlo.com/"
+);
 
 // ----- Streaming -----
-site!(h_stream_youtube, "streaming", "youtube", "https://www.youtube.com/");
-site!(h_stream_netflix, "streaming", "netflix", "https://www.netflix.com/");
-site!(h_stream_disney, "streaming", "disneyplus", "https://www.disneyplus.com/");
+site!(
+    h_stream_youtube,
+    "streaming",
+    "youtube",
+    "https://www.youtube.com/"
+);
+site!(
+    h_stream_netflix,
+    "streaming",
+    "netflix",
+    "https://www.netflix.com/"
+);
+site!(
+    h_stream_disney,
+    "streaming",
+    "disneyplus",
+    "https://www.disneyplus.com/"
+);
 site!(h_stream_hulu, "streaming", "hulu", "https://www.hulu.com/");
-site!(h_stream_prime, "streaming", "prime-video", "https://www.primevideo.com/");
-site!(h_stream_twitch, "streaming", "twitch", "https://www.twitch.tv/");
-site!(h_stream_spotify, "streaming", "spotify", "https://open.spotify.com/");
+site!(
+    h_stream_prime,
+    "streaming",
+    "prime-video",
+    "https://www.primevideo.com/"
+);
+site!(
+    h_stream_twitch,
+    "streaming",
+    "twitch",
+    "https://www.twitch.tv/"
+);
+site!(
+    h_stream_spotify,
+    "streaming",
+    "spotify",
+    "https://open.spotify.com/"
+);
 site!(h_stream_vimeo, "streaming", "vimeo", "https://vimeo.com/");
 
 // ----- Travel -----
-site!(h_trav_booking, "travel", "booking", "https://www.booking.com/");
+site!(
+    h_trav_booking,
+    "travel",
+    "booking",
+    "https://www.booking.com/"
+);
 site!(h_trav_airbnb, "travel", "airbnb", "https://www.airbnb.com/");
-site!(h_trav_expedia, "travel", "expedia", "https://www.expedia.com/");
+site!(
+    h_trav_expedia,
+    "travel",
+    "expedia",
+    "https://www.expedia.com/"
+);
 site!(h_trav_kayak, "travel", "kayak", "https://www.kayak.com/");
-site!(h_trav_tripadvisor, "travel", "tripadvisor", "https://www.tripadvisor.com/");
+site!(
+    h_trav_tripadvisor,
+    "travel",
+    "tripadvisor",
+    "https://www.tripadvisor.com/"
+);
 site!(h_trav_hotels, "travel", "hotels", "https://www.hotels.com/");
-site!(h_trav_skyscanner, "travel", "skyscanner", "https://www.skyscanner.com/");
+site!(
+    h_trav_skyscanner,
+    "travel",
+    "skyscanner",
+    "https://www.skyscanner.com/"
+);
 site!(h_trav_uber, "travel", "uber", "https://www.uber.com/");
 
 // ----- Real estate -----
-site!(h_re_zillow, "realestate", "zillow", "https://www.zillow.com/");
-site!(h_re_realtor, "realestate", "realtor", "https://www.realtor.com/");
-site!(h_re_redfin, "realestate", "redfin", "https://www.redfin.com/");
-site!(h_re_trulia, "realestate", "trulia", "https://www.trulia.com/");
+site!(
+    h_re_zillow,
+    "realestate",
+    "zillow",
+    "https://www.zillow.com/"
+);
+site!(
+    h_re_realtor,
+    "realestate",
+    "realtor",
+    "https://www.realtor.com/"
+);
+site!(
+    h_re_redfin,
+    "realestate",
+    "redfin",
+    "https://www.redfin.com/"
+);
+site!(
+    h_re_trulia,
+    "realestate",
+    "trulia",
+    "https://www.trulia.com/"
+);
 
 // ----- Tech -----
 site!(h_tech_apple, "tech", "apple", "https://www.apple.com/");
-site!(h_tech_microsoft, "tech", "microsoft", "https://www.microsoft.com/");
-site!(h_tech_gcloud, "tech", "google-cloud", "https://cloud.google.com/");
+site!(
+    h_tech_microsoft,
+    "tech",
+    "microsoft",
+    "https://www.microsoft.com/"
+);
+site!(
+    h_tech_gcloud,
+    "tech",
+    "google-cloud",
+    "https://cloud.google.com/"
+);
 site!(h_tech_aws, "tech", "aws", "https://aws.amazon.com/");
-site!(h_tech_azure, "tech", "azure", "https://azure.microsoft.com/");
-site!(h_tech_cloudflare, "tech", "cloudflare", "https://www.cloudflare.com/");
+site!(
+    h_tech_azure,
+    "tech",
+    "azure",
+    "https://azure.microsoft.com/"
+);
+site!(
+    h_tech_cloudflare,
+    "tech",
+    "cloudflare",
+    "https://www.cloudflare.com/"
+);
 site!(h_tech_stripe, "tech", "stripe", "https://stripe.com/");
 site!(h_tech_openai, "tech", "openai", "https://openai.com/");
-site!(h_tech_anthropic, "tech", "anthropic", "https://www.anthropic.com/");
+site!(
+    h_tech_anthropic,
+    "tech",
+    "anthropic",
+    "https://www.anthropic.com/"
+);
 
 // ----- Russian -----
 site!(h_ru_yandex, "ru", "yandex-ru", "https://yandex.ru/");
-site!(h_ru_wildberries, "ru", "wildberries", "https://www.wildberries.ru/");
+site!(
+    h_ru_wildberries,
+    "ru",
+    "wildberries",
+    "https://www.wildberries.ru/"
+);
 site!(h_ru_ozon, "ru", "ozon", "https://www.ozon.ru/");
 site!(h_ru_vk, "ru", "vk", "https://vk.com/");
 site!(h_ru_mail, "ru", "mail-ru", "https://mail.ru/");
@@ -288,36 +550,131 @@ site!(h_ru_ria, "ru", "ria", "https://ria.ru/");
 site!(h_gov_irs, "gov-bank", "irs", "https://www.irs.gov/");
 site!(h_gov_usagov, "gov-bank", "usa-gov", "https://www.usa.gov/");
 site!(h_gov_chase, "gov-bank", "chase", "https://www.chase.com/");
-site!(h_gov_bofa, "gov-bank", "bofa", "https://www.bankofamerica.com/");
-site!(h_gov_wf, "gov-bank", "wellsfargo", "https://www.wellsfargo.com/");
-site!(h_gov_paypal, "gov-bank", "paypal", "https://www.paypal.com/");
+site!(
+    h_gov_bofa,
+    "gov-bank",
+    "bofa",
+    "https://www.bankofamerica.com/"
+);
+site!(
+    h_gov_wf,
+    "gov-bank",
+    "wellsfargo",
+    "https://www.wellsfargo.com/"
+);
+site!(
+    h_gov_paypal,
+    "gov-bank",
+    "paypal",
+    "https://www.paypal.com/"
+);
 
 // ----- Antibot test pages -----
-site!(h_ab_creepjs, "antibot", "creepjs", "https://abrahamjuliot.github.io/creepjs/");
-site!(h_ab_sannysoft, "antibot", "sannysoft", "https://bot.sannysoft.com/");
-site!(h_ab_pixelscan, "antibot", "pixelscan", "https://pixelscan.net/");
-site!(h_ab_arh, "antibot", "areyouheadless", "https://arh.antoinevastel.com/bots/areyouheadless");
-site!(h_ab_botd, "antibot", "botd", "https://fingerprint.com/products/bot-detection/");
-site!(h_ab_fingerprint, "antibot", "fingerprintscan", "https://fingerprint.com/");
-site!(h_ab_browserleaks, "antibot", "browserleaks-canvas", "https://browserleaks.com/canvas");
-site!(h_ab_nowsecure, "antibot", "nowsecure", "https://nowsecure.nl/");
+site!(
+    h_ab_creepjs,
+    "antibot",
+    "creepjs",
+    "https://abrahamjuliot.github.io/creepjs/"
+);
+site!(
+    h_ab_sannysoft,
+    "antibot",
+    "sannysoft",
+    "https://bot.sannysoft.com/"
+);
+site!(
+    h_ab_pixelscan,
+    "antibot",
+    "pixelscan",
+    "https://pixelscan.net/"
+);
+site!(
+    h_ab_arh,
+    "antibot",
+    "areyouheadless",
+    "https://arh.antoinevastel.com/bots/areyouheadless"
+);
+site!(
+    h_ab_botd,
+    "antibot",
+    "botd",
+    "https://fingerprint.com/products/bot-detection/"
+);
+site!(
+    h_ab_fingerprint,
+    "antibot",
+    "fingerprintscan",
+    "https://fingerprint.com/"
+);
+site!(
+    h_ab_browserleaks,
+    "antibot",
+    "browserleaks-canvas",
+    "https://browserleaks.com/canvas"
+);
+site!(
+    h_ab_nowsecure,
+    "antibot",
+    "nowsecure",
+    "https://nowsecure.nl/"
+);
 site!(h_ab_iphey, "antibot", "iphey", "https://iphey.com/");
-site!(h_ab_amiunique, "antibot", "amiunique", "https://amiunique.org/");
+site!(
+    h_ab_amiunique,
+    "antibot",
+    "amiunique",
+    "https://amiunique.org/"
+);
 
 // ----- Previously known CHL -----
-site!(h_chl_canadagoose, "chl-known", "canadagoose", "https://www.canadagoose.com/");
+site!(
+    h_chl_canadagoose,
+    "chl-known",
+    "canadagoose",
+    "https://www.canadagoose.com/"
+);
 site!(h_chl_hyatt, "chl-known", "hyatt", "https://www.hyatt.com/");
-site!(h_chl_adidas, "chl-known", "adidas", "https://www.adidas.com/us");
-site!(h_chl_douyin, "chl-known", "douyin", "https://www.douyin.com/");
-site!(h_chl_leboncoin, "chl-known", "leboncoin", "https://www.leboncoin.fr/");
+site!(
+    h_chl_adidas,
+    "chl-known",
+    "adidas",
+    "https://www.adidas.com/us"
+);
+site!(
+    h_chl_douyin,
+    "chl-known",
+    "douyin",
+    "https://www.douyin.com/"
+);
+site!(
+    h_chl_leboncoin,
+    "chl-known",
+    "leboncoin",
+    "https://www.leboncoin.fr/"
+);
 
 // ----- Misc high-traffic -----
 site!(h_m_weather, "misc", "weather", "https://weather.com/");
 site!(h_m_imdb, "misc", "imdb", "https://www.imdb.com/");
 site!(h_m_yelp, "misc", "yelp", "https://www.yelp.com/");
-site!(h_m_duolingo, "misc", "duolingo", "https://www.duolingo.com/");
-site!(h_m_khan, "misc", "khanacademy", "https://www.khanacademy.org/");
-site!(h_m_coursera, "misc", "coursera", "https://www.coursera.org/");
+site!(
+    h_m_duolingo,
+    "misc",
+    "duolingo",
+    "https://www.duolingo.com/"
+);
+site!(
+    h_m_khan,
+    "misc",
+    "khanacademy",
+    "https://www.khanacademy.org/"
+);
+site!(
+    h_m_coursera,
+    "misc",
+    "coursera",
+    "https://www.coursera.org/"
+);
 site!(h_m_udemy, "misc", "udemy", "https://www.udemy.com/");
 site!(h_m_medium, "misc", "medium", "https://medium.com/");
 site!(h_m_substack, "misc", "substack", "https://substack.com/");
@@ -341,10 +698,26 @@ fn sites_list() -> Vec<(&'static str, &'static str, &'static str)> {
         ("amazon", "amazon-in", "https://www.amazon.in/"),
         ("amazon", "amazon-jp", "https://www.amazon.co.jp/"),
         ("antibot", "amiunique", "https://amiunique.org/"),
-        ("antibot", "areyouheadless", "https://arh.antoinevastel.com/bots/areyouheadless"),
-        ("antibot", "botd", "https://fingerprint.com/products/bot-detection/"),
-        ("antibot", "browserleaks-canvas", "https://browserleaks.com/canvas"),
-        ("antibot", "creepjs", "https://abrahamjuliot.github.io/creepjs/"),
+        (
+            "antibot",
+            "areyouheadless",
+            "https://arh.antoinevastel.com/bots/areyouheadless",
+        ),
+        (
+            "antibot",
+            "botd",
+            "https://fingerprint.com/products/bot-detection/",
+        ),
+        (
+            "antibot",
+            "browserleaks-canvas",
+            "https://browserleaks.com/canvas",
+        ),
+        (
+            "antibot",
+            "creepjs",
+            "https://abrahamjuliot.github.io/creepjs/",
+        ),
         ("antibot", "fingerprintscan", "https://fingerprint.com/"),
         ("antibot", "iphey", "https://iphey.com/"),
         ("antibot", "nowsecure", "https://nowsecure.nl/"),
@@ -390,7 +763,11 @@ fn sites_list() -> Vec<(&'static str, &'static str, &'static str)> {
         ("reference", "github", "https://github.com/"),
         ("reference", "mdn", "https://developer.mozilla.org/"),
         ("reference", "stackoverflow", "https://stackoverflow.com/"),
-        ("reference", "wikipedia-en", "https://en.wikipedia.org/wiki/Main_Page"),
+        (
+            "reference",
+            "wikipedia-en",
+            "https://en.wikipedia.org/wiki/Main_Page",
+        ),
         ("reference", "wiktionary", "https://en.wiktionary.org/"),
         ("ru", "mail-ru", "https://mail.ru/"),
         ("ru", "ozon", "https://www.ozon.ru/"),
@@ -582,7 +959,8 @@ mod classifier_tests {
 
     #[test]
     fn akamai_interstitial_title_is_chl() {
-        let html = "<html><head><title>Pardon Our Interruption</title></head><body>...</body></html>";
+        let html =
+            "<html><head><title>Pardon Our Interruption</title></head><body>...</body></html>";
         assert_eq!(classify(html), "Akamai-CHL");
     }
 
@@ -641,7 +1019,9 @@ mod classifier_tests {
         // disneyplus / costco shape — multi-MB body that mentions
         // recaptcha in config metadata. Must classify as L3-RENDERED.
         let mut html = String::from("<html><body>");
-        html.push_str(r#"<script>window.__CONFIG = {"googleRecaptcha":{"siteKey":"6LfAbcXYZ"}};</script>"#);
+        html.push_str(
+            r#"<script>window.__CONFIG = {"googleRecaptcha":{"siteKey":"6LfAbcXYZ"}};</script>"#,
+        );
         for _ in 0..5000 {
             html.push_str("<div>actual product card content here</div>");
         }
@@ -705,7 +1085,14 @@ async fn holistic_sweep_parallel() {
             } else {
                 classify(&r.html)
             };
-            (cat, name, outcome, r.html.len(), r.elapsed.as_millis() as u64, url)
+            (
+                cat,
+                name,
+                outcome,
+                r.html.len(),
+                r.elapsed.as_millis() as u64,
+                url,
+            )
         });
     }
     while let Some((cat, name, out, len, ms, url)) = fut.next().await {

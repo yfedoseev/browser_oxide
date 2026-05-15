@@ -148,7 +148,9 @@ mod tests {
 
     #[test]
     fn parse_empty_buffer() {
-        let d = parse_drained(r#"{"mouse":[],"key":[],"touch":[],"scroll":[],"counters":{"key":0,"mouse":0,"touch":0,"scroll":0,"accel":0}}"#);
+        let d = parse_drained(
+            r#"{"mouse":[],"key":[],"touch":[],"scroll":[],"counters":{"key":0,"mouse":0,"touch":0,"scroll":0,"accel":0}}"#,
+        );
         assert!(d.mouse.is_empty());
         assert!(d.key.is_empty());
         assert!(d.touch.is_empty());

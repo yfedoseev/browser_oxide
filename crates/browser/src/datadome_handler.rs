@@ -183,7 +183,8 @@ mod tests {
 
     #[test]
     fn ignores_body_without_dd_literal() {
-        let body = r#"<html><body><script>fetch('https://captcha-delivery.com/x')</script></body></html>"#;
+        let body =
+            r#"<html><body><script>fetch('https://captcha-delivery.com/x')</script></body></html>"#;
         assert!(detect_datadome_interstitial(body).is_none());
     }
 

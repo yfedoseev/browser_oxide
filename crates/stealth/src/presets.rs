@@ -413,7 +413,9 @@ pub fn chrome_130_jp() -> StealthProfile {
 pub fn firefox_135_macos() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
-        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+        user_agent:
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:135.0) Gecko/20100101 Firefox/135.0"
+                .into(),
         browser_name: "Firefox".into(),
         browser_version: "135.0".into(),
         os_name: "macOS".into(),
@@ -422,7 +424,8 @@ pub fn firefox_135_macos() -> StealthProfile {
         vendor: "".into(),
         vendor_sub: "".into(),
         product_sub: "20100101".into(),
-        app_version: "5.0 (Macintosh; Intel Mac OS X 14.5; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+        app_version: "5.0 (Macintosh; Intel Mac OS X 14.5; rv:135.0) Gecko/20100101 Firefox/135.0"
+            .into(),
 
         screen_width: 1440,
         screen_height: 900,
@@ -495,7 +498,9 @@ pub fn firefox_135_macos() -> StealthProfile {
 pub fn firefox_135_windows() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
-        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+        user_agent:
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"
+                .into(),
         browser_name: "Firefox".into(),
         browser_version: "135.0".into(),
         os_name: "Windows".into(),
@@ -504,7 +509,8 @@ pub fn firefox_135_windows() -> StealthProfile {
         vendor: "".into(),
         vendor_sub: "".into(),
         product_sub: "20100101".into(),
-        app_version: "5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0".into(),
+        app_version: "5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"
+            .into(),
 
         screen_width: 1920,
         screen_height: 1080,
@@ -949,7 +955,11 @@ mod tests {
     fn firefox_webgl_is_masked() {
         // Firefox 113+ masks WebGL by default — both vendor and renderer
         // report "Mozilla". This is a deliberate fingerprint reduction.
-        for profile in [firefox_135_macos(), firefox_135_windows(), firefox_135_linux()] {
+        for profile in [
+            firefox_135_macos(),
+            firefox_135_windows(),
+            firefox_135_linux(),
+        ] {
             assert_eq!(profile.webgl_vendor, "Mozilla");
             assert_eq!(profile.webgl_renderer, "Mozilla");
         }

@@ -6,8 +6,10 @@ mod tests {
     #[tokio::test]
     async fn audit_js_surface() {
         let profile = stealth::presets::chrome_130_macos();
-        let mut page = Page::navigate("https://example.com/", profile, 1).await.unwrap();
-        
+        let mut page = Page::navigate("https://example.com/", profile, 1)
+            .await
+            .unwrap();
+
         let js = r#"
             (async () => {
                 const res = {
@@ -31,9 +33,9 @@ mod tests {
             })();
         "#;
         page.evaluate(js).unwrap();
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        
+
         let r = page.evaluate("globalThis.__surface_res || 'wait'").unwrap();
         println!("JS SURFACE OXIDE:\n{}", r);
     }

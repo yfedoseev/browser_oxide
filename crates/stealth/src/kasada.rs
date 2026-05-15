@@ -146,20 +146,14 @@ fn sha256_hex(s: &str) -> String {
 /// the `/149e9513-.../2d206a39-.../tl` template — VEVE, canadagoose,
 /// hyatt), the server validates `duration` for plausibility against the
 /// PoW difficulty. A constant or randomly-sampled value can fail.
-pub fn solve(
-    challenge: &KasadaChallenge,
-    work_time_ms: i64,
-    id: &str,
-) -> KasadaSolution {
+pub fn solve(challenge: &KasadaChallenge, work_time_ms: i64, id: &str) -> KasadaSolution {
     let t0 = std::time::Instant::now();
-    let target_per_sub =
-        challenge.difficulty as f64 / challenge.subchallenge_count.max(1) as f64;
+    let target_per_sub = challenge.difficulty as f64 / challenge.subchallenge_count.max(1) as f64;
 
     // Initial seed: sha256("tp-v2-input, <alignedWorkTime>, <id>")
     // Kasada ips.js uses Math.round(Date.now() / 18000081) * 10 as part of the seed.
     // We match this alignment to ensure our PoW answers are valid for the current window.
-    let aligned_work_time =
-        (work_time_ms as f64 / 18000081.0).round() as i64 * 10;
+    let aligned_work_time = (work_time_ms as f64 / 18000081.0).round() as i64 * 10;
 
     let mut jonta = sha256_hex(&format!(
         "{}, {}, {}",
@@ -249,14 +243,12 @@ mod tests {
     #[test]
     fn hash_difficulty_known_values() {
         // h[0..13] = "0000000000000" → n=0 → 2^52/1 = huge → very high difficulty
-        let easy = hash_difficulty(
-            "00000000000000000000000000000000000000000000000000000000ffffffff",
-        );
+        let easy =
+            hash_difficulty("00000000000000000000000000000000000000000000000000000000ffffffff");
         assert!(easy > 1e15);
         // h[0..13] = "fffffffffffff" → n = 2^52-1 → 2^52/2^52 ≈ 1
-        let hard = hash_difficulty(
-            "ffffffffffffff0000000000000000000000000000000000000000000000ffff",
-        );
+        let hard =
+            hash_difficulty("ffffffffffffff0000000000000000000000000000000000000000000000ffff");
         assert!(hard < 2.0);
     }
 
@@ -345,8 +337,7 @@ mod tests {
         let id = "abcdef0123456789abcdef0123456789";
         let sol = solve(&challenge, work_time, id);
 
-        let aligned_work_time =
-            (work_time as f64 / 18000081.0).round() as i64 * 10;
+        let aligned_work_time = (work_time as f64 / 18000081.0).round() as i64 * 10;
 
         let mut jonta = sha256_hex(&format!(
             "{}, {}, {}",

@@ -367,7 +367,8 @@ mod tests {
     fn v3_payload_serializes_to_valid_json() {
         let profile = dummy_profile();
         let session = AkamaiSession::default();
-        let serialized = build_cleartext_v3_json(&profile, &session, "https://www.example.com/path");
+        let serialized =
+            build_cleartext_v3_json(&profile, &session, "https://www.example.com/path");
         // Must parse back as JSON object.
         let parsed: Value = serde_json::from_str(&serialized).expect("parses as JSON");
         assert!(parsed.is_object(), "v3 cleartext must be a JSON object");
@@ -390,7 +391,10 @@ mod tests {
         let v: Value = serde_json::from_str(&s).unwrap();
         let per = v["per"].as_str().unwrap();
         assert_eq!(per.len(), 20, "per must be 20 digits, got {per}");
-        assert!(per.chars().all(|c| c.is_ascii_digit()), "per must be all digits");
+        assert!(
+            per.chars().all(|c| c.is_ascii_digit()),
+            "per must be all digits"
+        );
     }
 
     #[test]
@@ -407,8 +411,15 @@ mod tests {
         //   wsl[5..=7] = 1 (plugin probes pass)
         //   wsl[8]     = 0 (File.prototype.path absent — Electron-only)
         //   wsl[9]     = 1 (SharedArrayBuffer present)
-        assert!(parts.len() >= 10, "wsl needs ≥10 slots, got {}", parts.len());
-        assert_eq!(parts[5], "1", "wsl[5] plugins[0][0].enabledPlugin must be 1");
+        assert!(
+            parts.len() >= 10,
+            "wsl needs ≥10 slots, got {}",
+            parts.len()
+        );
+        assert_eq!(
+            parts[5], "1",
+            "wsl[5] plugins[0][0].enabledPlugin must be 1"
+        );
         assert_eq!(parts[6], "1", "wsl[6] plugins.refresh must be 1");
         assert_eq!(parts[7], "1", "wsl[7] plugins.item(UINT32) must be 1");
         assert_eq!(parts[8], "0", "wsl[8] File.prototype.path must be 0");
@@ -419,7 +430,8 @@ mod tests {
     fn v3_pur_strips_fragment() {
         let profile = dummy_profile();
         let session = AkamaiSession::default();
-        let s = build_cleartext_v3_json(&profile, &session, "https://www.example.com/path#fragment");
+        let s =
+            build_cleartext_v3_json(&profile, &session, "https://www.example.com/path#fragment");
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["pur"].as_str().unwrap(), "https://www.example.com/path");
     }

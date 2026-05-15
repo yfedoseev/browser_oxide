@@ -73,7 +73,10 @@ impl ParallelPager {
                     .stack_size(64 * 1024 * 1024) // 64 MB — match RUST_MIN_STACK gate per V8 needs
                     .spawn(move || worker_main(rx))
                     .expect("failed to spawn pager worker");
-                WorkerHandle { tx, _thread: thread }
+                WorkerHandle {
+                    tx,
+                    _thread: thread,
+                }
             })
             .collect();
         Self {

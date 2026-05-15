@@ -13,8 +13,10 @@ mod tests {
         )
         .await
         .unwrap();
-        
-        let r = page.evaluate("Object.getOwnPropertyNames(globalThis).sort().join(',')").unwrap();
+
+        let r = page
+            .evaluate("Object.getOwnPropertyNames(globalThis).sort().join(',')")
+            .unwrap();
         println!("OXIDE_PROPS:{}", r);
     }
 }

@@ -1,4 +1,3 @@
-
 use browser::Page;
 use std::time::Duration;
 
@@ -7,9 +6,10 @@ async fn verify_canadagoose_pass() {
     let profile = stealth::chrome_130_windows();
     let res = tokio::time::timeout(
         Duration::from_secs(120),
-        Page::navigate_with_init("https://www.canadagoose.com/", profile, 3, vec![])
-    ).await;
-    
+        Page::navigate_with_init("https://www.canadagoose.com/", profile, 3, vec![]),
+    )
+    .await;
+
     match res {
         Ok(Ok(mut p)) => {
             let title = p.title();
@@ -18,10 +18,12 @@ async fn verify_canadagoose_pass() {
             if title.contains("Canada Goose") || html.contains("Canada Goose") {
                 println!("Confirmed: Page contains 'Canada Goose'");
             } else {
-                println!("Warning: Page does not contain 'Canada Goose'. Might be a challenge page.");
+                println!(
+                    "Warning: Page does not contain 'Canada Goose'. Might be a challenge page."
+                );
                 println!("Title: {}", title);
             }
-        },
+        }
         Ok(Err(e)) => println!("FAILED: {}", e),
         Err(_) => println!("TIMEOUT"),
     }
@@ -32,9 +34,10 @@ async fn verify_hyatt_pass() {
     let profile = stealth::chrome_130_windows();
     let res = tokio::time::timeout(
         Duration::from_secs(120),
-        Page::navigate_with_init("https://www.hyatt.com/", profile, 3, vec![])
-    ).await;
-    
+        Page::navigate_with_init("https://www.hyatt.com/", profile, 3, vec![]),
+    )
+    .await;
+
     match res {
         Ok(Ok(mut p)) => {
             let title = p.title();
@@ -46,7 +49,7 @@ async fn verify_hyatt_pass() {
                 println!("Warning: Page does not contain 'Hyatt'. Might be a challenge page.");
                 println!("Title: {}", title);
             }
-        },
+        }
         Ok(Err(e)) => println!("FAILED: {}", e),
         Err(_) => println!("TIMEOUT"),
     }
@@ -57,15 +60,19 @@ async fn verify_realtor_pass() {
     let profile = stealth::chrome_130_windows();
     let res = tokio::time::timeout(
         Duration::from_secs(120),
-        Page::navigate_with_init("https://www.realtor.com/", profile, 3, vec![])
-    ).await;
-    
+        Page::navigate_with_init("https://www.realtor.com/", profile, 3, vec![]),
+    )
+    .await;
+
     match res {
         Ok(Ok(mut p)) => {
             let title = p.title();
             let html = p.evaluate("document.body.innerHTML").unwrap_or_default();
             println!("SUCCESS! Title: {}", title);
-            if title.contains("realtor.com") || title.contains("Realtor") || html.contains("realtor.com") {
+            if title.contains("realtor.com")
+                || title.contains("Realtor")
+                || html.contains("realtor.com")
+            {
                 println!("Confirmed: Page contains 'Realtor'");
                 let end = std::cmp::min(html.len(), 500);
                 println!("HTML snippet: {}", &html[..end]);
@@ -73,7 +80,7 @@ async fn verify_realtor_pass() {
                 println!("Warning: Page does not contain 'Realtor'. Might be a challenge page.");
                 println!("Title: {}", title);
             }
-        },
+        }
         Ok(Err(e)) => println!("FAILED: {}", e),
         Err(_) => println!("TIMEOUT"),
     }

@@ -6,10 +6,12 @@ mod tests {
     #[tokio::test]
     async fn audit_browserleaks_oxide() {
         let profile = stealth::presets::chrome_130_linux();
-        let mut page = Page::navigate("https://browserleaks.com/javascript", profile, 5).await.unwrap();
-        
+        let mut page = Page::navigate("https://browserleaks.com/javascript", profile, 5)
+            .await
+            .unwrap();
+
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        
+
         let js = r#"
             (() => {
                 const results = {};
@@ -26,8 +28,10 @@ mod tests {
                 return JSON.stringify(results, null, 2);
             })()
         "#;
-        
-        let r = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {}", e));
+
+        let r = page
+            .evaluate(js)
+            .unwrap_or_else(|e| format!("ERROR: {}", e));
         println!("BROWSERLEAKS OXIDE:\n{}", r);
     }
 }

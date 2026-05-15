@@ -284,11 +284,17 @@ async fn nav_send_beacon() {
 }
 #[tokio::test]
 async fn nav_get_battery() {
-    assert_eq!(check_secure("typeof navigator.getBattery").await, "function");
+    assert_eq!(
+        check_secure("typeof navigator.getBattery").await,
+        "function"
+    );
 }
 #[tokio::test]
 async fn nav_user_agent_data() {
-    assert_eq!(check_secure("typeof navigator.userAgentData").await, "object");
+    assert_eq!(
+        check_secure("typeof navigator.userAgentData").await,
+        "object"
+    );
 }
 #[tokio::test]
 async fn nav_ua_data_brands() {
@@ -326,9 +332,13 @@ async fn nav_ua_data_get_high_entropy_returns_promise() {
 // populated by the time the second evaluate() reads it.
 #[tokio::test]
 async fn nav_ua_data_high_entropy_full_version_list() {
-    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate(
         r#"window.__r = null;
         navigator.userAgentData.getHighEntropyValues(['fullVersionList']).then(r => { window.__r = r; });"#
@@ -349,9 +359,13 @@ async fn nav_ua_data_high_entropy_full_version_list() {
 }
 #[tokio::test]
 async fn nav_ua_data_high_entropy_architecture_and_bitness() {
-    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate(
         r#"window.__r = null;
         navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness']).then(r => { window.__r = r; });"#
@@ -372,9 +386,13 @@ async fn nav_ua_data_high_entropy_architecture_and_bitness() {
 }
 #[tokio::test]
 async fn nav_ua_data_high_entropy_only_returns_requested_plus_low_entropy() {
-    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate(
         r#"window.__r = null;
         navigator.userAgentData.getHighEntropyValues(['architecture']).then(r => { window.__r = r; });"#
@@ -427,7 +445,10 @@ async fn nav_ua_data_brands_match_user_agent_version() {
 }
 #[tokio::test]
 async fn nav_media_devices() {
-    assert_eq!(check_secure("typeof navigator.mediaDevices").await, "object");
+    assert_eq!(
+        check_secure("typeof navigator.mediaDevices").await,
+        "object"
+    );
 }
 #[tokio::test]
 async fn nav_permissions() {
@@ -443,7 +464,10 @@ async fn nav_storage() {
 }
 #[tokio::test]
 async fn nav_service_worker() {
-    assert_eq!(check_secure("typeof navigator.serviceWorker").await, "object");
+    assert_eq!(
+        check_secure("typeof navigator.serviceWorker").await,
+        "object"
+    );
 }
 
 // ================================================================
@@ -940,7 +964,10 @@ async fn api_permissions_query() {
 // Battery
 #[tokio::test]
 async fn api_battery() {
-    assert_eq!(check_secure("typeof navigator.getBattery").await, "function");
+    assert_eq!(
+        check_secure("typeof navigator.getBattery").await,
+        "function"
+    );
 }
 
 // Dynamic script loading via DOM
@@ -1169,8 +1196,16 @@ async fn canvas_drawing_produces_nonblank_data_url() {
     eprintln!("Canvas drawing probe: {}", &result[..result.len().min(100)]);
     let parts: Vec<&str> = result.splitn(2, ':').collect();
     let len: usize = parts[0].parse().unwrap_or(0);
-    assert!(len > 1000, "canvas toDataURL after drawing should produce >1KB data, got {}b", len);
-    assert_eq!(parts.get(1), Some(&"true"), "canvas toDataURL should differ from blank canvas");
+    assert!(
+        len > 1000,
+        "canvas toDataURL after drawing should produce >1KB data, got {}b",
+        len
+    );
+    assert_eq!(
+        parts.get(1),
+        Some(&"true"),
+        "canvas toDataURL should differ from blank canvas"
+    );
 }
 
 // ================================================================
@@ -1850,7 +1885,10 @@ async fn chrome_csi_is_native() {
 #[tokio::test]
 async fn fn_proto_tostring_nav_getbattery_native() {
     assert_eq!(
-        check_secure("Function.prototype.toString.call(navigator.getBattery).includes('[native code]')").await,
+        check_secure(
+            "Function.prototype.toString.call(navigator.getBattery).includes('[native code]')"
+        )
+        .await,
         "true"
     );
 }
@@ -1858,7 +1896,10 @@ async fn fn_proto_tostring_nav_getbattery_native() {
 #[tokio::test]
 async fn fn_proto_tostring_speech_getvoices_native() {
     assert_eq!(
-        check("Function.prototype.toString.call(speechSynthesis.getVoices).includes('[native code]')").await,
+        check(
+            "Function.prototype.toString.call(speechSynthesis.getVoices).includes('[native code]')"
+        )
+        .await,
         "true"
     );
 }
@@ -2021,8 +2062,11 @@ async fn worker_ua_matches_window() {
         const src = 'self.postMessage(navigator.userAgent);';
         const w = new Worker(URL.createObjectURL(new Blob([src],{{type:'text/javascript'}})));
         w.onmessage = e => {{ window.__wua = e.data; w.terminate(); }};"#
-    )).unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(500)).await.ok();
+    ))
+    .unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(500))
+        .await
+        .ok();
     let worker_ua = page.evaluate("window.__wua").unwrap();
     assert_eq!(worker_ua, win_ua, "Worker UA should match window UA");
 }
@@ -2037,9 +2081,12 @@ async fn worker_platform_matches_window() {
         r#"window.__wplat = null;
         const src = 'self.postMessage(navigator.platform);';
         const w = new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));
-        w.onmessage = e => { window.__wplat = e.data; w.terminate(); };"#
-    ).unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(500)).await.ok();
+        w.onmessage = e => { window.__wplat = e.data; w.terminate(); };"#,
+    )
+    .unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(500))
+        .await
+        .ok();
     assert_eq!(page.evaluate("window.__wplat").unwrap(), expected);
 }
 
@@ -2053,9 +2100,12 @@ async fn worker_hardware_concurrency_matches_window() {
         r#"window.__whc = null;
         const src = 'self.postMessage(String(navigator.hardwareConcurrency));';
         const w = new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));
-        w.onmessage = e => { window.__whc = e.data; w.terminate(); };"#
-    ).unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(500)).await.ok();
+        w.onmessage = e => { window.__whc = e.data; w.terminate(); };"#,
+    )
+    .unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(500))
+        .await
+        .ok();
     assert_eq!(page.evaluate("window.__whc").unwrap(), expected);
 }
 
@@ -2148,34 +2198,61 @@ async fn nav_keyboard_getlayoutmap_returns_promise() {
 
 #[tokio::test]
 async fn nav_keyboard_getlayoutmap_resolves_to_map() {
-    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    page.evaluate(
+        "window.__r = null; navigator.keyboard.getLayoutMap().then(m => { window.__r = m; });",
+    )
+    .unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200))
         .await
-        .unwrap();
-    page.evaluate("window.__r = null; navigator.keyboard.getLayoutMap().then(m => { window.__r = m; });").unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+        .ok();
     assert_eq!(page.evaluate("window.__r !== null").unwrap(), "true");
 }
 
 #[tokio::test]
 async fn nav_keyboard_getlayoutmap_has_entries() {
     // A real QWERTY layout has ~50 entries; we just need > 0.
-    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    page.evaluate(
+        "window.__r = 0; navigator.keyboard.getLayoutMap().then(m => { window.__r = m.size; });",
+    )
+    .unwrap();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200))
         .await
-        .unwrap();
-    page.evaluate("window.__r = 0; navigator.keyboard.getLayoutMap().then(m => { window.__r = m.size; });").unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+        .ok();
     let size: usize = page.evaluate("window.__r").unwrap().parse().unwrap_or(0);
-    assert!(size > 0, "KeyboardLayoutMap should have entries, got {size}");
+    assert!(
+        size > 0,
+        "KeyboardLayoutMap should have entries, got {size}"
+    );
 }
 
 #[tokio::test]
 async fn nav_keyboard_getlayoutmap_has_keya() {
     // KeyA is always present in any Latin keyboard layout.
-    let mut page = Page::from_html_with_url(&html(""), "https://example.com/", None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate("window.__r = false; navigator.keyboard.getLayoutMap().then(m => { window.__r = m.has('KeyA'); });").unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200))
+        .await
+        .ok();
     assert_eq!(page.evaluate("window.__r").unwrap(), "true");
 }
 
@@ -2199,7 +2276,9 @@ async fn media_key_widevine_resolves_on_windows() {
     page.evaluate(
         "window.__r = null; navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{initDataTypes:['cenc'],videoCapabilities:[{contentType:'video/mp4;codecs=\"avc1.42E01E\"'}]}]).then(a => { window.__r = 'ok'; }).catch(e => { window.__r = 'err:' + e.name; });"
     ).unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200))
+        .await
+        .ok();
     assert_eq!(page.evaluate("window.__r").unwrap(), "ok");
 }
 
@@ -2211,18 +2290,24 @@ async fn media_key_widevine_resolves_on_macos() {
     page.evaluate(
         "window.__r = null; navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{initDataTypes:['cenc'],videoCapabilities:[{contentType:'video/mp4;codecs=\"avc1.42E01E\"'}]}]).then(a => { window.__r = 'ok'; }).catch(e => { window.__r = 'err:' + e.name; });"
     ).unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200))
+        .await
+        .ok();
     assert_eq!(page.evaluate("window.__r").unwrap(), "ok");
 }
 
 #[tokio::test]
 async fn media_key_clearkey_always_resolves() {
     // org.w3.clearkey must work on all platforms per the W3C EME spec.
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>).await.unwrap();
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
     page.evaluate(
         "window.__r = null; navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{initDataTypes:['keyids'],videoCapabilities:[{contentType:'video/webm;codecs=\"vp8\"'}]}]).then(a => { window.__r = 'ok'; }).catch(e => { window.__r = 'err:' + e.name; });"
     ).unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200))
+        .await
+        .ok();
     assert_eq!(page.evaluate("window.__r").unwrap(), "ok");
 }
 
@@ -2234,7 +2319,9 @@ async fn media_key_access_key_system_is_string() {
     page.evaluate(
         "window.__r = null; navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{initDataTypes:['cenc'],videoCapabilities:[{contentType:'video/mp4;codecs=\"avc1.42E01E\"'}]}]).then(a => { window.__r = typeof a.keySystem; }).catch(() => { window.__r = 'err'; });"
     ).unwrap();
-    page.evaluate_async("void 0", std::time::Duration::from_millis(200)).await.ok();
+    page.evaluate_async("void 0", std::time::Duration::from_millis(200))
+        .await
+        .ok();
     assert_eq!(page.evaluate("window.__r").unwrap(), "string");
 }
 
@@ -2247,7 +2334,10 @@ async fn crypto_instanceof_crypto() {
 
 #[tokio::test]
 async fn crypto_subtle_instanceof_subtle_crypto() {
-    assert_eq!(check_secure("crypto.subtle instanceof SubtleCrypto").await, "true");
+    assert_eq!(
+        check_secure("crypto.subtle instanceof SubtleCrypto").await,
+        "true"
+    );
 }
 
 #[tokio::test]
@@ -2295,7 +2385,10 @@ async fn crypto_get_random_values_returns_non_zero() {
 
 #[tokio::test]
 async fn crypto_subtle_digest_exists() {
-    assert_eq!(check_secure("typeof crypto.subtle.digest").await, "function");
+    assert_eq!(
+        check_secure("typeof crypto.subtle.digest").await,
+        "function"
+    );
 }
 
 #[tokio::test]
@@ -2330,14 +2423,29 @@ async fn crypto_subtle_digest_actually_works() {
             } catch(e) { globalThis.__cryptoTestResult = 'err:' + e.message; }
         })();
     "#, Duration::from_secs(5)).await;
-    let result = page.event_loop().execute_script("globalThis.__cryptoTestResult || 'not-set'").unwrap_or_default();
+    let result = page
+        .event_loop()
+        .execute_script("globalThis.__cryptoTestResult || 'not-set'")
+        .unwrap_or_default();
     // SHA-256("hello world") = b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576e637fb7cf96a1ddd (note: 63 chars)
     // Correct SHA-256("hello world") is b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576e637fb7cf96a1ddd53d which is actually wrong
     // Real SHA-256("hello world") = b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576e637fb7cf96a1ddd53de is 64 chars
     // Just check it's 64 hex chars and starts with "b9":
-    assert_eq!(result.len(), 64, "crypto.subtle.digest should return 64-char SHA-256 hex hash, got: {}", result);
-    assert!(!result.starts_with("err:"), "crypto.subtle.digest failed: {}", result);
-    assert!(!result.starts_with("not-set"), "crypto.subtle.digest never ran");
+    assert_eq!(
+        result.len(),
+        64,
+        "crypto.subtle.digest should return 64-char SHA-256 hex hash, got: {}",
+        result
+    );
+    assert!(
+        !result.starts_with("err:"),
+        "crypto.subtle.digest failed: {}",
+        result
+    );
+    assert!(
+        !result.starts_with("not-set"),
+        "crypto.subtle.digest never ran"
+    );
 }
 
 #[tokio::test]
@@ -2456,7 +2564,10 @@ async fn webauthn_public_key_credential_constructor_throws() {
 
 #[tokio::test]
 async fn webauthn_authenticator_response_classes_exist() {
-    assert_eq!(check_secure("typeof AuthenticatorResponse").await, "function");
+    assert_eq!(
+        check_secure("typeof AuthenticatorResponse").await,
+        "function"
+    );
     assert_eq!(
         check_secure("typeof AuthenticatorAttestationResponse").await,
         "function"
@@ -2470,7 +2581,8 @@ async fn webauthn_authenticator_response_classes_exist() {
 #[tokio::test]
 async fn webauthn_attestation_extends_response() {
     assert_eq!(
-        check_secure("AuthenticatorAttestationResponse.prototype instanceof AuthenticatorResponse").await,
+        check_secure("AuthenticatorAttestationResponse.prototype instanceof AuthenticatorResponse")
+            .await,
         "true"
     );
 }
@@ -2486,7 +2598,8 @@ async fn webauthn_isuvpa_returns_promise() {
 #[tokio::test]
 async fn webauthn_iscma_returns_promise() {
     assert_eq!(
-        check_secure("PublicKeyCredential.isConditionalMediationAvailable() instanceof Promise").await,
+        check_secure("PublicKeyCredential.isConditionalMediationAvailable() instanceof Promise")
+            .await,
         "true"
     );
 }
@@ -3136,7 +3249,10 @@ async fn sab_constructible_with_byte_length() {
 #[ignore = "SAB only available with cross-origin isolation (COOP+COEP headers)"]
 async fn sab_instance_is_shared_array_buffer() {
     assert_eq!(
-        coi_check(true, "new SharedArrayBuffer(4) instanceof SharedArrayBuffer"),
+        coi_check(
+            true,
+            "new SharedArrayBuffer(4) instanceof SharedArrayBuffer"
+        ),
         "true"
     );
 }
@@ -3159,7 +3275,10 @@ async fn atomics_wait_returns_timed_out_synchronously() {
     // "timed-out" (or "ok"/"not-equal" on edge cases) — proves SAB+Atomics
     // are functional, not just present.
     assert_eq!(
-        coi_check(true, "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1)"),
+        coi_check(
+            true,
+            "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1)"
+        ),
         "timed-out"
     );
 }
@@ -3396,7 +3515,10 @@ async fn antibot_smoke(label: &str, url: &str, profile: stealth::StealthProfile)
     {
         Ok(r) => r,
         Err(_) => {
-            println!("  [TIMEOUT] {label} exceeded 300s wall clock", label = label);
+            println!(
+                "  [TIMEOUT] {label} exceeded 300s wall clock",
+                label = label
+            );
             println!("=== end {label} ===");
             return;
         }
@@ -3407,7 +3529,9 @@ async fn antibot_smoke(label: &str, url: &str, profile: stealth::StealthProfile)
             let final_url = p.url().to_string();
             let title = p.title();
             let html_len = p
-                .evaluate("document.documentElement ? document.documentElement.outerHTML.length : 0")
+                .evaluate(
+                    "document.documentElement ? document.documentElement.outerHTML.length : 0",
+                )
                 .unwrap_or_default()
                 .parse::<usize>()
                 .unwrap_or(0);
@@ -3509,7 +3633,9 @@ async fn antibot_smoke(label: &str, url: &str, profile: stealth::StealthProfile)
                 )
                 .unwrap_or_else(|_| "{}".into());
             let cookies_now = p
-                .evaluate("typeof document.cookie === 'string' ? document.cookie.slice(0, 600) : ''")
+                .evaluate(
+                    "typeof document.cookie === 'string' ? document.cookie.slice(0, 600) : ''",
+                )
                 .unwrap_or_default();
             println!("  net-trace:        {net_trace_json}");
             println!("  msg-trace:        {msg_trace_json}");
@@ -3854,11 +3980,20 @@ async fn wbaas_report_body_capture() {
 
     match page {
         Ok(Ok(mut p)) => {
-            let body_len = p.evaluate("globalThis.__wbaasReportBodyLen || 0").unwrap_or_default();
-            let body = p.evaluate("globalThis.__wbaasReportBody || ''").unwrap_or_default();
-            let cap_err = p.evaluate("globalThis.__wbaasReportCapErr || ''").unwrap_or_default();
+            let body_len = p
+                .evaluate("globalThis.__wbaasReportBodyLen || 0")
+                .unwrap_or_default();
+            let body = p
+                .evaluate("globalThis.__wbaasReportBody || ''")
+                .unwrap_or_default();
+            let cap_err = p
+                .evaluate("globalThis.__wbaasReportCapErr || ''")
+                .unwrap_or_default();
             println!("Report body len: {}", body_len);
-            println!("Report body (first 500 chars): {}", &body[..body.len().min(500)]);
+            println!(
+                "Report body (first 500 chars): {}",
+                &body[..body.len().min(500)]
+            );
             if !cap_err.is_empty() {
                 println!("Capture error: {}", cap_err);
             }
@@ -3877,7 +4012,8 @@ async fn wbaas_report_body_capture() {
 async fn shim_recursion_proto_walk_no_access() {
     // If this test fails (timeout / SIGTRAP) the bug is in ownKeys / getPrototypeOf
     // enumeration itself — not in getter invocation.
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 let p = globalThis;
@@ -3896,7 +4032,9 @@ async fn shim_recursion_proto_walk_no_access() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("walk_done_") || result.starts_with("cycle_at_"),
         "proto walk should complete without crash, got: {result}"
@@ -3908,7 +4046,8 @@ async fn shim_recursion_proto_walk_no_access() {
 async fn shim_recursion_proto_walk_with_getters() {
     // CreepJS calls toString on every function it finds while walking.
     // This test isolates whether our getter-invocation or toString masking recurses.
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 let p = globalThis;
@@ -3942,7 +4081,9 @@ async fn shim_recursion_proto_walk_with_getters() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("walk_done_") || result.starts_with("cycle_at_"),
         "proto walk+getters should complete without crash, got: {result}"
@@ -3952,7 +4093,8 @@ async fn shim_recursion_proto_walk_with_getters() {
 /// Phase-3: does Function.prototype.toString.call(fn) on all globalThis functions recurse?
 #[tokio::test]
 async fn shim_recursion_fn_proto_tostring_on_all() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 const seen = new Set();
@@ -3979,7 +4121,9 @@ async fn shim_recursion_fn_proto_tostring_on_all() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("toString_ok_"),
         "Function.prototype.toString on all fns should not recurse, got: {result}"
@@ -3989,7 +4133,8 @@ async fn shim_recursion_fn_proto_tostring_on_all() {
 /// Diagnostic: WeakSet behavior with globalThis (V8 global proxy identity)
 #[tokio::test]
 async fn shim_recursion_diag_weakset_globalthis() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 const ws = new WeakSet();
@@ -4021,17 +4166,26 @@ async fn shim_recursion_diag_weakset_globalthis() {
                 });
             } catch(e) { return 'error: ' + e.message; }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     println!("weakset globalThis test: {result}");
-    assert!(!result.starts_with("error:"), "weakset test failed: {result}");
+    assert!(
+        !result.starts_with("error:"),
+        "weakset test failed: {result}"
+    );
     // Critical: afterAdd must be true (otherwise cycle detection in creepjs fails)
-    assert!(result.contains("\"afterAdd\":true"), "WeakSet.has(globalThis) after add must be true, got: {result}");
+    assert!(
+        result.contains("\"afterAdd\":true"),
+        "WeakSet.has(globalThis) after add must be true, got: {result}"
+    );
 }
 
 /// Diagnostic: check CallSite frame objects from Error.prepareStackTrace
 #[tokio::test]
 async fn shim_recursion_diag_callsite() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 let frameInfo = null;
@@ -4091,15 +4245,21 @@ async fn shim_recursion_diag_callsite() {
                 return JSON.stringify(frameInfo);
             } catch(e) { return 'error: ' + e.message; }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     println!("callsite frame info: {result}");
-    assert!(!result.starts_with("error:"), "callsite diag failed: {result}");
+    assert!(
+        !result.starts_with("error:"),
+        "callsite diag failed: {result}"
+    );
 }
 
 /// Diagnostic: what does Object.getPrototypeOf(globalThis) return?
 #[tokio::test]
 async fn shim_recursion_diag_global_proto() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 const gt = globalThis;
@@ -4153,7 +4313,9 @@ async fn shim_recursion_diag_global_proto() {
                 return JSON.stringify(info);
             } catch(e) { return 'error: ' + e.message; }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     // Expect: p1 is Object.prototype or null (Deno runtime)
     println!("global proto chain: {result}");
     assert!(!result.starts_with("error:"), "proto diag failed: {result}");
@@ -4162,7 +4324,8 @@ async fn shim_recursion_diag_global_proto() {
 /// Phase-4: iframe window prototype chain walking (creepjs primary pattern)
 #[tokio::test]
 async fn shim_recursion_iframe_proto_walk() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 const iframe = document.createElement('iframe');
@@ -4205,7 +4368,9 @@ async fn shim_recursion_iframe_proto_walk() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("iframe_walk_ok_") || result.starts_with("cycle_at_"),
         "iframe contentWindow walk should not crash, got: {result}"
@@ -4215,7 +4380,8 @@ async fn shim_recursion_iframe_proto_walk() {
 /// Phase-5: creepjs-style window vs iframe window comparison
 #[tokio::test]
 async fn shim_recursion_creepjs_realm_check() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 const iframe = document.createElement('iframe');
@@ -4258,7 +4424,9 @@ async fn shim_recursion_creepjs_realm_check() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.contains("\"ok\":true"),
         "creepjs realm check should not crash, got: {result}"
@@ -4269,7 +4437,8 @@ async fn shim_recursion_creepjs_realm_check() {
 /// called on every window property (including Proxy-wrapped properties)
 #[tokio::test]
 async fn shim_recursion_creepjs_lies_detection() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 const toString = Function.prototype.toString;
@@ -4314,7 +4483,9 @@ async fn shim_recursion_creepjs_lies_detection() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("lies_check_ok_"),
         "creepjs lies detection should not crash, got: {result}"
@@ -4328,7 +4499,8 @@ async fn shim_recursion_creepjs_lies_detection() {
 /// path doesn't infinitely recurse.
 #[tokio::test]
 async fn shim_recursion_ym_iife_pattern() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 // Simulate Yandex Metrika initialization IIFE.
@@ -4352,7 +4524,9 @@ async fn shim_recursion_ym_iife_pattern() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("ym_ok_"),
         "Yandex Metrika IIFE pattern should not recurse, got: {result}"
@@ -4365,7 +4539,8 @@ async fn shim_recursion_ym_iife_pattern() {
 /// cycle or triggers a self-referential toString chain, it crashes here.
 #[tokio::test]
 async fn shim_recursion_ym_iframe_navigator_probe() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 // Create iframe + read its window (our iframeWindow Proxy)
@@ -4399,7 +4574,9 @@ async fn shim_recursion_ym_iframe_navigator_probe() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("ym_iframe_ok_"),
         "YM iframe+navigator probe should not crash, got: {result}"
@@ -4411,7 +4588,8 @@ async fn shim_recursion_ym_iframe_navigator_probe() {
 /// to avoid re-inserting itself.
 #[tokio::test]
 async fn shim_recursion_ym_cookie_scripts_probe() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 // Cookie read/write (YM stores its state in _ym_uid cookie)
@@ -4438,7 +4616,9 @@ async fn shim_recursion_ym_cookie_scripts_probe() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("ym_cookie_ok_"),
         "YM cookie+scripts probe should not crash, got: {result}"
@@ -4450,7 +4630,8 @@ async fn shim_recursion_ym_cookie_scripts_probe() {
 /// If any property getter recurses or the prototype walk loops, this crashes.
 #[tokio::test]
 async fn shim_recursion_ym_window_enum_probe() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 // YM checks if specific globals exist via in-operator
@@ -4490,7 +4671,9 @@ async fn shim_recursion_ym_window_enum_probe() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("ym_enum_ok_"),
         "YM window enumeration should not crash, got: {result}"
@@ -4504,7 +4687,8 @@ async fn shim_recursion_ym_window_enum_probe() {
 /// this test catches it.
 #[tokio::test]
 async fn shim_recursion_ym_module_loader_pattern() {
-    let result = check(r#"
+    let result = check(
+        r#"
         (function() {
             try {
                 // Simulate YM's webpack-style module loader
@@ -4541,7 +4725,9 @@ async fn shim_recursion_ym_module_loader_pattern() {
                 return 'error: ' + e.message;
             }
         })()
-    "#).await;
+    "#,
+    )
+    .await;
     assert!(
         result.starts_with("ym_loader_ok_"),
         "YM module loader pattern should not crash, got: {result}"
@@ -4599,7 +4785,12 @@ async fn antibot_t3_akamai_bmp() {
 #[ignore = "network: T4 Kasada (ticketmaster/canadagoose/hyatt)"]
 async fn antibot_t4_kasada() {
     let p = stealth::presets::chrome_130_macos();
-    antibot_smoke("T4-ticketmaster", "https://www.ticketmaster.com/", p.clone()).await;
+    antibot_smoke(
+        "T4-ticketmaster",
+        "https://www.ticketmaster.com/",
+        p.clone(),
+    )
+    .await;
     antibot_smoke("T4-canadagoose", "https://www.canadagoose.com/", p.clone()).await;
     antibot_smoke("T4-hyatt", "https://www.hyatt.com/", p).await;
 }
@@ -4643,7 +4834,8 @@ async fn antibot_t8_chinese() {
 async fn wbaas_solver_url_direct_fetch() {
     let profile = stealth::presets::chrome_130_ru();
     let client = net::HttpClient::new(&profile).unwrap();
-    let url = "https://www.wildberries.ru/__wbaas/challenges/antibot/statics/challenge_solver_v1.0.4.js";
+    let url =
+        "https://www.wildberries.ru/__wbaas/challenges/antibot/statics/challenge_solver_v1.0.4.js";
     println!("\n=== WBAAS solver direct fetch ===");
     let t0 = std::time::Instant::now();
     let mut hdrs = net::headers::chrome_headers(&profile);
@@ -4658,7 +4850,10 @@ async fn wbaas_solver_url_direct_fetch() {
             println!("  body bytes:    {}", body.len());
             println!("  elapsed:       {:?}", t0.elapsed());
             println!("  content-type:  {:?}", resp.headers.get("content-type"));
-            println!("  content-encoding: {:?}", resp.headers.get("content-encoding"));
+            println!(
+                "  content-encoding: {:?}",
+                resp.headers.get("content-encoding")
+            );
             if !body.is_empty() {
                 println!("  body[..200]:   {}", &body[..body.len().min(200)]);
             }
@@ -4742,25 +4937,37 @@ async fn wbaas_full_network_trace() {
     match page {
         Ok(Ok(mut p)) => {
             // Read both __allRequests (our wrapper) and __fetchLog (page.rs wrapper).
-            let all = p.evaluate("JSON.stringify(window.__allRequests||[])").unwrap_or_default();
-            let fetch_log = p.evaluate(r#"JSON.stringify((window.__fetchLog||[]).map(e => ({
+            let all = p
+                .evaluate("JSON.stringify(window.__allRequests||[])")
+                .unwrap_or_default();
+            let fetch_log = p
+                .evaluate(
+                    r#"JSON.stringify((window.__fetchLog||[]).map(e => ({
                 method: e.method, url: e.url, status: e.status, hasBody: e.hasBody,
                 body: e.body ? e.body.substring(0,300) : undefined,
                 respHeaders: e.respHeaders
-            })))"#).unwrap_or_default();
+            })))"#,
+                )
+                .unwrap_or_default();
 
             println!("\n=== __fetchLog (page.rs wrapper) ===");
             if let Ok(entries) = serde_json::from_str::<serde_json::Value>(&fetch_log) {
                 if let Some(arr) = entries.as_array() {
                     println!("Total: {}", arr.len());
                     for (i, e) in arr.iter().enumerate() {
-                        println!("  [{i:03}] {} {} status={}",
+                        println!(
+                            "  [{i:03}] {} {} status={}",
                             e["method"].as_str().unwrap_or("?"),
                             e["url"].as_str().unwrap_or("?"),
-                            e.get("status").and_then(|s| s.as_u64()).map(|s| s.to_string()).unwrap_or_else(|| "?".to_string()),
+                            e.get("status")
+                                .and_then(|s| s.as_u64())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "?".to_string()),
                         );
                         if let Some(b) = e.get("body").and_then(|s| s.as_str()) {
-                            if !b.is_empty() { println!("         body: {}", &b[..b.len().min(300)]); }
+                            if !b.is_empty() {
+                                println!("         body: {}", &b[..b.len().min(300)]);
+                            }
                         }
                     }
                 }
@@ -4773,10 +4980,14 @@ async fn wbaas_full_network_trace() {
                 if let Some(arr) = entries.as_array() {
                     println!("Total: {}", arr.len());
                     for (i, e) in arr.iter().enumerate() {
-                        println!("  [{i:03}] {} {} status={} bodyLen={}",
+                        println!(
+                            "  [{i:03}] {} {} status={} bodyLen={}",
                             e["method"].as_str().unwrap_or("?"),
                             e["url"].as_str().unwrap_or("?"),
-                            e.get("status").and_then(|s| s.as_u64()).map(|s| s.to_string()).unwrap_or_else(|| "?".to_string()),
+                            e.get("status")
+                                .and_then(|s| s.as_u64())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "?".to_string()),
                             e.get("bodyLen").and_then(|s| s.as_u64()).unwrap_or(0),
                         );
                         if let Some(snippet) = e.get("bodySnippet").and_then(|s| s.as_str()) {
@@ -4795,7 +5006,9 @@ async fn wbaas_full_network_trace() {
                 println!("Raw: {}", &all[..all.len().min(1000)]);
             }
 
-            let errors = p.evaluate("JSON.stringify(window.__scriptErrors||[])").unwrap_or_default();
+            let errors = p
+                .evaluate("JSON.stringify(window.__scriptErrors||[])")
+                .unwrap_or_default();
             println!("\n=== Script errors ===");
             println!("{}", &errors[..errors.len().min(1000)]);
         }
@@ -4809,8 +5022,7 @@ async fn wbaas_full_network_trace() {
 async fn dump_hyatt_initial_response() {
     let profile = stealth::presets::chrome_130_macos();
     let client = net::HttpClient::new(&profile).unwrap();
-    let url = std::env::var("HYATT_URL")
-        .unwrap_or_else(|_| "https://www.hyatt.com/".to_string());
+    let url = std::env::var("HYATT_URL").unwrap_or_else(|_| "https://www.hyatt.com/".to_string());
     let url = url.as_str();
     println!("\n=== Initial response from hyatt.com ===");
     let hdrs = net::headers::chrome_headers(&profile);
@@ -4897,7 +5109,10 @@ async fn tls_fingerprint_peet() {
             println!("  peetprint:         {}", extract("peetprint"));
             println!("  peetprint_hash:    {}", extract("peetprint_hash"));
             println!("  akamai_fp:         {}", extract("akamai_fingerprint"));
-            println!("  akamai_hash:       {}", extract("akamai_fingerprint_hash"));
+            println!(
+                "  akamai_hash:       {}",
+                extract("akamai_fingerprint_hash")
+            );
             println!("  user_agent:        {}", extract("user_agent"));
             // also dump our http_version to verify h2
             println!("  http_version:      {}", extract("http_version"));
@@ -4927,6 +5142,23 @@ async fn kasada_alt_targets() {
     antibot_smoke(
         "KASADA-ticketmaster",
         "https://www.ticketmaster.com/",
+        profile,
+    )
+    .await;
+}
+
+/// W4.2 — homedepot Akamai sec-cpt self-solve diagnostic. Run with
+/// BOXIDE_DEBUG_NAV=1 to trace which of the 4 self-solve steps
+/// truncates (exec external challenge script / PoW budget / verify XHR
+/// / post-solve reload re-fetch) per doc 20. The only engine-tractable
+/// union lever (homedepot Akamai-CHL → L3, union 120→121).
+#[tokio::test]
+#[ignore = "network: homedepot sec-cpt self-solve nav trace"]
+async fn akamai_homedepot_seccpt_diag() {
+    let profile = stealth::presets::chrome_130_macos();
+    antibot_smoke(
+        "AKAMAI-homedepot-SECCPT",
+        "https://www.homedepot.com/",
         profile,
     )
     .await;
@@ -5074,7 +5306,11 @@ async fn fingerprint_probe_vs_chrome() {
     let result = check(js).await;
     println!("\nFINGERPRINT PROBE:\n{}", result);
     // Just ensure it ran
-    assert!(result.starts_with('{'), "expected JSON, got: {}", &result[..100.min(result.len())]);
+    assert!(
+        result.starts_with('{'),
+        "expected JSON, got: {}",
+        &result[..100.min(result.len())]
+    );
 }
 
 /// W6 — DataDome diagnostic capture. Mirror of kasada_error_blob_capture
@@ -5231,21 +5467,32 @@ async fn datadome_diagnostic_capture() {
             // Did we get a `datadome` cookie? Indirect check via
             // document.cookie — Page-level cookie jar is the truth, but
             // this is what the JS would see.
-            let cookie = p.evaluate("document.cookie || ''")
-                .unwrap_or_default();
+            let cookie = p.evaluate("document.cookie || ''").unwrap_or_default();
             println!("page final: title={title:?} url={url} content_len={content_len}");
-            println!("page cookie: {}", cookie.trim_matches('"').chars().take(500).collect::<String>());
+            println!(
+                "page cookie: {}",
+                cookie
+                    .trim_matches('"')
+                    .chars()
+                    .take(500)
+                    .collect::<String>()
+            );
 
             for i in 0..n {
-                let kind = p.evaluate(&format!("globalThis.__ddCapture[{i}].kind || ''"))
+                let kind = p
+                    .evaluate(&format!("globalThis.__ddCapture[{i}].kind || ''"))
                     .unwrap_or_default();
-                let url = p.evaluate(&format!("globalThis.__ddCapture[{i}].url || ''"))
+                let url = p
+                    .evaluate(&format!("globalThis.__ddCapture[{i}].url || ''"))
                     .unwrap_or_default();
-                let len = p.evaluate(&format!("globalThis.__ddCapture[{i}].len || 0"))
+                let len = p
+                    .evaluate(&format!("globalThis.__ddCapture[{i}].len || 0"))
                     .unwrap_or_default();
-                let b64 = p.evaluate(&format!("globalThis.__ddCapture[{i}].b64 || ''"))
+                let b64 = p
+                    .evaluate(&format!("globalThis.__ddCapture[{i}].b64 || ''"))
                     .unwrap_or_default();
-                let preview = p.evaluate(&format!("globalThis.__ddCapture[{i}].preview || ''"))
+                let preview = p
+                    .evaluate(&format!("globalThis.__ddCapture[{i}].preview || ''"))
                     .unwrap_or_default();
                 let kind = kind.trim_matches('"');
                 let url = url.trim_matches('"');
@@ -5254,7 +5501,10 @@ async fn datadome_diagnostic_capture() {
                 let preview = preview.trim_matches('"');
                 println!("--- entry #{i}: kind={kind} len={len} url={url} ---");
                 if !preview.is_empty() {
-                    println!("    preview: {}", preview.chars().take(200).collect::<String>());
+                    println!(
+                        "    preview: {}",
+                        preview.chars().take(200).collect::<String>()
+                    );
                 }
                 if !b64.is_empty() {
                     let path = format!("datadome_blob_{i}.b64");
@@ -5339,12 +5589,20 @@ async fn kasada_eval_source_capture() {
             }
             // Filter: only show evals containing "unjzomuy" OR very short
             // expressions (likely the probe call itself).
-            let unj = p.evaluate(
-                "(globalThis.__evalLog || []).filter(e => e.src.includes('unjzomuy')).length"
-            ).unwrap_or_default().trim_matches('"').parse::<usize>().unwrap_or(0);
-            let total = p.evaluate(
-                "(globalThis.__evalLog || []).length"
-            ).unwrap_or_default().trim_matches('"').parse::<usize>().unwrap_or(0);
+            let unj = p
+                .evaluate(
+                    "(globalThis.__evalLog || []).filter(e => e.src.includes('unjzomuy')).length",
+                )
+                .unwrap_or_default()
+                .trim_matches('"')
+                .parse::<usize>()
+                .unwrap_or(0);
+            let total = p
+                .evaluate("(globalThis.__evalLog || []).length")
+                .unwrap_or_default()
+                .trim_matches('"')
+                .parse::<usize>()
+                .unwrap_or(0);
             println!("\n=== Total evals: {total}, unjzomuy-bearing: {unj} ===\n");
             // Dump all unjzomuy evals
             for i in 0..total.min(2000) {
@@ -5352,9 +5610,9 @@ async fn kasada_eval_source_capture() {
                     "(function(){{ var e = globalThis.__evalLog[{i}]; return e && e.src && e.src.includes('unjzomuy') ? '1' : '0'; }})()"
                 )).unwrap_or_default();
                 if has.trim_matches('"') == "1" {
-                    let src = p.evaluate(&format!(
-                        "globalThis.__evalLog[{i}].src"
-                    )).unwrap_or_default();
+                    let src = p
+                        .evaluate(&format!("globalThis.__evalLog[{i}].src"))
+                        .unwrap_or_default();
                     println!("--- eval #{i} (unjzomuy) ---");
                     let s = src.trim_matches('"');
                     println!("{}", s.chars().take(800).collect::<String>());
@@ -5449,7 +5707,8 @@ async fn kasada_typeerror_stack_capture() {
                 let _ = p.evaluate("0");
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            let n = p.evaluate("(globalThis.__teLog || []).length")
+            let n = p
+                .evaluate("(globalThis.__teLog || []).length")
                 .unwrap_or_default()
                 .trim_matches('"')
                 .parse::<usize>()
@@ -5457,33 +5716,39 @@ async fn kasada_typeerror_stack_capture() {
             println!("\n=== Captured {n} unjzomuy TypeError stacks ===\n");
             for i in 0..n {
                 println!("--- TypeError #{i} ---");
-                let msg = p.evaluate(&format!(
-                    "globalThis.__teLog[{i}].msg || ''"
-                )).unwrap_or_default();
+                let msg = p
+                    .evaluate(&format!("globalThis.__teLog[{i}].msg || ''"))
+                    .unwrap_or_default();
                 println!("  msg: {}", msg.trim_matches('"'));
-                let frames_n = p.evaluate(&format!(
-                    "(globalThis.__teLog[{i}].stack || []).length"
-                )).unwrap_or_default()
-                    .trim_matches('"').parse::<usize>().unwrap_or(0);
+                let frames_n = p
+                    .evaluate(&format!("(globalThis.__teLog[{i}].stack || []).length"))
+                    .unwrap_or_default()
+                    .trim_matches('"')
+                    .parse::<usize>()
+                    .unwrap_or(0);
                 for f in 0..frames_n {
-                    let fn_name = p.evaluate(&format!(
-                        "globalThis.__teLog[{i}].stack[{f}].fn || ''"
-                    )).unwrap_or_default();
-                    let file = p.evaluate(&format!(
-                        "globalThis.__teLog[{i}].stack[{f}].file || ''"
-                    )).unwrap_or_default();
-                    let line = p.evaluate(&format!(
-                        "globalThis.__teLog[{i}].stack[{f}].line || -1"
-                    )).unwrap_or_default();
-                    let col = p.evaluate(&format!(
-                        "globalThis.__teLog[{i}].stack[{f}].col || -1"
-                    )).unwrap_or_default();
-                    let is_eval = p.evaluate(&format!(
-                        "globalThis.__teLog[{i}].stack[{f}].isEval || false"
-                    )).unwrap_or_default();
-                    let is_native = p.evaluate(&format!(
-                        "globalThis.__teLog[{i}].stack[{f}].isNative || false"
-                    )).unwrap_or_default();
+                    let fn_name = p
+                        .evaluate(&format!("globalThis.__teLog[{i}].stack[{f}].fn || ''"))
+                        .unwrap_or_default();
+                    let file = p
+                        .evaluate(&format!("globalThis.__teLog[{i}].stack[{f}].file || ''"))
+                        .unwrap_or_default();
+                    let line = p
+                        .evaluate(&format!("globalThis.__teLog[{i}].stack[{f}].line || -1"))
+                        .unwrap_or_default();
+                    let col = p
+                        .evaluate(&format!("globalThis.__teLog[{i}].stack[{f}].col || -1"))
+                        .unwrap_or_default();
+                    let is_eval = p
+                        .evaluate(&format!(
+                            "globalThis.__teLog[{i}].stack[{f}].isEval || false"
+                        ))
+                        .unwrap_or_default();
+                    let is_native = p
+                        .evaluate(&format!(
+                            "globalThis.__teLog[{i}].stack[{f}].isNative || false"
+                        ))
+                        .unwrap_or_default();
                     println!(
                         "  [{f}] fn={} file={} line={} col={} isEval={} isNative={}",
                         fn_name.trim_matches('"'),
@@ -5505,7 +5770,9 @@ async fn kasada_typeerror_stack_capture() {
 #[tokio::test]
 async fn check_iterators_test() {
     let profile = stealth::chrome_130_macos();
-    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let mut page = browser::Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
     let js = r#"
         (function() {
             const results = {};
@@ -5532,7 +5799,9 @@ async fn check_iterators_test() {
 #[tokio::test]
 async fn check_ctors_test() {
     let profile = stealth::chrome_130_macos();
-    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let mut page = browser::Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
     let js = r#"
         (function() {
             const results = {};
@@ -5561,7 +5830,9 @@ async fn check_ctors_test() {
 #[tokio::test]
 async fn check_tostring_test() {
     let profile = stealth::chrome_130_macos();
-    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let mut page = browser::Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
     let js = r#"
         (function() {
             const res = {};
@@ -5595,7 +5866,9 @@ async fn check_tostring_test() {
 #[tokio::test]
 async fn check_spread_test() {
     let profile = stealth::chrome_130_macos();
-    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let mut page = browser::Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
     let js = r#"
         (function() {
             const res = {};
@@ -5630,7 +5903,9 @@ async fn check_spread_test() {
 #[tokio::test]
 async fn check_ao_candidates_test() {
     let profile = stealth::chrome_130_macos();
-    let mut page = browser::Page::with_profile("", "about:blank", profile).await.unwrap();
+    let mut page = browser::Page::with_profile("", "about:blank", profile)
+        .await
+        .unwrap();
     let js = r#"
         (function() {
             const res = {};
@@ -5799,7 +6074,9 @@ async fn kasada_symbol_iterator_probe() {
                 let _ = p.evaluate("0");
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            let init_err = p.evaluate("globalThis.__iterProbeInitErr || ''").unwrap_or_default();
+            let init_err = p
+                .evaluate("globalThis.__iterProbeInitErr || ''")
+                .unwrap_or_default();
             let n = p
                 .evaluate("(globalThis.__iterProbe || []).length")
                 .unwrap_or_default()
@@ -5809,7 +6086,9 @@ async fn kasada_symbol_iterator_probe() {
             println!("init_err: {init_err}");
             println!("=== Symbol.iterator probes (all): {n} ===");
             // Group by (typeTag, keys.join, proto) to dedupe.
-            let summary = p.evaluate(r#"
+            let summary = p
+                .evaluate(
+                    r#"
                 JSON.stringify((() => {
                     const counts = {};
                     for (const e of globalThis.__iterProbe || []) {
@@ -5818,10 +6097,14 @@ async fn kasada_symbol_iterator_probe() {
                     }
                     return counts;
                 })())
-            "#).unwrap_or_default();
+            "#,
+                )
+                .unwrap_or_default();
             println!("SUMMARY: {summary}");
             // Show the first 20 unique stacks
-            let stacks = p.evaluate(r#"
+            let stacks = p
+                .evaluate(
+                    r#"
                 JSON.stringify((() => {
                     const seen = new Set(); const out = [];
                     for (const e of globalThis.__iterProbe || []) {
@@ -5833,7 +6116,9 @@ async fn kasada_symbol_iterator_probe() {
                     }
                     return out;
                 })())
-            "#).unwrap_or_default();
+            "#,
+                )
+                .unwrap_or_default();
             println!("UNIQUE_STACKS: {stacks}");
         }
         Ok(Err(e)) => println!("page err: {e}"),
@@ -5915,7 +6200,9 @@ async fn kasada_capture_ips_js() {
             if ips_url.is_empty() {
                 println!("ips.js URL not found in setter log or DOM");
                 println!("Captured script URLs:");
-                let urls = p.evaluate("JSON.stringify(globalThis.__scriptUrls || [])").unwrap_or_default();
+                let urls = p
+                    .evaluate("JSON.stringify(globalThis.__scriptUrls || [])")
+                    .unwrap_or_default();
                 println!("{urls}");
                 return;
             }
@@ -5933,7 +6220,9 @@ async fn kasada_capture_ips_js() {
             println!("Absolute ips.js URL: {abs_url}");
 
             // Debug: what does the runtime think the location is?
-            let loc = p.evaluate("JSON.stringify({base: document.baseURI, loc: location.href})").unwrap_or_default();
+            let loc = p
+                .evaluate("JSON.stringify({base: document.baseURI, loc: location.href})")
+                .unwrap_or_default();
             println!("Page location debug: {loc}");
 
             // Use a SYNCHRONOUS XHR — our op_net_fetch_sync runs inline
@@ -5959,11 +6248,19 @@ async fn kasada_capture_ips_js() {
             );
             let fetch_result = p.evaluate(&fetch_js).unwrap_or_default();
             println!("Fetch result: {fetch_result}");
-            let source = p.evaluate("globalThis.__ipsJsSource || ''").unwrap_or_default();
+            let source = p
+                .evaluate("globalThis.__ipsJsSource || ''")
+                .unwrap_or_default();
             // Strip JSON-encoded outer quotes if any
-            let source = source.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&source);
+            let source = source
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .unwrap_or(&source);
             // Unescape JSON \" and \\
-            let source = source.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
+            let source = source
+                .replace("\\n", "\n")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
             println!("ips.js length: {}", source.len());
             std::fs::write("kasada_ips.js", &source).ok();
             println!("Wrote kasada_ips.js ({} bytes)", source.len());
@@ -6328,12 +6625,27 @@ async fn kasada_vm_dispatcher_trace() {
             std::fs::write("kasada_vm_trace.json", &stripped).ok();
             println!("=== Kasada VM dispatcher trace ===");
             // Print a brief summary; full dump on disk.
-            let parsed: serde_json::Value = serde_json::from_str(&stripped)
-                .unwrap_or(serde_json::Value::Null);
+            let parsed: serde_json::Value =
+                serde_json::from_str(&stripped).unwrap_or(serde_json::Value::Null);
             if let Some(obj) = parsed.as_object() {
-                println!("handler_count: {}", obj.get("handler_count").map(|v| v.to_string()).unwrap_or_default());
-                println!("trace_size:    {}", obj.get("trace_size").map(|v| v.to_string()).unwrap_or_default());
-                println!("first_throw_at: {}", obj.get("first_throw_at").map(|v| v.to_string()).unwrap_or_default());
+                println!(
+                    "handler_count: {}",
+                    obj.get("handler_count")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default()
+                );
+                println!(
+                    "trace_size:    {}",
+                    obj.get("trace_size")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default()
+                );
+                println!(
+                    "first_throw_at: {}",
+                    obj.get("first_throw_at")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default()
+                );
                 if let Some(throws) = obj.get("throw_stacks").and_then(|v| v.as_array()) {
                     println!("\n=== First {} throws ===", throws.len());
                     for t in throws {
@@ -6347,7 +6659,10 @@ async fn kasada_vm_dispatcher_trace() {
                     }
                 }
             }
-            println!("\nFull dump: ./kasada_vm_trace.json (size: {} bytes)", stripped.len());
+            println!(
+                "\nFull dump: ./kasada_vm_trace.json (size: {} bytes)",
+                stripped.len()
+            );
         }
         Ok(Err(e)) => println!("page err: {e}"),
         Err(_) => println!("timeout"),
@@ -6501,7 +6816,9 @@ async fn check_payment_request_surface() {
     assert!(async_result.contains("\"canMakePayment_unknown\": false"));
     assert!(async_result.contains("\"hasEnrolledInstrument\": false"));
     assert!(async_result.contains("\"show_rejected\": \"AbortError\""));
-    assert!(async_result.contains("\"spc\": \"unavailable-no-user-verifying-platform-authenticator\""));
+    assert!(
+        async_result.contains("\"spc\": \"unavailable-no-user-verifying-platform-authenticator\"")
+    );
 }
 
 /// navigator.getInstalledRelatedApps — Chrome/Edge-only API; absence
@@ -6737,7 +7054,8 @@ async fn check_audio_fingerprint_per_profile() {
         let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
             .await
             .unwrap();
-        page.evaluate(r#"
+        page.evaluate(
+            r#"
             (function() {
                 const ctx = new OfflineAudioContext(1, 5000, 44100);
                 const osc = ctx.createOscillator();
@@ -6762,13 +7080,13 @@ async fn check_audio_fingerprint_per_profile() {
                     window.__audio_done = true;
                 });
             })()
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         page.evaluate_async("void 0", std::time::Duration::from_millis(500))
             .await
             .ok();
-        let raw = page
-            .evaluate(r#"String(window.__audio_hash)"#)
-            .unwrap();
+        let raw = page.evaluate(r#"String(window.__audio_hash)"#).unwrap();
         raw.parse::<f64>().unwrap_or(f64::NAN)
     }
     let _ = render_js; // referenced for documentation
@@ -6778,8 +7096,14 @@ async fn check_audio_fingerprint_per_profile() {
     let h_lin_2 = render(stealth::chrome_130_linux()).await;
     println!("audio hashes: mac={h_mac} lin={h_lin} lin_again={h_lin_2}");
 
-    assert!(h_mac.is_finite() && h_mac > 0.0, "macOS profile produced no audio output");
-    assert!(h_lin.is_finite() && h_lin > 0.0, "Linux profile produced no audio output");
+    assert!(
+        h_mac.is_finite() && h_mac > 0.0,
+        "macOS profile produced no audio output"
+    );
+    assert!(
+        h_lin.is_finite() && h_lin > 0.0,
+        "Linux profile produced no audio output"
+    );
     // Different audio_seed → distinct hashes
     assert!(
         (h_mac - h_lin).abs() > 1e-6,
@@ -6909,8 +7233,7 @@ async fn check_function_identity_preservation() {
         "FAIL test1: tag did NOT persist on enumerateDevices re-access — even though refs were equal"
     );
     assert!(
-        result.contains("\"test3_same_ref\": true")
-            || result.contains("\"test3_skipped\""),
+        result.contains("\"test3_same_ref\": true") || result.contains("\"test3_skipped\""),
         "FAIL test3: Navigator.sendBeacon descriptor.value returns DIFFERENT objects on re-access"
     );
     assert!(
@@ -7020,14 +7343,38 @@ async fn check_ios_safari_surface() {
     // W1.5 — `in`-operator absences (PerimeterX UA-consistency check).
     // These are the actual fail-on-true checks for wayfair/zillow/trulia/bloomberg.
     for (key, label) in [
-        ("\"chrome_in_window\": false", "window.chrome must be absent"),
-        ("\"userActivation_in_navigator\": false", "navigator.userActivation must be absent"),
-        ("\"deviceMemory_in_navigator\": false", "navigator.deviceMemory must be absent"),
-        ("\"connection_in_navigator\": false", "navigator.connection must be absent"),
-        ("\"scheduling_in_navigator\": false", "navigator.scheduling must be absent"),
-        ("\"getInstalledRelatedApps_in_navigator\": false", "navigator.getInstalledRelatedApps must be absent"),
-        ("\"IdleDetector_in_window\": false", "globalThis.IdleDetector must be absent"),
-        ("\"UserActivation_in_window\": false", "globalThis.UserActivation must be absent"),
+        (
+            "\"chrome_in_window\": false",
+            "window.chrome must be absent",
+        ),
+        (
+            "\"userActivation_in_navigator\": false",
+            "navigator.userActivation must be absent",
+        ),
+        (
+            "\"deviceMemory_in_navigator\": false",
+            "navigator.deviceMemory must be absent",
+        ),
+        (
+            "\"connection_in_navigator\": false",
+            "navigator.connection must be absent",
+        ),
+        (
+            "\"scheduling_in_navigator\": false",
+            "navigator.scheduling must be absent",
+        ),
+        (
+            "\"getInstalledRelatedApps_in_navigator\": false",
+            "navigator.getInstalledRelatedApps must be absent",
+        ),
+        (
+            "\"IdleDetector_in_window\": false",
+            "globalThis.IdleDetector must be absent",
+        ),
+        (
+            "\"UserActivation_in_window\": false",
+            "globalThis.UserActivation must be absent",
+        ),
     ] {
         assert!(result.contains(key), "iOS surface: {label} (got: {result})");
     }
@@ -7227,10 +7574,22 @@ async fn kasada_smc_isTypeSupported_must_be_true_for_mp4() {
     eprintln!("smc isTypeSupported: {result}");
     // Real Chrome 148: mp4=true, mp4_codec=true, m4a=true (with codec=mp4a),
     // aac=true, acc=alias of aac (real Chrome returns true).
-    assert!(result.contains("\"mp4\":true"), "mp4 must be supported: {result}");
-    assert!(result.contains("\"m4a\":true"), "m4a must be supported (Kasada smc probe): {result}");
-    assert!(result.contains("\"aac\":true"), "aac must be supported (Kasada smc probe): {result}");
-    assert!(result.contains("\"acc\":true"), "acc alias must be supported (Kasada smc probe): {result}");
+    assert!(
+        result.contains("\"mp4\":true"),
+        "mp4 must be supported: {result}"
+    );
+    assert!(
+        result.contains("\"m4a\":true"),
+        "m4a must be supported (Kasada smc probe): {result}"
+    );
+    assert!(
+        result.contains("\"aac\":true"),
+        "aac must be supported (Kasada smc probe): {result}"
+    );
+    assert!(
+        result.contains("\"acc\":true"),
+        "acc alias must be supported (Kasada smc probe): {result}"
+    );
 }
 
 // Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
@@ -7600,7 +7959,8 @@ async fn pluginarray_namedItem_must_show_native_code() {
             leak_allPlugins: s1.includes('_allPlugins'),
         });
         "#,
-    ).await;
+    )
+    .await;
     eprintln!("namedItem audit: {result}");
     assert!(
         result.contains("[native code]"),

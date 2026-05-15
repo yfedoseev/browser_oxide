@@ -73,7 +73,10 @@ fn write_artifacts(site: &str, html: &str, extracted: &Value) {
     let html_path = dir.join(format!("{}.html", site));
     let json_path = dir.join(format!("{}.json", site));
     let _ = std::fs::write(&html_path, html);
-    let _ = std::fs::write(&json_path, serde_json::to_string_pretty(extracted).unwrap_or_default());
+    let _ = std::fs::write(
+        &json_path,
+        serde_json::to_string_pretty(extracted).unwrap_or_default(),
+    );
 }
 
 /// Wait until a JS predicate returns "true" or the deadline elapses.
@@ -153,7 +156,13 @@ async fn run_creepjs(profile: stealth::StealthProfile) -> SiteResult {
             "no trustScore (window.creep absent or report did not finish)".into(),
         ),
     };
-    SiteResult { site: "creepjs", url, verdict, note, extracted }
+    SiteResult {
+        site: "creepjs",
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
 async fn run_pixelscan(profile: stealth::StealthProfile) -> SiteResult {
@@ -207,17 +216,26 @@ async fn run_pixelscan(profile: stealth::StealthProfile) -> SiteResult {
     let (verdict, note) = match (consistency, spoofing_hits) {
         (Some(c), 0) if c >= 90.0 => (Verdict::Pass, format!("consistency={c}%")),
         (Some(c), 0) if c >= 70.0 => (Verdict::Partial, format!("consistency={c}%")),
-        (Some(c), _) => (Verdict::Fail, format!("consistency={c}% spoofing_hits={spoofing_hits}")),
-        (None, 0) => (Verdict::Partial, "no consistency score parsed; no negative markers".into()),
+        (Some(c), _) => (
+            Verdict::Fail,
+            format!("consistency={c}% spoofing_hits={spoofing_hits}"),
+        ),
+        (None, 0) => (
+            Verdict::Partial,
+            "no consistency score parsed; no negative markers".into(),
+        ),
         (None, _) => (Verdict::Fail, format!("spoofing_hits={spoofing_hits}")),
     };
-    SiteResult { site: "pixelscan", url, verdict, note, extracted }
+    SiteResult {
+        site: "pixelscan",
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
-async fn run_browserleaks(
-    profile: stealth::StealthProfile,
-    section: &'static str,
-) -> SiteResult {
+async fn run_browserleaks(profile: stealth::StealthProfile, section: &'static str) -> SiteResult {
     let site_key: &'static str = match section {
         "canvas" => "browserleaks_canvas",
         "webgl" => "browserleaks_webgl",
@@ -290,11 +308,20 @@ async fn run_browserleaks(
     } else if rows >= 3 && bad_markers == 0 {
         (Verdict::Partial, format!("{rows} rows; thin report"))
     } else if bad_markers > 0 {
-        (Verdict::Fail, format!("{bad_markers} bot-marker hits in body"))
+        (
+            Verdict::Fail,
+            format!("{bad_markers} bot-marker hits in body"),
+        )
     } else {
         (Verdict::Fail, format!("only {rows} rows, no clear report"))
     };
-    SiteResult { site: site_key, url, verdict, note, extracted }
+    SiteResult {
+        site: site_key,
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
 async fn run_rebrowser(profile: stealth::StealthProfile) -> SiteResult {
@@ -332,20 +359,47 @@ async fn run_rebrowser(profile: stealth::StealthProfile) -> SiteResult {
     let html = page.content();
     write_artifacts("rebrowser", &html, &extracted);
 
-    let passed = extracted.get("passedCount").and_then(|v| v.as_u64()).unwrap_or(0);
-    let failed = extracted.get("failedCount").and_then(|v| v.as_u64()).unwrap_or(0);
-    let detected = extracted.get("detectedCount").and_then(|v| v.as_u64()).unwrap_or(0);
+    let passed = extracted
+        .get("passedCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let failed = extracted
+        .get("failedCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let detected = extracted
+        .get("detectedCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let bad = failed + detected;
     let (verdict, note) = if passed >= 3 && bad == 0 {
-        (Verdict::Pass, format!("PASSED={passed} FAILED={failed} DETECTED={detected}"))
+        (
+            Verdict::Pass,
+            format!("PASSED={passed} FAILED={failed} DETECTED={detected}"),
+        )
     } else if passed > 0 && bad <= 1 {
-        (Verdict::Partial, format!("PASSED={passed} FAILED={failed} DETECTED={detected}"))
+        (
+            Verdict::Partial,
+            format!("PASSED={passed} FAILED={failed} DETECTED={detected}"),
+        )
     } else if passed == 0 && bad == 0 {
-        (Verdict::Fail, "no PASSED/FAILED markers — page likely did not render".into())
+        (
+            Verdict::Fail,
+            "no PASSED/FAILED markers — page likely did not render".into(),
+        )
     } else {
-        (Verdict::Fail, format!("PASSED={passed} FAILED={failed} DETECTED={detected}"))
+        (
+            Verdict::Fail,
+            format!("PASSED={passed} FAILED={failed} DETECTED={detected}"),
+        )
     };
-    SiteResult { site: "rebrowser", url, verdict, note, extracted }
+    SiteResult {
+        site: "rebrowser",
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
 async fn run_fingerprint_demo(profile: stealth::StealthProfile) -> SiteResult {
@@ -394,14 +448,28 @@ async fn run_fingerprint_demo(profile: stealth::StealthProfile) -> SiteResult {
         .unwrap_or("")
         .to_lowercase();
     let visitor_id = extracted.get("visitorId").and_then(|v| v.as_str());
-    let bot_signal = body.contains("automated") || body.contains("bot detected") || body.contains("automation tool");
+    let bot_signal = body.contains("automated")
+        || body.contains("bot detected")
+        || body.contains("automation tool");
     let (verdict, note) = match (visitor_id, bot_signal) {
         (Some(id), false) => (Verdict::Pass, format!("visitorId={id}")),
-        (Some(id), true) => (Verdict::Partial, format!("visitorId={id} but bot signal in copy")),
-        (None, false) => (Verdict::Partial, "no visitorId parsed; no bot signal".into()),
+        (Some(id), true) => (
+            Verdict::Partial,
+            format!("visitorId={id} but bot signal in copy"),
+        ),
+        (None, false) => (
+            Verdict::Partial,
+            "no visitorId parsed; no bot signal".into(),
+        ),
         (None, true) => (Verdict::Fail, "no visitorId; bot signal in copy".into()),
     };
-    SiteResult { site: "fingerprint_com", url, verdict, note, extracted }
+    SiteResult {
+        site: "fingerprint_com",
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
 async fn run_amiunique(profile: stealth::StealthProfile) -> SiteResult {
@@ -446,10 +514,19 @@ async fn run_amiunique(profile: stealth::StealthProfile) -> SiteResult {
     let v = extracted.get("verdict").and_then(|v| v.as_str());
     let (verdict, note) = match v {
         Some("not_unique") => (Verdict::Pass, "amiunique reports NOT unique".into()),
-        Some("unique") => (Verdict::Partial, "amiunique reports unique (expected for new fp)".into()),
+        Some("unique") => (
+            Verdict::Partial,
+            "amiunique reports unique (expected for new fp)".into(),
+        ),
         _ => (Verdict::Partial, "no verdict text parsed".into()),
     };
-    SiteResult { site: "amiunique", url, verdict, note, extracted }
+    SiteResult {
+        site: "amiunique",
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
 async fn run_eff(profile: stealth::StealthProfile) -> SiteResult {
@@ -491,15 +568,28 @@ async fn run_eff(profile: stealth::StealthProfile) -> SiteResult {
         .get("bodyText")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let bad = body.to_lowercase().contains("just a moment") || body.to_lowercase().contains("captcha");
+    let bad =
+        body.to_lowercase().contains("just a moment") || body.to_lowercase().contains("captcha");
     let (verdict, note) = if !bad && body.len() > 800 {
-        (Verdict::Partial, format!("landing page rendered ({} chars)", body.len()))
+        (
+            Verdict::Partial,
+            format!("landing page rendered ({} chars)", body.len()),
+        )
     } else if bad {
         (Verdict::Fail, "challenge / captcha page returned".into())
     } else {
-        (Verdict::Fail, format!("body too short: {} chars", body.len()))
+        (
+            Verdict::Fail,
+            format!("body too short: {} chars", body.len()),
+        )
     };
-    SiteResult { site: "eff_coveryourtracks", url, verdict, note, extracted }
+    SiteResult {
+        site: "eff_coveryourtracks",
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
 async fn run_deviceinfo(profile: stealth::StealthProfile) -> SiteResult {
@@ -550,13 +640,22 @@ async fn run_deviceinfo(profile: stealth::StealthProfile) -> SiteResult {
     let says_linux = body.contains("linux") && !body.contains("windows");
     let says_windows = body.contains("windows");
     let (verdict, note) = if says_windows && !says_linux {
-        (Verdict::Pass, "OS reported as Windows, no Linux leak".into())
+        (
+            Verdict::Pass,
+            "OS reported as Windows, no Linux leak".into(),
+        )
     } else if says_linux {
         (Verdict::Fail, "true OS leaked: Linux".into())
     } else {
         (Verdict::Partial, "could not parse OS".into())
     };
-    SiteResult { site: "deviceinfo", url, verdict, note, extracted }
+    SiteResult {
+        site: "deviceinfo",
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
 async fn run_nowsecure(profile: stealth::StealthProfile) -> SiteResult {
@@ -600,20 +699,35 @@ async fn run_nowsecure(profile: stealth::StealthProfile) -> SiteResult {
     let extracted = parse_json(&raw);
     write_artifacts("nowsecure_cloudflare", &html, &extracted);
 
-    let html_len = extracted.get("htmlLen").and_then(|v| v.as_u64()).unwrap_or(0);
+    let html_len = extracted
+        .get("htmlLen")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let just_a_moment = extracted
         .get("challengeMarkers")
         .and_then(|m| m.get("justAMoment"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let (verdict, note) = if html_len > 5120 && !just_a_moment {
-        (Verdict::Pass, format!("HTML {html_len}b, no challenge text"))
+        (
+            Verdict::Pass,
+            format!("HTML {html_len}b, no challenge text"),
+        )
     } else if just_a_moment {
-        (Verdict::Fail, "Cloudflare 'Just a moment' interstitial".into())
+        (
+            Verdict::Fail,
+            "Cloudflare 'Just a moment' interstitial".into(),
+        )
     } else {
         (Verdict::Fail, format!("HTML only {html_len}b"))
     };
-    SiteResult { site: "nowsecure_cloudflare", url, verdict, note, extracted }
+    SiteResult {
+        site: "nowsecure_cloudflare",
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
 async fn run_datadome(profile: stealth::StealthProfile) -> SiteResult {
@@ -661,13 +775,25 @@ async fn run_datadome(profile: stealth::StealthProfile) -> SiteResult {
         .map(str::len)
         .unwrap_or(0);
     let (verdict, note) = if !blocked && body_len > 200 {
-        (Verdict::Pass, format!("rendered {body_len} chars, no block markers"))
+        (
+            Verdict::Pass,
+            format!("rendered {body_len} chars, no block markers"),
+        )
     } else if blocked {
-        (Verdict::Fail, "DataDome block / captcha text present".into())
+        (
+            Verdict::Fail,
+            "DataDome block / captcha text present".into(),
+        )
     } else {
         (Verdict::Fail, format!("body too short: {body_len} chars"))
     };
-    SiteResult { site: "datadome_antoinevastel", url, verdict, note, extracted }
+    SiteResult {
+        site: "datadome_antoinevastel",
+        url,
+        verdict,
+        note,
+        extracted,
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -679,8 +805,10 @@ fn write_summary(results: &[SiteResult]) {
     let _ = std::fs::create_dir_all(&dir);
     let mut md = String::new();
     md.push_str("# Fingerprint Suite — 2026-05-10\n\n");
-    md.push_str("Run via `cargo test --release -p browser --test fingerprint_suite \
-                 -- --ignored --test-threads=1 --nocapture fingerprint_suite_full_run`.\n\n");
+    md.push_str(
+        "Run via `cargo test --release -p browser --test fingerprint_suite \
+                 -- --ignored --test-threads=1 --nocapture fingerprint_suite_full_run`.\n\n",
+    );
     md.push_str("Profile: `stealth::presets::chrome_130_windows()` (UA reports Chrome 147).\n\n");
     md.push_str("| Site | URL | Verdict | Note |\n");
     md.push_str("|------|-----|---------|------|\n");
@@ -694,7 +822,9 @@ fn write_summary(results: &[SiteResult]) {
             note_clean
         ));
     }
-    md.push_str("\nPer-site artifacts: `<site>.html` (rendered DOM) and `<site>.json` (extracted state).\n");
+    md.push_str(
+        "\nPer-site artifacts: `<site>.html` (rendered DOM) and `<site>.json` (extracted state).\n",
+    );
     let summary_path = dir.join("SUMMARY.md");
     let _ = std::fs::write(&summary_path, md);
 }

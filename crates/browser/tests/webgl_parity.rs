@@ -50,12 +50,18 @@ async fn webgl_unmasked_vendor_is_google() {
 #[tokio::test]
 async fn webgl_max_texture_size_chrome_value() {
     let r = evaluate(&format!("{GL_SETUP}gl.getParameter(gl.MAX_TEXTURE_SIZE)")).await;
-    assert_eq!(r, "16384", "MAX_TEXTURE_SIZE must match Chrome 147 captured value");
+    assert_eq!(
+        r, "16384",
+        "MAX_TEXTURE_SIZE must match Chrome 147 captured value"
+    );
 }
 
 #[tokio::test]
 async fn webgl_max_renderbuffer_size_chrome_value() {
-    let r = evaluate(&format!("{GL_SETUP}gl.getParameter(gl.MAX_RENDERBUFFER_SIZE)")).await;
+    let r = evaluate(&format!(
+        "{GL_SETUP}gl.getParameter(gl.MAX_RENDERBUFFER_SIZE)"
+    ))
+    .await;
     assert_eq!(r, "16384");
 }
 
@@ -105,7 +111,10 @@ async fn webgl_supported_extensions_includes_chrome147_set() {
         required.every(e => exts.includes(e))"
     ))
     .await;
-    assert_eq!(r, "true", "WebGL must support Chrome 147 baseline extensions");
+    assert_eq!(
+        r, "true",
+        "WebGL must support Chrome 147 baseline extensions"
+    );
 }
 
 #[tokio::test]

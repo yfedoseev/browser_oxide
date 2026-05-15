@@ -228,8 +228,8 @@ impl StealthProfile {
             .to_string();
         let chrome_form = format!("{}.0.0.0", ua_major);
         let firefox_form = format!("{}.0", ua_major);
-        let ua_ok = self.user_agent.contains(&chrome_form)
-            || self.user_agent.contains(&firefox_form);
+        let ua_ok =
+            self.user_agent.contains(&chrome_form) || self.user_agent.contains(&firefox_form);
         if !ua_ok {
             errors.push(format!(
                 "UA '{}' doesn't contain reduced major version '{}' or '{}'",

@@ -257,7 +257,10 @@ async fn performance_memory_exists() {
 #[tokio::test]
 async fn navigator_user_agent_data_exists() {
     // userAgentData is [SecureContext] — only present on https/etc.
-    assert_eq!(eval_secure("typeof navigator.userAgentData").await, "object");
+    assert_eq!(
+        eval_secure("typeof navigator.userAgentData").await,
+        "object"
+    );
 }
 
 #[tokio::test]

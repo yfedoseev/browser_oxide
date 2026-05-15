@@ -22,7 +22,10 @@ async fn evaluate(js: &str) -> String {
 #[tokio::test]
 async fn perf_memory_heap_limit_is_desktop_value() {
     let r = evaluate("performance.memory.jsHeapSizeLimit").await;
-    assert_eq!(r, "4294705152", "jsHeapSizeLimit must be Chrome desktop value");
+    assert_eq!(
+        r, "4294705152",
+        "jsHeapSizeLimit must be Chrome desktop value"
+    );
 }
 
 // ================================================================
@@ -31,7 +34,10 @@ async fn perf_memory_heap_limit_is_desktop_value() {
 #[tokio::test]
 async fn navigator_connection_rtt_25ms_quantized() {
     let r = evaluate("navigator.connection.rtt % 25").await;
-    assert_eq!(r, "0", "navigator.connection.rtt must be a multiple of 25 ms");
+    assert_eq!(
+        r, "0",
+        "navigator.connection.rtt must be a multiple of 25 ms"
+    );
 }
 
 // ================================================================
@@ -41,7 +47,10 @@ async fn navigator_connection_rtt_25ms_quantized() {
 async fn navigator_connection_downlink_quantized() {
     // Chrome rounds downlink to nearest 0.025 Mbps. Test: value × 40 is an integer.
     let r = evaluate("Number.isInteger(Math.round(navigator.connection.downlink * 40))").await;
-    assert_eq!(r, "true", "navigator.connection.downlink must be a multiple of 0.025 Mbps");
+    assert_eq!(
+        r, "true",
+        "navigator.connection.downlink must be a multiple of 0.025 Mbps"
+    );
 }
 
 // ================================================================
@@ -76,7 +85,10 @@ async fn device_memory_is_quantized() {
 #[tokio::test]
 async fn event_constructor_default_is_not_trusted() {
     let r = evaluate("new Event('click').isTrusted").await;
-    assert_eq!(r, "false", "page-side new Event must produce isTrusted=false");
+    assert_eq!(
+        r, "false",
+        "page-side new Event must produce isTrusted=false"
+    );
 }
 
 #[tokio::test]
@@ -84,10 +96,8 @@ async fn event_trusted_via_internal_symbol() {
     // The Rust dispatchers can use Symbol.for('__bo_trusted__') to opt-in.
     // Page JS doesn't know this Symbol unless it's registered; verify the
     // mechanism works.
-    let r = evaluate(
-        "new Event('click', { [Symbol.for('__bo_trusted__')]: true }).isTrusted",
-    )
-    .await;
+    let r =
+        evaluate("new Event('click', { [Symbol.for('__bo_trusted__')]: true }).isTrusted").await;
     assert_eq!(r, "true", "Symbol-opt-in event must be trusted");
 }
 

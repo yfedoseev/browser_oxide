@@ -69,25 +69,47 @@ async fn capture_homedepot_bmak_from_challenge() {
     // Find ALL <script src="..."> paths.
     let mut paths: Vec<String> = Vec::new();
     for frag in body.split("<script") {
-        let Some(attr_start) = frag.find(" src=") else { continue };
+        let Some(attr_start) = frag.find(" src=") else {
+            continue;
+        };
         let after = &frag[attr_start + " src=".len()..];
-        let Some(q) = after.chars().next() else { continue };
-        if q != '"' && q != '\'' { continue }
-        let Some(close) = after[1..].find(q) else { continue };
+        let Some(q) = after.chars().next() else {
+            continue;
+        };
+        if q != '"' && q != '\'' {
+            continue;
+        }
+        let Some(close) = after[1..].find(q) else {
+            continue;
+        };
         let path = &after[1..1 + close];
-        if !path.starts_with('/') && !path.starts_with("https://www.homedepot.com/") { continue }
+        if !path.starts_with('/') && !path.starts_with("https://www.homedepot.com/") {
+            continue;
+        }
         let path_only = path.trim_start_matches("https://www.homedepot.com");
-        if path_only.starts_with("/akam/") { continue }
+        if path_only.starts_with("/akam/") {
+            continue;
+        }
         // We want paths WITHOUT `?` query — those are bmak.js, not challenge scripts.
-        if path_only.contains('?') { continue }
+        if path_only.contains('?') {
+            continue;
+        }
         let segments: Vec<&str> = path_only.split('/').filter(|s| !s.is_empty()).collect();
-        if segments.len() < 4 { continue }
-        if !segments.iter().all(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
+        if segments.len() < 4 {
+            continue;
+        }
+        if !segments.iter().all(|s| {
+            s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        }) {
             continue;
         }
         paths.push(path_only.to_string());
     }
-    eprintln!("[homedepot] found {} candidate bmak paths: {paths:?}", paths.len());
+    eprintln!(
+        "[homedepot] found {} candidate bmak paths: {paths:?}",
+        paths.len()
+    );
     let Some(bmak_path) = paths.first() else {
         eprintln!("[homedepot] no candidate bmak.js path");
         return;
@@ -95,7 +117,11 @@ async fn capture_homedepot_bmak_from_challenge() {
     let bmak_url = format!("https://www.homedepot.com{bmak_path}");
     eprintln!("[homedepot] fetching bmak.js: {bmak_url}");
     let resp = client.get(&bmak_url).await.unwrap();
-    eprintln!("[homedepot] status={} length={}", resp.status, resp.body.len());
+    eprintln!(
+        "[homedepot] status={} length={}",
+        resp.status,
+        resp.body.len()
+    );
     std::fs::write("/tmp/bmak_homedepot.js", &resp.body).expect("save");
     eprintln!("[homedepot] saved /tmp/bmak_homedepot.js");
 }
@@ -144,7 +170,10 @@ async fn capture_via_http_client(url: &str, label: &str) {
         if segments.len() < 4 {
             return None;
         }
-        if !segments.iter().all(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
+        if !segments.iter().all(|s| {
+            s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        }) {
             return None;
         }
         Some(path.to_string())
@@ -164,8 +193,15 @@ async fn capture_via_http_client(url: &str, label: &str) {
 
     let bmak_url = format!(
         "{}://{}{}",
-        if url.starts_with("https") { "https" } else { "http" },
-        url::Url::parse(url).unwrap().host_str().unwrap_or("unknown"),
+        if url.starts_with("https") {
+            "https"
+        } else {
+            "http"
+        },
+        url::Url::parse(url)
+            .unwrap()
+            .host_str()
+            .unwrap_or("unknown"),
         bmak_path
     );
     eprintln!("[{label}] fetching bmak.js: {bmak_url}");
@@ -177,7 +213,11 @@ async fn capture_via_http_client(url: &str, label: &str) {
             return;
         }
     };
-    eprintln!("[{label}] bmak.js status: {}, body length: {}", resp.status, resp.body.len());
+    eprintln!(
+        "[{label}] bmak.js status: {}, body length: {}",
+        resp.status,
+        resp.body.len()
+    );
     let path = format!("/tmp/bmak_{label}.js");
     std::fs::write(&path, &resp.body).expect("save bmak.js");
     eprintln!("[{label}] saved to {path}");
@@ -209,7 +249,12 @@ async fn capture_homedepot_seccpt_challenge() {
     };
     let body = String::from_utf8_lossy(&resp.body).to_string();
     let mut out = String::new();
-    out.push_str(&format!("STATUS={}\nURL={}\nBODY_LEN={}\n\n", resp.status, resp.url, body.len()));
+    out.push_str(&format!(
+        "STATUS={}\nURL={}\nBODY_LEN={}\n\n",
+        resp.status,
+        resp.url,
+        body.len()
+    ));
     out.push_str("=== HEADERS ===\n");
     for (k, v) in &resp.headers {
         out.push_str(&format!("{k}: {v}\n"));
@@ -219,13 +264,25 @@ async fn capture_homedepot_seccpt_challenge() {
     // Heuristic extraction of sec-cpt markers.
     out.push_str("\n\n=== SEC-CPT MARKERS ===\n");
     for needle in [
-        "sec_cpt", "sec-cpt", "cp_challenge", "challenge", "nonce",
-        "difficulty", "verify", "timestamp", "x-akamai", "?v=", "&t=",
+        "sec_cpt",
+        "sec-cpt",
+        "cp_challenge",
+        "challenge",
+        "nonce",
+        "difficulty",
+        "verify",
+        "timestamp",
+        "x-akamai",
+        "?v=",
+        "&t=",
     ] {
         if let Some(i) = body.find(needle) {
             let s = i.saturating_sub(40);
             let e = (i + 160).min(body.len());
-            out.push_str(&format!("[{needle}] …{}…\n", &body[s..e].replace('\n', " ")));
+            out.push_str(&format!(
+                "[{needle}] …{}…\n",
+                &body[s..e].replace('\n', " ")
+            ));
         }
     }
     std::fs::write("/tmp/homedepot_seccpt.txt", &out).ok();

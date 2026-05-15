@@ -211,7 +211,7 @@ async fn variance_report() {
     // (For each site, does it have AT LEAST one profile-run pass?)
     // This characterizes the union-level variance the user observes.
     let mut union_by_site: BTreeMap<String, (u32, u32)> = BTreeMap::new(); // (any_pass_across_runs, total_runs_observed)
-    // Group runs by (path basename) so we can compute per-run union.
+                                                                           // Group runs by (path basename) so we can compute per-run union.
     let mut runs_by_path: Vec<(PathBuf, Vec<(String, String, bool)>)> = Vec::new();
     for p in &paths {
         let Some(profile) = profile_from_path(p) else {

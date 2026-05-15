@@ -118,17 +118,34 @@ async fn akamai_local_probe_macos_profile() {
     let v: serde_json::Value = serde_json::from_str(&clean).expect("probe must emit valid JSON");
 
     // ap_*: ApplePaySession must be present
-    assert_eq!(v["ap_typeof"], "function", "ApplePaySession must be a function on macOS profile");
-    assert_eq!(v["ap_canMakePayments"], true, "canMakePayments() must return true");
-    assert_eq!(v["ap_supportsVersion3"], true, "supportsVersion(3) must return true");
+    assert_eq!(
+        v["ap_typeof"], "function",
+        "ApplePaySession must be a function on macOS profile"
+    );
+    assert_eq!(
+        v["ap_canMakePayments"], true,
+        "canMakePayments() must return true"
+    );
+    assert_eq!(
+        v["ap_supportsVersion3"], true,
+        "supportsVersion(3) must return true"
+    );
 
     // sr.client: documentElement.clientHeight must be viewport (789), not
     // the full 30000-px overflow. The chrome_130_macos preset uses
     // innerWidth=1440, innerHeight=789.
     let inner_w = v["window_iw"].as_i64().unwrap();
     let inner_h = v["window_ih"].as_i64().unwrap();
-    assert_eq!(v["docElem_cw"].as_i64().unwrap(), inner_w, "documentElement.clientWidth = innerWidth");
-    assert_eq!(v["docElem_ch"].as_i64().unwrap(), inner_h, "documentElement.clientHeight = innerHeight (NOT 30000)");
+    assert_eq!(
+        v["docElem_cw"].as_i64().unwrap(),
+        inner_w,
+        "documentElement.clientWidth = innerWidth"
+    );
+    assert_eq!(
+        v["docElem_ch"].as_i64().unwrap(),
+        inner_h,
+        "documentElement.clientHeight = innerHeight (NOT 30000)"
+    );
     let body_cw = v["body_cw"].as_i64().unwrap_or(-1);
     let body_ch = v["body_ch"].as_i64().unwrap_or(-1);
     println!("body clientWidth={body_cw} clientHeight={body_ch} (these feed Akamai sr.client)");
@@ -144,7 +161,10 @@ async fn akamai_local_probe_macos_profile() {
         .iter()
         .map(|s| s.as_str().unwrap().to_string())
         .collect();
-    assert!(names.contains(&"Arial".to_string()), "Arial missing: {names:?}");
+    assert!(
+        names.contains(&"Arial".to_string()),
+        "Arial missing: {names:?}"
+    );
     assert!(
         names.contains(&"Helvetica Neue".to_string()),
         "Helvetica Neue missing on macOS: {names:?}"
@@ -166,7 +186,10 @@ async fn akamai_local_probe_macos_profile() {
         !names.contains(&"Segoe UI".to_string()),
         "Segoe UI must not be 'installed' on macOS: {names:?}"
     );
-    assert!(!v["fh"].is_null(), "fh must be non-null when fonts detected");
+    assert!(
+        !v["fh"].is_null(),
+        "fh must be non-null when fonts detected"
+    );
 }
 
 /// Direct width measurement diagnostic — shows raw widths for every probe
@@ -221,7 +244,10 @@ async fn akamai_local_probe_linux_profile() {
     let v: serde_json::Value = serde_json::from_str(&clean).expect("probe must emit valid JSON");
 
     // ap_*: ApplePaySession must NOT be present on Linux
-    assert_eq!(v["ap_typeof"], "undefined", "ApplePaySession must NOT exist on Linux profile");
+    assert_eq!(
+        v["ap_typeof"], "undefined",
+        "ApplePaySession must NOT exist on Linux profile"
+    );
 
     // fonts: Linux set must include Arial (aliased) but NOT Helvetica Neue
     let installed = v["fonts_installed"].as_array().unwrap();
@@ -237,7 +263,10 @@ async fn akamai_local_probe_linux_profile() {
     // reports neither as installed. Tightening the alias table to be
     // OS-aware is a follow-up; documented here so future changes don't
     // accidentally reintroduce the universal-detection bug.
-    assert!(names.contains(&"Arial".to_string()), "Arial must be detected on Linux: {names:?}");
+    assert!(
+        names.contains(&"Arial".to_string()),
+        "Arial must be detected on Linux: {names:?}"
+    );
     // SF Pro must NOT be detected — it's macOS-only and has no alias.
     assert!(
         !names.contains(&"SF Pro".to_string()),

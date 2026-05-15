@@ -13,8 +13,10 @@ mod tests {
         )
         .await
         .unwrap();
-        
-        let r = page.evaluate(r#"
+
+        let r = page
+            .evaluate(
+                r#"
             JSON.stringify({
                 width: screen.width,
                 height: screen.height,
@@ -25,7 +27,9 @@ mod tests {
                 proto: Object.getPrototypeOf(screen).constructor.name,
                 ownKeys: Object.getOwnPropertyNames(screen)
             }, null, 2)
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         println!("SCREEN OXIDE:\n{}", r);
     }
 }

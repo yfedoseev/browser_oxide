@@ -14,9 +14,7 @@ use browser::Page;
 use stealth;
 
 fn html(body: &str) -> String {
-    format!(
-        "<!DOCTYPE html><html><head></head><body>{body}</body></html>"
-    )
+    format!("<!DOCTYPE html><html><head></head><body>{body}</body></html>")
 }
 
 async fn evaluate(js: &str) -> String {
@@ -39,13 +37,22 @@ const IFRAME_SETUP: &str = "
 #[tokio::test]
 async fn iframe_navigator_distinct_identity() {
     let r = evaluate(&format!("{IFRAME_SETUP} cw.Navigator !== Navigator")).await;
-    assert_eq!(r, "true", "iframe.contentWindow.Navigator must be distinct from window.Navigator");
+    assert_eq!(
+        r, "true",
+        "iframe.contentWindow.Navigator must be distinct from window.Navigator"
+    );
 }
 
 #[tokio::test]
 async fn iframe_navigator_prototype_distinct_identity() {
-    let r = evaluate(&format!("{IFRAME_SETUP} cw.Navigator.prototype !== Navigator.prototype")).await;
-    assert_eq!(r, "true", "iframe.contentWindow.Navigator.prototype must be distinct");
+    let r = evaluate(&format!(
+        "{IFRAME_SETUP} cw.Navigator.prototype !== Navigator.prototype"
+    ))
+    .await;
+    assert_eq!(
+        r, "true",
+        "iframe.contentWindow.Navigator.prototype must be distinct"
+    );
 }
 
 // ================================================================
@@ -53,13 +60,18 @@ async fn iframe_navigator_prototype_distinct_identity() {
 // ================================================================
 #[tokio::test]
 async fn iframe_navigator_prototype_same_shape() {
-    let js = format!("{IFRAME_SETUP}
+    let js = format!(
+        "{IFRAME_SETUP}
         const a = Object.getOwnPropertyNames(cw.Navigator.prototype).sort().join(',');
         const b = Object.getOwnPropertyNames(Navigator.prototype).sort().join(',');
         a === b
-    ");
+    "
+    );
     let r = evaluate(&js).await;
-    assert_eq!(r, "true", "iframe Navigator.prototype must have same own-property-names as parent's");
+    assert_eq!(
+        r, "true",
+        "iframe Navigator.prototype must have same own-property-names as parent's"
+    );
 }
 
 // ================================================================
@@ -67,12 +79,17 @@ async fn iframe_navigator_prototype_same_shape() {
 // ================================================================
 #[tokio::test]
 async fn iframe_function_toString_native_shape() {
-    let js = format!("{IFRAME_SETUP}
+    let js = format!(
+        "{IFRAME_SETUP}
         const s = cw.Function.prototype.toString.call(window.fetch);
         s.includes('[native code]')
-    ");
+    "
+    );
     let r = evaluate(&js).await;
-    assert_eq!(r, "true", "cross-realm Function.prototype.toString must produce [native code]");
+    assert_eq!(
+        r, "true",
+        "cross-realm Function.prototype.toString must produce [native code]"
+    );
 }
 
 // ================================================================
@@ -81,13 +98,19 @@ async fn iframe_function_toString_native_shape() {
 #[tokio::test]
 async fn iframe_array_distinct_identity() {
     let r = evaluate(&format!("{IFRAME_SETUP} cw.Array !== Array")).await;
-    assert_eq!(r, "true", "iframe.contentWindow.Array must be distinct from window.Array");
+    assert_eq!(
+        r, "true",
+        "iframe.contentWindow.Array must be distinct from window.Array"
+    );
 }
 
 #[tokio::test]
 async fn iframe_object_distinct_identity() {
     let r = evaluate(&format!("{IFRAME_SETUP} cw.Object !== Object")).await;
-    assert_eq!(r, "true", "iframe.contentWindow.Object must be distinct from window.Object");
+    assert_eq!(
+        r, "true",
+        "iframe.contentWindow.Object must be distinct from window.Object"
+    );
 }
 
 // Real Chrome: parent-realm [] is NOT instanceof iframe-realm Array.
@@ -147,6 +170,7 @@ async fn iframe_navigator_constructor_name() {
 async fn iframe_navigator_toString_native_shape() {
     let r = evaluate(&format!(
         "{IFRAME_SETUP} cw.Function.prototype.toString.call(cw.Navigator)"
-    )).await;
+    ))
+    .await;
     assert_eq!(r, "function Navigator() { [native code] }");
 }

@@ -21,7 +21,10 @@ async fn evaluate(js: &str) -> String {
 #[tokio::test]
 async fn eval_to_string_length_is_33() {
     let r = evaluate("eval.toString().length").await;
-    assert_eq!(r, "33", "eval.toString().length must be 33 (Chromium V8 invariant)");
+    assert_eq!(
+        r, "33",
+        "eval.toString().length must be 33 (Chromium V8 invariant)"
+    );
 }
 
 #[tokio::test]
@@ -39,19 +42,28 @@ async fn eval_to_string_native_shape() {
 #[tokio::test]
 async fn math_sin_to_string_native_shape() {
     let r = evaluate("Function.prototype.toString.call(Math.sin)").await;
-    assert!(r.contains("[native code]"), "Math.sin native toString missing [native code]: {r}");
+    assert!(
+        r.contains("[native code]"),
+        "Math.sin native toString missing [native code]: {r}"
+    );
 }
 
 #[tokio::test]
 async fn fetch_to_string_native_shape() {
     let r = evaluate("Function.prototype.toString.call(window.fetch)").await;
-    assert!(r.contains("[native code]"), "fetch native toString missing [native code]: {r}");
+    assert!(
+        r.contains("[native code]"),
+        "fetch native toString missing [native code]: {r}"
+    );
 }
 
 #[tokio::test]
 async fn navigator_permissions_query_to_string_native_shape() {
     let r = evaluate("Function.prototype.toString.call(navigator.permissions.query)").await;
-    assert!(r.contains("[native code]"), "permissions.query missing [native code]: {r}");
+    assert!(
+        r.contains("[native code]"),
+        "permissions.query missing [native code]: {r}"
+    );
 }
 
 // ================================================================
@@ -59,10 +71,7 @@ async fn navigator_permissions_query_to_string_native_shape() {
 // ================================================================
 #[tokio::test]
 async fn error_stack_does_not_leak_deno_frames() {
-    let r = evaluate(
-        "(()=>{ try { null.foo } catch(e) { return e.stack || ''; } })()",
-    )
-    .await;
+    let r = evaluate("(()=>{ try { null.foo } catch(e) { return e.stack || ''; } })()").await;
     assert!(
         !r.contains("deno:") && !r.contains("ext:"),
         "Error.stack leaks engine-internal frames: {r}"
@@ -71,10 +80,7 @@ async fn error_stack_does_not_leak_deno_frames() {
 
 #[tokio::test]
 async fn error_stack_does_not_leak_bootstrap_frames() {
-    let r = evaluate(
-        "(()=>{ try { null.foo } catch(e) { return e.stack || ''; } })()",
-    )
-    .await;
+    let r = evaluate("(()=>{ try { null.foo } catch(e) { return e.stack || ''; } })()").await;
     assert!(
         !r.contains("bootstrap"),
         "Error.stack leaks bootstrap frames: {r}"
@@ -111,5 +117,8 @@ async fn request_idle_callback_exists() {
 #[tokio::test]
 async fn function_to_string_self_native_shape() {
     let r = evaluate("Function.prototype.toString.call(Function.prototype.toString)").await;
-    assert!(r.contains("[native code]"), "self-toString missing [native code]: {r}");
+    assert!(
+        r.contains("[native code]"),
+        "self-toString missing [native code]: {r}"
+    );
 }

@@ -187,26 +187,62 @@ async fn perimeterx_surface_macos() {
         "https://example.com/",
         Some(stealth::presets::chrome_130_macos()),
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
 
     // Per-field reads — see akamai_v13_probe_parity for why we don't
     // pull the whole struct as a single JSON string.
-    let win_markers = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).markers_on_window.join(',')");
-    let doc_markers = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).markers_on_document.join(',')");
+    let win_markers = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).markers_on_window.join(',')",
+    );
+    let doc_markers = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).markers_on_document.join(',')",
+    );
     let webdriver = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).nav_webdriver");
     let vendor = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).nav_vendor");
-    let plugins_len = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).nav_plugins_length");
-    let has_chrome = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).has_chrome_obj");
-    let iframe_wd = pull(&mut page, "String(JSON.parse(globalThis.__PX_PROBE).iframe_webdriver)");
-    let iframe_chrome = pull(&mut page, "String(JSON.parse(globalThis.__PX_PROBE).iframe_chrome_present)");
-    let iframe_proto_match = pull(&mut page, "String(JSON.parse(globalThis.__PX_PROBE).iframe_navProto_ctor_match)");
+    let plugins_len = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).nav_plugins_length",
+    );
+    let has_chrome = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).has_chrome_obj",
+    );
+    let iframe_wd = pull(
+        &mut page,
+        "String(JSON.parse(globalThis.__PX_PROBE).iframe_webdriver)",
+    );
+    let iframe_chrome = pull(
+        &mut page,
+        "String(JSON.parse(globalThis.__PX_PROBE).iframe_chrome_present)",
+    );
+    let iframe_proto_match = pull(
+        &mut page,
+        "String(JSON.parse(globalThis.__PX_PROBE).iframe_navProto_ctor_match)",
+    );
 
-    let native_query = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).tostring_query.native");
-    let native_fetch = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).tostring_fetch.native");
-    let native_setTimeout = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).tostring_setTimeout.native");
-    let native_addEventListener = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).tostring_addEventListener.native");
-    let native_getContext = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).tostring_canvasGetContext.native");
+    let native_query = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).tostring_query.native",
+    );
+    let native_fetch = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).tostring_fetch.native",
+    );
+    let native_setTimeout = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).tostring_setTimeout.native",
+    );
+    let native_addEventListener = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).tostring_addEventListener.native",
+    );
+    let native_getContext = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).tostring_canvasGetContext.native",
+    );
 
     println!("\n=== PerimeterX surface probe (macOS profile) ===");
     println!("  webdriver:           {webdriver}");
@@ -230,10 +266,7 @@ async fn perimeterx_surface_macos() {
     let vv_w = pull(&mut page, "visualViewport.width");
     let vv_h = pull(&mut page, "visualViewport.height");
     let vv_scale = pull(&mut page, "String(visualViewport.scale)");
-    let vv_proto = pull(
-        &mut page,
-        "Object.prototype.toString.call(visualViewport)",
-    );
+    let vv_proto = pull(&mut page, "Object.prototype.toString.call(visualViewport)");
     let vv_is_event_target = pull(&mut page, "String(visualViewport instanceof EventTarget)");
     let idc_typeof = pull(&mut page, "typeof InputDeviceCapabilities");
     let idc_fires_touch = pull(
@@ -259,15 +292,33 @@ async fn perimeterx_surface_macos() {
         plugins_len.parse::<i64>().unwrap() >= 5,
         "navigator.plugins must enumerate ≥5 Chrome stub plugins, got {plugins_len}"
     );
-    assert_eq!(has_chrome, "true", "window.chrome must exist on macOS Chrome profile");
+    assert_eq!(
+        has_chrome, "true",
+        "window.chrome must exist on macOS Chrome profile"
+    );
 
-    assert_eq!(native_query, "true", "navigator.permissions.query must serialize native");
+    assert_eq!(
+        native_query, "true",
+        "navigator.permissions.query must serialize native"
+    );
     assert_eq!(native_fetch, "true", "fetch must serialize native");
-    assert_eq!(native_setTimeout, "true", "setTimeout must serialize native");
-    assert_eq!(native_addEventListener, "true", "addEventListener must serialize native");
-    assert_eq!(native_getContext, "true", "HTMLCanvasElement.getContext must serialize native");
+    assert_eq!(
+        native_setTimeout, "true",
+        "setTimeout must serialize native"
+    );
+    assert_eq!(
+        native_addEventListener, "true",
+        "addEventListener must serialize native"
+    );
+    assert_eq!(
+        native_getContext, "true",
+        "HTMLCanvasElement.getContext must serialize native"
+    );
 
-    assert_eq!(iframe_wd, "false", "iframe navigator.webdriver must be false");
+    assert_eq!(
+        iframe_wd, "false",
+        "iframe navigator.webdriver must be false"
+    );
     assert_eq!(iframe_chrome, "true", "iframe must also have window.chrome");
     assert_eq!(
         iframe_proto_match, "true",
@@ -281,15 +332,42 @@ async fn perimeterx_surface_macos() {
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
     }
 
-    let battery_ctor_name = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).battery_ctor_name");
-    let battery_is_event_target = pull(&mut page, "String(JSON.parse(globalThis.__PX_PROBE).battery_is_eventTarget)");
-    let battery_to_string_tag = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).battery_toStringTag");
-    let storage_quota_gb = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).storage_quota_gb");
-    let uad_correct = pull(&mut page, "String(JSON.parse(globalThis.__PX_PROBE).uad_has_correct_grease)");
-    let uad_no_old = pull(&mut page, "String(JSON.parse(globalThis.__PX_PROBE).uad_no_old_grease)");
-    let touch_to_string = pull(&mut page, "JSON.parse(globalThis.__PX_PROBE).touch_toString");
-    let rtc_candidates_n = pull(&mut page, "String(JSON.parse(globalThis.__PX_PROBE).rtc_candidates.length)");
-    let rtc_first = pull(&mut page, "String(JSON.parse(globalThis.__PX_PROBE).rtc_candidates[0]||'')");
+    let battery_ctor_name = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).battery_ctor_name",
+    );
+    let battery_is_event_target = pull(
+        &mut page,
+        "String(JSON.parse(globalThis.__PX_PROBE).battery_is_eventTarget)",
+    );
+    let battery_to_string_tag = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).battery_toStringTag",
+    );
+    let storage_quota_gb = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).storage_quota_gb",
+    );
+    let uad_correct = pull(
+        &mut page,
+        "String(JSON.parse(globalThis.__PX_PROBE).uad_has_correct_grease)",
+    );
+    let uad_no_old = pull(
+        &mut page,
+        "String(JSON.parse(globalThis.__PX_PROBE).uad_no_old_grease)",
+    );
+    let touch_to_string = pull(
+        &mut page,
+        "JSON.parse(globalThis.__PX_PROBE).touch_toString",
+    );
+    let rtc_candidates_n = pull(
+        &mut page,
+        "String(JSON.parse(globalThis.__PX_PROBE).rtc_candidates.length)",
+    );
+    let rtc_first = pull(
+        &mut page,
+        "String(JSON.parse(globalThis.__PX_PROBE).rtc_candidates[0]||'')",
+    );
 
     println!("\n--- Five Chrome-surface fixes ---");
     println!("  BatteryManager.constructor.name:   {battery_ctor_name}");
@@ -302,32 +380,83 @@ async fn perimeterx_surface_macos() {
     println!("  RTC ICE candidates emitted:        {rtc_candidates_n}");
     println!("    first:                           {rtc_first}");
 
-    assert_eq!(battery_ctor_name, "BatteryManager", "navigator.getBattery() must resolve a BatteryManager instance");
-    assert_eq!(battery_is_event_target, "true", "BatteryManager must inherit EventTarget");
+    assert_eq!(
+        battery_ctor_name, "BatteryManager",
+        "navigator.getBattery() must resolve a BatteryManager instance"
+    );
+    assert_eq!(
+        battery_is_event_target, "true",
+        "BatteryManager must inherit EventTarget"
+    );
     assert_eq!(battery_to_string_tag, "[object BatteryManager]");
     let quota_gb: f64 = storage_quota_gb.parse().unwrap();
-    assert!(quota_gb >= 50.0, "storage.estimate quota must be ≥50 GB (real Chrome ~120 GB), got {quota_gb} GB");
-    assert_eq!(uad_correct, "true", "userAgentData must contain Chrome's GREASE brand 'Not.A/Brand'");
-    assert_eq!(uad_no_old, "true", "userAgentData must NOT contain the old 'Not-A.Brand' literal");
-    assert_eq!(touch_to_string, "[object Touch]", "Touch.prototype Symbol.toStringTag missing");
+    assert!(
+        quota_gb >= 50.0,
+        "storage.estimate quota must be ≥50 GB (real Chrome ~120 GB), got {quota_gb} GB"
+    );
+    assert_eq!(
+        uad_correct, "true",
+        "userAgentData must contain Chrome's GREASE brand 'Not.A/Brand'"
+    );
+    assert_eq!(
+        uad_no_old, "true",
+        "userAgentData must NOT contain the old 'Not-A.Brand' literal"
+    );
+    assert_eq!(
+        touch_to_string, "[object Touch]",
+        "Touch.prototype Symbol.toStringTag missing"
+    );
     let cand_n: i64 = rtc_candidates_n.parse().unwrap();
-    assert!(cand_n >= 1, "RTCPeerConnection must emit ≥1 ICE candidate before the null terminator");
-    assert!(rtc_first.contains(".local"), "RTC candidate must be mDNS-anonymized (.local), got: {rtc_first}");
-    assert!(rtc_first.contains("typ host"), "RTC candidate must be host type, got: {rtc_first}");
+    assert!(
+        cand_n >= 1,
+        "RTCPeerConnection must emit ≥1 ICE candidate before the null terminator"
+    );
+    assert!(
+        rtc_first.contains(".local"),
+        "RTC candidate must be mDNS-anonymized (.local), got: {rtc_first}"
+    );
+    assert!(
+        rtc_first.contains("typ host"),
+        "RTC candidate must be host type, got: {rtc_first}"
+    );
 
     // --- D10 surfaces parity gates -----------------------------------
     assert_eq!(vv_typeof, "object", "window.visualViewport must exist");
-    assert_eq!(vv_proto, "[object VisualViewport]", "Symbol.toStringTag missing");
-    assert_eq!(vv_is_event_target, "true", "VisualViewport must extend EventTarget");
+    assert_eq!(
+        vv_proto, "[object VisualViewport]",
+        "Symbol.toStringTag missing"
+    );
+    assert_eq!(
+        vv_is_event_target, "true",
+        "VisualViewport must extend EventTarget"
+    );
     let vv_w_int: i64 = vv_w.parse().unwrap();
     let vv_h_int: i64 = vv_h.parse().unwrap();
-    assert!(vv_w_int > 0 && vv_h_int > 0, "visualViewport size must be non-zero, got {vv_w}x{vv_h}");
+    assert!(
+        vv_w_int > 0 && vv_h_int > 0,
+        "visualViewport size must be non-zero, got {vv_w}x{vv_h}"
+    );
     assert_eq!(vv_scale, "1");
-    assert_eq!(idc_typeof, "function", "InputDeviceCapabilities constructor must exist");
-    assert_eq!(idc_fires_touch, "true", "firesTouchEvents must round-trip from constructor init");
-    assert_eq!(ms_proto, "[object MediaSession]", "navigator.mediaSession must be a MediaSession instance");
-    assert_eq!(ms_state, "none", "default playbackState must be 'none' per spec");
-    assert_eq!(ms_set_action_typeof, "function", "setActionHandler must be callable");
+    assert_eq!(
+        idc_typeof, "function",
+        "InputDeviceCapabilities constructor must exist"
+    );
+    assert_eq!(
+        idc_fires_touch, "true",
+        "firesTouchEvents must round-trip from constructor init"
+    );
+    assert_eq!(
+        ms_proto, "[object MediaSession]",
+        "navigator.mediaSession must be a MediaSession instance"
+    );
+    assert_eq!(
+        ms_state, "none",
+        "default playbackState must be 'none' per spec"
+    );
+    assert_eq!(
+        ms_set_action_typeof, "function",
+        "setActionHandler must be callable"
+    );
 
     // --- Phase 6 D1: Date.toString TZ + matchMedia full features --
     // Real Chrome on macOS / America/Los_Angeles produces:
@@ -382,7 +511,10 @@ async fn perimeterx_surface_macos() {
         "Date.prototype.toString must serialize as native code"
     );
 
-    let mql_color_scheme = pull(&mut page, "matchMedia('(prefers-color-scheme: light)').matches");
+    let mql_color_scheme = pull(
+        &mut page,
+        "matchMedia('(prefers-color-scheme: light)').matches",
+    );
     let mql_pointer_fine = pull(&mut page, "matchMedia('(pointer: fine)').matches");
     let mql_hover = pull(&mut page, "matchMedia('(hover: hover)').matches");
     let mql_forced_colors_none = pull(&mut page, "matchMedia('(forced-colors: none)').matches");
@@ -417,8 +549,14 @@ async fn perimeterx_surface_macos() {
     println!("  toStringTag:                  {mql_proto}");
     println!("  instanceof EventTarget:       {mql_is_event_target}");
     println!("  instanceof MediaQueryList:    {mql_is_class}");
-    assert_eq!(mql_color_scheme, "true", "macOS profile defaults light theme");
-    assert_eq!(mql_pointer_fine, "true", "desktop profile default pointer:fine");
+    assert_eq!(
+        mql_color_scheme, "true",
+        "macOS profile defaults light theme"
+    );
+    assert_eq!(
+        mql_pointer_fine, "true",
+        "desktop profile default pointer:fine"
+    );
     assert_eq!(mql_hover, "true", "desktop profile default hover:hover");
     assert_eq!(mql_forced_colors_none, "true");
     assert_eq!(mql_inverted_colors_none, "true");
@@ -440,7 +578,10 @@ async fn perimeterx_surface_macos() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     let edev_pre = pull(&mut page, "JSON.stringify(globalThis.__edev)");
-    let edev_count = pull(&mut page, "String(globalThis.__edev ? globalThis.__edev.length : 0)");
+    let edev_count = pull(
+        &mut page,
+        "String(globalThis.__edev ? globalThis.__edev.length : 0)",
+    );
     println!("\n--- Phase 6 D2: enumerateDevices pre-permission blanking ---");
     println!("  count: {edev_count}");
     println!("  per-device shape: {edev_pre}");
@@ -451,15 +592,18 @@ async fn perimeterx_surface_macos() {
     );
     // All deviceId/groupId/label fields must be empty pre-permission.
     assert!(
-        !edev_pre.contains("\"idLen\":") || edev_pre.matches("\"idLen\":0").count() == edev_count_n as usize,
+        !edev_pre.contains("\"idLen\":")
+            || edev_pre.matches("\"idLen\":0").count() == edev_count_n as usize,
         "deviceId must be blank (length 0) for every device pre-permission, got {edev_pre}"
     );
     assert!(
-        !edev_pre.contains("\"gidLen\":") || edev_pre.matches("\"gidLen\":0").count() == edev_count_n as usize,
+        !edev_pre.contains("\"gidLen\":")
+            || edev_pre.matches("\"gidLen\":0").count() == edev_count_n as usize,
         "groupId must be blank pre-permission, got {edev_pre}"
     );
     assert!(
-        !edev_pre.contains("\"labelLen\":") || edev_pre.matches("\"labelLen\":0").count() == edev_count_n as usize,
+        !edev_pre.contains("\"labelLen\":")
+            || edev_pre.matches("\"labelLen\":0").count() == edev_count_n as usize,
         "label must be blank pre-permission, got {edev_pre}"
     );
 
@@ -594,23 +738,35 @@ async fn perimeterx_surface_macos() {
     let cs_get_typeof = pull(&mut page, "String(typeof cookieStore.get)");
     let cs_is_event_target = pull(&mut page, "String(cookieStore instanceof EventTarget)");
     // (3) performance.eventCounts
-    let ec_proto = pull(&mut page, "Object.prototype.toString.call(performance.eventCounts)");
+    let ec_proto = pull(
+        &mut page,
+        "Object.prototype.toString.call(performance.eventCounts)",
+    );
     let ec_size = pull(&mut page, "String(performance.eventCounts.size)");
     let ec_get_typeof = pull(&mut page, "String(typeof performance.eventCounts.get)");
     // (4) Notification.requestPermission
     let n_perm = pull(&mut page, "Notification.permission");
     let n_max = pull(&mut page, "String(Notification.maxActions)");
     let n_req_perm_typeof = pull(&mut page, "String(typeof Notification.requestPermission)");
-    let n_req_perm_returns_promise = pull(&mut page, "String(Notification.requestPermission() instanceof Promise)");
+    let n_req_perm_returns_promise = pull(
+        &mut page,
+        "String(Notification.requestPermission() instanceof Promise)",
+    );
     // (5) IdleDetector
     let id_typeof = pull(&mut page, "String(typeof IdleDetector)");
     let id_req_perm_typeof = pull(&mut page, "String(typeof IdleDetector.requestPermission)");
     // (6) EyeDropper
     let ed_typeof = pull(&mut page, "String(typeof EyeDropper)");
-    let ed_open_returns_promise = pull(&mut page, "String((new EyeDropper()).open() instanceof Promise)");
+    let ed_open_returns_promise = pull(
+        &mut page,
+        "String((new EyeDropper()).open() instanceof Promise)",
+    );
     // (7) navigator.virtualKeyboard
     let vk_typeof = pull(&mut page, "String(typeof navigator.virtualKeyboard)");
-    let vk_overlays = pull(&mut page, "String(navigator.virtualKeyboard.overlaysContent)");
+    let vk_overlays = pull(
+        &mut page,
+        "String(navigator.virtualKeyboard.overlaysContent)",
+    );
     let vk_show_typeof = pull(&mut page, "String(typeof navigator.virtualKeyboard.show)");
     // (8) navigator.devicePosture
     let dp_typeof = pull(&mut page, "String(typeof navigator.devicePosture)");
@@ -618,11 +774,20 @@ async fn perimeterx_surface_macos() {
     // (9) navigator.windowControlsOverlay
     let wco_typeof = pull(&mut page, "String(typeof navigator.windowControlsOverlay)");
     let wco_visible = pull(&mut page, "String(navigator.windowControlsOverlay.visible)");
-    let wco_rect_typeof = pull(&mut page, "String(typeof navigator.windowControlsOverlay.getTitlebarAreaRect())");
+    let wco_rect_typeof = pull(
+        &mut page,
+        "String(typeof navigator.windowControlsOverlay.getTitlebarAreaRect())",
+    );
     // (10) Document.startViewTransition
     let svt_typeof = pull(&mut page, "String(typeof document.startViewTransition)");
-    let svt_returns_obj = pull(&mut page, "Object.prototype.toString.call(document.startViewTransition(() => {}))");
-    let svt_ready_promise = pull(&mut page, "String(document.startViewTransition(() => {}).ready instanceof Promise)");
+    let svt_returns_obj = pull(
+        &mut page,
+        "Object.prototype.toString.call(document.startViewTransition(() => {}))",
+    );
+    let svt_ready_promise = pull(
+        &mut page,
+        "String(document.startViewTransition(() => {}).ready instanceof Promise)",
+    );
 
     println!("\n--- Phase 6 D4: 10 missing-constructor batch ---");
     println!("  caches:                {caches_typeof} {caches_proto} match={caches_match_typeof}");
@@ -631,7 +796,9 @@ async fn perimeterx_surface_macos() {
     println!("  Notification:          permission={n_perm} maxActions={n_max} reqPerm={n_req_perm_typeof} reqPerm()->Promise={n_req_perm_returns_promise}");
     println!("  IdleDetector:          {id_typeof} reqPerm={id_req_perm_typeof}");
     println!("  EyeDropper:            {ed_typeof} open()->Promise={ed_open_returns_promise}");
-    println!("  virtualKeyboard:       {vk_typeof} overlaysContent={vk_overlays} show={vk_show_typeof}");
+    println!(
+        "  virtualKeyboard:       {vk_typeof} overlaysContent={vk_overlays} show={vk_show_typeof}"
+    );
     println!("  devicePosture:         {dp_typeof} type={dp_type}");
     println!("  windowControlsOverlay: {wco_typeof} visible={wco_visible} rect={wco_rect_typeof}");
     println!("  startViewTransition:   {svt_typeof} returns={svt_returns_obj} ready=Promise:{svt_ready_promise}");
@@ -639,7 +806,10 @@ async fn perimeterx_surface_macos() {
     assert_eq!(caches_typeof, "object");
     assert_eq!(caches_proto, "[object CacheStorage]");
     assert_eq!(caches_match_typeof, "function");
-    assert_eq!(cs_typeof, "object", "cookieStore must be an instance, not a constructor");
+    assert_eq!(
+        cs_typeof, "object",
+        "cookieStore must be an instance, not a constructor"
+    );
     assert_eq!(cs_proto, "[object CookieStore]");
     assert_eq!(cs_get_typeof, "function");
     assert_eq!(cs_is_event_target, "true");

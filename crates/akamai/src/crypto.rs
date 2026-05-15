@@ -87,25 +87,19 @@ pub fn shuffle_tokens(input: &str, seed: u32) -> String {
 
 /// 91-character output alphabet (b6D) used by step 4. Excludes
 /// `"`, `'`, `\`, and control characters.
-pub const B6D: &[u8] = b" !#$%&()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+pub const B6D: &[u8] =
+    b" !#$%&()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{|}~";
 
 /// 127-entry character → b6D-base-index lookup. -1 means "pass
 /// through unchanged" (separators, control chars). Verbatim from
 /// DalphanDev/akamai-sensor `initVariables`.
 pub const P6D: [i32; 127] = [
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1,  0,  1, -1,  2,  3,  4,  5,
-    -1,  6,  7,  8,  9, 10, 11, 12, 13, 14,
-    15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-    25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
-    35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
-    45, 46, 47, 48, 49, 50, 51, 52, 53, 54,
-    55, 56, -1, 58, 59, 60, 61, 62, 63, 64,
-    65, 66, 67, 68, 69, 70, 71, 72, 73, 74,
-    75, 76, 77, 78, 79, 80, 81, 82, 83, 84,
-    85, 86, 87, 88, 89, 90, 91,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, -1, 2, 3, 4, 5, -1, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
+    39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, -1, 58, 59, 60, 61, 62,
+    63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86,
+    87, 88, 89, 90, 91,
 ];
 
 /// Per-character substitution seeded by `V6D = 3_683_632`. Returns
@@ -243,10 +237,7 @@ pub fn substitute_chars_v3(input: &str, seed: u32) -> String {
     let mut out = Vec::with_capacity(input.len());
     for &b in input.as_bytes() {
         let shift = ((state >> 8) & 0xFFFF) as i32;
-        state = state
-            .wrapping_mul(65_793)
-            .wrapping_add(4_282_663)
-            & 0x7F_FFFF;
+        state = state.wrapping_mul(65_793).wrapping_add(4_282_663) & 0x7F_FFFF;
         // Lookup char in B6D by linear search (91 entries — fast in practice;
         // could be a 256-entry table but the readability vs. v2 parity
         // matters more for cross-checking with glizzy's JS).
@@ -291,15 +282,9 @@ pub fn shuffle_tokens_v3(input: &str, seed: u32) -> String {
     let mut pairs: Vec<(usize, usize)> = Vec::with_capacity(len);
     for _ in 0..len {
         let first = ((state >> 8) & 65535) as usize % len;
-        state = state
-            .wrapping_mul(65_793)
-            .wrapping_add(4_282_663)
-            & 0x7F_FFFF;
+        state = state.wrapping_mul(65_793).wrapping_add(4_282_663) & 0x7F_FFFF;
         let second = ((state >> 8) & 65535) as usize % len;
-        state = state
-            .wrapping_mul(65_793)
-            .wrapping_add(4_282_663)
-            & 0x7F_FFFF;
+        state = state.wrapping_mul(65_793).wrapping_add(4_282_663) & 0x7F_FFFF;
         pairs.push((first, second));
     }
     for (a, b) in pairs {
@@ -327,11 +312,7 @@ pub fn shuffle_tokens_v3(input: &str, seed: u32) -> String {
 /// (Agent 2's patch #2). Until that lands, a placeholder is used —
 /// Akamai's edge will fail to reverse-shuffle, producing 201 still,
 /// but at least the substitute step + envelope shape is correct.
-pub fn build_v3_envelope(
-    cleartext: &str,
-    cookie_hash: u32,
-    file_hash: u32,
-) -> String {
+pub fn build_v3_envelope(cleartext: &str, cookie_hash: u32, file_hash: u32) -> String {
     let shuffled = shuffle_tokens_v3(cleartext, file_hash);
     // Use substitute_chars_v3 (NOT v2's substitute_chars) — v2's P6D
     // table has space mapped to -1 which produces wrong output for v3.
@@ -430,7 +411,8 @@ mod tests {
     /// which must come from real bmak.js extraction.
     #[test]
     fn build_v3_envelope_matches_glizzy_reference_end_to_end() {
-        let cleartext = r#"{"ver":"wS5KmeE4vP5vBcKRIM2pPQlq4qZivf0B53dgMqmUH4E=","fpt":"test","fpc":"4488"}"#;
+        let cleartext =
+            r#"{"ver":"wS5KmeE4vP5vBcKRIM2pPQlq4qZivf0B53dgMqmUH4E=","fpt":"test","fpc":"4488"}"#;
         let cookie_hash = 12_345_678u32;
         let file_hash = 5_645_252u32;
         let envelope = build_v3_envelope(cleartext, cookie_hash, file_hash);

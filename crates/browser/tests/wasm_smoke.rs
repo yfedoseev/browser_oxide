@@ -41,11 +41,17 @@ async fn webassembly_object_exists() {
         "#,
         )
         .unwrap();
-    assert!(result.contains("\"WebAssembly\":\"object\""), "got {result}");
+    assert!(
+        result.contains("\"WebAssembly\":\"object\""),
+        "got {result}"
+    );
     assert!(result.contains("\"Module\":\"function\""), "got {result}");
     assert!(result.contains("\"Instance\":\"function\""), "got {result}");
     assert!(result.contains("\"compile\":\"function\""), "got {result}");
-    assert!(result.contains("\"instantiate\":\"function\""), "got {result}");
+    assert!(
+        result.contains("\"instantiate\":\"function\""),
+        "got {result}"
+    );
     assert!(
         result.contains("\"compileStreaming\":\"function\""),
         "got {result}"

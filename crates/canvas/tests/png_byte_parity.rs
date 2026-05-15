@@ -20,10 +20,7 @@ use sha2::{Digest, Sha256};
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
-    h.finalize()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect()
+    h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 fn fixture_canvas() -> Canvas2D {

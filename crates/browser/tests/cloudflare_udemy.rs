@@ -65,8 +65,8 @@ window._cf_chl_opt = {
 };
 </script>
 "#;
-    let ctx = stealth::cloudflare::detect_challenge(&h, body)
-        .expect("synthetic body should detect");
+    let ctx =
+        stealth::cloudflare::detect_challenge(&h, body).expect("synthetic body should detect");
     assert_eq!(ctx.kind, stealth::cloudflare::CfChallengeKind::Managed);
     assert_eq!(ctx.zone, "example.com");
 }

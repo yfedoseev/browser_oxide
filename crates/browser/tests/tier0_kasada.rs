@@ -2548,7 +2548,8 @@ async fn kasada_canadagoose_raw_with_cookies_test() {
     println!("  status={} body={}b", r2.status, r2.body.len());
 
     println!("\nStep 3: GET with reload-style headers + Referer");
-    let reload_hdrs = net::headers::chrome_headers_reload(&profile, "https://www.canadagoose.com/", false);
+    let reload_hdrs =
+        net::headers::chrome_headers_reload(&profile, "https://www.canadagoose.com/", false);
     let r3 = client
         .get_follow_exact_headers("https://www.canadagoose.com/", &reload_hdrs, 10)
         .await

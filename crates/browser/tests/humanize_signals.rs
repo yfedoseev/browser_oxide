@@ -56,7 +56,9 @@ async fn humanize_emits_full_signal_set() {
     //
     // Trick: navigate_humanized takes a URL. We don't want a network test
     // here, so we use a data: URL that decodes to the probe HTML.
-    let mut page = Page::from_html(HTML, Some(chrome_130_macos())).await.unwrap();
+    let mut page = Page::from_html(HTML, Some(chrome_130_macos()))
+        .await
+        .unwrap();
     // Manually inject humanize.js and drive enough time for it to fire.
     let humanize = include_str!("../src/js/humanize.js");
     page.evaluate(humanize).unwrap();
@@ -105,9 +107,8 @@ async fn humanize_emits_full_signal_set() {
         )
         .unwrap();
     let trusted_count = page
-        .evaluate(
-            "globalThis.__events.filter(e => e.isTrusted === true).length"
-        ).unwrap();
+        .evaluate("globalThis.__events.filter(e => e.isTrusted === true).length")
+        .unwrap();
 
     println!("\n=== Humanize signal probe ===");
     println!("  total events:     {n_total}");
@@ -119,7 +120,10 @@ async fn humanize_emits_full_signal_set() {
     println!("  isTrusted=true:   {trusted_count}");
 
     let mm = n_mousemove.parse::<i64>().unwrap();
-    assert!(mm >= 30, "humanize must emit ≥30 mousemove events, got {mm}");
+    assert!(
+        mm >= 30,
+        "humanize must emit ≥30 mousemove events, got {mm}"
+    );
     let w = n_wheel.parse::<i64>().unwrap();
     assert!(w >= 4, "humanize must emit ≥4 wheel events, got {w}");
     let c = n_click.parse::<i64>().unwrap();
@@ -132,7 +136,8 @@ async fn humanize_emits_full_signal_set() {
         "mouse path must cover ≥800 px (sensors check magnitude), got {dist}"
     );
     assert_eq!(
-        monotonic_decel.trim_matches('"'), "ok",
+        monotonic_decel.trim_matches('"'),
+        "ok",
         "scroll wheel deltaY must monotonically decrease (deceleration model)"
     );
     let trusted = trusted_count.parse::<i64>().unwrap();
@@ -149,7 +154,9 @@ async fn humanize_emits_full_signal_set() {
 /// distinguishable from human input.
 #[tokio::test]
 async fn humanize_mouse_intervals_are_right_skewed() {
-    let mut page = Page::from_html(HTML, Some(chrome_130_macos())).await.unwrap();
+    let mut page = Page::from_html(HTML, Some(chrome_130_macos()))
+        .await
+        .unwrap();
     let humanize = include_str!("../src/js/humanize.js");
     page.evaluate(humanize).unwrap();
 

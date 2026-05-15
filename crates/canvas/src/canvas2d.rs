@@ -1053,7 +1053,9 @@ impl Canvas2D {
 
             let mut next_u32 = |s: &mut u64| {
                 let old_state = *s;
-                *s = old_state.wrapping_mul(6364136223846793005).wrapping_add(inc);
+                *s = old_state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(inc);
                 let xorshifted = (((old_state >> 18) ^ old_state) >> 27) as u32;
                 let rot = (old_state >> 59) as u32;
                 (xorshifted >> rot) | (xorshifted << (rot.wrapping_neg() & 31))
@@ -1061,11 +1063,24 @@ impl Canvas2D {
 
             for i in (0..pixels.len()).step_by(4) {
                 let val = next_u32(&mut state);
-                if (val % 100) < 5 { // Jitter 5% of pixels
+                if (val % 100) < 5 {
+                    // Jitter 5% of pixels
                     // Perturb RGB by +/- 1 in a way that remains in [0, 255]
-                    pixels[i] = if pixels[i] > 128 { pixels[i].wrapping_sub(1) } else { pixels[i].wrapping_add(1) };
-                    pixels[i+1] = if pixels[i+1] > 128 { pixels[i+1].wrapping_sub(1) } else { pixels[i+1].wrapping_add(1) };
-                    pixels[i+2] = if pixels[i+2] > 128 { pixels[i+2].wrapping_sub(1) } else { pixels[i+2].wrapping_add(1) };
+                    pixels[i] = if pixels[i] > 128 {
+                        pixels[i].wrapping_sub(1)
+                    } else {
+                        pixels[i].wrapping_add(1)
+                    };
+                    pixels[i + 1] = if pixels[i + 1] > 128 {
+                        pixels[i + 1].wrapping_sub(1)
+                    } else {
+                        pixels[i + 1].wrapping_add(1)
+                    };
+                    pixels[i + 2] = if pixels[i + 2] > 128 {
+                        pixels[i + 2].wrapping_sub(1)
+                    } else {
+                        pixels[i + 2].wrapping_add(1)
+                    };
                 }
             }
         }

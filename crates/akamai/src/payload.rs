@@ -196,7 +196,11 @@ pub fn build_cleartext(
     tad.push("-129".into());
     tad.push(field_lrd(profile));
 
-    debug_assert_eq!(tad.len(), 58, "tAD must be 58 elements (29 marker/data pairs)");
+    debug_assert_eq!(
+        tad.len(),
+        58,
+        "tAD must be 58 elements (29 marker/data pairs)"
+    );
     tad.join(",")
 }
 
@@ -306,7 +310,13 @@ fn field_lrd(p: &StealthProfile) -> String {
 /// canvas / audio / shader fingerprints — same shape as a real
 /// SHA-256 digest in hex.
 fn hex64(seed: u64) -> String {
-    format!("{:016x}{:016x}{:016x}{:016x}", seed, !seed, seed.wrapping_mul(31), !seed.wrapping_mul(31))
+    format!(
+        "{:016x}{:016x}{:016x}{:016x}",
+        seed,
+        !seed,
+        seed.wrapping_mul(31),
+        !seed.wrapping_mul(31)
+    )
 }
 
 #[cfg(test)]
@@ -326,7 +336,10 @@ mod tests {
         // 58 array slots, each separated by ','. The vAD field itself
         // contains commas internally, so the split count is HIGHER
         // than 58. We just sanity-check the count is meaningful.
-        assert!(n >= 58, "split count {n} should be ≥ 58 (extra commas inside fields)");
+        assert!(
+            n >= 58,
+            "split count {n} should be ≥ 58 (extra commas inside fields)"
+        );
     }
 
     #[test]
@@ -354,8 +367,20 @@ mod tests {
     #[test]
     fn mouse_trajectory_emits_per_event_tuples() {
         let events = vec![
-            MouseEvent { x: 100, y: 200, t: 1000, kind: 0, button: 0 },
-            MouseEvent { x: 110, y: 205, t: 1010, kind: 0, button: 0 },
+            MouseEvent {
+                x: 100,
+                y: 200,
+                t: 1000,
+                kind: 0,
+                button: 0,
+            },
+            MouseEvent {
+                x: 110,
+                y: 205,
+                t: 1010,
+                kind: 0,
+                button: 0,
+            },
         ];
         let s = field_mouse_trajectory(&events);
         assert_eq!(s, "0,1,1000,100,200;1,1,1010,110,205;");

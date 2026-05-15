@@ -80,7 +80,11 @@ impl ParsedAbck {
         let suffix = match value.find('~') {
             Some(i) => &value[i + 1..],
             None => {
-                return Self { stop_signal: -1, inv_signal: 0, well_formed: false };
+                return Self {
+                    stop_signal: -1,
+                    inv_signal: 0,
+                    well_formed: false,
+                };
             }
         };
         let parts: Vec<&str> = suffix.split('~').collect();
@@ -197,13 +201,11 @@ impl AkamaiSessionStore {
 
     /// Get-or-create a session for `host`, then call `f` with mutable
     /// access. Returns `f`'s result.
-    pub async fn with_session<R>(
-        &self,
-        host: &str,
-        f: impl FnOnce(&mut AkamaiSession) -> R,
-    ) -> R {
+    pub async fn with_session<R>(&self, host: &str, f: impl FnOnce(&mut AkamaiSession) -> R) -> R {
         let mut guard = self.inner.write().await;
-        let session = guard.entry(host.to_string()).or_insert_with(AkamaiSession::new);
+        let session = guard
+            .entry(host.to_string())
+            .or_insert_with(AkamaiSession::new);
         f(session)
     }
 

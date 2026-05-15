@@ -378,8 +378,8 @@ mod tests {
         let key = [0u8; 16];
         let iv = [0u8; 16];
         let pt_padded: [u8; 16] = [
-            b'h', b'e', b'l', b'l', b'o',
-            0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+            b'h', b'e', b'l', b'l', b'o', 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+            0x0b, 0x0b,
         ];
         // Encrypt: AES-128-ECB(pt XOR iv) with all-zero key/IV.
         // CBC-encrypt a single block: ct = AES_enc(pt XOR IV).
@@ -507,8 +507,7 @@ mod tests {
         let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
         let mut i = 0;
         while i + 3 <= input.len() {
-            let n =
-                ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8) | input[i + 2] as u32;
+            let n = ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8) | input[i + 2] as u32;
             out.push(ALPHA[((n >> 18) & 63) as usize] as char);
             out.push(ALPHA[((n >> 12) & 63) as usize] as char);
             out.push(ALPHA[((n >> 6) & 63) as usize] as char);

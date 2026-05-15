@@ -9,8 +9,8 @@
 //!   cargo test -p browser --test phase7_ab_probe -- --test-threads=1 --nocapture phase7_ab_probe_secure
 
 use browser::Page;
-use stealth::presets::chrome_130_macos;
 use std::collections::HashMap;
+use stealth::presets::chrome_130_macos;
 
 const PROBE_HTML: &str = r#"<!doctype html><html><head><title>probe</title></head><body><canvas id=c width=300 height=80></canvas><div id=test>x</div><script>
 globalThis.__P7_RESULT = null;
@@ -121,13 +121,9 @@ async fn run_probe(_url_label: &str) -> HashMap<String, String> {
     // match Chrome's insecure-context capture). Phase 7 follow-up.
     const PROBE_URL: &str =
         "data:text/html,<!doctype html><html><head><title>probe</title></head><body><canvas id=c width=300 height=80></canvas><div id=test>x</div></body></html>";
-    let mut page = Page::from_html_with_url(
-        PROBE_HTML,
-        PROBE_URL,
-        Some(chrome_130_macos()),
-    )
-    .await
-    .unwrap();
+    let mut page = Page::from_html_with_url(PROBE_HTML, PROBE_URL, Some(chrome_130_macos()))
+        .await
+        .unwrap();
     let _ = page
         .event_loop()
         .run_until_idle(std::time::Duration::from_secs(3))
@@ -159,7 +155,10 @@ async fn run_probe(_url_label: &str) -> HashMap<String, String> {
         let keys: Vec<String> = serde_json::from_str(&cleaned).unwrap_or_default();
         for k in keys {
             let v = page
-                .evaluate(&format!("String(JSON.parse(globalThis.__P7_RESULT)[{}])", serde_json::to_string(&k).unwrap()))
+                .evaluate(&format!(
+                    "String(JSON.parse(globalThis.__P7_RESULT)[{}])",
+                    serde_json::to_string(&k).unwrap()
+                ))
                 .unwrap();
             map.insert(k, v.trim_matches('"').to_string());
         }
@@ -217,7 +216,9 @@ async fn phase7_d5_doc_charset_default() {
     .await
     .unwrap();
     assert_eq!(
-        p.evaluate("document.characterSet").unwrap().trim_matches('"'),
+        p.evaluate("document.characterSet")
+            .unwrap()
+            .trim_matches('"'),
         "windows-1252"
     );
     assert_eq!(
@@ -347,9 +348,7 @@ async fn phase7_d3_scroll_eventcounts_grease() {
         "36"
     );
     let first10 = p
-        .evaluate(
-            "Array.from(performance.eventCounts.keys()).slice(0,10).join(',')",
-        )
+        .evaluate("Array.from(performance.eventCounts.keys()).slice(0,10).join(',')")
         .unwrap();
     assert_eq!(
         first10.trim_matches('"'),
@@ -361,10 +360,14 @@ async fn phase7_d3_scroll_eventcounts_grease() {
         .evaluate("navigator.userAgentData.brands.map(b=>b.brand+':'+b.version).join(',')")
         .unwrap();
     let s = brands.trim_matches('"');
-    assert!(s.contains("Not.A/Brand:8"),
-        "Not.A/Brand version should be '8', got: {s}");
-    assert!(!s.contains("Not.A/Brand:24"),
-        "stale GREASE version 24 leaked into brands: {s}");
+    assert!(
+        s.contains("Not.A/Brand:8"),
+        "Not.A/Brand version should be '8', got: {s}"
+    );
+    assert!(
+        !s.contains("Not.A/Brand:24"),
+        "stale GREASE version 24 leaked into brands: {s}"
+    );
 }
 
 /// Phase 7 D2 gate — 18 [SecureContext] APIs return undefined on
@@ -465,8 +468,11 @@ async fn phase7_d2_secure_context_gating() {
     ];
     for (expr, want) in present {
         let v = p.evaluate(expr).unwrap();
-        assert_eq!(v.trim_matches('"'), want,
-            "{expr} on secure context should be {want}");
+        assert_eq!(
+            v.trim_matches('"'),
+            want,
+            "{expr} on secure context should be {want}"
+        );
     }
 }
 
@@ -484,8 +490,13 @@ async fn phase7_d1_is_secure_context_per_scheme() {
     let mut p = Page::from_html("<!doctype html><html></html>", Some(chrome_130_macos()))
         .await
         .unwrap();
-    assert_eq!(p.evaluate("String(isSecureContext)").unwrap().trim_matches('"'), "false",
-        "about:blank should be insecure");
+    assert_eq!(
+        p.evaluate("String(isSecureContext)")
+            .unwrap()
+            .trim_matches('"'),
+        "false",
+        "about:blank should be insecure"
+    );
 
     // https:// is secure
     let mut p = Page::from_html_with_url(
@@ -495,8 +506,13 @@ async fn phase7_d1_is_secure_context_per_scheme() {
     )
     .await
     .unwrap();
-    assert_eq!(p.evaluate("String(isSecureContext)").unwrap().trim_matches('"'), "true",
-        "https:// should be secure");
+    assert_eq!(
+        p.evaluate("String(isSecureContext)")
+            .unwrap()
+            .trim_matches('"'),
+        "true",
+        "https:// should be secure"
+    );
 
     // http://localhost is the loopback exception → secure
     let mut p = Page::from_html_with_url(
@@ -506,8 +522,13 @@ async fn phase7_d1_is_secure_context_per_scheme() {
     )
     .await
     .unwrap();
-    assert_eq!(p.evaluate("String(isSecureContext)").unwrap().trim_matches('"'), "true",
-        "http://localhost should be secure");
+    assert_eq!(
+        p.evaluate("String(isSecureContext)")
+            .unwrap()
+            .trim_matches('"'),
+        "true",
+        "http://localhost should be secure"
+    );
 
     // http://example.com is insecure
     let mut p = Page::from_html_with_url(
@@ -517,6 +538,11 @@ async fn phase7_d1_is_secure_context_per_scheme() {
     )
     .await
     .unwrap();
-    assert_eq!(p.evaluate("String(isSecureContext)").unwrap().trim_matches('"'), "false",
-        "http://example.com should be insecure");
+    assert_eq!(
+        p.evaluate("String(isSecureContext)")
+            .unwrap()
+            .trim_matches('"'),
+        "false",
+        "http://example.com should be insecure"
+    );
 }

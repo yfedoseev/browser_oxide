@@ -85,5 +85,8 @@ async fn querySelectorAll_rects_all_64ths() {
         ",
     )
     .await;
-    assert_eq!(r, "true", "every rect float across querySelectorAll('*') must be a multiple of 1/64");
+    assert_eq!(
+        r, "true",
+        "every rect float across querySelectorAll('*') must be a multiple of 1/64"
+    );
 }

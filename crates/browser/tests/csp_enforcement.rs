@@ -68,7 +68,10 @@ async fn parser_injected_script_without_nonce_is_blocked() {
         None, // no nonce → blocked under strict-dynamic
         true, // parser_inserted
     );
-    assert!(block_decision.is_err(), "parser-injected, no-nonce script must trip CSP");
+    assert!(
+        block_decision.is_err(),
+        "parser-injected, no-nonce script must trip CSP"
+    );
     assert_eq!(block_decision.unwrap_err(), "script-src");
 
     // The same URL with a matching nonce must NOT trip CSP.
@@ -88,9 +91,13 @@ async fn parser_injected_script_without_nonce_is_blocked() {
     // skipped without a network attempt.
     let captured_log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let _captured_for_log = captured_log.clone();
-    let mut page = Page::from_html(HTML, Some(chrome_130_macos())).await.unwrap();
+    let mut page = Page::from_html(HTML, Some(chrome_130_macos()))
+        .await
+        .unwrap();
 
-    let inline_ran = page.evaluate("String(globalThis.__legitimate_inline_ran)").unwrap();
+    let inline_ran = page
+        .evaluate("String(globalThis.__legitimate_inline_ran)")
+        .unwrap();
     assert_eq!(
         inline_ran, "true",
         "inline script with matching nonce must execute"
@@ -108,7 +115,9 @@ async fn no_csp_does_not_block_anything() {
 <html><head><title>no csp</title></head><body>
 <script>globalThis.__inline_ran = "yes";</script>
 </body></html>"#;
-    let mut page = Page::from_html(NO_CSP_HTML, Some(chrome_130_macos())).await.unwrap();
+    let mut page = Page::from_html(NO_CSP_HTML, Some(chrome_130_macos()))
+        .await
+        .unwrap();
     let inline = page.evaluate("globalThis.__inline_ran").unwrap();
     assert_eq!(inline.trim_matches('"'), "yes");
 }
@@ -145,7 +154,9 @@ async fn securitypolicyviolation_event_fires_on_block() {
 </script>
 </body></html>"#;
 
-    let mut page = Page::from_html(HTML, Some(chrome_130_macos())).await.unwrap();
+    let mut page = Page::from_html(HTML, Some(chrome_130_macos()))
+        .await
+        .unwrap();
 
     // Trip the gate AFTER Page is up so the violation queue is fresh
     // and the policy hasn't been re-set since the listener registered.
@@ -336,7 +347,10 @@ async fn frame_src_falls_back_through_child_src_to_default_src() {
         None,
         false,
     );
-    assert!(same_origin.is_ok(), "default-src 'self' allows same-origin iframe");
+    assert!(
+        same_origin.is_ok(),
+        "default-src 'self' allows same-origin iframe"
+    );
 
     let cross = csp_state::check_csp(
         Directive::FrameSrc,
@@ -344,7 +358,10 @@ async fn frame_src_falls_back_through_child_src_to_default_src() {
         None,
         false,
     );
-    assert!(cross.is_err(), "default-src 'self' blocks cross-origin iframe via fallback chain");
+    assert!(
+        cross.is_err(),
+        "default-src 'self' blocks cross-origin iframe via fallback chain"
+    );
     assert_eq!(cross.unwrap_err(), "default-src");
 
     csp_state::clear_csp_policy();

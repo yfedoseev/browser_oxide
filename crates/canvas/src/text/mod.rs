@@ -199,7 +199,10 @@ struct Path2DOutlineBuilder<'a> {
 impl Path2DOutlineBuilder<'_> {
     fn map(&self, x: f32, y: f32) -> (f32, f32) {
         // Font space: y up, em units. Canvas space: y down, pixels.
-        (self.origin_x + x * self.scale, self.origin_y - y * self.scale)
+        (
+            self.origin_x + x * self.scale,
+            self.origin_y - y * self.scale,
+        )
     }
 }
 

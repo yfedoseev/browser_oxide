@@ -47,7 +47,9 @@ async fn audio_compressor_in_blink_range() {
     .unwrap();
     // Drain microtasks via a separate eval (Promise.then microtask runs).
     page.evaluate("new Promise(r => r(0)); 'drained';").unwrap();
-    let r = page.evaluate("String(globalThis.__audioSum)").unwrap_or_default();
+    let r = page
+        .evaluate("String(globalThis.__audioSum)")
+        .unwrap_or_default();
     eprintln!("Engine audio compressor sum: {r}");
     eprintln!("Chrome 147 captured sum:    124.04348155876505");
     let parsed: f64 = r.parse().unwrap_or(0.0);

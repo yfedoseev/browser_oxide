@@ -126,7 +126,9 @@ mod tests {
         );
         let set = collect_csp(&[], &dom);
         assert_eq!(set.policies.len(), 1);
-        assert!(set.policies[0].directives.contains_key(&Directive::ScriptSrc));
+        assert!(set.policies[0]
+            .directives
+            .contains_key(&Directive::ScriptSrc));
     }
 
     #[test]

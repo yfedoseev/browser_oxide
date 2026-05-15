@@ -156,8 +156,7 @@ pub fn detect_challenge(
     // Require either the canonical header OR (one body marker AND
     // server: cloudflare). Bare body markers without `server: cloudflare`
     // would over-match on the research notes themselves.
-    let is_challenge = cf_mitigated
-        || ((has_chl_opt || has_chl_platform) && server_is_cf);
+    let is_challenge = cf_mitigated || ((has_chl_opt || has_chl_platform) && server_is_cf);
     if !is_challenge {
         return None;
     }
@@ -243,9 +242,7 @@ fn extract_orchestrator_url(body: &str) -> Option<String> {
     // Walk forward until we hit a quote, `<`, `>`, whitespace, or `;`.
     let tail = &body[idx..];
     let end = tail
-        .find(|c: char| {
-            matches!(c, '"' | '\'' | '<' | '>' | ' ' | '\t' | '\n' | '\r' | ';')
-        })
+        .find(|c: char| matches!(c, '"' | '\'' | '<' | '>' | ' ' | '\t' | '\n' | '\r' | ';'))
         .unwrap_or(tail.len());
     Some(tail[..end].to_string())
 }
@@ -291,8 +288,7 @@ document.head.appendChild(a);
 
     #[test]
     fn detects_managed_challenge_from_udemy() {
-        let ctx = detect_challenge(&udemy_headers(), UDEMY_BODY)
-            .expect("should detect challenge");
+        let ctx = detect_challenge(&udemy_headers(), UDEMY_BODY).expect("should detect challenge");
         assert_eq!(ctx.kind, CfChallengeKind::Managed);
         assert_eq!(ctx.ray, "9f9a7259de914d45-YVR");
         assert_eq!(ctx.zone, "www.udemy.com");

@@ -81,7 +81,10 @@ pub fn solve_crypto(challenge: &SecCptChallenge, sec: &str) -> Vec<String> {
     let mut answers = Vec::with_capacity(challenge.count as usize);
     for i in 0..challenge.count {
         let target_d = challenge.difficulty + i as u64;
-        let prefix = format!("{}{}{}{}", sec, challenge.timestamp, challenge.nonce, target_d);
+        let prefix = format!(
+            "{}{}{}{}",
+            sec, challenge.timestamp, challenge.nonce, target_d
+        );
         let answer = find_answer(&prefix, target_d);
         answers.push(answer);
     }
@@ -141,7 +144,10 @@ mod tests {
         assert!(r.starts_with("0."), "answer should be base-16 float: {r}");
 
         // Verify the answer satisfies the rolling-hash check.
-        let prefix = format!("{}{}{}{}", "secprefix", chal.timestamp, chal.nonce, chal.difficulty);
+        let prefix = format!(
+            "{}{}{}{}",
+            "secprefix", chal.timestamp, chal.nonce, chal.difficulty
+        );
         let mut h = Sha256::new();
         h.update(prefix.as_bytes());
         h.update(r.as_bytes());

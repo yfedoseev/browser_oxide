@@ -296,8 +296,16 @@ async fn test_chrome_api_surface() {
             keys
         );
     }
-    assert!(!keys.contains("runtime"), "chrome.runtime must be absent on regular pages (keys: {})", keys);
-    assert!(!keys.contains("webstore"), "chrome.webstore was removed in Chrome 126 (keys: {})", keys);
+    assert!(
+        !keys.contains("runtime"),
+        "chrome.runtime must be absent on regular pages (keys: {})",
+        keys
+    );
+    assert!(
+        !keys.contains("webstore"),
+        "chrome.webstore was removed in Chrome 126 (keys: {})",
+        keys
+    );
 
     // chrome.loadTimes — for a non-HTTP local page, spdy/npn are false.
     // On real HTTPS pages (tested via anti_bot tests), they are true/"h2".
