@@ -406,6 +406,38 @@ mod tests {
         assert_eq!(out, "yc*{XkAaZk[");
     }
 
+    /// End-to-end reference vector against glizzy's encryptSensorData
+    /// using their example-1.js as the input.js source (fileHash
+    /// extracts to 5_645_252 from that file). Captured 2026-05-14:
+    ///
+    /// ```js
+    /// encryptSensorData(
+    ///     {ver:"wS5KmeE4vP5vBcKRIM2pPQlq4qZivf0B53dgMqmUH4E=", fpt:"test", fpc:"4488"},
+    ///     12345678,  // cookieHash
+    ///     example1_js  // fileContent — yields fileHash 5645252
+    /// )
+    /// ```
+    ///
+    /// Returns sensor_data:
+    /// ```text
+    /// 3;0;1;0;12345678;wS5K…UH4E=;141659;"6Yao[AS.6/n_gXFIdw81Ie`yX>)dOMwaoRdRq2h0Fm%|"&"n>]"$"}U$@"42"e_9f"E"YY2"~;"G%j"
+    /// ```
+    ///
+    /// Pins build_v3_envelope to byte-perfect parity with the JS
+    /// reference. If this passes, our v3 encryption pipeline is
+    /// correct end-to-end. Akamai's edge can decrypt our output
+    /// exactly as it decrypts glizzy's, modulo the per-host fileHash
+    /// which must come from real bmak.js extraction.
+    #[test]
+    fn build_v3_envelope_matches_glizzy_reference_end_to_end() {
+        let cleartext = r#"{"ver":"wS5KmeE4vP5vBcKRIM2pPQlq4qZivf0B53dgMqmUH4E=","fpt":"test","fpc":"4488"}"#;
+        let cookie_hash = 12_345_678u32;
+        let file_hash = 5_645_252u32;
+        let envelope = build_v3_envelope(cleartext, cookie_hash, file_hash);
+        let expected = "3;0;1;0;12345678;wS5KmeE4vP5vBcKRIM2pPQlq4qZivf0B53dgMqmUH4E=;141659;\"6Yao[AS.6/n_gXFIdw81Ie`yX>)dOMwaoRdRq2h0Fm%|\"&\"n>]\"$\"}U$@\"42\"e_9f\"E\"YY2\"~;\"G%j\"";
+        assert_eq!(envelope, expected);
+    }
+
     #[test]
     fn lcg_first_steps_match_reference() {
         // Step the LCG from seed 3_289_904 and check the first few
