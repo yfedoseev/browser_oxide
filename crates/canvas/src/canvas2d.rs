@@ -17,7 +17,8 @@ use crate::path::Path2D;
 use crate::text::{self, ParsedFont, TextMetrics};
 use skia_safe::{
     gradient_shader, image_filters, surfaces, AlphaType, BlendMode, Canvas as SkCanvas, Color4f,
-    ColorFilter, ColorType, ImageInfo, Matrix, Paint, PaintStyle, Point, Rect as SkRect, TileMode,
+    ColorFilter, ColorType, Font, FontHinting, FontMgr, ImageInfo, Matrix, Paint, PaintStyle,
+    Point, Rect as SkRect, TileMode,
 };
 
 /// Simple 0-255 RGBA color. This is the public color type exposed to
@@ -962,30 +963,66 @@ impl Canvas2D {
         text::measure_text_metrics(text, &self.state.font, &self.os_name)
     }
 
-    /// Fill text at `(x, y)`, with `y` interpreted as the alphabetic
-    /// baseline (Canvas 2D's default `textBaseline`). Shapes via
-    /// rustybuzz, rasterizes glyphs via swash, and composites the
-    /// alpha masks onto the canvas pixel buffer using
-    /// premultiplied-alpha SOURCE_OVER.
+    /// Fill text at `(x, y)`, with `y` the alphabetic baseline (Canvas
+    /// 2D's default `textBaseline`). Shapes via rustybuzz, then draws
+    /// glyphs through **Skia's own rasterizer** with Chrome's
+    /// documented 2D-canvas `SkFont` settings (grayscale AntiAlias —
+    /// canvas never uses LCD; subpixel glyph positioning; NO hinting).
+    /// Chrome's 2D-canvas text IS Skia, so using the same Skia glyph
+    /// rasterizer + the same settings is canvas-fingerprint parity by
+    /// construction (vs the prior swash path whose AA coverage could
+    /// never byte-match FreeType+Skia). Falls back to the legacy swash
+    /// raster only if Skia can't parse the face (robustness).
     pub fn fill_text(&mut self, text: &str, x: f32, y: f32) {
-        let color = self.state.fill_style.color();
-        let glyphs = text::rasterize_text(
-            text,
-            x,
-            y,
-            &self.state.font,
-            color.r,
-            color.g,
-            color.b,
-            self.state.global_alpha * color.alpha(),
-            &self.os_name,
-        );
+        let Some((data, idx, run)) = text::shape_run(text, &self.state.font, &self.os_name) else {
+            return;
+        };
+        let size_px = self.state.font.size_px;
+        let Some(typeface) = FontMgr::new().new_from_data(data, Some(idx as usize)) else {
+            // Robustness fallback: legacy swash raster + manual composite.
+            let color = self.state.fill_style.color();
+            let glyphs = text::rasterize_text(
+                text,
+                x,
+                y,
+                &self.state.font,
+                color.r,
+                color.g,
+                color.b,
+                self.state.global_alpha * color.alpha(),
+                &self.os_name,
+            );
+            let w = self.width;
+            let h = self.height;
+            for glyph in &glyphs {
+                text::composite_glyph(glyph, &mut self.pixels, w, h);
+            }
+            return;
+        };
+        let mut font = Font::from_typeface(typeface, Some(size_px));
+        // Chrome 2D canvas: grayscale AA (never LCD), subpixel glyph
+        // positioning, hinting disabled (resolution-independent text).
+        font.set_edging(skia_safe::font::Edging::AntiAlias);
+        font.set_subpixel(true);
+        font.set_hinting(FontHinting::None);
 
-        let w = self.width;
-        let h = self.height;
-        for glyph in &glyphs {
-            text::composite_glyph(glyph, &mut self.pixels, w, h);
+        let mut ids: Vec<u16> = Vec::with_capacity(run.glyphs.len());
+        let mut pos: Vec<Point> = Vec::with_capacity(run.glyphs.len());
+        let mut cx = x;
+        for g in &run.glyphs {
+            ids.push(g.glyph_id as u16);
+            pos.push(Point::new(cx + g.x_offset, y - g.y_offset));
+            cx += g.x_advance;
         }
+
+        let paint = self.build_fill_paint();
+        let matrix = self.state.transform;
+        self.with_canvas(|canvas| {
+            canvas.save();
+            canvas.concat(&matrix);
+            canvas.draw_glyphs_at(&ids, &pos[..], Point::new(0.0, 0.0), &font, &paint);
+            canvas.restore();
+        });
     }
 
     /// Stroke text at `(x, y)` (alphabetic baseline). Builds a Path2D

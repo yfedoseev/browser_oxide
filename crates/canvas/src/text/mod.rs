@@ -133,6 +133,23 @@ pub struct PlacedGlyph {
     pub alpha: f32,
 }
 
+/// Resolve the font face + shape `text` via rustybuzz, returning the
+/// face bytes, TTC index, and the shaped run. Lets the canvas draw
+/// glyphs through Skia's own rasterizer (Chrome-parity by
+/// construction — Chrome's 2D-canvas text IS Skia) while keeping our
+/// rustybuzz shaping so `measureText` stays consistent.
+pub fn shape_run(
+    text: &str,
+    font: &ParsedFont,
+    os_name: &str,
+) -> Option<(&'static [u8], u32, shaper::ShapedRun)> {
+    if text.is_empty() {
+        return None;
+    }
+    let (data, idx) = resolve_face(font, os_name)?;
+    Some((data, idx, shaper::shape(text, data, idx, font.size_px)))
+}
+
 /// Shape + rasterize `text` at the given origin, producing a list of
 /// placed alpha masks ready for canvas compositing. The `(x, y)`
 /// origin is the start of the text run, with the alphabetic baseline
