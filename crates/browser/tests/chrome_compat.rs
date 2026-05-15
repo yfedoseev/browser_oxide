@@ -6979,6 +6979,98 @@ async fn kasada_sentinel_identity_audit() {
 }
 
 // Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
+// Hypothesis 3 (HIGH 25%): AudioContext fingerprint divergence.
+// CreepJS / FingerprintJS / Kasada all hash the output buffer of a
+// known-input OfflineAudioContext rendering. Real Chrome produces
+// hash ≈ 124.04 (M-series Mac) or 124.03 (Intel Mac). Our engine ships
+// a stub DynamicsCompressor — if startRendering returns 0 or all-zero
+// samples, every sample-sum hash = 0 = canonical headless tell.
+#[tokio::test]
+async fn kasada_audio_fingerprint_audit() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        // Synchronous startRendering — our OfflineAudioContext should
+        // populate the buffer with the DynamicsCompressor output.
+        let result;
+        try {
+            const ctx = new OfflineAudioContext(1, 44100 * 0.5, 44100);
+            const osc = ctx.createOscillator();
+            osc.type = 'triangle';
+            osc.frequency.value = 10000;
+            const compressor = ctx.createDynamicsCompressor();
+            compressor.threshold.setValueAtTime(-50, 0);
+            compressor.knee.setValueAtTime(40, 0);
+            compressor.ratio.setValueAtTime(12, 0);
+            compressor.attack.setValueAtTime(0, 0);
+            compressor.release.setValueAtTime(0.25, 0);
+            osc.connect(compressor);
+            compressor.connect(ctx.destination);
+            osc.start(0);
+            const renderPromise = ctx.startRendering();
+            result = JSON.stringify({
+                hasPromise: typeof renderPromise === 'object',
+                hasThen: typeof renderPromise?.then === 'function',
+                sampleRate: ctx.sampleRate,
+                length: ctx._length || -1,
+                bufferSize: 44100 * 0.5,
+            });
+        } catch (e) {
+            result = JSON.stringify({ error: e.message });
+        }
+        result;
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("kasada-audio-fingerprint-audit: {result}");
+    // We don't assert specific values yet — this is exploratory. Real
+    // Chrome hash should be ~124.04; our engine should produce a
+    // non-zero value or we have a clear stub-detection signal.
+    assert!(!result.starts_with("ERROR:"));
+    assert!(
+        result.contains("\"hasPromise\":true"),
+        "OfflineAudioContext.startRendering must return a Promise: {result}"
+    );
+}
+
+// Hypothesis 4 (MEDIUM 15%): WebAssembly absence. Real Chrome ships
+// WebAssembly with all 4 standard exports. Kasada probes them. If our
+// engine disabled WASM or returns wrong types, definitive headless tell.
+#[tokio::test]
+async fn kasada_wasm_audit() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        const out = {
+            typeofWebAssembly: typeof WebAssembly,
+            compileType: typeof WebAssembly?.compile,
+            instantiateType: typeof WebAssembly?.instantiate,
+            moduleType: typeof WebAssembly?.Module,
+            memoryType: typeof WebAssembly?.Memory,
+            globalType: typeof WebAssembly?.Global,
+            tableType: typeof WebAssembly?.Table,
+            instanceType: typeof WebAssembly?.Instance,
+        };
+        JSON.stringify(out);
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("kasada-wasm-audit: {result}");
+    assert!(result.contains("\"typeofWebAssembly\":\"object\""));
+    assert!(result.contains("\"compileType\":\"function\""));
+    assert!(result.contains("\"instantiateType\":\"function\""));
+    assert!(result.contains("\"moduleType\":\"function\""));
+}
+
+// Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
 // Hypothesis 7 (MEDIUM): Error.stack must never expose our internal
 // bootstrap script names (`<init_script_0>`, `<cleanup>`, etc.). Our
 // own VM trace at VM_TRACE_FINDINGS_2026_05_12.md captured the
