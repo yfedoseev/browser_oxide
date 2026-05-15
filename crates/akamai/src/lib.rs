@@ -211,11 +211,13 @@ pub fn known_file_hash(host: &str) -> Option<u32> {
     //   cat /tmp/bmak_<host>.js | node \
     //     /tmp/akamai-v3-sensor-data-helper/src/extract_hash/index.js
     match host {
-        // Captured 2026-05-14 via crates/browser/tests/capture_bmak_js.rs:
+        // Captured 2026-05-14 via crates/browser/tests/capture_bmak_js.rs.
+        // homedepot rotated bmak.js between two captures ~40 min apart
+        // (8806534 → 2900615); fileHash rotates faster than the 24-48 h
+        // estimate. The latest value (2900615) is in use.
         "www.bestbuy.com" => Some(6_249_250),
         "www.macys.com" => Some(2_752_023),
-        "www.homedepot.com" => Some(8_806_534),
-        // hotels.com / h-m.com captures pending.
+        "www.homedepot.com" => Some(2_900_615),
         _ => None,
     }
 }
