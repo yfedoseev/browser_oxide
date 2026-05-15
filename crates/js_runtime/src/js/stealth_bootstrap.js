@@ -45,23 +45,28 @@
     const _maskFunction = (fn, name) => {
         if (!fn) return;
         try {
+            // Native fns have an own configurable `name` (Chrome-correct).
             Object.defineProperty(fn, 'name', { value: name, configurable: true });
-            // Symbol tag — used by the patched Function.prototype.toString above
+            // Symbol tag — read by the patched Function.prototype.toString
+            // above. `Symbol.for` (global registry) is DELIBERATE: an
+            // iframe realm's patched toString must resolve the tag on
+            // PARENT-realm functions (cross-realm robustness — see iframe
+            // contentWindow self-loop commits).
             Object.defineProperty(fn, _nativeTag, { value: name, configurable: true });
-            // Instance toString — used by direct fn.toString() calls
-            const ts = function toString() { return `function ${name}() { [native code] }`; };
-            Object.defineProperty(fn, 'toString', { value: ts, configurable: true });
-            // Mask the toString wrapper itself
-            Object.defineProperty(ts, 'name', { value: 'toString', configurable: true });
-            Object.defineProperty(ts, _nativeTag, { value: 'toString', configurable: true });
-            // innerTs must also carry _nativeTag — otherwise Function.prototype.toString.call(innerTs)
-            // would return its raw source code instead of a native-looking string.
-            const innerTs = function toString() { return 'function toString() { [native code] }'; };
-            Object.defineProperty(innerTs, _nativeTag, { value: 'toString', configurable: true });
-            Object.defineProperty(ts, 'toString', {
-                value: innerTs,
-                configurable: true,
-            });
+            // NO own `toString`: it was a self-inflicted FP leak — a
+            // fresh /tl-driven clean probe (kasada_masked_fn_own_props_
+            // probe) showed every masked fn had own `toString` →
+            // `getOwnPropertyNames(fn)` included "toString" (Chrome:
+            // ['length','name'(,'prototype')] only — doc-11 line98) and
+            // `fn.toString !== Function.prototype.toString` (Chrome: ===,
+            // inherited). The own toString was REDUNDANT: the patched
+            // Function.prototype.toString already yields
+            // `function <tag>() { [native code] }` via the tag, and
+            // `fn.toString()` / `Function.prototype.toString.call(fn)`
+            // both resolve up-chain to it. Removing it is cross-realm-
+            // safe (tag mechanism unchanged) and restores Chrome parity
+            // for getOwnPropertyNames / hasOwnProperty('toString') /
+            // toString-identity on EVERY masked fn in the engine.
         } catch (e) {}
     };
 

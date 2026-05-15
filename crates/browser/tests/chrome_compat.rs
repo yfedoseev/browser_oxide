@@ -8309,3 +8309,51 @@ async fn kasada_native_fn_shape_clean_probe() {
         "native-fn shape divergence (proto/constructability): {result}"
     );
 }
+
+/// Fix #5 confirmation probe: `_maskFunction` self-brands every masked
+/// function. Real Chrome native fn: `getOwnPropertyNames(fn)` ⊆
+/// `['length','name','prototype']`, `getOwnPropertySymbols(fn)===[]`,
+/// no own `toString`, `fn.toString===Function.prototype.toString`.
+/// Ours adds an own `Symbol.for('__boxide_native__')` (readable as the
+/// literal brand string via `Symbol.keyFor`) + an own `toString`.
+/// Diagnostic (reports the exact leak surface) — drives the
+/// reflection-hide fix from measured truth before the blast-radius
+/// refactor (validated probe-first discipline).
+#[tokio::test]
+async fn kasada_masked_fn_own_props_probe() {
+    let result = check(
+        r#"(function(){
+            const FPT = Function.prototype.toString;
+            const targets = [
+              ["fetch", globalThis.fetch],
+              ["atob", globalThis.atob],
+              ["Worker", globalThis.Worker],
+              ["console.log", globalThis.console && console.log],
+              ["perm.query", globalThis.navigator && navigator.permissions
+                 && Object.getPrototypeOf(navigator.permissions).query],
+            ];
+            const leaks = [];
+            for (const [n, fn] of targets) {
+              if (typeof fn !== "function") continue;
+              const names = Object.getOwnPropertyNames(fn);
+              const bad = names.filter(k => k !== "length" && k !== "name" && k !== "prototype");
+              if (bad.length) leaks.push(n + ":names+" + bad.join(","));
+              if (Object.prototype.hasOwnProperty.call(fn, "toString"))
+                leaks.push(n + ":ownToString");
+              if (fn.toString !== FPT)
+                leaks.push(n + ":toString!==FPT");
+              // Symbol(__boxide_native__) own-symbol leak is documented
+              // evidence-gated future work (CreepJS-class; NOT in the
+              // current Kasada /tl capture) — intentionally NOT asserted
+              // here. The toString-family Chrome-parity IS asserted.
+            }
+            return JSON.stringify(leaks);
+        })()"#,
+    )
+    .await;
+    eprintln!("kasada-masked-fn-ownprops: {result}");
+    assert_eq!(
+        result, "[]",
+        "masked-fn own-prop Chrome-parity divergence (toString family): {result}"
+    );
+}
