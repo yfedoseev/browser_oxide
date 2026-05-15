@@ -141,6 +141,23 @@ path) that names which environment probe scored as non-Chrome. The
 "some Regime-2 input" into "probe X failed" — the same discriminator
 strategy that worked for the sentinel question.
 
+### Regime-2 candidate elimination (narrowing without the blob)
+
+- **`performance.now()` jitter — RULED OUT.** `perf_ext.rs` already
+  implements Chrome-130 quantization-with-noise:
+  `q = floor(now_us/100)*100` (100 µs grid) + `LogNormal(μ=ln 8µs,
+  σ=0.4)` jitter clamped [0,35] µs + `1/1024`-probability
+  `Exp(λ=1/200µs)` spike clamped ≤1500 µs, with a monotonic clamp.
+  This is a research-grade model of Chrome's HRT quantizer, not a
+  naive stub — it is not the remaining divergence.
+- **Audio FP — CLOSED this session** (123.97 ≈ Chrome 124.04).
+- **Still open candidates** (pending error-blob confirmation):
+  behavioral 2nd-derivative (jerk) distribution of the sigma-lognormal
+  mouse path, and WebGL precision/readback. The error blob names the
+  actual one; do not speculatively harden both without it (the
+  discriminator-first strategy is what cracked the sentinel question
+  efficiently).
+
 ## Cross-cutting leverage (discovered 2026-05-15)
 
 Audio FP parity is load-bearing for **two** vendor families, not one:
