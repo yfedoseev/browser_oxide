@@ -6978,6 +6978,32 @@ async fn kasada_sentinel_identity_audit() {
     want_pass("\"valueIdentical\":true");
 }
 
+// Verify Kasada smc probe — MediaSource.isTypeSupported must return
+// true for video/mp4 (captured blob 2026-05-10 showed v=false; our
+// _supportedTypes Set includes video/mp4 — this is a regression guard).
+#[tokio::test]
+async fn kasada_smc_isTypeSupported_must_be_true_for_mp4() {
+    let result = check(
+        r#"
+        JSON.stringify({
+            mp4: MediaSource.isTypeSupported('video/mp4'),
+            mp4_codec: MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"'),
+            m4a: MediaSource.isTypeSupported('audio/x-m4a'),
+            aac: MediaSource.isTypeSupported('audio/aac'),
+            acc: MediaSource.isTypeSupported('audio/acc'),
+        });
+        "#,
+    )
+    .await;
+    eprintln!("smc isTypeSupported: {result}");
+    // Real Chrome 148: mp4=true, mp4_codec=true, m4a=true (with codec=mp4a),
+    // aac=true, acc=alias of aac (real Chrome returns true).
+    assert!(result.contains("\"mp4\":true"), "mp4 must be supported: {result}");
+    assert!(result.contains("\"m4a\":true"), "m4a must be supported (Kasada smc probe): {result}");
+    assert!(result.contains("\"aac\":true"), "aac must be supported (Kasada smc probe): {result}");
+    assert!(result.contains("\"acc\":true"), "acc alias must be supported (Kasada smc probe): {result}");
+}
+
 // Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
 // Hypothesis 3 (HIGH 25%): AudioContext fingerprint divergence.
 // CreepJS / FingerprintJS / Kasada all hash the output buffer of a

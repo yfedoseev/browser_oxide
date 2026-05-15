@@ -5273,6 +5273,12 @@
     // MediaSource + MediaRecorder.isTypeSupported in window realm.
     // Kasada's `mrs` probe (W4a 2026-05-11) reads .isTypeSupported.
     (() => {
+        // Per the captured Kasada smc probe blob (2026-05-10), Kasada
+        // tests audio/x-m4a + audio/aac + audio/acc and reads the
+        // boolean verdict. Real Chrome returns true; without these
+        // entries we return false → captured `v:false` was a real engine
+        // gap. Bringing in line with the first _supportedTypes Set at
+        // line 4987 (the canPlayType one).
         const _supportedTypes = new Set([
             "video/mp4", 'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
             'video/mp4;codecs="avc1.640028"', "video/webm",
@@ -5280,6 +5286,10 @@
             'video/webm;codecs="vp9,opus"', "audio/mp4",
             'audio/mp4;codecs="mp4a.40.2"', "audio/webm",
             'audio/webm;codecs=opus', 'audio/webm;codecs=vorbis',
+            // Kasada smc probe — captured blob 2026-05-10:
+            "audio/x-m4a", "audio/aac", "audio/acc",
+            "audio/mpeg", "audio/ogg", "audio/wav", "audio/flac",
+            "audio/mp3", "audio/x-wav",
         ]);
         
         const _isTypeSupported = ({
