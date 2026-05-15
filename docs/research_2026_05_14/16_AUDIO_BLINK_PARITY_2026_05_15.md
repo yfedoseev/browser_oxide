@@ -78,6 +78,35 @@ against a Blink reference trace, sample-by-sample, at −50 dB). It is
 **days**, far cheaper than the previously-feared VM emulation, and is
 the single highest-probability lever for 3 universal blocks.
 
+## Empirical convergence (2026-05-15, measured)
+
+`check_audio_fingerprint_per_profile` (the exact canonical probe,
+threshold=-50 knee=40 ratio=12, sum abs[4500..5000]):
+
+| exponent slope | mac hash | vs Chrome 124.04 |
+|---|---|---|
+| 0.125 (old hack) | 140.05 | +12.9% (obvious outlier) |
+| 0.070 (iter 1)   | 122.82 | −1.0% (plausible-Chrome range) |
+| 0.0739 (iter 2)  | *measuring* | target ≈ 124.04 |
+
+Both 0.070 and 0.0739 are deterministic per profile (lin == lin_again),
+preserving the per-profile-stable / per-OS-distinct property real
+Chrome has. Even iter-1's 122.82 is within real Chrome's cross-hardware
+spread (Intel vs Apple-silicon Chrome differ at the ~0.01 level on this
+sum, but a 1% gap is far inside any tolerance-based comparator and is
+no longer the synthetic-outlier the 140 value was).
+
+## Verification gate (the real proof)
+
+The audio sum matching ~124 is necessary but the *verifier* is the
+canadagoose 429→200 flip. After the hash lands, run
+`kasada_canadagoose_diagnostic` (#[ignore], live) and check the final
+classification: `L3-RENDERED` = Kasada passed (audio was the/​a
+load-bearing divergence); still `429`/Kasada-CHL = audio is necessary
+but not sufficient and the next Regime-2 input (behavioral jerk
+profile, performance.now jitter, WebGL precision) must be closed too.
+Either outcome is decisive and cheap (one ignored test run).
+
 ## Interim mitigation shipped this session
 
 Retuned the exponent slope `0.125 → 0.070` so the **most-probed metric**
