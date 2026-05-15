@@ -1,0 +1,96 @@
+# Session Handoff — 2026-05-15
+
+## What landed (13 commits, all in `main`)
+
+| Commit | What | Plan item |
+|---|---|---|
+| f0d8dea | Chrome 133+ + Safari 18.4 canonical header order + JA4H ref | W1.4 / W1.10 |
+| 054cf99 | Safari iOS 18.4 cipher/sigalgs/versions + Pixel Android MLKEM | W1.6–1.9 |
+| 24c19e3 | `_abck` parser — slot 1 = stop-signal threshold (Hyper SDK `IsCookieValid`) | W1.3 |
+| 8a76683 | `op_behavior_mouse_trajectory` — Plamondon Σ-Λ wired to humanize.js | W1.2 |
+| b19fc01 | W1.5 iOS navigator surface gating (8 `in`-operator absences) | W1.5 |
+| 7bfc450 | Scrub script names from V8 stack traces (`<anonymous>` / doc URL) | W2.7 |
+| cce1d82 | Mask `structuredClone` toString as native | (audit) |
+| 366bfa0 | iframe contentWindow `window`/`frames`/`globalThis` self-loops | (DataDome) |
+| 991a489 | interfaces_bootstrap stub no longer pre-empts real impls | (regression class) |
+| 1b792ff | canvas.toDataURL auto-alloc + perf 5 default resource entries | (audit) |
+| f28a00d | Inject PerfState into worker OpState | (regression fix) |
+| 1e37d37 | kasada `rst` test asserts page-relative offset (stale test) | (test debt) |
+| (doc) | 14_KASADA_SENTINEL_STILL_OPEN — VM-emulation gap analysis | — |
+
+`chrome_compat`: **405 → 415 passing, 0 failed**. `net` lib **117/117**,
+`akamai` **63/63**. All green.
+
+## Sweep result (post-W1, 4-profile)
+
+| Profile | Pre-W1 | Post-W1 | Δ |
+|---|---|---|---|
+| chrome_130_macos | 112 | **117** | +5 |
+| pixel_9_pro_chrome_147 | 115 | **116** | +1 |
+| iphone_15_pro_safari_18 | 115 | **115** | 0 |
+| firefox_135_macos | 111 | (running) | ? |
+| **routing UNION** | **120** | **120** | **0** |
+
+Chrome's +5: `airbnb, apple, bestbuy, primevideo, ya.ru`. **`bestbuy`
+is a direct, attributable W1.3 `_abck` Akamai win.** Zero regressions
+(0 sites lost on any profile).
+
+### Why the union didn't move (this is expected, not a failure)
+
+The union ceiling is held by the **6 universal blocks**, which fail on
+*every* profile so per-profile robustness gains are routing-redundant:
+
+- `canadagoose / hyatt / realtor` — Kasada VM `unjzomuy` sentinel.
+  **Confirmed multi-day VM-emulation problem** — W1.1 memoization is
+  live and did NOT crack it; `first_throw_at` is still 2141. See
+  `14_KASADA_SENTINEL_STILL_OPEN_2026_05_15.md`.
+- `udemy` — Cloudflare Managed Challenge (W3.1–3.3 not yet done).
+- `douyin / wildberries` — regional/locale ML, out of scope per PLAN §1.
+
+PLAN.md §1 was explicit: union gains 120→123+ were *contingent* on
+cracking Kasada. They are not yet cracked. What W1/W2 bought is
+**per-profile robustness + variance reduction** (chrome +5 is large),
+which improves real-world reliability even though the synthetic-corpus
+union number is unchanged.
+
+## The single load-bearing unknown
+
+`X.unjzomuybtbyyhwwkdpkxomylnab` evaluates `X` to `undefined` inside a
+Kasada `eval`. Identity of `X` is lost between the VM opcode that
+*plants* the sentinel (~idx 2134) and the one that *reads* it (2141).
+Not the iframe realm (W1.1 ruled out). Candidates: a per-access fresh
+cross-realm ctor/proxy, a tagged global we rebuild, or direct-vs-
+indirect `eval` realm split.
+
+### Next experiment (cheap, hours not days) — ALREADY SCAFFOLDED
+
+`kasada_vm_dispatcher_trace` (chrome_compat.rs) now has a **sentinel
+eval interceptor** added this session: it hooks `globalThis.eval`,
+captures any eval'd source containing `unjzomuy…`, regexes out the
+receiver expression `E` in `E.unjzomuy…`, re-evals just `E` in the
+same scope, and records `E => <type/undefined>`. Dump field:
+`sentinel_evals`. Run:
+
+```
+cargo test --release -p browser --test chrome_compat \
+  kasada_vm_dispatcher_trace -- --ignored --nocapture --test-threads=1
+```
+
+(network: hits canadagoose.com live, ~30s). An entry reading
+`E => undefined` names the exact bug site, converting the open
+problem into a targeted JS fix. **This is the recommended first action
+for the next session.**
+
+## Caveats / notes for next session
+
+- The `<init_script_0>` in `kasada_vm_trace.json` is the *test*
+  Function-wrapper, NOT production. Prod uses `<anonymous>` after the
+  W2.7 scrub. Don't chase it as a leak.
+- W1.5 iOS gating is theoretically correct (PerimeterX UA-consistency,
+  8 `in`-checks pass in `check_ios_safari_surface`) but net-neutral on
+  the 126-corpus — the corpus has no iOS PerimeterX site that was
+  failing solely on this. Keep it; it's defensive correctness.
+- Pre-existing fmt/clippy debt in `qrator.rs`/`presets.rs` is unrelated
+  to this session and was left untouched.
+- Sweep variance is ±2/profile (±8 union); chrome +5 is above the
+  noise floor and corroborated by the attributable `bestbuy` flip.

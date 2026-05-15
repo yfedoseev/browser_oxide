@@ -6074,6 +6074,57 @@ async fn kasada_vm_dispatcher_trace() {
             // closure (already-resolved) will keep the original, which is
             // OK for performance — we just won't trace those.
             try { globalThis.Function = _wrappedFn; } catch (_) {}
+
+            // --- Sentinel pinpoint instrumentation (2026-05-15) ---
+            // The persistent throw is `eval(<anonymous>:3:82)` reading
+            // `X.unjzomuybtbyyhwwkdpkxomylnab` on undefined. Capture every
+            // eval'd source that mentions the sentinel so we can see the
+            // EXACT receiver expression Kasada uses, plus whether the
+            // receiver evaluates to undefined in our engine. This converts
+            // "some object loses identity" into "expression E is undefined
+            // at eval time" — a targeted, fixable signal.
+            globalThis.__sentinelEvals = [];
+            const _SENT = 'unjzomuybtbyyhwwkdpkxomylnab';
+            try {
+                const _origEval = globalThis.eval;
+                const _hookedEval = function eval(src) {
+                    if (typeof src === 'string' && src.indexOf(_SENT) !== -1) {
+                        let receiverProbe = 'n/a';
+                        try {
+                            // Pull the token immediately before `.<SENT>` —
+                            // that is the receiver expression. Then eval JUST
+                            // that sub-expression in the same scope to see
+                            // what it resolves to (undefined ⇒ the bug site).
+                            const m = src.match(
+                                /([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])*)\s*\.\s*unjzomuybtbyyhwwkdpkxomylnab/);
+                            if (m && m[1]) {
+                                let v;
+                                try { v = _origEval.call(this, m[1]); }
+                                catch (e) { v = '<throws: ' + e.message + '>'; }
+                                receiverProbe = m[1] + ' => ' + (
+                                    v === undefined ? 'undefined'
+                                    : v === null ? 'null'
+                                    : (typeof v) + ' ' +
+                                      (Object.prototype.toString.call(v)));
+                            }
+                        } catch (_) {}
+                        if (globalThis.__sentinelEvals.length < 20) {
+                            globalThis.__sentinelEvals.push({
+                                srcHead: src.slice(0, 200),
+                                receiverProbe,
+                            });
+                        }
+                    }
+                    return _origEval.call(this, src);
+                };
+                try {
+                    Object.defineProperty(_hookedEval, 'name',
+                        { value: 'eval', configurable: true });
+                    Object.defineProperty(_hookedEval, 'length',
+                        { value: 1, configurable: true });
+                } catch (_) {}
+                globalThis.eval = _hookedEval;
+            } catch (_) {}
         })();
     "#;
 
@@ -6105,6 +6156,10 @@ async fn kasada_vm_dispatcher_trace() {
                     trace_size: (globalThis.__vmTrace || []).length,
                     first_throw_at: globalThis.__vmFirstThrowAt,
                     throw_stacks: (globalThis.__vmThrowStacks || []).slice(0, 10),
+                    // Sentinel pinpoint: which eval'd expressions reference
+                    // unjzomuy… and what their receiver resolves to. An
+                    // entry with `=> undefined` is the exact bug site.
+                    sentinel_evals: globalThis.__sentinelEvals || [],
                     // Last 60 entries before the first throw (the slice that
                     // names the receiver Kasada was probing).
                     pre_throw_window: (function() {
