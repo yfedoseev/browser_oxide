@@ -181,31 +181,29 @@ pub fn parse_bm_sz(cookie: &str) -> Option<i64> {
 /// default note).
 pub fn build_v3(
     cleartext: &str,
-    tenant_seed: i64,
-    counter_tuple: &str,
+    _tenant_seed: i64,
+    _counter_tuple: &str,
     bm_sz_cookie: Option<&str>,
 ) -> String {
-    // Per glizzykingdreko's v3 helper there is ONE seed (cookieHash)
-    // parsed from bm_sz[2]. The shuffle seed comes from a SEPARATE
-    // fileHash extracted from bmak.js (W2.3 patch #2 — not yet
-    // implemented; using default for now).
+    // Per glizzykingdreko/akamai-v3-sensor-data-helper:
+    //   - shuffle (elementSwapping) uses fileHash extracted from bmak.js
+    //   - substitute (characterSubstitution) uses cookieHash from bm_sz[2]
+    //   - envelope: `3;0;1;0;<cookieHash>;<ver_static>;<counter>;<body>`
     //
-    // Until fileHash extraction lands, use the same cookieHash for both
-    // shuffle and substitute. Akamai's edge will fail to reverse-shuffle
-    // (the response will be 201 with _abck unchanged) but at least the
-    // substitute step is reversible. Once patch #2 lands the shuffle
-    // seed will be replaced with the real fileHash.
-    let cookie_hash = bm_sz_cookie
-        .and_then(parse_bm_sz)
-        .unwrap_or(8_888_888);
-    let seed_u32 = cookie_hash.unsigned_abs().min(u32::MAX as u64) as u32;
-    build_v2_bestbuy(
-        cleartext,
-        tenant_seed,
-        counter_tuple,
-        seed_u32, // shuffle seed — should be fileHash from bmak.js (TODO patch #2)
-        seed_u32, // substitute seed — cookieHash from bm_sz[2]
-    )
+    // The earlier `_tenant_seed` and `_counter_tuple` args are kept for
+    // call-site compatibility but unused — v3 envelope uses cookieHash
+    // as field 5 (not tenant_seed) and a static counter as field 7
+    // (not the 6-CSV tuple of v2).
+    let cookie_hash_i64 = bm_sz_cookie.and_then(parse_bm_sz).unwrap_or(8_888_888);
+    let cookie_hash = cookie_hash_i64.unsigned_abs().min(u32::MAX as u64) as u32;
+    // fileHash from bmak.js (Agent 2's patch #2) — not yet implemented.
+    // Use the cookieHash as a placeholder so the shuffle step is at
+    // least deterministic. Akamai's edge will fail the reverse-shuffle
+    // (returning 201) until the real fileHash is wired in, but the
+    // envelope shape, JSON cleartext, and substitute-step crypto are
+    // all correct now.
+    let file_hash = cookie_hash;
+    crypto::build_v3_envelope(cleartext, cookie_hash, file_hash)
 }
 
 /// Static registry of known Akamai tenants and their magic constants.
@@ -700,25 +698,37 @@ mod tests {
     }
 
     #[test]
-    fn end_to_end_build_produces_bestbuy_envelope() {
-        // Top-level integration: build_sensor_data() with the bestbuy
-        // tenant seed should produce a `3;0;1;0;<seed>;<sha>;<counter>;<body>`
-        // envelope that can be wrapped as `{"sensor_data": "<v>"}`.
+    fn end_to_end_build_produces_v3_envelope() {
+        // Top-level integration: build_sensor_data() now emits v3
+        // envelope `3;0;1;0;<cookieHash>;<ver_static>;<counter>;<body>`
+        // per glizzykingdreko/akamai-v3-sensor-data-helper reference.
+        // Without a bm_sz cookie, cookieHash falls back to 8_888_888
+        // (glizzykingdreko's pre-first-request default).
         let profile = stealth::presets::chrome_130_macos();
         let session = AkamaiSession::default();
         let body = crate::build_sensor_data(
             &profile,
             &session,
             "https://www.bestbuy.com/?intl=nosplash",
-            3_224_113, // bestbuy tenant seed (from A0 capture)
+            3_224_113, // tenant_seed — unused by v3 path, kept for compat
         );
         let prefix_parts: Vec<&str> = body.splitn(8, ';').collect();
-        assert_eq!(prefix_parts.len(), 8, "envelope is 8 fields (3;0;1;0;seed;sha;counter;body)");
+        assert_eq!(
+            prefix_parts.len(),
+            8,
+            "envelope is 8 fields (3;0;1;0;cookieHash;ver;counter;body)"
+        );
         assert_eq!(prefix_parts[0], "3");
-        assert_eq!(prefix_parts[4], "3224113", "tenant seed in field 5");
-        // Field 5 is base64 SHA-256 (44 chars + '=')
+        assert_eq!(prefix_parts[1], "0");
+        assert_eq!(prefix_parts[2], "1");
+        assert_eq!(prefix_parts[3], "0");
+        // Field 5 is cookieHash (pre-first-request default 8888888)
+        assert_eq!(prefix_parts[4], "8888888");
+        // Field 6 is the static ver placeholder (44-char b64).
         assert_eq!(prefix_parts[5].len(), 44);
         assert!(prefix_parts[5].ends_with('='));
+        // Field 7 is the static counter placeholder.
+        assert_eq!(prefix_parts[6], "141659");
         // Body is non-empty
         assert!(!prefix_parts[7].is_empty());
         // Wrap as Akamai expects

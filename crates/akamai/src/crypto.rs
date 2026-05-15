@@ -225,6 +225,80 @@ pub fn build_v2_dalphan(cleartext: &str, counter_tuple: &str) -> String {
     )
 }
 
+/// V3 element-swapping shuffle (Akamai's `elementSwapping` per
+/// glizzykingdreko/akamai-v3-sensor-data-helper/src/encryption.js).
+/// Differs from v2 `shuffle_tokens` in TWO axes:
+///   1. Delimiter is `:` (not `,`).
+///   2. Seed iteration formula: the LCG `seed *= 65793 & 0xFFFFFFFF +
+///      4282663 & 0x7FFFFF` is the SAME as our `Lcg`, but it advances
+///      TWICE per swap-pair (firstIndex then secondIndex).
+///
+/// All 4 byte values (.split, .join, swap order, LCG advance count)
+/// must match exactly for Akamai's edge to reverse the operation.
+pub fn shuffle_tokens_v3(input: &str, seed: u32) -> String {
+    let mut tokens: Vec<&str> = input.split(':').collect();
+    let len = tokens.len();
+    if len == 0 {
+        return String::new();
+    }
+    // Inline LCG (state advance matches our `Lcg::step`):
+    //   state = (state * 65793 & 0xFFFFFFFF + 4282663) & 0x7FFFFF
+    // Glizzy reads firstIndex from CURRENT state (pre-advance),
+    // then advances; reads secondIndex from new state, then advances.
+    let mut state: u32 = seed;
+    let mut pairs: Vec<(usize, usize)> = Vec::with_capacity(len);
+    for _ in 0..len {
+        let first = ((state >> 8) & 65535) as usize % len;
+        state = state
+            .wrapping_mul(65_793)
+            .wrapping_add(4_282_663)
+            & 0x7F_FFFF;
+        let second = ((state >> 8) & 65535) as usize % len;
+        state = state
+            .wrapping_mul(65_793)
+            .wrapping_add(4_282_663)
+            & 0x7F_FFFF;
+        pairs.push((first, second));
+    }
+    for (a, b) in pairs {
+        tokens.swap(a, b);
+    }
+    tokens.join(":")
+}
+
+/// Build a v3 sensor_data envelope matching the format observed in
+/// `glizzykingdreko/akamai-v3-sensor-data-helper/src/encryption.js`:
+///
+/// `"3;0;1;0;<cookieHash>;<ver_static_b64>;<counter>;<encryptedData>"`
+///
+/// where:
+///   - `cookieHash` = `bm_sz` parts[2] (parsed by `parse_bm_sz`)
+///   - `ver_static_b64` = SHA-256 of bmak.js content (static per-host).
+///     Glizzy's placeholder: `wS5KmeE4vP5vBcKRIM2pPQlq4qZivf0B53dgMqmUH4E=`.
+///   - `counter` = single integer for v3 (not the 6-CSV tuple of v2).
+///     Glizzy's placeholder: `141659`.
+///   - `encryptedData = characterSubstitution(elementSwapping(cleartext,
+///     fileHash), cookieHash)`. Shuffle uses fileHash; substitute uses
+///     cookieHash.
+///
+/// `fileHash` must be extracted from bmak.js via the Babel-AST helper
+/// (Agent 2's patch #2). Until that lands, a placeholder is used —
+/// Akamai's edge will fail to reverse-shuffle, producing 201 still,
+/// but at least the substitute step + envelope shape is correct.
+pub fn build_v3_envelope(
+    cleartext: &str,
+    cookie_hash: u32,
+    file_hash: u32,
+) -> String {
+    let shuffled = shuffle_tokens_v3(cleartext, file_hash);
+    let substituted = substitute_chars(&shuffled, cookie_hash);
+    format!(
+        "3;0;1;0;{cookie};wS5KmeE4vP5vBcKRIM2pPQlq4qZivf0B53dgMqmUH4E=;141659;{body}",
+        cookie = cookie_hash,
+        body = substituted,
+    )
+}
+
 /// Build the bestbuy-variant v2 envelope observed in our 2026-04-29
 /// reference capture:
 ///
