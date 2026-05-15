@@ -46,7 +46,8 @@ impl ChildIframe {
         );
         let mut event_loop = BrowserEventLoop::new(runtime);
 
-        // Execute scripts in the child's own V8 context
+        // Execute scripts in the child's own V8 context. W2.7 — Chrome
+        // reports `about:srcdoc` for srcdoc iframe stack frames.
         for (i, script) in scripts.iter().enumerate() {
             if script.src.is_some() {
                 continue;
@@ -54,7 +55,7 @@ impl ChildIframe {
             if script.code.trim().is_empty() {
                 continue;
             }
-            if let Err(e) = event_loop.execute_script(&script.code) {
+            if let Err(e) = event_loop.execute_script_with_name(&script.code, "about:srcdoc") {
                 tracing::warn!(script_index = i, error = %e, "iframe script error");
             }
         }
@@ -214,7 +215,15 @@ impl ChildIframe {
             if code.trim().is_empty() {
                 continue;
             }
-            if let Err(e) = event_loop.execute_script(&code) {
+            // W2.7 — name scripts by their actual URL (external src or
+            // the iframe document URL for inline). Chrome stack frames
+            // are URL-tagged, not anonymous.
+            let name = if let Some(src) = &script.src {
+                src.clone()
+            } else {
+                url.to_string()
+            };
+            if let Err(e) = event_loop.execute_script_with_name(&code, &name) {
                 tracing::warn!(script_index = i, error = %e, "iframe script error");
             }
         }

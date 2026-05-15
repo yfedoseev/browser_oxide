@@ -201,13 +201,17 @@ pub fn create_runtime_with_signals(
         );
 
         runtime
-            .execute_script("<bootstrap>", BOOTSTRAP_JS)
+            .execute_script("<anonymous>", BOOTSTRAP_JS)
             .expect("bootstrap failed");
     }
 
-    // Always run cleanup to hide internals, even when restoring from snapshot
+    // W2.7 — all bootstrap scripts run with name "<anonymous>" so V8
+    // stack frames don't leak browser_oxide-specific tags. Castle.io
+    // documented Kasada/DataDome inspecting Error.stack literal format
+    // (09_KASADA_DEEP_2026_05_14.md §9).
+    // Always run cleanup to hide internals, even when restoring from snapshot.
     runtime
-        .execute_script("<cleanup>", include_str!("js/cleanup_bootstrap.js"))
+        .execute_script("<anonymous>", include_str!("js/cleanup_bootstrap.js"))
         .expect("cleanup failed");
 
     // Run caller-provided init scripts after built-in cleanup.
@@ -266,46 +270,39 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
         .borrow_mut()
         .put(StealthState::new(profile));
 
-    // stealth_bootstrap must run first: installs Function.prototype.toString patch
-    // and the _nativeTag/_maskFunction/_maskAsNative helpers that worker_bootstrap uses.
+    // W2.7 — every worker bootstrap script runs with name "<anonymous>"
+    // (V8's eval-default) so Error.stack frames don't leak our internal
+    // tags to Kasada/DataDome.
+    //
+    // stealth_bootstrap must run first: installs Function.prototype.toString
+    // patch and the _nativeTag/_maskFunction/_maskAsNative helpers that
+    // worker_bootstrap uses.
     runtime
-        .execute_script(
-            "<stealth_bootstrap>",
-            include_str!("js/stealth_bootstrap.js"),
-        )
+        .execute_script("<anonymous>", include_str!("js/stealth_bootstrap.js"))
         .expect("worker: stealth bootstrap failed");
 
     runtime
-        .execute_script(
-            "<console_bootstrap>",
-            include_str!("js/console_bootstrap.js"),
-        )
+        .execute_script("<anonymous>", include_str!("js/console_bootstrap.js"))
         .expect("worker: console bootstrap failed");
 
     runtime
-        .execute_script(
-            "<interfaces_bootstrap>",
-            include_str!("js/interfaces_bootstrap.js"),
-        )
+        .execute_script("<anonymous>", include_str!("js/interfaces_bootstrap.js"))
         .expect("worker: interfaces bootstrap failed");
 
     runtime
-        .execute_script(
-            "<shared_apis_bootstrap>",
-            include_str!("js/shared_apis_bootstrap.js"),
-        )
+        .execute_script("<anonymous>", include_str!("js/shared_apis_bootstrap.js"))
         .expect("worker: shared_apis bootstrap failed");
 
     runtime
-        .execute_script("<timer_bootstrap>", include_str!("js/timer_bootstrap.js"))
+        .execute_script("<anonymous>", include_str!("js/timer_bootstrap.js"))
         .expect("worker: timer bootstrap failed");
 
     runtime
-        .execute_script("<fetch_bootstrap>", include_str!("js/fetch_bootstrap.js"))
+        .execute_script("<anonymous>", include_str!("js/fetch_bootstrap.js"))
         .expect("worker: fetch bootstrap failed");
 
     runtime
-        .execute_script("<streams_bootstrap>", include_str!("js/streams_bootstrap.js"))
+        .execute_script("<anonymous>", include_str!("js/streams_bootstrap.js"))
         .expect("worker: streams bootstrap failed");
 
     // structuredClone is useful inside workers too — worker code that
@@ -313,11 +310,11 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
     // impl is self-contained (it gracefully handles the absence of
     // DOMException / Blob via typeof checks).
     runtime
-        .execute_script("<structured_clone>", include_str!("js/structured_clone.js"))
+        .execute_script("<anonymous>", include_str!("js/structured_clone.js"))
         .expect("worker: structured_clone bootstrap failed");
 
     runtime
-        .execute_script("<worker_bootstrap>", include_str!("js/worker_bootstrap.js"))
+        .execute_script("<anonymous>", include_str!("js/worker_bootstrap.js"))
         .expect("worker: worker bootstrap failed");
 
     // canvas_bootstrap installs CanvasRenderingContext2D and the real
@@ -325,15 +322,12 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
     // because its DOM-patch blocks all gate on `globalThis.document?`
     // / `globalThis.Element?` which are undefined in the worker scope.
     runtime
-        .execute_script("<canvas_bootstrap>", include_str!("js/canvas_bootstrap.js"))
+        .execute_script("<anonymous>", include_str!("js/canvas_bootstrap.js"))
         .expect("worker: canvas bootstrap failed");
 
     // Final cleanup in worker
     runtime
-        .execute_script(
-            "<cleanup_bootstrap>",
-            include_str!("js/cleanup_bootstrap.js"),
-        )
+        .execute_script("<anonymous>", include_str!("js/cleanup_bootstrap.js"))
         .expect("worker: cleanup bootstrap failed");
 
     runtime

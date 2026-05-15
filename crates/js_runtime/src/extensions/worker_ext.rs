@@ -307,7 +307,7 @@ pub fn op_worker_spawn(
                             tracing::error!(worker_id = worker_id, error = %e, "worker module load error");
                         }
                     }
-                } else if let Err(e) = runtime.execute_script("<worker_script>", script) {
+                } else if let Err(e) = runtime.execute_script("<anonymous>", script) {
                     tracing::warn!(worker_id = worker_id, error = %e, "worker script error");
                 }
 

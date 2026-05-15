@@ -90,8 +90,13 @@ pub fn get_snapshot() -> &'static [u8] {
             include_str!("js/structured_clone.js"),
         );
 
+        // W2.7 — script name "<anonymous>" matches V8's eval-default so
+        // Error.stack frames from inside the bootstrap don't leak
+        // `<bootstrap>` (a non-Chrome filename). Castle.io documented
+        // Kasada/DataDome inspecting `Error.stack` literal format
+        // (research 09_KASADA_DEEP_2026_05_14.md §9).
         runtime
-            .execute_script("<bootstrap>", BOOTSTRAP_JS)
+            .execute_script("<anonymous>", BOOTSTRAP_JS)
             .expect("snapshot bootstrap failed");
 
         runtime.snapshot()

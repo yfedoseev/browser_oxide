@@ -537,7 +537,9 @@ impl Page {
                 continue;
             }
             if !script.code.is_empty() {
-                if let Err(e) = event_loop.execute_script(&script.code) {
+                // W2.7 — name inline scripts with document URL (Chrome
+                // parity) instead of letting V8 default to <anonymous>.
+                if let Err(e) = event_loop.execute_script_with_name(&script.code, url) {
                     tracing::warn!(script_index = i, error = %e, "Script error in inline script");
                 }
             }
@@ -581,7 +583,11 @@ impl Page {
             if script.code.trim().is_empty() {
                 continue;
             }
-            if let Err(e) = self.event_loop.execute_script(&script.code) {
+            // W2.7 — Chrome parity: inline scripts report the document URL.
+            if let Err(e) = self
+                .event_loop
+                .execute_script_with_name(&script.code, &self.url)
+            {
                 tracing::warn!(script_index = i, error = %e, "Script error in inline script");
             }
         }
@@ -2512,7 +2518,11 @@ impl Page {
             let name = if let Some(src) = &script.src {
                 src.clone()
             } else {
-                format!("<script_{}>", i)
+                // W2.7 — real Chrome inline <script> stack frames report
+                // the document URL, not a synthetic <script_N> tag. The
+                // latter would leak the index/wrapper layer to Kasada /
+                // DataDome (research 09_KASADA_DEEP_2026_05_14.md §9).
+                url.to_string()
             };
             if let Err(e) = event_loop.execute_script_with_name(&code, &name) {
                 tracing::warn!(script = %name, error = %e, "Script execution error");
