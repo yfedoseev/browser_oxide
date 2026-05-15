@@ -225,6 +225,48 @@ pub fn build_v2_dalphan(cleartext: &str, counter_tuple: &str) -> String {
     )
 }
 
+/// V3 character substitution — matches Akamai's
+/// `characterSubstitution` byte-for-byte per glizzy's reference. The
+/// alphabet is `B6D` (91 chars: ` !#$%&()*+,-./0-9:;<=>?@A-Z[]^_\`a-z{|}~`).
+///
+/// Differs from v2 `substitute_chars` in one critical way:
+///   - **Alphabet membership** uses `ALLOWED_CHARS.indexOf(char)`
+///     (B6D-as-string), not our v2 P6D 127-entry lookup table.
+///   - The v2 P6D table had a bug where space (char 32) mapped to -1
+///     (pass-through); glizzy's algorithm correctly substitutes space
+///     as alphabet position 0.
+///   - LCG advance is the same for both v2 and v3 (mul-65793,
+///     add-4282663, mask-23-bit).
+pub fn substitute_chars_v3(input: &str, seed: u32) -> String {
+    let mut state: u32 = seed;
+    let alphabet_len = B6D.len() as i32; // 91
+    let mut out = Vec::with_capacity(input.len());
+    for &b in input.as_bytes() {
+        let shift = ((state >> 8) & 0xFFFF) as i32;
+        state = state
+            .wrapping_mul(65_793)
+            .wrapping_add(4_282_663)
+            & 0x7F_FFFF;
+        // Lookup char in B6D by linear search (91 entries — fast in practice;
+        // could be a 256-entry table but the readability vs. v2 parity
+        // matters more for cross-checking with glizzy's JS).
+        let mut found = -1i32;
+        for (i, &cb) in B6D.iter().enumerate() {
+            if cb == b {
+                found = i as i32;
+                break;
+            }
+        }
+        if found >= 0 {
+            let idx = ((found + shift) % alphabet_len) as usize;
+            out.push(B6D[idx]);
+        } else {
+            out.push(b);
+        }
+    }
+    String::from_utf8(out).expect("output is ASCII subset by construction")
+}
+
 /// V3 element-swapping shuffle (Akamai's `elementSwapping` per
 /// glizzykingdreko/akamai-v3-sensor-data-helper/src/encryption.js).
 /// Differs from v2 `shuffle_tokens` in TWO axes:
@@ -291,7 +333,10 @@ pub fn build_v3_envelope(
     file_hash: u32,
 ) -> String {
     let shuffled = shuffle_tokens_v3(cleartext, file_hash);
-    let substituted = substitute_chars(&shuffled, cookie_hash);
+    // Use substitute_chars_v3 (NOT v2's substitute_chars) — v2's P6D
+    // table has space mapped to -1 which produces wrong output for v3.
+    // The v3 path uses glizzy's indexOf-against-alphabet pattern.
+    let substituted = substitute_chars_v3(&shuffled, cookie_hash);
     format!(
         "3;0;1;0;{cookie};wS5KmeE4vP5vBcKRIM2pPQlq4qZivf0B53dgMqmUH4E=;141659;{body}",
         cookie = cookie_hash,
@@ -332,6 +377,34 @@ pub fn build_v2_bestbuy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reference vector captured from
+    /// /tmp/akamai-v3-sensor-data-helper/src/encryption.js's
+    /// `elementSwapping` function on 2026-05-14:
+    ///
+    ///   elementSwapping("a:b:c:d:e", 12345) === "a:e:d:c:b"
+    #[test]
+    fn shuffle_tokens_v3_matches_glizzy_reference() {
+        let out = shuffle_tokens_v3("a:b:c:d:e", 12345);
+        assert_eq!(out, "a:e:d:c:b");
+    }
+
+    /// Reference vector from glizzy's `characterSubstitution`:
+    ///
+    ///   characterSubstitution("Hello World", 12345) === "yc*{XkAaZk["
+    ///
+    /// Pins `substitute_chars_v3` to byte-perfect parity with the JS
+    /// reference. Note: the v2 `substitute_chars` produces DIFFERENT
+    /// output for this input because its P6D table has space (char 32)
+    /// mapped to -1 (pass-through), where glizzy's algorithm treats
+    /// space as alphabet position 0 and substitutes it. The v2 path
+    /// is preserved unchanged to avoid breaking the bestbuy DalphanDev
+    /// captures we already have working.
+    #[test]
+    fn substitute_chars_v3_matches_glizzy_reference() {
+        let out = substitute_chars_v3("Hello World", 12345);
+        assert_eq!(out, "yc*{XkAaZk[");
+    }
 
     #[test]
     fn lcg_first_steps_match_reference() {
