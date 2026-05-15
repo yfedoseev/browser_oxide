@@ -182,8 +182,20 @@ impl Page {
         (body.contains("ips.js") && body.contains("kpsdk"))
             || body.contains("checkpoint/interstitial") // Cloudflare
             || body.contains("/cdn-cgi/challenge-platform/") // Cloudflare Managed Challenge
-            || (body.contains("_abck") && body.contains("sensor_data")) // Akamai
+            || (body.contains("_abck") && body.contains("sensor_data")) // Akamai BMP
             || body.contains("bm_sz")
+            // Akamai sec-cpt PoW interstitial. The 2.6 KB challenge page
+            // (verified via the live homedepot capture 2026-05-15,
+            // docs/research_2026_05_14/20_VENDOR_CHALLENGE_JS_UNIFIED)
+            // carries NONE of the BMP markers above (_abck/sensor_data/
+            // bm_sz) — it is a self-solving JS bundle wrapped in this
+            // container div. Without this marker the pipeline mis-classed
+            // it as final content and never continued iterations to let
+            // the sec-cpt self-solve + reload re-fetch complete, so
+            // homedepot stuck at Akamai-CHL. `sec-if-cpt-container` is an
+            // Akamai-sec-cpt-unique element id (near-zero false-positive).
+            || body.contains("sec-if-cpt-container")
+            || body.contains("sec-cpt-if")
             || body.contains("px-captcha") // PerimeterX
             || body.contains("human security")
             || body.contains("smartcaptcha")
