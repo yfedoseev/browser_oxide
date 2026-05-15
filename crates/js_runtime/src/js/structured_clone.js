@@ -343,5 +343,14 @@
         }
         return clone(value, new WeakMap());
     };
+    // Mask as native — Kasada's `kasada_function_toString_audit` greps for
+    // raw JS bodies of polyfilled built-ins. Without this, `structuredClone
+    // .toString()` returns the function source and identifies the engine
+    // as non-Chrome. Helpers are registered in stealth_bootstrap.js.
+    try {
+        if (typeof globalThis._maskFunction === 'function') {
+            globalThis._maskFunction(globalThis.structuredClone, 'structuredClone');
+        }
+    } catch (_e) {}
 
 })(globalThis);
