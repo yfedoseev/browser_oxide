@@ -72,12 +72,46 @@ likely remaining suspects are `duration` (must match PoW difficulty),
 `d` (clock-drift = workTime − server_st), or the PoW solution itself.
 Decisive, file-local, unit-testable — not multi-day fingerprinting.
 
-## Status correction
+## Status correction (honest synthesis — supersedes the "one file" claim above)
 
-Prior docs framed canadagoose as "fingerprint-parity, days." The
-error-blob `action:allow` supersedes that: it is an **edge
-token-handshake** problem in `kasada_session.rs`, even more localized.
-The audio FP work (committed, 123.97 ≈ Chrome 124.04) remains valuable
-hardening with 7-site leverage (DataDome boring_challenge still needs
-it) but is NOT on the canadagoose critical path. The canadagoose
-critical path is the x-kpsdk-cd token.
+The "edge token-handshake / one file" framing above is **too strong**.
+Re-reading `01_KASADA.md` §7–8: `x-kpsdk-ct` is *earned* by the `/tl`
+sensor POST passing Kasada's **server-side ML model**, whose published
+input weights are:
+
+- Browser fingerprint (the ~120 sensor fields): **30–40%**
+- IP reputation (datacenter vs residential, ASN, history): **20–30%**
+- Behavioral (mouse/scroll/keyboard cadence): **10–20%**
+- TLS fingerprint: 10–15% · HTTP/2: 5–10% · Token state: 5%
+
+What `action:allow` actually proves: **no single client-side probe
+hard-failed** (bot1225 etc. are tolerated; the wrapper-induced
+sentinel errors are not the cause). What it does NOT prove: that the
+*aggregate* server ML score passes. canadagoose's 429 is the
+**server `/tl` ML verdict** on the weighted blend — there is no single
+"probe X" silver bullet, which is exactly the Regime-2 (cascading /
+holistic) model from doc 14, now confirmed to live at the server ML
+layer rather than a client throw.
+
+Accurate implications:
+- The audio FP fix (123.97 ≈ Chrome 124.04, committed) genuinely
+  improves the 30–40% browser-fingerprint component and retains
+  7-site leverage (DataDome boring_challenge). It is real progress on
+  the dominant ML input, not off-path.
+- IP reputation is a **structural 20–30% weight**. Per the standing
+  memory [[proxy_not_the_problem]] we still demand engine root-cause
+  first, but §8 establishes IP reputation as a *genuine, irreducible
+  model input* — not something any engine fix fully neutralizes if the
+  datacenter-IP penalty alone exceeds the pass threshold.
+- The honest path for canadagoose/hyatt/realtor: maximize every
+  engine-controllable ML input (fingerprint parity — audio done,
+  behavioral jerk + WebGL next; TLS/H2 already byte-perfect) to push
+  the aggregate score above threshold *despite* the IP penalty. This
+  is incremental score-raising, not a single decisive fix — consistent
+  with these being genuinely hard universal blocks, now precisely
+  understood rather than mischaracterized.
+
+This correction matters: do not chase `kasada_session.rs` cd-token
+math as "the" fix (the cd token is cheap/derived; the gate is the
+`/tl` ML score). The cd-token `rst` fix this session was still correct
+hygiene but is not the canadagoose lever.
