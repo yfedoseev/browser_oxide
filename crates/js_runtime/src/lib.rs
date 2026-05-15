@@ -3,6 +3,7 @@
 //! MIT/Apache-2.0 licensed. Part of the browser_oxide project.
 
 pub mod extensions;
+pub mod native_fns;
 pub mod runtime;
 pub mod snapshot;
 pub mod state;

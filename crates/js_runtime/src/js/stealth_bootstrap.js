@@ -16,7 +16,13 @@
     // Re-entrant guard: prevents infinite recursion when this[_nativeTag] access
     // triggers a Proxy get trap that itself calls Function.prototype.toString.
     let _inPatchedToStr = false;
-    const _patchedFnToStr = function toString() {
+    // Method-shorthand → NO [[Construct]] / no own `.prototype`, exactly
+    // like the real native Function.prototype.toString. A plain
+    // `function toString(){}` IS constructable, so
+    // `class X extends Function.prototype.toString {}` did NOT throw in
+    // our engine while real Chrome 147 throws `TypeError` (verified
+    // CDP-free) — Kasada's `fsc` probe recorded `"no error thrown"`.
+    const _patchedFnToStr = ({ toString() {
         if (_inPatchedToStr) return _origFnToStr.call(this);
         _inPatchedToStr = true;
         try {
@@ -30,7 +36,7 @@
         } finally {
             _inPatchedToStr = false;
         }
-    };
+    } }).toString;
     // Tag the patched toString itself so recursive calls also appear native
     Object.defineProperty(_patchedFnToStr, _nativeTag, { value: 'toString', configurable: true });
     Object.defineProperty(_patchedFnToStr, 'name', { value: 'toString', configurable: true });

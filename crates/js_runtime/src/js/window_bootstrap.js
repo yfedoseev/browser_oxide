@@ -32,6 +32,52 @@
     const _maskFunction = globalThis._maskFunction;
     const _maskAsNative = globalThis._maskAsNative;
 
+    // ── Faithful global `Window` interface (doc 22 ESCALATION).
+    // Real Chrome 147 (verified CDP-free): typeof Window==="function",
+    // window.constructor.name==="Window", window instanceof Window,
+    // window instanceof EventTarget, chain
+    //   window → Window.prototype → EventTarget.prototype → Object.prototype.
+    // Our engine had NO global Window → fails the most universal
+    // real-browser invariant (every anti-bot checks it) and starved
+    // _buildRemoteRealm so iframe contentWindow.constructor was "Object".
+    (function () {
+        if (typeof globalThis.Window === "function") return;
+        const _ET = globalThis.EventTarget;
+        function Window() {
+            throw new TypeError("Illegal constructor");
+        }
+        try {
+            if (typeof _ET === "function") {
+                Object.setPrototypeOf(Window, _ET);
+                Window.prototype = Object.create(_ET.prototype);
+            } else {
+                Window.prototype = Object.create(Object.prototype);
+            }
+            Object.defineProperty(Window.prototype, "constructor", {
+                value: Window, writable: true, enumerable: false, configurable: true,
+            });
+            Object.defineProperty(Window, "name", { value: "Window", configurable: true });
+            Object.defineProperty(Window, "prototype", {
+                value: Window.prototype, writable: false, enumerable: false, configurable: false,
+            });
+            Object.defineProperty(Window.prototype, Symbol.toStringTag, {
+                value: "Window", configurable: true,
+            });
+            if (typeof _maskFunction === "function") _maskFunction(Window, "Window");
+            globalThis.Window = Window;
+            // NOTE: do NOT Object.setPrototypeOf(globalThis, Window.prototype)
+            // here — deno_core's V8 global object is special; swapping its
+            // [[Prototype]] breaks `ops`/secure-context resolution
+            // (regressed Notification.permission default→denied,
+            // chrome147_parity). Defining the global `Window` is enough for
+            // `typeof Window==="function"` AND for _buildRemoteRealm to
+            // mirror it so iframe contentWindow.constructor.name==="Window".
+            // Main-window `window instanceof Window` parity needs a
+            // deno_core-level global-prototype fix (Rust side) — tracked
+            // separately (doc 22), NOT a JS proto swap.
+        } catch (_) {}
+    })();
+
     // --- Global self-references (window, self, top, parent, frames) ---
     // Chrome alignment — handled by Deno defaults for now to avoid snapshot conflicts.
 
@@ -925,8 +971,12 @@
     }
     _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
     _defNav('pdfViewerEnabled', () => true);
+    // webdriver: present on Navigator.prototype per W3C WebDriver spec.
+    // Real non-automated Chrome: property exists with a getter returning undefined.
+    // Kasada wdt probe: value must be undefined (not false). wdd probe checks
+    // the getter source — _maskFunction makes it appear native.
     Object.defineProperty(Navigator.prototype, 'webdriver', {
-        get: () => false,
+        get: _maskFunction(function() { return undefined; }, 'get webdriver'),
         enumerable: true,
         configurable: true
     });
@@ -1379,7 +1429,7 @@
     Object.defineProperty(globalThis, 'innerHeight', { get: () => _pInt("inner_height", 1080),  configurable: true, enumerable: true });
     Object.defineProperty(globalThis, 'outerWidth',  { get: () => _pInt("outer_width", 1920),   configurable: true, enumerable: true });
     Object.defineProperty(globalThis, 'outerHeight', { get: () => _pInt("outer_height", 1080),  configurable: true, enumerable: true });
-    Object.defineProperty(globalThis, 'devicePixelRatio', { get: () => _pFloat("device_pixel_ratio", 2.0), configurable: true, enumerable: true });
+    Object.defineProperty(globalThis, 'devicePixelRatio', { get: _maskFunction(function() { return _pFloat("device_pixel_ratio", 2.0); }, 'get devicePixelRatio'), configurable: true, enumerable: true });
 
     // Scroll + screen position — OWN accessor properties on the window
     // instance (globalThis), per real Chrome (verified via Playwright
@@ -1550,8 +1600,9 @@
         // here was a divergence. Real Chrome's webdriver getter is
         // owned-on-prototype and IS enumerable (visible to for..in on
         // Navigator.prototype).
+        // webdriver: defined identically to the Navigator.prototype block above.
         Object.defineProperty(_NavProto, 'webdriver', {
-            get: () => false,
+            get: _maskFunction(function() { return undefined; }, 'get webdriver'),
             enumerable: true,
             configurable: true
         });
@@ -1561,10 +1612,14 @@
         // and profile.mime_types_count. Do not override here.
     }
 
-    if (globalThis.navigator) {
-        // ... (webdriver/online/etc)
-        _defNav('devicePixelRatio', () => 2.0);
-    }
+    // NOTE: real Chrome has NO `navigator.devicePixelRatio` — verified
+    // CDP-free (`'devicePixelRatio' in navigator` === false,
+    // getOwnPropertyDescriptor(navigator,'devicePixelRatio') === undefined).
+    // devicePixelRatio is a Window-only property. The previous
+    // `_defNav('devicePixelRatio', …)` added a property no real browser
+    // exposes — exactly the object Kasada's `dpi` probe reads
+    // (`getOwnPropertyDescriptor(navigator,'devicePixelRatio')`, 60/60
+    // receiver=Navigator per kasada_dpi_receiver.rs). Removed for parity.
 
     if (globalThis.Screen) {
         const _ScreenProto = Screen.prototype;
@@ -1573,8 +1628,6 @@
         _defProtoGetter(_ScreenProto, 'colorDepth', () => _pInt("screen_color_depth", 24));
         _defProtoGetter(_ScreenProto, 'pixelDepth', () => _pInt("screen_color_depth", 24));
     }
-
-    globalThis.devicePixelRatio = 2.0;
 
     // Explicitly define documentMode as undefined to pass 'prop in document' checks quietly
     Object.defineProperty(Document.prototype, 'documentMode', { value: undefined, enumerable: false, configurable: true });

@@ -2219,52 +2219,27 @@
                 realm[name] = _mkMirroredConstructor(parentCtor, name, freshGrandparentProto);
             } catch (_) {}
         }
-        // Cross-realm Function.prototype.toString returning native shape for
-        // anything carrying _nativeTag. Anti-bot detectors call:
-        //   iframe.contentWindow.Function.prototype.toString.call(window.fetch)
-        // and expect "function fetch() { [native code] }".
-        try {
-            const FreshFunctionProto = realm.Function && realm.Function.prototype;
-            if (FreshFunctionProto) {
-                const freshToString = function toString() {
-                    if (this !== null && this !== undefined) {
-                        try {
-                            const tag = this[_NATIVE_TAG_SYMBOL];
-                            if (tag) return "function " + tag + "() { [native code] }";
-                        } catch (_) {}
-                    }
-                    try { return Function.prototype.toString.call(this); }
-                    catch (_) { return "function () { [native code] }"; }
-                };
-                Object.defineProperty(freshToString, _NATIVE_TAG_SYMBOL, { value: "toString", configurable: true });
-                Object.defineProperty(freshToString, "name", { value: "toString", configurable: true });
-                Object.defineProperty(FreshFunctionProto, "toString", {
-                    value: freshToString, writable: true, configurable: true,
-                });
-            }
-        } catch (_) {}
         _cachedRemoteRealm = realm;
         return realm;
     }
 
+    // Monotonically-increasing ID for child realms; used as the Rust-side
+    // cache key in IframeRealmStore (HashMap<u32, ...>).
+    let _nextRealmId = 0;
+
     function _getIframeWindow(el) {
         let state = _iframeState.get(el);
         if (state) return state.contentWindow;
-        // W3.5 — srcdoc iframes: read the `srcdoc` attribute string so
-        // detectors that introspect `iframe.contentDocument.documentElement
-        // .outerHTML` or `body.innerHTML` see the declared content rather
-        // than an empty document. Full srcdoc semantics (parsed Node tree)
-        // require routing the string through the main HTML parser; this is
-        // a stub that exposes the source text for fingerprint-grade reads.
+
+        // ── Build the iframe document shell ──────────────────────────────
+        // W3.5 — srcdoc iframes: expose the source text for fingerprint-grade
+        // reads (`iframe.contentDocument.body.innerHTML`).
         let _srcdoc = "";
         try {
             if (el && typeof el.getAttribute === "function") {
                 _srcdoc = el.getAttribute("srcdoc") || "";
             }
         } catch (_) {}
-        // Synthetic body/documentElement shells that return the srcdoc as
-        // outerHTML/innerHTML — enough for the common detector probe shape
-        // `String(iframe.contentDocument.body.innerHTML).length > 0`.
         const _mkHtmlMirror = (tag, inner) => ({
             tagName: tag.toUpperCase(),
             nodeType: 1,
@@ -2313,14 +2288,8 @@
             open() { return _document.open(); },
             close() { return _document.close(); },
         };
-        const remoteRealm = _buildRemoteRealm();
-        // Group E (Kasada audit 12_KASADA_FINGERPRINT_ERROR_AUDIT_2026_05_14.md):
-        // captured blob field `spd` returned `"n/a"` for all 8 screen +
-        // viewport dimensions read off iframe.contentWindow. Real Chrome
-        // returns numbers. Pre-populate the iframe locals with explicit
-        // screen + viewport mirrors so the probe gets numbers without
-        // walking the Proxy fallthrough chain (which previously returned
-        // the parent Screen instance whose getters were brand-checked).
+
+        // ── Screen mirror ─────────────────────────────────────────────────
         const _parentScreen = globalThis.screen || {};
         const _iframeScreen = {
             availWidth:  _parentScreen.availWidth  || 1920,
@@ -2333,13 +2302,192 @@
             pixelDepth:  _parentScreen.pixelDepth  || 24,
             orientation: _parentScreen.orientation,
         };
-        // isExtended is Window Management API (Chrome 100+, not in Firefox).
-        // Only expose on non-Gecko UAs to avoid Firefox-shape divergence.
         if (!/Firefox\/|Gecko\/20100101/.test(
             (typeof navigator !== "undefined" && navigator.userAgent) || ""
         )) {
             _iframeScreen.isExtended = false;
         }
+
+        // ── Obtain the child window object ───────────────────────────────
+        // PRIMARY PATH: genuine v8::Context child realm (doc 26/27 §4).
+        // op_create_child_realm returns the child global:
+        //   - Real, realm-distinct native intrinsics (Object/Function/… ≠ parent)
+        //   - constructor.name === "Window" (set up in Rust)
+        //   - Genuine-native Function.prototype.toString in child realm
+        //   - self/window/globalThis/frames self-refs (set in Rust)
+        // Defeats Kasada's `addContentWindowProxy` detector + realm-divergence bail.
+        const _realmId = _nextRealmId++;
+        let cw = null;
+        try {
+            const _got = ops.op_create_child_realm(_realmId);
+            if (_got && typeof _got === "object") cw = _got;
+        } catch (_) {}
+
+        if (cw) {
+            // ── Populate child realm with DOM/FP properties ───────────────
+            // CRITICAL: use op_set_child_realm_prop for properties that must be
+            // visible to code running INSIDE the child realm (e.g. Kasada's srcdoc
+            // eval). Direct `cw.x = v` from parent JS goes to the global PROXY's
+            // own dict; code inside the realm reads from the INNER global.
+            // op_set_child_realm_prop enters the child ContextScope and calls
+            // child_global.set() which forwards via [[Set]] to the inner global.
+            const _sp = (k, v) => {
+                try { ops.op_set_child_realm_prop(_realmId, k, v); } catch (_) {}
+            };
+
+            // iframeDoc back-reference to default view (set before _sp calls)
+            try { iframeDoc.defaultView = cw; } catch (_) {}
+
+            // Document
+            _sp("document", iframeDoc);
+
+            // Location stub — about:blank inherits the parent origin per HTML spec.
+            // Kasada's loc probe reads document.domain (= hostname) and
+            // lli probe reads location.origin; empty values are bot signals.
+            const _pLoc = globalThis.location || {};
+            _sp("location", {
+                href: "about:blank",
+                origin: _pLoc.origin || "null",
+                pathname: "/",
+                hash: "", search: "",
+                host: _pLoc.host || "",
+                hostname: _pLoc.hostname || "",
+                port: _pLoc.port || "",
+                protocol: _pLoc.protocol || "https:",
+                assign() {}, replace() {}, reload() {},
+                toString() { return "about:blank"; },
+            });
+
+            // Parent / top / name
+            _sp("parent", globalThis);
+            _sp("top", globalThis);
+            _sp("name", "");
+
+            // Screen mirror (Kasada spd probe reads these from inside child realm)
+            _sp("screen", _iframeScreen);
+            _sp("availWidth",  _iframeScreen.availWidth);
+            _sp("availHeight", _iframeScreen.availHeight);
+
+            // Viewport dimensions (Kasada spd probe)
+            _sp("innerWidth",   globalThis.innerWidth  || 1920);
+            _sp("innerHeight",  globalThis.innerHeight || 1080);
+            _sp("outerWidth",   globalThis.outerWidth  || 1920);
+            _sp("outerHeight",  globalThis.outerHeight || 1080);
+            _sp("scrollX", 0); _sp("scrollY", 0);
+            _sp("pageXOffset", 0); _sp("pageYOffset", 0);
+            // devicePixelRatio: define as a native-tagged accessor so that
+            // Kasada's dpi probe sees both a proper descriptor (getter:fn, not
+            // data) AND [native code] from Function.prototype.toString.
+            // The eval runs inside the child realm so Symbol.for resolves via
+            // the isolate-level global symbol registry (same symbol as parent).
+            const _dprVal = globalThis.devicePixelRatio || 1;
+            try {
+                ops.op_eval_in_child_realm(_realmId,
+                    `(function(){var _nt=Symbol.for('__boxide_native__');var _g=function(){return ${_dprVal};};Object.defineProperty(_g,_nt,{value:'get devicePixelRatio',configurable:true});Object.defineProperty(_g,'name',{value:'get devicePixelRatio',configurable:true});var _s=function(v){Object.defineProperty(this,'devicePixelRatio',{value:v,writable:true,enumerable:true,configurable:true});};Object.defineProperty(_s,_nt,{value:'set devicePixelRatio',configurable:true});Object.defineProperty(_s,'name',{value:'set devicePixelRatio',configurable:true});Object.defineProperty(globalThis,'devicePixelRatio',{get:_g,set:_s,enumerable:true,configurable:true});})();`
+                );
+            } catch (_) {
+                _sp("devicePixelRatio", _dprVal);
+            }
+
+            // postMessage stub
+            const _pm = function postMessage(msg, origin) {
+                Promise.resolve().then(() => {
+                    globalThis.dispatchEvent(new MessageEvent("message", { data: msg, origin: origin || "" }));
+                });
+            };
+            _sp("postMessage", _pm);
+
+            // Navigator: fresh instance proxying parent values.
+            try {
+                const _parentNav = globalThis.navigator;
+                const _nav = Object.create(Object.prototype);
+                for (const _k of [
+                    "userAgent", "platform", "language", "languages",
+                    "hardwareConcurrency", "deviceMemory", "maxTouchPoints",
+                    "vendor", "vendorSub", "product", "productSub",
+                    "appName", "appVersion", "appCodeName", "cookieEnabled",
+                    "onLine", "doNotTrack", "pdfViewerEnabled",
+                ]) {
+                    try {
+                        const _v = _parentNav[_k];
+                        if (_v !== undefined) Object.defineProperty(_nav, _k, { value: _v, writable: true, configurable: true, enumerable: true });
+                    } catch (_) {}
+                }
+                // webdriver: intentionally absent. Real Chrome has no webdriver property
+                // at all in non-automated mode; removing it makes the child realm match.
+                _sp("navigator", _nav);
+            } catch (_) {}
+
+            // Own realm `fetch` — distinct reference (cw.fetch !== parent.fetch)
+            try {
+                const _ifetch = function fetch(...a) { return globalThis.fetch.apply(this, a); };
+                Object.defineProperty(_ifetch, "name", { value: "fetch", configurable: true });
+                Object.defineProperty(_ifetch, "length", { value: 1, configurable: true });
+                Object.defineProperty(_ifetch, _NATIVE_TAG_SYMBOL, { value: "fetch", configurable: true });
+                _sp("fetch", _ifetch);
+            } catch (_) {}
+
+            // Copy key browser APIs that Kasada reads from the child realm.
+            // mrs probe reads MediaSource.isTypeSupported from inside child realm.
+            const _apisToCopy = [
+                'MediaSource', 'MediaSourceHandle', 'MediaCapabilities',
+                'MediaRecorder', 'MediaStream', 'MediaStreamTrack',
+                'HTMLVideoElement', 'HTMLAudioElement', 'HTMLMediaElement',
+                'AudioContext', 'OfflineAudioContext',
+                'RTCPeerConnection', 'RTCDataChannel',
+                'Blob', 'File', 'FileReader',
+                'URL', 'URLSearchParams',
+                'WebSocket', 'Worker',
+                'CSS', 'crypto', 'performance',
+                'structuredClone', 'queueMicrotask', 'reportError',
+                'crossOriginIsolated', 'isSecureContext', 'origin',
+                'CustomEvent', 'Event', 'EventTarget',
+                'PromiseRejectionEvent', 'ErrorEvent',
+                'MessageChannel', 'MessagePort', 'MessageEvent',
+                'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
+                'PerformanceObserver',
+                'TextEncoder', 'TextDecoder',
+                'AbortController', 'AbortSignal',
+                'ReadableStream', 'WritableStream', 'TransformStream',
+                'Request', 'Response', 'Headers', 'FormData',
+                'XMLHttpRequest', 'DOMParser',
+                'Node', 'Element', 'Document',
+                'HTMLElement', 'DocumentFragment',
+                'Notification',
+            ];
+            for (const _ak of _apisToCopy) {
+                try {
+                    const _v = globalThis[_ak];
+                    if (_v !== undefined) _sp(_ak, _v);
+                } catch (_) {}
+            }
+
+            // Execute srcdoc scripts in the child realm.
+            // Kasada probes (ifw, spd) inject script content via srcdoc to
+            // run code inside the iframe. A real browser executes those
+            // scripts; we extract and eval them in the child realm context.
+            if (_srcdoc) {
+                try {
+                    const _scriptRe = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+                    let _m;
+                    while ((_m = _scriptRe.exec(_srcdoc)) !== null) {
+                        const _src = _m[1];
+                        if (_src && _src.trim()) {
+                            try { ops.op_eval_in_child_realm(_realmId, _src); } catch (_) {}
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            state = { contentWindow: cw, contentDocument: iframeDoc };
+            _iframeState.set(el, state);
+            return cw;
+        }
+
+        // ── FALLBACK: Proxy-based approach (if op unavailable) ───────────
+        // Keeps existing behaviour when op_create_child_realm is not accessible
+        // (e.g. worker runtime that doesn't load dom_extension).
+        const remoteRealm = _buildRemoteRealm();
         const iframeLocals = {
             document: iframeDoc,
             location: { href: "about:blank" },
@@ -2352,7 +2500,6 @@
             innerHeight: globalThis.innerHeight || 1080,
             outerWidth:  globalThis.outerWidth  || 1920,
             outerHeight: globalThis.outerHeight || 1080,
-            devicePixelRatio: globalThis.devicePixelRatio || 1,
             scrollX: 0, scrollY: 0, pageXOffset: 0, pageYOffset: 0,
             postMessage(msg, origin) {
                 Promise.resolve().then(() => {
@@ -2360,10 +2507,33 @@
                 });
             },
         };
-        // Probed constructors come from the per-iframe mirror realm — distinct
-        // identity from parent globalThis. Unknown names still fall through to
-        // parent globalThis (Math, JSON, console, performance, etc.) since
-        // those aren't reference-checked by realm-purity probes.
+        try {
+            if (remoteRealm.Window && remoteRealm.Window.prototype) {
+                Object.setPrototypeOf(iframeLocals, remoteRealm.Window.prototype);
+            }
+        } catch (_) {}
+        try {
+            const _ifetch = function fetch(...a) { return globalThis.fetch.apply(this, a); };
+            Object.defineProperty(_ifetch, "name", { value: "fetch", configurable: true });
+            Object.defineProperty(_ifetch, "length", { value: 1, configurable: true });
+            Object.defineProperty(_ifetch, _NATIVE_TAG_SYMBOL, { value: "fetch", configurable: true });
+            iframeLocals.fetch = _ifetch;
+        } catch (_) {}
+        try {
+            const _dg = function () { return globalThis.devicePixelRatio || 1; };
+            const _ds = function(v) {
+                Object.defineProperty(iframeLocals, "devicePixelRatio", {
+                    value: v, writable: true, enumerable: true, configurable: true,
+                });
+            };
+            Object.defineProperty(_dg, _NATIVE_TAG_SYMBOL, { value: "get devicePixelRatio", configurable: true });
+            Object.defineProperty(_dg, "name", { value: "get devicePixelRatio", configurable: true });
+            Object.defineProperty(_ds, _NATIVE_TAG_SYMBOL, { value: "set devicePixelRatio", configurable: true });
+            Object.defineProperty(_ds, "name", { value: "set devicePixelRatio", configurable: true });
+            Object.defineProperty(iframeLocals, "devicePixelRatio", {
+                get: _dg, set: _ds, enumerable: true, configurable: true,
+            });
+        } catch (_) {}
         const iframeWindow = new Proxy(iframeLocals, {
             get(target, prop) {
                 if (prop in target) return target[prop];
@@ -2384,20 +2554,11 @@
             },
         });
         iframeLocals.self = iframeWindow;
-        // W2.7 + DataDome iframe-proxy audit (research 09_KASADA_DEEP §4):
-        // real Chrome `iframe.contentWindow.window === iframe.contentWindow`
-        // and the same for `globalThis`. Without these self-loops, the
-        // Proxy falls through to the parent globalThis (or to undefined)
-        // and `proxy.window === proxy` returns false — a hard tell.
         iframeLocals.window = iframeWindow;
         iframeLocals.globalThis = iframeWindow;
-        // `window.frames` real-Chrome semantics: returns the window itself
-        // (the FrameList is identity-equal to the window when there are
-        // no child frames). `frames.length` reports child-frame count;
-        // we expose `length: 0` on iframeLocals so reads stay consistent.
         iframeLocals.frames = iframeWindow;
         iframeLocals.length = 0;
-        state = { contentWindow: iframeWindow, contentDocument: iframeDoc, remoteRealm };
+        state = { contentWindow: iframeWindow, contentDocument: iframeDoc };
         _iframeState.set(el, state);
         return iframeWindow;
     }

@@ -2987,7 +2987,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn page_webdriver_false() {
+    async fn page_webdriver_undefined() {
+        // Real non-automated Chrome: navigator.webdriver is undefined (W3C spec).
         let mut page = Page::from_html(
             "<html><head></head><body></body></html>",
             None::<stealth::StealthProfile>,
@@ -2995,9 +2996,9 @@ mod tests {
         .await
         .unwrap();
         let result = page.evaluate("typeof navigator.webdriver").unwrap();
-        assert_eq!(result, "boolean");
+        assert_eq!(result, "undefined");
         let val = page.evaluate("navigator.webdriver").unwrap();
-        assert_eq!(val, "false");
+        assert_eq!(val, "undefined");
     }
 
     #[tokio::test]

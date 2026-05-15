@@ -1,9 +1,12 @@
 use std::collections::HashMap;
+use crate::native_fns::{install_native_fp_tostring, IframeRealmStore};
 use crate::state::DomState;
 use crate::utils::tokens_to_string;
 use css_values::calc::resolve_computed_value;
 use css_values::types::length::CalcContext;
 use deno_core::op2;
+use deno_core::v8;
+use deno_core::JsRuntime;
 use dom::node::NodeId;
 use dom::DomElement;
 
@@ -1098,6 +1101,261 @@ pub fn op_dom_storage_keys(#[state] state: &DomState, #[string] area: String) ->
         .unwrap_or_default()
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Child-realm support (§4 of 2026-05-15 handoff / doc 27 §5.2)
+// ──────────────────────────────────────────────────────────────────
+
+/// Window constructor callback — throws per the spec ("Illegal constructor").
+/// Used only to create a real, named `Window` function whose `.name === "Window"`
+/// and whose `.prototype.constructor === Window`.  Kasada never calls `new Window()`,
+/// so the throw body is never reached; we keep it for spec correctness.
+fn _window_ctor_cb(
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut _rv: v8::ReturnValue,
+) {
+    if let Some(msg) = v8::String::new(scope, "Illegal constructor") {
+        let e = v8::Exception::type_error(scope, msg);
+        scope.throw_exception(e);
+    }
+}
+
+/// Create (or return cached) a genuine `v8::Context` child realm for an iframe's
+/// `contentWindow`.  Returns the child global as a live JS object — NOT a Proxy.
+///
+/// The child context gets:
+/// - Real, realm-distinct native intrinsics (`Object`/`Function`/`Array`/… ≠ parent's)
+///   — defeats Kasada's `addContentWindowProxy` + realm-divergence bail (doc 26).
+/// - `[[Prototype]] === Window.prototype` → `cw.constructor.name === "Window"`.
+/// - Genuine-native `Function.prototype.toString` (same API-fn recipe as the main window).
+/// - Standard self-referential globals (`window`, `self`, `globalThis`, `frames`).
+///
+/// JS completes the setup by setting `document`, `location`, `navigator`, `fetch`,
+/// `devicePixelRatio` (accessor), etc. on the returned object.
+#[op2]
+pub fn op_create_child_realm<'s>(
+    scope: &mut v8::HandleScope<'s>,
+    #[smi] realm_id: i32,
+) -> v8::Local<'s, v8::Value> {
+    let rid = realm_id as u32;
+
+    // Access OpState via the isolate-level state (public, stable in 0.311).
+    // op_state_from takes &Isolate; HandleScope auto-derefs there.
+    let op_state_rc = JsRuntime::op_state_from(scope);
+
+    // Fast path: cached realm — return the previously-created global.
+    {
+        let op_state = op_state_rc.borrow();
+        if let Some(store) = op_state.try_borrow::<IframeRealmStore>() {
+            if let Some(global) = store.globals.get(&rid) {
+                return v8::Local::new(scope, global).into();
+            }
+        }
+    }
+
+    // Clone the `orig_fp_tostring` Global into a new handle BEFORE entering
+    // the child ContextScope (requires the parent scope for the new handle).
+    let orig_fpt: Option<v8::Global<v8::Function>> = {
+        let op_state = op_state_rc.borrow();
+        op_state.try_borrow::<IframeRealmStore>().and_then(|store| {
+            store.orig_fp_tostring.as_ref().map(|g| {
+                let local = v8::Local::new(scope, g);
+                v8::Global::new(scope, local)
+            })
+        })
+    };
+
+    // Create the child context (vanilla v8::Context — full native intrinsics).
+    let child_ctx = v8::Context::new(scope, v8::ContextOptions::default());
+
+    // Copy parent's security token to child so V8 treats the contexts as
+    // same-origin (about:blank inherits the parent origin in Chrome).
+    // Without this, accessing child-realm objects from the parent scope
+    // throws "TypeError: no access" via V8's cross-context security check.
+    let parent_ctx = scope.get_current_context();
+    let parent_tok = parent_ctx.get_security_token(scope);
+    child_ctx.set_security_token(parent_tok);
+
+    // Set up the child context.  Returns None on any fatal V8 allocation
+    // failure (extremely rare); the outer code falls back to undefined.
+    let child_global_g: Option<v8::Global<v8::Object>> = {
+        let cs = &mut v8::ContextScope::new(scope, child_ctx);
+
+        // Build a real `Window` function (FunctionTemplate → native `[native code]`)
+        // so the child global is typed: `constructor.name === "Window"`.
+        let window_tmpl = v8::FunctionTemplate::new(cs, _window_ctor_cb);
+        if let Some(n) = v8::String::new(cs, "Window") {
+            window_tmpl.set_class_name(n);
+        }
+        let window_fn = match window_tmpl.get_function(cs) {
+            Some(f) => f,
+            None => return v8::undefined(cs).into(),
+        };
+        if let Some(n) = v8::String::new(cs, "Window") {
+            window_fn.set_name(n);
+        }
+
+        // child_global.[[Prototype]] = Window.prototype
+        // → child_global.constructor.name === "Window"
+        if let Some(pk) = v8::String::new(cs, "prototype") {
+            if let Some(proto_val) = window_fn.get(cs, pk.into()) {
+                let child_global = child_ctx.global(cs);
+                child_global.set_prototype(cs, proto_val);
+            }
+        }
+
+        let child_global = child_ctx.global(cs);
+
+        // Expose Window on child global (Kasada reads `contentWindow.Window`).
+        if let Some(k) = v8::String::new(cs, "Window") {
+            child_global.set(cs, k.into(), window_fn.into());
+        }
+
+        // Standard self-referential globals (all point to child_global).
+        for key in &["window", "self", "globalThis", "frames"] {
+            if let Some(k) = v8::String::new(cs, key) {
+                child_global.set(cs, k.into(), child_global.into());
+            }
+        }
+        // length = 0  (avoid borrow-twice by staging the value first)
+        if let Some(k) = v8::String::new(cs, "length") {
+            let zero = v8::Integer::new(cs, 0);
+            child_global.set(cs, k.into(), zero.into());
+        }
+        // opener = null
+        if let Some(k) = v8::String::new(cs, "opener") {
+            let null = v8::null(cs);
+            child_global.set(cs, k.into(), null.into());
+        }
+
+        // Install genuine-native Function.prototype.toString in child realm.
+        // Closes the [[SourceText]] leak for child-realm functions too.
+        if let Some(ref orig) = orig_fpt {
+            install_native_fp_tostring(cs, orig);
+        }
+
+        Some(v8::Global::new(cs, child_global))
+    };
+
+    let child_global_g = match child_global_g {
+        Some(g) => g,
+        None => return v8::undefined(scope).into(),
+    };
+
+    // Build Local from Global BEFORE moving Global into the store.
+    let local: v8::Local<'s, v8::Value> = v8::Local::new(scope, &child_global_g).into();
+
+    // Persist context (keeps it alive) and cache global in OpState.
+    {
+        let mut op_state = op_state_rc.borrow_mut();
+        if let Some(store) = op_state.try_borrow_mut::<IframeRealmStore>() {
+            store.contexts.insert(rid, v8::Global::new(scope, child_ctx));
+            store.globals.insert(rid, child_global_g);
+        }
+    }
+
+    local
+}
+
+/// Set a property on the INNER GLOBAL of a child realm.
+///
+/// The global proxy's own property dict is NOT visible to code running inside
+/// the child realm (which reads from the inner global's scope chain). Setting
+/// on the proxy via `proxy.set()` from Rust only writes to the proxy's own
+/// Two-path write to guarantee visibility from both inside and outside the realm:
+///
+/// 1. `create_data_property` on the inner global (the JSGlobalObject behind the
+///    GlobalProxy): makes the property an own property of the inner global, so
+///    scope-chain lookups from scripts running INSIDE the realm find it.
+///
+/// 2. `proxy.set()` on the GlobalProxy: puts the property in the proxy's own
+///    dictionary, so cross-context reads from the parent (`cw.screen`) find it.
+///
+/// Both paths are necessary: V8's API `Object::Set()` on a GlobalProxy writes to
+/// the proxy's own dict (not the inner global), so scope-chain lookups inside the
+/// realm miss it. Conversely, `create_data_property` on the inner global is NOT
+/// reachable from a cross-context `proxy.property` read (the proxy's own dict is
+/// checked first and exclusively for cross-context callers without the interceptor).
+#[op2]
+pub fn op_set_child_realm_prop<'s>(
+    scope: &mut v8::HandleScope<'s>,
+    #[smi] realm_id: i32,
+    key: v8::Local<v8::Value>,
+    value: v8::Local<v8::Value>,
+) -> v8::Local<'s, v8::Value> {
+    let rid = realm_id as u32;
+    let op_state_rc = JsRuntime::op_state_from(scope);
+
+    let child_ctx_g: Option<v8::Global<v8::Context>> = {
+        let op_state = op_state_rc.borrow();
+        op_state.try_borrow::<IframeRealmStore>().and_then(|store| {
+            store.contexts.get(&rid).map(|g| {
+                let local = v8::Local::new(scope, g);
+                v8::Global::new(scope, local)
+            })
+        })
+    };
+    let child_ctx_g = match child_ctx_g {
+        Some(g) => g,
+        None => return v8::undefined(scope).into(),
+    };
+
+    let child_ctx = v8::Local::new(scope, &child_ctx_g);
+    let cs = &mut v8::ContextScope::new(scope, child_ctx);
+    let child_proxy = child_ctx.global(cs);
+
+    // Path 1: inner global own property (inside-realm scope chain visibility).
+    if let Some(inner) = child_proxy
+        .get_prototype(cs)
+        .and_then(|p| v8::Local::<v8::Object>::try_from(p).ok())
+    {
+        if let Ok(k) = v8::Local::<v8::Name>::try_from(key) {
+            inner.create_data_property(cs, k, value);
+        }
+    }
+
+    // Path 2: proxy own property (cross-context parent-side visibility).
+    child_proxy.set(cs, key, value);
+
+    v8::undefined(cs).into()
+}
+
+/// Execute a JavaScript string inside a child realm's context.
+///
+/// Compiles and runs `code` in the child context scope. Returns the result
+/// (coerced to string) or `undefined` on compile/runtime error. Used for
+/// cases where `op_set_child_realm_prop` cannot express the required
+/// descriptor shape (e.g. accessor properties with a getter function).
+#[op2]
+#[string]
+pub fn op_eval_in_child_realm<'s>(
+    scope: &mut v8::HandleScope<'s>,
+    #[smi] realm_id: i32,
+    #[string] code: String,
+) -> Option<String> {
+    let rid = realm_id as u32;
+    let op_state_rc = JsRuntime::op_state_from(scope);
+
+    let child_ctx_g: Option<v8::Global<v8::Context>> = {
+        let op_state = op_state_rc.borrow();
+        op_state.try_borrow::<IframeRealmStore>().and_then(|store| {
+            store.contexts.get(&rid).map(|g| {
+                let local = v8::Local::new(scope, g);
+                v8::Global::new(scope, local)
+            })
+        })
+    };
+    let child_ctx_g = child_ctx_g?;
+
+    let child_ctx = v8::Local::new(scope, &child_ctx_g);
+    let cs = &mut v8::ContextScope::new(scope, child_ctx);
+
+    let src = v8::String::new(cs, &code)?;
+    let script = v8::Script::compile(cs, src, None)?;
+    let _ = script.run(cs);
+    None
+}
+
 deno_core::extension!(
     dom_extension,
     ops = [
@@ -1151,5 +1409,8 @@ deno_core::extension!(
         op_dom_storage_remove,
         op_dom_storage_clear,
         op_dom_storage_keys,
+        op_create_child_realm,
+        op_set_child_realm_prop,
+        op_eval_in_child_realm,
     ],
 );

@@ -15,7 +15,7 @@ use crate::extensions::webgl_ext::{webgl_extension, WebGLState};
 use crate::extensions::websocket_ext::{websocket_extension, WebSocketState};
 use crate::extensions::worker_ext::worker_extension;
 use crate::state::DomState;
-use deno_core::{JsRuntime, RuntimeOptions, SharedArrayBufferStore};
+use deno_core::{v8, JsRuntime, RuntimeOptions, SharedArrayBufferStore};
 use dom::Dom;
 use stealth::StealthProfile;
 
@@ -168,6 +168,33 @@ pub fn create_runtime_with_signals(
     runtime.op_state().borrow_mut().put(WebGLState::new());
     runtime.op_state().borrow_mut().put(SseState::new());
 
+    // Capture the GENUINE `Function.prototype.toString` before any
+    // bootstrap replaces it (doc 27). Untagged functions delegate to
+    // this so real-JS source / real-native `[native code]` stay exactly
+    // V8-correct; tagged host fns get the synthetic native string from
+    // the API-function callback (which V8 itself renders `[native code]`
+    // in class-extends/NoSideEffectsToString — closing the source leak).
+    let orig_fp_tostring: Option<deno_core::v8::Global<deno_core::v8::Function>> = {
+        let scope = &mut runtime.handle_scope();
+        crate::native_fns::capture_original_fp_tostring(scope)
+    };
+
+    // IframeRealmStore: holds genuine child v8::Context instances (one per
+    // iframe) so `iframe.contentWindow` returns a real realm instead of a
+    // Proxy — defeats Kasada's `addContentWindowProxy` detector (doc 26/27).
+    // Store orig_fp_tostring so op_create_child_realm can install the same
+    // genuine-native toString into every child context (cross-realm parity).
+    {
+        let mut realm_store = crate::native_fns::IframeRealmStore::new();
+        if let Some(ref orig) = orig_fp_tostring {
+            // Clone the Global (separate handle, same V8 heap object).
+            let scope = &mut runtime.handle_scope();
+            let local = v8::Local::new(scope, orig);
+            realm_store.orig_fp_tostring = Some(v8::Global::new(scope, local));
+        }
+        runtime.op_state().borrow_mut().put(realm_store);
+    }
+
     // Execute bootstrap JS only if NOT starting from snapshot
     if options.startup_snapshot.is_none() {
         const BOOTSTRAP_JS: &str = concat!(
@@ -213,6 +240,18 @@ pub fn create_runtime_with_signals(
     runtime
         .execute_script("<anonymous>", include_str!("js/cleanup_bootstrap.js"))
         .expect("cleanup failed");
+
+    // Install the genuine-native `Function.prototype.toString` (raw
+    // v8::FunctionTemplate API function) AFTER all bootstrap/cleanup,
+    // replacing the JS-level patch. Closes the structurally-JS-
+    // unpatchable [[SourceText]] leak (class-extends TypeError /
+    // NoSideEffectsToString / error stacks / eval) — Kasada `fsc`
+    // probe. Behaviour preserved via the captured genuine original +
+    // the `Symbol.for('__boxide_native__')` tag scheme. doc 27.
+    if let Some(ref orig) = orig_fp_tostring {
+        let scope = &mut runtime.handle_scope();
+        crate::native_fns::install_native_fp_tostring(scope, orig);
+    }
 
     // Run caller-provided init scripts after built-in cleanup.
     // These run in order before any <script> tags parsed from HTML.

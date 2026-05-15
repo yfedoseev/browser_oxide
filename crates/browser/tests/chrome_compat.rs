@@ -264,7 +264,8 @@ async fn nav_pdf_viewer_enabled() {
 }
 #[tokio::test]
 async fn nav_webdriver() {
-    assert_eq!(check("typeof navigator.webdriver").await, "boolean");
+    // Real Chrome: navigator.webdriver is undefined in non-automated sessions.
+    assert_eq!(check("typeof navigator.webdriver").await, "undefined");
 }
 #[tokio::test]
 async fn nav_plugins_length() {
@@ -1577,6 +1578,134 @@ async fn iframe_content_window() {
     );
 }
 #[tokio::test]
+async fn iframe_cross_realm_nav_stealth() {
+    // Verify cross-realm property access works WITH a stealth profile.
+    // Kasada's ifw probe reads cw.navigator.webdriver from the parent context.
+    let profile = stealth::chrome_130_macos();
+    let mut page = browser::Page::with_profile(
+        "<!DOCTYPE html><html><head></head><body></body></html>",
+        "https://example.com/",
+        profile,
+    )
+    .await
+    .unwrap();
+    let result = page
+        .evaluate(r#"
+        (function() {
+            var iframe = document.createElement('iframe');
+            iframe.setAttribute('srcdoc', '<head></head><body></body>');
+            document.body.appendChild(iframe);
+            var cw = iframe.contentWindow;
+            if (!cw) return 'no_cw';
+            var navType = typeof cw.navigator;
+            var wd = 'threw';
+            try { wd = cw.navigator ? cw.navigator.webdriver : 'null_nav'; } catch(e) { wd = 'ERR:' + e.message; }
+            var aw = 'threw';
+            try { aw = cw.screen ? cw.screen.availWidth : 'null_scr'; } catch(e) { aw = 'ERR:' + e.message; }
+            var names = Object.getOwnPropertyNames(cw);
+            var hasNav = names.indexOf('navigator') >= 0;
+            var hasScr = names.indexOf('screen') >= 0;
+            return JSON.stringify({navType, wd, aw, hasNav, hasScr, total: names.length});
+        })()
+    "#)
+        .unwrap_or_else(|e| format!("ERROR: {e}"));
+    println!("iframe_cross_realm_nav_stealth: {}", result);
+    assert!(result.contains("\"navType\":\"object\""), "cw.navigator must be object with stealth profile, got: {result}");
+    // Real Chrome returns undefined for webdriver (omitted by JSON.stringify) or false;
+    // explicit true is the only unacceptable automation signal.
+    assert!(!result.contains("\"wd\":true"), "cw.navigator.webdriver must not be true, got: {result}");
+}
+#[tokio::test]
+async fn iframe_inner_realm_nav_access() {
+    // Verify that code running INSIDE the child realm (via new cw.Function(...))
+    // can access navigator, screen, and devicePixelRatio — these are the
+    // properties Kasada's ifw and spd probes read from inside the child realm.
+    let profile = stealth::chrome_130_macos();
+    let mut page = browser::Page::with_profile(
+        "<!DOCTYPE html><html><body></body></html>",
+        "https://example.com/",
+        profile,
+    )
+    .await
+    .unwrap();
+    let result = page
+        .evaluate(r#"
+        (function() {
+            var iframe = document.createElement('iframe');
+            document.body.appendChild(iframe);
+            var cw = iframe.contentWindow;
+            if (!cw) return 'no_cw';
+            if (!cw.Function) return 'no_fn:' + typeof cw.Function;
+            var innerNav = 'threw';
+            try { innerNav = new cw.Function('return typeof navigator')(); }
+            catch(e) { innerNav = 'err:' + e.message; }
+            var innerDpr = 'threw';
+            try { innerDpr = new cw.Function('return devicePixelRatio')(); }
+            catch(e) { innerDpr = 'err:' + e.message; }
+            var innerScreen = 'threw';
+            try { innerScreen = new cw.Function('return typeof screen')(); }
+            catch(e) { innerScreen = 'err:' + e.message; }
+            return JSON.stringify({innerNav, innerDpr, innerScreen});
+        })()
+    "#)
+        .unwrap_or_else(|e| format!("ERROR: {e}"));
+    println!("iframe_inner_realm_nav_access: {}", result);
+    assert!(result.contains("\"innerNav\":\"object\""), "navigator must be object inside realm, got: {result}");
+    assert!(result.contains("\"innerScreen\":\"object\""), "screen must be object inside realm, got: {result}");
+}
+#[tokio::test]
+async fn iframe_child_realm_dpr_is_accessor() {
+    // Verify that devicePixelRatio in the child realm is defined as an accessor
+    // (getter), not a data property. Kasada's dpi probe checks this.
+    let result = check(r#"
+        (function() {
+            var iframe = document.createElement('iframe');
+            document.body.appendChild(iframe);
+            var cw = iframe.contentWindow;
+            if (!cw) return 'no_cw';
+            if (!cw.Function) return 'no_fn';
+            // Check descriptor from inside the child realm
+            var desc = new cw.Function(
+                'return JSON.stringify((function(d){return d?{hasGet:!!d.get,hasValue:"value" in d}:{missing:true};})(Object.getOwnPropertyDescriptor(globalThis,"devicePixelRatio")))'
+            )();
+            return desc || 'null';
+        })()
+    "#).await;
+    println!("iframe_child_realm_dpr_is_accessor: {}", result);
+    assert!(result.contains("\"hasGet\":true"), "child realm dpr must be accessor with getter, got: {result}");
+}
+#[tokio::test]
+async fn iframe_cross_realm_write_read() {
+    // Verify parent-context JS writes to child realm are readable back.
+    // This mirrors how Kasada tags sentinel functions on iframe.contentWindow.
+    let result = check(r#"
+        (function() {
+            var f = document.createElement('iframe');
+            document.body.appendChild(f);
+            var cw = f.contentWindow;
+            if (!cw) return 'no_cw';
+            // Write from parent context to child realm
+            cw.__testSentinel = 'hello';
+            // Read back from parent context
+            var readBack = cw.__testSentinel;
+            // Also write a function
+            var fn1 = function sentinel() { return 42; };
+            cw.__sentinelFn = fn1;
+            var fn1Back = cw.__sentinelFn;
+            return JSON.stringify({
+                writeRead: readBack,
+                fnType: typeof fn1Back,
+                fnCall: fn1Back ? fn1Back() : 'no_fn',
+                navType: typeof cw.navigator,
+                wd: cw.navigator ? cw.navigator.webdriver : 'null_nav'
+            });
+        })()
+    "#).await;
+    println!("iframe_cross_realm_write_read: {}", result);
+    assert!(result.contains("\"writeRead\":\"hello\""), "cross-realm write-read must work, got: {result}");
+    assert!(result.contains("\"fnType\":\"function\""), "cross-realm fn write-read must work, got: {result}");
+}
+#[tokio::test]
 async fn iframe_content_document() {
     assert_eq!(
         check("typeof document.createElement('iframe').contentDocument").await,
@@ -1644,8 +1773,9 @@ async fn k_no_script_id_webdriver_not_on_instance() {
 }
 
 #[tokio::test]
-async fn k_no_script_id_webdriver_on_prototype_returns_false() {
-    assert_eq!(check("navigator.webdriver === false").await, "true");
+async fn k_no_script_id_webdriver_on_prototype_returns_undefined() {
+    // Real Chrome: navigator.webdriver is undefined in non-automated sessions (not false).
+    assert_eq!(check("navigator.webdriver === undefined").await, "true");
 }
 
 #[tokio::test]
@@ -2144,7 +2274,8 @@ async fn screen_avail_top_linux_is_0() {
 
 #[tokio::test]
 async fn nav_webdriver_typeof_boolean() {
-    assert_eq!(check("typeof navigator.webdriver").await, "boolean");
+    // Real Chrome: navigator.webdriver is undefined in non-automated sessions.
+    assert_eq!(check("typeof navigator.webdriver").await, "undefined");
 }
 
 #[tokio::test]
