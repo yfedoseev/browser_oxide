@@ -212,10 +212,16 @@ pub fn create_runtime_with_signals(
 
     // Run caller-provided init scripts after built-in cleanup.
     // These run in order before any <script> tags parsed from HTML.
-    for (i, code) in options.init_scripts.iter().enumerate() {
-        let name: &'static str = Box::leak(format!("<init_script_{i}>").into_boxed_str());
-        if let Err(e) = runtime.execute_script(name, code.clone()) {
-            tracing::warn!(script_index = i, error = %e, "init script failed");
+    //
+    // Script name is `<anonymous>` (V8's eval-default tag) to avoid
+    // leaking browser_oxide identifiers in Error.stack frames if a
+    // site script overrides Error.prepareStackTrace and bypasses our
+    // filter. Our VM_TRACE_FINDINGS_2026_05_12.md previously captured
+    // `at h (<init_script_0>:51:34)` — Kasada literally saw the index.
+    // Both index and the `init_script` tag are now scrubbed.
+    for (_i, code) in options.init_scripts.iter().enumerate() {
+        if let Err(e) = runtime.execute_script("<anonymous>", code.clone()) {
+            tracing::warn!(error = %e, "init script failed");
         }
     }
 
