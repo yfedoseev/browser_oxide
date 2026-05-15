@@ -58,6 +58,7 @@ pub mod payload;
 pub mod sec_cpt;
 pub mod session;
 pub mod tea_cbc;
+pub mod v3_payload;
 
 pub use crypto::{build_v2_bestbuy, build_v2_dalphan, sha256_b64};
 pub use drain::{parse_drained, Drained, DRAIN_JS};
