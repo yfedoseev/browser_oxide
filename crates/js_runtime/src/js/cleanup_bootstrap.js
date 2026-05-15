@@ -163,6 +163,9 @@
                 "Serial", "SerialPort",
                 "NetworkInformation", "BatteryManager",
                 "IdleDetector", "EyeDropper",
+                // W1.5 — Chrome-only interfaces real Safari does NOT expose.
+                // PerimeterX `'X' in window` tells (research 05_PERIMETERX.md §6.3).
+                "UserActivation", "Scheduling",
                 "Sensor", "Accelerometer", "AbsoluteOrientationSensor",
                 "GravitySensor", "Gyroscope", "LinearAccelerationSensor",
                 "Magnetometer", "OrientationSensor", "RelativeOrientationSensor",
@@ -184,30 +187,25 @@
                 try { delete globalThis[k]; } catch (_e) {}
             }
 
-            // 2. Strip Navigator.prototype methods/getters that iOS doesn't have
+            // 2. Strip Navigator.prototype methods/getters that iOS doesn't have.
+            // Defense in depth: window_bootstrap.js W1.5 gate avoids
+            // installing these on iOS profiles, but we also delete here in
+            // case any prior pass re-installed them. Use `delete` (not
+            // redefine-with-undefined-getter) so `'X' in navigator` returns
+            // false — the descriptor must not be present.
             const _NavProto = globalThis.Navigator && globalThis.Navigator.prototype;
             if (_NavProto) {
                 for (const k of [
                     "bluetooth", "usb", "serial", "hid", "requestMIDIAccess",
                     "getBattery", "connection", "getInstalledRelatedApps",
                     "scheduling", "userActivation",
+                    // userAgentData absent on Safari (no UA-CH at all)
+                    "userAgentData",
+                    // deviceMemory absent on Safari
+                    "deviceMemory",
                 ]) {
                     try { delete _NavProto[k]; } catch (_e) {}
                 }
-                // userAgentData absent on Safari (no UA-CH at all)
-                try {
-                    Object.defineProperty(_NavProto, "userAgentData", {
-                        get: function() { return undefined; },
-                        configurable: true, enumerable: false,
-                    });
-                } catch (_e) {}
-                // deviceMemory absent on Safari
-                try {
-                    Object.defineProperty(_NavProto, "deviceMemory", {
-                        get: function() { return undefined; },
-                        configurable: true, enumerable: false,
-                    });
-                } catch (_e) {}
             }
 
             // 3. PaymentRequest.prototype.hasEnrolledInstrument is Chrome/Edge-only

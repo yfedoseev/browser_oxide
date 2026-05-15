@@ -65,6 +65,16 @@
         return fallback;
     };
 
+    // W1.5 — iOS surface gating. Real iOS Safari has no UA-Client-Hints,
+    // no `chrome` global, and no NetworkInformation / UserActivation /
+    // deviceMemory / scheduling / IdleDetector / getInstalledRelatedApps.
+    // PerimeterX checks `('chrome' in window) || ('userActivation' in
+    // navigator) || ('deviceMemory' in navigator) || ('connection' in
+    // navigator)` against an iOS UA — any positive hit adds ~50 risk
+    // points (research 05_PERIMETERX.md §6.3). These are Chrome-family
+    // APIs that must not appear on the iPhone 15 Pro Safari profile.
+    const _isMobileIOS = () => _p("device_class", "Desktop") === "MobileIOS";
+
     // ================================================================
     // Prototype-install helpers — kNoScriptId-safe layout
     // ================================================================
@@ -908,8 +918,11 @@
     _defNav('cookieEnabled', () => true);
     _defNav('hardwareConcurrency', () => _pInt("hardware_concurrency", 8));
     // navigator.deviceMemory is [SecureContext] — undefined on
-    // data:/http:/about:blank. Phase 7.
-    _defNav('deviceMemory', () => _secure() ? _pInt("device_memory", 8) : undefined);
+    // data:/http:/about:blank. Phase 7. Skip entirely on iOS (real
+    // Safari has no NavigatorDeviceMemory interface).
+    if (!_isMobileIOS()) {
+        _defNav('deviceMemory', () => _secure() ? _pInt("device_memory", 8) : undefined);
+    }
     _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
     _defNav('pdfViewerEnabled', () => true);
     Object.defineProperty(Navigator.prototype, 'webdriver', {
@@ -923,7 +936,11 @@
     _defNav('sayswho', () => undefined);
 
     // Object getters — stable references.
-    Object.defineProperty(_NavProto, 'connection', { get: () => _navConnection, enumerable: false, configurable: true });
+    // navigator.connection (NetworkInformation API) — Chrome-only. Real
+    // Safari has no `connection` on Navigator. Skip on iOS.
+    if (!_isMobileIOS()) {
+        Object.defineProperty(_NavProto, 'connection', { get: () => _navConnection, enumerable: false, configurable: true });
+    }
     Object.defineProperty(_NavProto, 'plugins', { get: () => _navPlugins, enumerable: false, configurable: true });
     Object.defineProperty(_NavProto, 'mimeTypes', { get: () => _navMimeTypes, enumerable: false, configurable: true });
     // Navigator getters. Properties marked /* SC */ are
@@ -954,8 +971,12 @@
         'hid', 'keyboard', 'locks', 'storage', 'serviceWorker', 'clipboard', 
         'geolocation', 'wakeLock');
     _defNav('mediaSession', () => _navMediaSession);
-    _defNav('scheduling', () => _navScheduling);
-    _defNav('userActivation', () => _navUserActivation);
+    // navigator.scheduling.isInputPending — Chrome-only. Real Safari has
+    // no Scheduling interface. navigator.userActivation — Chrome 88+ only.
+    if (!_isMobileIOS()) {
+        _defNav('scheduling', () => _navScheduling);
+        _defNav('userActivation', () => _navUserActivation);
+    }
 
     // Prototype methods.
     _defNavMethod('javaEnabled', function javaEnabled() { return false; });
@@ -1495,20 +1516,24 @@
     // chrome.runtime is ONLY present in extension contexts — absent on regular pages.
     // chrome.webstore was removed in Chrome 126.
     // Adding either is a classic bot detection signal (Kasada, Cloudflare, DataDome).
-    globalThis.chrome = {
-        app: {
-            isInstalled: false,
-            InstallState: {DISABLED:"disabled",INSTALLED:"installed",NOT_INSTALLED:"not_installed"},
-            RunningState: {CANNOT_RUN:"cannot_run",READY_TO_RUN:"ready_to_run",RUNNING:"running"},
-            // Chrome 147 exposes these functions on chrome.app (bot detectors check them):
-            getDetails: function getDetails() { return null; },
-            getIsInstalled: function getIsInstalled() { return false; },
-            installState: function installState(cb) { if (typeof cb === 'function') setTimeout(() => cb('not_installed'), 0); },
-            runningState: function runningState() { return 'cannot_run'; },
-        },
-        csi: _chromeCsi,
-        loadTimes: _chromeLoadTimes,
-    };
+    // iOS Safari MUST NOT have `window.chrome` — PerimeterX `('chrome' in window)`
+    // check (research 05_PERIMETERX.md §6.3) flags it instantly.
+    if (!_isMobileIOS()) {
+        globalThis.chrome = {
+            app: {
+                isInstalled: false,
+                InstallState: {DISABLED:"disabled",INSTALLED:"installed",NOT_INSTALLED:"not_installed"},
+                RunningState: {CANNOT_RUN:"cannot_run",READY_TO_RUN:"ready_to_run",RUNNING:"running"},
+                // Chrome 147 exposes these functions on chrome.app (bot detectors check them):
+                getDetails: function getDetails() { return null; },
+                getIsInstalled: function getIsInstalled() { return false; },
+                installState: function installState(cb) { if (typeof cb === 'function') setTimeout(() => cb('not_installed'), 0); },
+                runningState: function runningState() { return 'cannot_run'; },
+            },
+            csi: _chromeCsi,
+            loadTimes: _chromeLoadTimes,
+        };
+    }
 
     // --- Document visibility/hidden stubs ---
     Object.defineProperty(Document.prototype, 'visibilityState', { get() { return 'visible'; }, enumerable: false, configurable: true });
@@ -1559,7 +1584,12 @@
     };
     globalThis.navigator = _hunt(globalThis.navigator, 'navigator');
     globalThis.document = _hunt(globalThis.document, 'document');
-    globalThis.chrome = _hunt(globalThis.chrome, 'chrome');
+    // Only re-bind chrome where it was actually installed — assigning
+    // `undefined` would still create a `chrome` own property and trip
+    // PerimeterX's `('chrome' in window)` check on iOS.
+    if (!_isMobileIOS()) {
+        globalThis.chrome = _hunt(globalThis.chrome, 'chrome');
+    }
     globalThis.performance = _hunt(globalThis.performance, 'performance');
 
     // navigator.userAgentData (Client Hints API)
@@ -5134,7 +5164,9 @@
     // (https://html.spec.whatwg.org/multipage/interaction.html#useractivation).
     // Reports whether the user has interacted with the page (gestures).
     // Probed by Kasada bot1225 / various others.
-    if (typeof globalThis.UserActivation === 'undefined') {
+    // Chrome 88+ only — real Safari (any platform) has no UserActivation
+    // interface. Skip the class install AND the navigator binding on iOS.
+    if (!_isMobileIOS() && typeof globalThis.UserActivation === 'undefined') {
         class UserActivation {
             constructor() {
                 this._hasBeenActive = false;
@@ -6079,7 +6111,8 @@
     // (6) IdleDetector — User Idle Detection API (Chrome 94+)
     // Spec: https://wicg.github.io/idle-detection/
     // [SecureContext] — undefined on insecure contexts. Phase 7.
-    if (_secure() && typeof globalThis.IdleDetector === "undefined") {
+    // Chrome-only — real Safari has no IdleDetector. Skip on iOS.
+    if (!_isMobileIOS() && _secure() && typeof globalThis.IdleDetector === "undefined") {
         class IdleDetector extends EventTarget {
             constructor() {
                 super();
@@ -6414,8 +6447,8 @@
     // Chrome/Edge-only. Returns Promise<[]> on a fresh profile (no PWAs
     // installed). Absence under a Chrome UA is itself a tell — anti-bot
     // scripts can probe `'getInstalledRelatedApps' in navigator` against
-    // the UA family.
-    if (typeof navigator !== "undefined" && typeof navigator.getInstalledRelatedApps !== "function") {
+    // the UA family. Skip on iOS (Safari has no such method).
+    if (!_isMobileIOS() && typeof navigator !== "undefined" && typeof navigator.getInstalledRelatedApps !== "function") {
         _defNavMethod("getInstalledRelatedApps", function getInstalledRelatedApps() {
             return Promise.resolve([]);
         });

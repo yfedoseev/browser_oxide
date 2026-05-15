@@ -6786,6 +6786,20 @@ async fn check_ios_safari_surface() {
             res.deviceMemory_typeof = typeof navigator.deviceMemory;
             res.requestMIDIAccess_typeof = typeof navigator.requestMIDIAccess;
 
+            // W1.5 — PerimeterX UA-consistency check uses the `in` operator
+            // (research 05_PERIMETERX.md §6.3). The descriptor itself must
+            // not exist, not just return undefined — `typeof` returns
+            // "undefined" for both cases but `'X' in navigator` distinguishes
+            // them. This is the load-bearing check for wayfair/zillow/trulia/bloomberg.
+            res.chrome_in_window = ('chrome' in globalThis);
+            res.userActivation_in_navigator = ('userActivation' in navigator);
+            res.deviceMemory_in_navigator = ('deviceMemory' in navigator);
+            res.connection_in_navigator = ('connection' in navigator);
+            res.scheduling_in_navigator = ('scheduling' in navigator);
+            res.getInstalledRelatedApps_in_navigator = ('getInstalledRelatedApps' in navigator);
+            res.IdleDetector_in_window = ('IdleDetector' in globalThis);
+            res.UserActivation_in_window = ('UserActivation' in globalThis);
+
             // PaymentRequest hasEnrolledInstrument MUST be absent (Chrome-only)
             res.hasEnrolledInstrument_present = typeof PaymentRequest === "function"
                 ? typeof PaymentRequest.prototype.hasEnrolledInstrument !== "undefined"
@@ -6831,6 +6845,21 @@ async fn check_ios_safari_surface() {
     assert!(result.contains("\"connection_typeof\": \"undefined\""));
     assert!(result.contains("\"userAgentData_typeof\": \"undefined\""));
     assert!(result.contains("\"deviceMemory_typeof\": \"undefined\""));
+
+    // W1.5 — `in`-operator absences (PerimeterX UA-consistency check).
+    // These are the actual fail-on-true checks for wayfair/zillow/trulia/bloomberg.
+    for (key, label) in [
+        ("\"chrome_in_window\": false", "window.chrome must be absent"),
+        ("\"userActivation_in_navigator\": false", "navigator.userActivation must be absent"),
+        ("\"deviceMemory_in_navigator\": false", "navigator.deviceMemory must be absent"),
+        ("\"connection_in_navigator\": false", "navigator.connection must be absent"),
+        ("\"scheduling_in_navigator\": false", "navigator.scheduling must be absent"),
+        ("\"getInstalledRelatedApps_in_navigator\": false", "navigator.getInstalledRelatedApps must be absent"),
+        ("\"IdleDetector_in_window\": false", "globalThis.IdleDetector must be absent"),
+        ("\"UserActivation_in_window\": false", "globalThis.UserActivation must be absent"),
+    ] {
+        assert!(result.contains(key), "iOS surface: {label} (got: {result})");
+    }
 
     // PaymentRequest hasEnrolledInstrument must be absent on Safari
     assert!(
