@@ -178,6 +178,38 @@ challenge params (token/nonce/difficulty/verify_url) from the executed
 `handle_akamai_flow` so BMP sensor_data is not POSTed to a sec-cpt
 endpoint.
 
+## "Refresh homedepot fileHash" interim — CLOSED with evidence (2026-05-15)
+
+Hypothesis tested: homedepot's sensor is rejected only because its
+static `bazadebezolkohpepadr` fileHash (shuffle seed) rotates ~40 min
+and our registry is stale; capturing the live value would flip it
+(interim union 120→121, like bestbuy).
+
+Experiment: `capture_homedepot_bmak_from_challenge` →
+`/tmp/bmak_homedepot.js` (533 KB) → glizzy fileHash extractor.
+
+Result: **closed — interim does NOT apply.** The challenge page
+exposed exactly ONE script path (`/Wjv3muMJul/…/BqRSxpZwgB`), which is
+the **sec-cpt obfuscated self-solving bundle** (polyfill-laden;
+`grep -c` for `bazadebezolkohpepadr|sensor_data|sec-cpt|sec-if-cpt` =
+**0**). The glizzy extractor (designed for a plain bmak.js carrying a
+static fileHash literal) produces **no output** — there is no static
+fileHash because this is not a plain bmak.js; it's the self-solving
+bundle that computes everything internally.
+
+⇒ The doc-15 "stale fileHash" framing was a partial read of the sweep
+log. The FULL, evidence-verified truth: homedepot serves the sec-cpt
+bundle; it executes in our engine and POSTs a sensor whose computed
+output Akamai rejects — **the same obfuscated-self-solving-bundle
+multi-day-RE class as Kasada**, with NO static parameter to refresh.
+This is the final, complete homedepot characterization. Every
+remaining engine-tractable union blocker (Kasada canadagoose/hyatt/
+realtor + homedepot) is now confirmed to be exactly one class:
+*vendor obfuscated bundle executes correctly in-engine, computed
+output rejected* — resolvable only by multi-day bundle deobfuscation
+or byte-perfect fingerprint parity, and (Kasada) additionally gated on
+a Playwright-MCP A/B requiring a tool unavailable in this environment.
+
 ## Next experiment
 
 Run a live homedepot navigation with `BOXIDE_DEBUG_NAV=1` + script-
