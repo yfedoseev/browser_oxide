@@ -115,3 +115,37 @@ This correction matters: do not chase `kasada_session.rs` cd-token
 math as "the" fix (the cd token is cheap/derived; the gate is the
 `/tl` ML score). The cd-token `rst` fix this session was still correct
 hygiene but is not the canadagoose lever.
+
+## Engine-controllable ML inputs — now EXHAUSTED (2026-05-15 close-out)
+
+Systematic close-out of every engine-controllable input to Kasada's
+`/tl` server ML model (the canadagoose/hyatt/realtor gate):
+
+| ML input (weight) | State | Action this session |
+|---|---|---|
+| Audio FP (part of FP 30–40%) | was WRONG (140.05 vs 124.04) | **FIXED** → 123.97, committed |
+| Behavioral jerk (10–20%) | was WRONG (endpoint snap → jerk impulse) | **FIXED** → smoothstep decel, committed + regression test |
+| WebGL precision (part of FP) | already CORRECT | **VERIFIED** — `gpu.rs::standard_shader_precision()` returns proper per-GPU float/int-differentiated values ([127,127,23] float, [31,30,0] int); not the old all-127 stub. No demonstrated defect — deliberately NOT changed (inventing a change without a defect risks regression). |
+| TLS / JA3 / JA4 (10–15%) | already byte-perfect | verified prior sessions |
+| HTTP/2 (5–10%) | already byte-perfect | Chrome masp / Safari msap, settings verified prior |
+| Token state (5%) | cd-token rst corrected | committed (hygiene, not the lever) |
+| **IP reputation (20–30%)** | **structurally engine-irreducible** | datacenter-IP penalty; per [[proxy_not_the_problem]] the standing rule is to demand engine root-cause first — which is now **done**: every engine input is closed or verified-correct. |
+
+**Honest conclusion.** The engine-controllable surface for the Kasada
+universal blocks is now exhausted: two real fingerprint defects were
+found and fixed (audio, behavioral-jerk), the rest were verified
+already-correct. The residual canadagoose 429 is therefore dominated
+by the **IP-reputation weight (20–30%)** plus the holistic threshold —
+the one input no engine change can fully neutralize from a datacenter
+IP. This is exactly the [[proxy_not_the_problem]] tension, now
+*resolved in the rigorous direction*: we did NOT accept "needs proxy"
+prematurely; we exhausted the engine first. The decisive remaining
+experiment is the PLAN §5.2 / standing-memory **Playwright-MCP A/B
+from this same datacenter IP**: if MCP (real Chrome) passes canadagoose
+from this IP and we still 429 with all engine inputs now parity-correct,
+a residual engine delta remains and is findable; if MCP also 429s from
+this IP, canadagoose is genuinely IP-operational (like yelp/douyin) and
+out of engine scope. That A/B — not more speculative engine hardening —
+is the correct next action, and it requires the Playwright-MCP tool
+which is not available in this environment (flag for the user/next
+session).
