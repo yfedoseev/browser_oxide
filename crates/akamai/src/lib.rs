@@ -179,11 +179,63 @@ pub fn parse_bm_sz(cookie: &str) -> Option<i64> {
 /// Falls back to `(8_888_888, 8_888_888)` if parsing fails or the
 /// cookie isn't yet set (per glizzykingdreko's pre-first-request
 /// default note).
+/// Per-host fileHash registry — the LCG shuffle seed extracted from
+/// each Akamai-protected host's bmak.js. Without this seed, our v3
+/// envelope's shuffle step doesn't reverse correctly on Akamai's edge,
+/// so `_abck` never flips Favorable.
+///
+/// Values are captured offline via the reference extractor at
+/// `/tmp/akamai-v3-sensor-data-helper/src/extract_hash/index.js`
+/// (glizzykingdreko's Babel-AST walker, ~295 LOC). To capture a fresh
+/// value:
+///
+///   1. Fetch bmak.js from the target host (its URL is the `<script
+///      src="/akam/13/<hash>">` tag in the rendered HTML, or the deep
+///      obfuscated `<script src="/iBo5C/hYh/...">` per-tenant path).
+///   2. Run `cat bmak.js | node extract.js` against the extractor.
+///   3. Add the resulting 5-7 digit integer to this registry.
+///
+/// bmak.js rotates approximately every 24-48 hours per host, so this
+/// registry needs to be refreshed periodically. A Rust port of the
+/// Babel-AST walker (Agent 2 patch #2 V2) would automate this.
+///
+/// Returns `None` for hosts without a known fileHash; caller falls back
+/// to the cookieHash as a placeholder (Akamai will reject the shuffle
+/// step but the envelope shape stays correct).
+pub fn known_file_hash(host: &str) -> Option<u32> {
+    // Initially empty. Per-host values populate after live capture +
+    // glizzy-extractor run. The cookieHash placeholder fallback is
+    // structurally valid (envelope decodes) — only the wsl scoring is
+    // affected, which means 201 persists for now but eventually flips
+    // when real hash + clean cleartext combine.
+    match host {
+        // Example shape (filled in after capture):
+        //   "www.bestbuy.com" => Some(5_645_252),
+        //   "www.homedepot.com" => Some(3_619_139),
+        //   "www1.macys.com" => Some(3_224_898),
+        _ => None,
+    }
+}
+
 pub fn build_v3(
     cleartext: &str,
     _tenant_seed: i64,
     _counter_tuple: &str,
     bm_sz_cookie: Option<&str>,
+) -> String {
+    build_v3_for_host(cleartext, _tenant_seed, _counter_tuple, bm_sz_cookie, None)
+}
+
+/// Variant of `build_v3` that consults the per-host fileHash registry
+/// (`known_file_hash`) when `host` is provided. Used by the navigation
+/// pipeline; the bare `build_v3` is kept for back-compat with existing
+/// callers that don't yet pass host context.
+pub fn build_v3_for_host(
+    cleartext: &str,
+    _tenant_seed: i64,
+    _counter_tuple: &str,
+    bm_sz_cookie: Option<&str>,
+    host: Option<&str>,
 ) -> String {
     // Per glizzykingdreko/akamai-v3-sensor-data-helper:
     //   - shuffle (elementSwapping) uses fileHash extracted from bmak.js
@@ -196,13 +248,10 @@ pub fn build_v3(
     // (not the 6-CSV tuple of v2).
     let cookie_hash_i64 = bm_sz_cookie.and_then(parse_bm_sz).unwrap_or(8_888_888);
     let cookie_hash = cookie_hash_i64.unsigned_abs().min(u32::MAX as u64) as u32;
-    // fileHash from bmak.js (Agent 2's patch #2) — not yet implemented.
-    // Use the cookieHash as a placeholder so the shuffle step is at
-    // least deterministic. Akamai's edge will fail the reverse-shuffle
-    // (returning 201) until the real fileHash is wired in, but the
-    // envelope shape, JSON cleartext, and substitute-step crypto are
-    // all correct now.
-    let file_hash = cookie_hash;
+    // fileHash from bmak.js — look up in registry by host. Fall back
+    // to cookieHash placeholder (shuffle won't reverse on Akamai's
+    // edge, returning 201) until the per-host capture lands.
+    let file_hash = host.and_then(known_file_hash).unwrap_or(cookie_hash);
     crypto::build_v3_envelope(cleartext, cookie_hash, file_hash)
 }
 
@@ -443,16 +492,21 @@ pub fn build_sensor_data(
         accel_count: session.accel_count,
         orientation_count: 0,
     };
-    // W2.3 — v3 envelope: use the bm_sz-derived shuffle/substitute seeds
-    // when the cookie is observed; otherwise fall back to the pre-first-
-    // request default (8_888_888) per glizzykingdreko's spec. The DalphanDev
-    // constants we previously hardcoded matched bestbuy in April 2026 but
-    // have since rotated (seeds rotate every 4h with bm_sz Max-Age=14400).
-    build_v3(
+    // W2.3 — v3 envelope: use the bm_sz-derived cookieHash from
+    // session.bm_sz, and the per-host fileHash from `known_file_hash`
+    // (populates from offline glizzy-extractor captures). Falls back
+    // to cookieHash placeholder when no host-specific value is known
+    // — Akamai's edge still gets 201, but envelope shape + substitute
+    // step are correct.
+    let host = url::Url::parse(request_url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()));
+    build_v3_for_host(
         &cleartext,
         tenant_seed,
         &counter.as_field7(),
         session.bm_sz.as_deref(),
+        host.as_deref(),
     )
 }
 
