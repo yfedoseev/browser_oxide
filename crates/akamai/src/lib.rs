@@ -424,7 +424,12 @@ pub fn build_sensor_data(
     request_url: &str,
     tenant_seed: i64,
 ) -> String {
-    let cleartext = build_cleartext(profile, session, request_url);
+    // W2.3 patch #3 (Agent 2's load-bearing fix): emit v3 JSON
+    // cleartext so Akamai's edge can JSON.parse() the decrypted body
+    // and actually score it. Previously we emitted the v2 DalphanDev
+    // 58-element CSV which Akamai's v3 path failed to parse — that's
+    // why _abck never flipped Favorable across 8-POST retry loops.
+    let cleartext = v3_payload::build_cleartext_v3_json(profile, session, request_url);
     // Derive key_down / key_up from the session's drained key buffer.
     // kind=0 → down, kind=1 → up, kind=2 → press (counted on neither side
     // per spec — synthetic keypress events are deprecated and absent in
