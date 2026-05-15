@@ -202,7 +202,32 @@ pub fn parse_bm_sz(cookie: &str) -> Option<i64> {
 /// Returns `None` for hosts without a known fileHash; caller falls back
 /// to the cookieHash as a placeholder (Akamai will reject the shuffle
 /// step but the envelope shape stays correct).
+/// Runtime override for per-host fileHash via env var. Format:
+///   `BOXIDE_AKAMAI_FILE_HASHES=www.bestbuy.com=6249250,www.macys.com=2752023`
+///
+/// Useful when bmak.js rotates and we want to refresh without code
+/// changes — capture the fresh fileHash via `cargo test ...
+/// capture_<host>_bmak` + `node extract_hash`, then set the env var
+/// before the sweep run. Falls back to the static `known_file_hash`
+/// registry if the env var isn't set.
+fn env_override_file_hash(host: &str) -> Option<u32> {
+    let raw = std::env::var("BOXIDE_AKAMAI_FILE_HASHES").ok()?;
+    for entry in raw.split(',') {
+        let entry = entry.trim();
+        let (h, v) = entry.split_once('=')?;
+        if h == host {
+            return v.parse::<u32>().ok();
+        }
+    }
+    None
+}
+
 pub fn known_file_hash(host: &str) -> Option<u32> {
+    // Env var override comes first — lets fresh captures slot in
+    // without recompiling.
+    if let Some(h) = env_override_file_hash(host) {
+        return Some(h);
+    }
     // Per-host fileHash values captured from live bmak.js via glizzy's
     // extractor (Babel-AST walk). Values rotate every 24-48 hours per
     // host as Akamai redeploys bmak.js; expect periodic refresh.
