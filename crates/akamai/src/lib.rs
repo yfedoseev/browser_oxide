@@ -203,16 +203,16 @@ pub fn parse_bm_sz(cookie: &str) -> Option<i64> {
 /// to the cookieHash as a placeholder (Akamai will reject the shuffle
 /// step but the envelope shape stays correct).
 pub fn known_file_hash(host: &str) -> Option<u32> {
-    // Initially empty. Per-host values populate after live capture +
-    // glizzy-extractor run. The cookieHash placeholder fallback is
-    // structurally valid (envelope decodes) — only the wsl scoring is
-    // affected, which means 201 persists for now but eventually flips
-    // when real hash + clean cleartext combine.
+    // Per-host fileHash values captured from live bmak.js via glizzy's
+    // extractor (Babel-AST walk). Values rotate every 24-48 hours per
+    // host as Akamai redeploys bmak.js; expect periodic refresh.
+    //
+    // Captured 2026-05-14 via crates/browser/tests/capture_bmak_js.rs:
+    //   cat /tmp/bmak_<host>.js | node \
+    //     /tmp/akamai-v3-sensor-data-helper/src/extract_hash/index.js
     match host {
-        // Example shape (filled in after capture):
-        //   "www.bestbuy.com" => Some(5_645_252),
-        //   "www.homedepot.com" => Some(3_619_139),
-        //   "www1.macys.com" => Some(3_224_898),
+        "www.bestbuy.com" => Some(6_249_250),
+        // homedepot / macys / hotels captures pending — add when extracted.
         _ => None,
     }
 }
