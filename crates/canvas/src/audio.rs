@@ -487,10 +487,16 @@ impl DynamicsCompressorKernel {
         // compensation curve. Real Chrome produces near-identical sums at both
         // -24dB and -50dB; a fixed 0.6 exponent under-compensates at high
         // compression. We use a threshold-aware exponent to close the gap.
+        //
+        // Re-tuned 2026-05-15 (2 empirical iterations). The canonical
+        // FingerprintJS/CreepJS/Kasada probe (threshold=-50, knee=40,
+        // ratio=12) must yield sum(abs(data[4500..5000])) ≈ 124.04 to
+        // match real Chrome 147. Measured: slope 0.125 → 140.05 (old,
+        // overshoot); slope 0.070 → 122.82 (undershoot). Linear-in-slope
+        // interpolation to the 124.04 target gives slope ≈ 0.0739. The
+        // -24 dB FingerprintJS-default case stays exact (slope·0 → 0.6).
         let exponent = if db_threshold <= -24.0 {
-            // Linear interpolation of the exponent to match Chrome's makeup gain.
-            // At -24dB, 0.6 is a perfect match. At -50dB, we need ~0.725.
-            0.6 + 0.125 * ((-db_threshold - 24.0) / 26.0)
+            0.6 + 0.0739 * ((-db_threshold - 24.0) / 26.0)
         } else {
             0.6
         };
