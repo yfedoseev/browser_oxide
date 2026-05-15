@@ -248,8 +248,40 @@ pub fn mouse_trajectory_with_rng<R: Rng>(
         points.push(MousePoint { t_ms: t, x, y });
     }
 
-    // Snap final point to target (real humans land within target_w of center).
-    if let Some(last) = points.last_mut() {
+    // Land exactly on the target WITHOUT a jerk discontinuity. A
+    // single-sample snap (the prior implementation) teleports the last
+    // 8 ms sample onto `to`, producing an impulse in velocity and an
+    // unbounded spike in the 2nd derivative (jerk) at the endpoint —
+    // exactly the statistic BeCAPTCHA-Mouse / Kasada's behavioral
+    // scorer integrates over. Real human pointing instead *decelerates
+    // smoothly to a stop* on the target. We distribute the small
+    // residual (computed_end → to) across the last `tail` samples with
+    // a smoothstep weight s(u)=3u²−2u³, whose first derivative is zero
+    // at BOTH ends: zero added velocity at the splice (C¹-continuous
+    // join with the Σ-Λ tail) and zero velocity at arrival (a natural
+    // stop, not a max-velocity impact). Jerk stays bounded throughout.
+    if points.len() >= 2 {
+        let n = points.len();
+        let last = &points[n - 1];
+        let res_x = to.0 - last.x;
+        let res_y = to.1 - last.y;
+        // Tail length ~120 ms of motion (15 samples @ 8 ms), clamped to
+        // the available trajectory; long enough that the per-sample
+        // correction stays sub-pixel for typical residuals.
+        let tail = 15.min(n - 1);
+        let start = n - tail - 1;
+        for (k, p) in points.iter_mut().enumerate().skip(start) {
+            let u = (k - start) as f32 / tail as f32;
+            let s = u * u * (3.0 - 2.0 * u); // smoothstep, s(0)=0 s(1)=1
+            p.x += res_x * s;
+            p.y += res_y * s;
+        }
+        // Floating-point guarantee: the final sample is exactly `to`.
+        if let Some(last) = points.last_mut() {
+            last.x = to.0;
+            last.y = to.1;
+        }
+    } else if let Some(last) = points.last_mut() {
         last.x = to.0;
         last.y = to.1;
     }
@@ -620,6 +652,54 @@ mod tests {
         assert_eq!(a.len(), b.len());
         for (pa, pb) in a.iter().zip(b.iter()) {
             assert_eq!(pa, pb);
+        }
+    }
+
+    #[test]
+    fn mouse_trajectory_no_endpoint_jerk_spike() {
+        // Regression: the prior implementation snapped the final sample
+        // onto `to` in one 8 ms step, producing a velocity impulse and
+        // an unbounded jerk (3rd-derivative) spike at the endpoint —
+        // exactly what BeCAPTCHA-Mouse / Kasada's behavioral scorer
+        // integrates. A real decelerating stop has its SMALLEST
+        // per-sample steps at the end, never its largest. Assert the
+        // final step is not an outlier vs the interior step
+        // distribution, across many seeds and geometries.
+        for seed in 0..40u64 {
+            let p = BehaviorProfile {
+                seed,
+                ..BehaviorProfile::default()
+            };
+            let mut r = p.rng_for(2);
+            let tr = mouse_trajectory_with_rng((12.0, 30.0), (840.0, 510.0), 28.0, &p, &mut r);
+            assert!(tr.len() >= 8, "trajectory too short");
+            let step =
+                |a: &MousePoint, b: &MousePoint| ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt();
+            let steps: Vec<f32> = tr.windows(2).map(|w| step(&w[0], &w[1])).collect();
+            let n = steps.len();
+            let final_step = steps[n - 1];
+            // Median interior step as the scale reference (robust to the
+            // ballistic-phase max).
+            let mut sorted = steps.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median = sorted[n / 2];
+            let max_step = sorted[n - 1];
+            // A smooth stop: the last step must be modest — not a snap.
+            // Old behavior could make final_step == the whole residual
+            // (often ≫ median). Require it to stay within the normal
+            // motion envelope (≤ the max interior step, and not a wild
+            // multiple of the median).
+            assert!(
+                final_step <= max_step + 1e-3,
+                "seed {seed}: final step {final_step} exceeds max interior step {max_step} — endpoint snap/jerk spike"
+            );
+            assert!(
+                final_step <= median * 6.0 + 5.0,
+                "seed {seed}: final step {final_step} is a jerk outlier vs median {median}"
+            );
+            // And it still lands exactly on target.
+            let last = tr.last().unwrap();
+            assert!((last.x - 840.0).abs() < 1e-2 && (last.y - 510.0).abs() < 1e-2);
         }
     }
 
