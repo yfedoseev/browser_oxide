@@ -426,16 +426,25 @@ impl Page {
         }
 
         // W2.3 landed: build_sensor_data now routes through build_v3 with
-        // session.bm_sz-derived shuffle/substitute seeds. POST retries
-        // measured net-positive against the holistic sweep — N=8 union
-        // 120 vs N=1 union 119; the chrome/iPhone gains (bestbuy chrome
-        // + holding iphone count) more than offset the apparent
-        // iphone-homedepot regression which was variance, not POST-
-        // volume-driven. Per Hyper SDK's behavioral provider pattern
-        // (02_AKAMAI.md §5.3), POST up to N=8 with ~500ms gaps until
-        // _abck flips Favorable. Each iteration re-drains the
-        // behavioural buffer so accumulated events feed forward.
-        const MAX_POSTS: u32 = 8;
+        // session.bm_sz-derived shuffle/substitute seeds.
+        //
+        // POST count tuning history (all measurements within ±8 union
+        // variance noise floor per W4.3 characterization):
+        //   N=1 (1st run): 121 union (115/116/117/113)
+        //   N=8 retry:     120 union (117/116/117/112)
+        //   N=1 (2nd run): 119 union (114/116/113/112)
+        //
+        // Across runs the union variance is ±1 around 120. N=1 keeps
+        // network traffic per Akamai site to a single POST (clean
+        // single-shot behavior, lower detection volume) and lands on
+        // the upper edge of the variance band more often than N=8 in
+        // sample-of-three. Defaulting N=1.
+        //
+        // Keep the loop structure intact so MAX_POSTS becomes a single-
+        // line toggle if a future envelope improvement makes multi-POST
+        // credible again (e.g., per-attempt bm_sz refresh, dynamic key
+        // count accumulation between iterations).
+        const MAX_POSTS: u32 = 1;
         const POST_GAP_MS: u64 = 500;
         let mut last_state = akamai::AbckState::NeedsSensor;
         for attempt in 0..MAX_POSTS {
