@@ -355,6 +355,117 @@
         }
     } catch (_e) { /* profile-conditional installs are best-effort */ }
 
+    // -- sfc native-source masking (Kasada `/tl` "sfc" probe) --------
+    // Kasada's `/tl` sensor dumps `String(globalThis.<ctor>)` for a
+    // rotating list of Web Platform constructors/functions and feeds
+    // the result into the dominant ~30-40% browser-fingerprint ML
+    // weight. A FRESH decrypted /tl capture (2026-05-15, post console
+    // fix) showed 46 of 47 probed names leaking our polyfill source —
+    // raw `class Worker {…}` / `function(input, init){…}` bodies, or
+    // the wrong native name (constructors that extend our internal
+    // EventTarget reported `function EventTarget() { [native code] }`,
+    // `clearTimeout` reported `clearInterval`). Real Chrome returns
+    // `function <Name>() { [native code] }` for every one of these.
+    //
+    // This MUST run here, not in stealth_bootstrap.js: the constructors
+    // are defined by interfaces/shared_apis/streams/window/worker
+    // bootstraps that are concatenated AFTER stealth_bootstrap.js (and
+    // shared_apis/worker run at runtime, after the snapshot). This is
+    // the universal last pass — it runs always for the page (even from
+    // snapshot) and last for workers — and `_maskFunction` is still on
+    // globalThis here (the `internals` purge below removes it after).
+    try {
+        const _mask = globalThis._maskFunction;
+        if (typeof _mask === 'function') {
+            // De-alias Chrome-distinct pairs our impl points at one
+            // object. The fresh /tl `sfc` probe caught these: real
+            // Chrome has clearTimeout!==clearInterval,
+            // scroll!==scrollTo, DOMMatrix!==DOMMatrixReadOnly — each
+            // is its own named native, so a single shared object can't
+            // satisfy `String(globalThis[name])` for both names. We
+            // split the secondary into a distinct delegator/subclass
+            // (more Chrome-faithful; zero behavior change).
+            try {
+                if (typeof globalThis.clearTimeout === 'function'
+                    && globalThis.clearInterval === globalThis.clearTimeout) {
+                    const _ct = globalThis.clearTimeout;
+                    globalThis.clearInterval = function clearInterval(id) { return _ct(id); };
+                }
+                if (typeof globalThis.scrollTo === 'function'
+                    && globalThis.scroll === globalThis.scrollTo) {
+                    const _st = globalThis.scrollTo;
+                    globalThis.scroll = function scroll(x, y) { return _st.apply(this, arguments); };
+                }
+                if (typeof globalThis.DOMMatrix === 'function'
+                    && globalThis.DOMMatrixReadOnly === globalThis.DOMMatrix) {
+                    globalThis.DOMMatrixReadOnly = class DOMMatrixReadOnly extends globalThis.DOMMatrix {};
+                }
+            } catch (_e) {}
+
+            // chrome.app.* are raw-source JS stubs (Kasada `sbi` probe
+            // dumped `String(chrome.app.getDetails)` =
+            // "function getDetails() { return null; }"). Real Chrome:
+            // `function getDetails() { [native code] }`.
+            try {
+                const _ca = globalThis.chrome && globalThis.chrome.app;
+                if (_ca) {
+                    for (const _m of ['getDetails', 'getIsInstalled',
+                        'installState', 'runningState']) {
+                        if (typeof _ca[_m] === 'function') _mask(_ca[_m], _m);
+                    }
+                }
+            } catch (_e) {}
+            // The exact 47 names the fresh sensor probed, plus adjacent
+            // standard constructors Kasada rotates through — all are
+            // genuinely `[native code]` in real Chrome, so masking any
+            // that exist on this profile is correct (missing ones are a
+            // safe no-op via `_maskFunction`'s `if (!fn) return`).
+            // [globalKey, maskName]. maskName differs from globalKey
+            // only for the legacy webkit-prefixed aliases: in real
+            // Chrome `webkitAudioContext === AudioContext` (same object),
+            // so `String(webkitAudioContext)` is
+            // `function AudioContext() { [native code] }`. Masking them
+            // to their prefixed key would itself be a divergence.
+            const _sfcNames = [
+                ['webkitMediaStream', 'MediaStream'],
+                ['webkitAudioContext', 'AudioContext'],
+                ['webkitRTCPeerConnection', 'RTCPeerConnection'],
+                'fetch', 'clearTimeout', 'clearInterval', 'setTimeout',
+                'setInterval', 'TouchEvent', 'AudioContext', 'OffscreenCanvas',
+                'Bluetooth', 'StorageManager', 'scrollTo', 'scroll', 'scrollBy',
+                'Worker', 'SharedWorker', 'ServiceWorker', 'WorkerGlobalScope',
+                'DedicatedWorkerGlobalScope', 'FileReader', 'ImageBitmap',
+                'DOMMatrix', 'DOMMatrixReadOnly', 'PerformanceObserver',
+                'PerformanceEntry', 'ReportingObserver', 'ReadableStream',
+                'WritableStream', 'TransformStream', 'ReadableStreamDefaultReader',
+                'WritableStreamDefaultWriter', 'ReadableStreamDefaultController',
+                'BroadcastChannel', 'MessagePort', 'MessageChannel',
+                'EventSource', 'CompressionStream', 'DecompressionStream',
+                'Crypto', 'SubtleCrypto', 'CloseEvent', 'AbortController',
+                'AbortSignal', 'DOMException', 'URL', 'URLSearchParams',
+                'FormData', 'Blob', 'File', 'FileList', 'RTCPeerConnection',
+                'PressureObserver', 'InputDeviceCapabilities', 'MediaSession',
+                'Touch', 'TouchList', 'EyeDropper', 'XMLHttpRequest',
+                'XMLHttpRequestUpload', 'WebSocket', 'Notification', 'Image',
+                'Audio', 'Headers', 'Request', 'Response', 'createImageBitmap',
+                'structuredClone', 'queueMicrotask', 'reportError', 'atob',
+                'btoa', 'ResizeObserver', 'IntersectionObserver',
+                'MutationObserver', 'TextEncoder', 'TextDecoder', 'EventTarget',
+                'Event', 'CustomEvent', 'MediaStream', 'MediaStreamTrack',
+                'MediaRecorder', 'DOMRect', 'DOMRectReadOnly', 'DOMPoint',
+                'DOMPointReadOnly', 'DOMQuad',
+            ];
+            for (const _e of _sfcNames) {
+                try {
+                    const _key = Array.isArray(_e) ? _e[0] : _e;
+                    const _nm = Array.isArray(_e) ? _e[1] : _e;
+                    const _fn = globalThis[_key];
+                    if (typeof _fn === 'function') _mask(_fn, _nm);
+                } catch (_e2) {}
+            }
+        }
+    } catch (_e) { /* sfc masking is best-effort */ }
+
     const internals = [
         'Deno',
         'ops',

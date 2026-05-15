@@ -8179,3 +8179,81 @@ async fn kasada_console_methods_native_masked() {
     eprintln!("kasada-console-native: {result}");
     assert_eq!(result, "[]", "console methods leak non-native toString: {result}");
 }
+
+/// Kasada `sfc` probe: `String(globalThis.<ctor>)` for ~47 Web API
+/// constructors must be `function <Name>() { [native code] }`. A fresh
+/// decrypted /tl capture (2026-05-15) showed 46/47 leaking raw polyfill
+/// source (`class Worker {…}`) or the wrong native name (subclasses of
+/// our internal EventTarget reported `EventTarget`). Feeds the dominant
+/// 30-40% browser-FP weight. webkit-prefixed aliases must report their
+/// canonical unprefixed name (Chrome: `webkitAudioContext===AudioContext`).
+#[tokio::test]
+async fn kasada_sfc_constructors_native_masked() {
+    let result = check(
+        r#"(function(){
+            // [globalKey, expectedNameToken]
+            const probe = [
+              ["webkitMediaStream","MediaStream"],
+              ["webkitAudioContext","AudioContext"],
+              ["webkitRTCPeerConnection","RTCPeerConnection"],
+              ["fetch","fetch"],["clearTimeout","clearTimeout"],
+              ["TouchEvent","TouchEvent"],["OffscreenCanvas","OffscreenCanvas"],
+              ["Bluetooth","Bluetooth"],["StorageManager","StorageManager"],
+              ["scrollTo","scrollTo"],["scroll","scroll"],
+              ["scrollBy","scrollBy"],["clearInterval","clearInterval"],
+              ["setTimeout","setTimeout"],["setInterval","setInterval"],
+              ["DOMMatrixReadOnly","DOMMatrixReadOnly"],
+              ["Worker","Worker"],
+              ["SharedWorker","SharedWorker"],["ServiceWorker","ServiceWorker"],
+              ["WorkerGlobalScope","WorkerGlobalScope"],
+              ["DedicatedWorkerGlobalScope","DedicatedWorkerGlobalScope"],
+              ["FileReader","FileReader"],["ImageBitmap","ImageBitmap"],
+              ["DOMMatrix","DOMMatrix"],["PerformanceObserver","PerformanceObserver"],
+              ["PerformanceEntry","PerformanceEntry"],
+              ["ReportingObserver","ReportingObserver"],
+              ["ReadableStream","ReadableStream"],["WritableStream","WritableStream"],
+              ["TransformStream","TransformStream"],
+              ["ReadableStreamDefaultReader","ReadableStreamDefaultReader"],
+              ["WritableStreamDefaultWriter","WritableStreamDefaultWriter"],
+              ["BroadcastChannel","BroadcastChannel"],["MessagePort","MessagePort"],
+              ["MessageChannel","MessageChannel"],["EventSource","EventSource"],
+              ["CompressionStream","CompressionStream"],
+              ["DecompressionStream","DecompressionStream"],["Crypto","Crypto"],
+              ["CloseEvent","CloseEvent"],["AbortController","AbortController"],
+              ["AbortSignal","AbortSignal"],["DOMException","DOMException"],
+              ["URL","URL"],["FormData","FormData"],["Blob","Blob"],
+              ["File","File"],["PressureObserver","PressureObserver"],
+              ["InputDeviceCapabilities","InputDeviceCapabilities"],
+              ["MediaSession","MediaSession"],["Touch","Touch"],
+              ["TouchList","TouchList"],["EyeDropper","EyeDropper"]
+            ];
+            const leaks = [];
+            for (const [k, want] of probe) {
+              const fn = globalThis[k];
+              if (typeof fn !== "function") continue; // profile-gated: ok
+              const s = Function.prototype.toString.call(fn);
+              const expect = "function " + want + "() { [native code] }";
+              if (s !== expect) leaks.push(k + ":" + s.slice(0, 48));
+            }
+            // chrome.app.* (Kasada `sbi` probe) must be native too.
+            const ca = (globalThis.chrome && globalThis.chrome.app) || null;
+            if (ca) {
+              for (const m of ["getDetails","getIsInstalled","installState","runningState"]) {
+                const fn = ca[m];
+                if (typeof fn !== "function") continue;
+                const s = Function.prototype.toString.call(fn);
+                if (s !== "function " + m + "() { [native code] }") {
+                  leaks.push("chrome.app."+m+":"+s.slice(0,48));
+                }
+              }
+            }
+            return JSON.stringify(leaks);
+        })()"#,
+    )
+    .await;
+    eprintln!("kasada-sfc-native: {result}");
+    assert_eq!(
+        result, "[]",
+        "sfc constructors leak non-native/wrong-name toString: {result}"
+    );
+}
