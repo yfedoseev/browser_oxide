@@ -54,6 +54,21 @@
 
     for (const name of _rest) {
         if (!(name in globalThis)) {
+            // Lowercase IDL identifiers are properties/functions in the
+            // Web spec (structuredClone, queueMicrotask, getComputedStyle,
+            // customElements, devicePixelRatio, etc.). Real Chrome
+            // exposes them as Window globals — calling `new` on a
+            // function throws `TypeError: X is not a constructor`,
+            // NOT `Illegal constructor`. The Kasada `nppm` probe
+            // captured our stub error and used it as a headless signal.
+            // Skip stubbing them as classes; if they aren't installed
+            // by a later bootstrap (e.g. structured_clone.js), they
+            // remain undefined and `typeof X === "undefined"` matches
+            // what a hardened production page sees on Chrome without
+            // the relevant feature.
+            const first = name.charCodeAt(0);
+            const isUpper = first >= 65 && first <= 90;
+            if (!isUpper) continue;
             _define(name, _stub(name));
         }
     }

@@ -326,6 +326,10 @@
             },
             enumerable: false, configurable: true,
         });
+        // Mask the per-instance item/namedItem so toString returns
+        // `function NAME() { [native code] }` instead of leaking source.
+        // Kasada blob field `npn1` captured the unmasked source string.
+        try { _maskAsNative(p, 'item', 'namedItem'); } catch (_) {}
     });
 
     const _navMimeTypes = Object.create(_MimeTypeArrayProto);
