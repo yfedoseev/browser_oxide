@@ -5129,6 +5129,56 @@ async fn kasada_hyatt_only() {
     antibot_smoke("KASADA-hyatt-RETEST", "https://www.hyatt.com/", profile).await;
 }
 
+/// DECISIVE clean-production hyatt measurement. `antibot_smoke` has
+/// TWO non-production confounds: (1) no humanize.js → the documented
+/// Kasada /tl behavioral weight (10-20%) is EMPTY, (2) it injects
+/// FN_TRACE_INIT — the §9.3 Function-trace wrapper that is itself
+/// Kasada-detectable. Every prior "hyatt ceiling" ran through both.
+/// This uses the PRODUCTION `Page::navigate` path (humanize.js
+/// injected, NO trace wrapper) — the spd/dip/§9.3 measurement-
+/// instrument-vs-production discipline applied to the headline
+/// conclusion. If hyatt renders real content here, the prior ceiling
+/// was a test-instrument artifact.
+#[tokio::test]
+#[ignore = "network: decisive clean-production hyatt (humanized, no FN_TRACE)"]
+async fn kasada_hyatt_clean_production() {
+    let profile = stealth::presets::chrome_130_macos();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        Page::navigate("https://www.hyatt.com/", profile, 3),
+    )
+    .await
+    {
+        Ok(Ok(mut p)) => {
+            let final_url = p.url().to_string();
+            let html_len = p
+                .evaluate(
+                    "document.documentElement ? document.documentElement.outerHTML.length : 0",
+                )
+                .unwrap_or_default()
+                .parse::<usize>()
+                .unwrap_or(0);
+            let body_len = p
+                .evaluate("document.body ? document.body.textContent.length : 0")
+                .unwrap_or_default()
+                .parse::<usize>()
+                .unwrap_or(0);
+            let title = p.title();
+            println!(
+                "KASADA-hyatt-CLEAN-PROD: final_url={final_url} html={html_len} body={body_len} title={title:?}"
+            );
+            // The 756-byte Kasada interstitial is the block signature;
+            // a real hyatt page is tens-to-hundreds of KB.
+            println!(
+                "KASADA-hyatt-CLEAN-PROD: verdict={}",
+                if html_len > 5000 { "RENDERED (ceiling was instrument artifact!)" } else { "still blocked (ceiling robust)" }
+            );
+        }
+        Ok(Err(e)) => println!("KASADA-hyatt-CLEAN-PROD: nav error: {e}"),
+        Err(_) => println!("KASADA-hyatt-CLEAN-PROD: 300s timeout"),
+    }
+}
+
 #[tokio::test]
 #[ignore = "network: 2 alt-Kasada targets to isolate IP-gate vs fingerprint"]
 async fn kasada_alt_targets() {
