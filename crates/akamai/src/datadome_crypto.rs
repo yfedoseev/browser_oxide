@@ -81,6 +81,183 @@ pub fn cid_prng_seed(cid: &str) -> i32 {
     CID_PRNG_CONSTANT ^ custom_hash(cid)
 }
 
+/// Faithful port of `_createPrng`'s returned closure (stateful).
+/// 3 output bytes per `_mixInt` round; result = `state >> (16 - 8*round)`
+/// (JS signed `>>`); optional `result ^= --saltState` when `use_alt`;
+/// `&255`; a 1-deep cache when `flag=true`.
+pub struct DdPrng {
+    state: i32,
+    round: i32,
+    salt_state: i32,
+    use_alt: bool,
+    cache: Option<u8>,
+}
+
+impl DdPrng {
+    pub fn new(seed: i32, salt: i32, use_alt: bool) -> Self {
+        Self {
+            state: seed,
+            round: -1,
+            salt_state: salt,
+            use_alt,
+            cache: None,
+        }
+    }
+
+    /// One PRNG byte. `flag=true` arms a 1-deep cache (the next call
+    /// returns the same byte) — used exactly once for the `}` terminator.
+    pub fn next(&mut self, flag: bool) -> u8 {
+        if let Some(c) = self.cache.take() {
+            return c;
+        }
+        self.round += 1;
+        if self.round > 2 {
+            self.state = mix_int(self.state);
+            self.round = 0;
+        }
+        let shift = 16 - 8 * self.round; // 16, 8, 0
+        let mut result = self.state >> shift; // JS signed >>
+        if self.use_alt {
+            self.salt_state = self.salt_state.wrapping_sub(1); // pre-decrement
+            result ^= self.salt_state;
+        }
+        let byte = (result & 255) as u8;
+        if flag {
+            self.cache = Some(byte);
+        }
+        byte
+    }
+}
+
+/// `_utf8Xor`: UTF-8 encode `s`, then XOR each byte with `prng.next(false)`.
+fn utf8_xor(s: &str, prng: &mut DdPrng, out: &mut Vec<u8>) {
+    for b in s.as_bytes() {
+        out.push(b ^ prng.next(false));
+    }
+}
+
+/// JSON-stringify a scalar exactly as JS `JSON.stringify` would for the
+/// types DataDome signals use (string / integer / bool). serde_json
+/// matches JS for these (ASCII strings, no float exponent edge cases in
+/// the signal map). Strings get quoted+escaped; numbers/bools bare.
+fn js_json(v: &DdValue) -> String {
+    match v {
+        DdValue::Str(s) => serde_json::to_string(s).unwrap_or_default(),
+        DdValue::Int(n) => n.to_string(),
+        DdValue::Bool(b) => b.to_string(),
+    }
+}
+
+/// A DataDome signal value (the only types `_addSignal` accepts).
+#[derive(Debug, Clone)]
+pub enum DdValue {
+    Str(String),
+    Int(i64),
+    Bool(bool),
+}
+
+/// Full interstitial-path encryptor. Construct with an explicit salt
+/// for determinism / byte-parity testing (the interstitial path also
+/// supplies the salt externally). `hash` and `cid` are the
+/// `dd={...}` interstitial fields.
+pub struct DdEncryptor {
+    cid: String,
+    salt: i32,
+    prng: DdPrng,
+    buffer: Vec<u8>,
+}
+
+impl DdEncryptor {
+    pub fn new_interstitial(hash: &str, cid: &str, salt: i32) -> Self {
+        let seed = main_prng_seed(hash);
+        Self {
+            cid: cid.to_string(),
+            salt,
+            // The main prng is the one created while `_useAlt == true`.
+            prng: DdPrng::new(seed, salt, true),
+            buffer: Vec::new(),
+        }
+    }
+
+    /// `_addSignal`: skip `xt1` / empty key. startByte =
+    /// `prng() ^ (buffer.empty ? 123 : 44)`, then xor'd key, `:`, value.
+    pub fn add(&mut self, key: &str, value: DdValue) {
+        if key.is_empty() || key == "xt1" {
+            return;
+        }
+        let key_str = serde_json::to_string(key).unwrap_or_default();
+        let val_str = js_json(&value);
+        let marker: u8 = if self.buffer.is_empty() { 123 } else { 44 }; // '{' / ','
+        let start = self.prng.next(false) ^ marker;
+        self.buffer.push(start);
+        utf8_xor(&key_str, &mut self.prng, &mut self.buffer);
+        let sep = 58u8 ^ self.prng.next(false); // ':'
+        self.buffer.push(sep);
+        utf8_xor(&val_str, &mut self.prng, &mut self.buffer);
+    }
+
+    /// `_buildPayload` + `_encodePayload`. Consumes the accumulated
+    /// buffer; returns the custom-base64 payload string.
+    pub fn finish(mut self) -> String {
+        let cid_seed = cid_prng_seed(&self.cid);
+        // cidPrng is created after the main prng → `_useAlt` is false.
+        let mut cid_prng = DdPrng::new(cid_seed, self.salt, false);
+        let mut out: Vec<u8> = Vec::with_capacity(self.buffer.len() + 1);
+        for &b in &self.buffer {
+            out.push(b ^ cid_prng.next(false));
+        }
+        // Terminator: 125 ('}') ^ prng(true) ^ cidPrng().
+        let term = 125u8 ^ self.prng.next(true) ^ cid_prng.next(false);
+        out.push(term);
+        encode_payload(&out, self.salt)
+    }
+}
+
+/// `_encodePayload`: 3-byte groups → 4×6-bit, with a per-byte
+/// decrementing-salt XOR (`255 & --n ^ byte`), custom-base64 encoded,
+/// padding trimmed by `len % 3`.
+fn encode_payload(bytes: &[u8], salt: i32) -> String {
+    let mut n = salt;
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len() / 3 * 4 + 4);
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        n = n.wrapping_sub(1);
+        let b0 = ((255 & n) as u8) ^ bytes[i];
+        n = n.wrapping_sub(1);
+        let b1 = ((255 & n) as u8) ^ bytes[i + 1];
+        n = n.wrapping_sub(1);
+        let b2 = ((255 & n) as u8) ^ bytes[i + 2];
+        let chunk = ((b0 as i32) << 16) | ((b1 as i32) << 8) | (b2 as i32);
+        out.push(encode_6bits((chunk >> 18) & 63));
+        out.push(encode_6bits((chunk >> 12) & 63));
+        out.push(encode_6bits((chunk >> 6) & 63));
+        out.push(encode_6bits(chunk & 63));
+        i += 3;
+    }
+    // Trailing 1 or 2 bytes (mod) — JS still processes the partial group
+    // (reading past-end as undefined→NaN→0 after `& byte`), then trims
+    // `3 - mod` output chars. We mirror by processing remaining bytes as
+    // 0-filled then trimming.
+    let rem = bytes.len() - i;
+    if rem > 0 {
+        let mut g = [0u8; 3];
+        for (k, slot) in g.iter_mut().enumerate() {
+            n = n.wrapping_sub(1);
+            let src = if i + k < bytes.len() { bytes[i + k] } else { 0 };
+            *slot = ((255 & n) as u8) ^ src;
+        }
+        let chunk = ((g[0] as i32) << 16) | ((g[1] as i32) << 8) | (g[2] as i32);
+        out.push(encode_6bits((chunk >> 18) & 63));
+        out.push(encode_6bits((chunk >> 12) & 63));
+        out.push(encode_6bits((chunk >> 6) & 63));
+        out.push(encode_6bits(chunk & 63));
+        // mod = rem; drop (3 - rem) chars.
+        out.truncate(out.len() - (3 - rem));
+    }
+    // Custom alphabet codepoints are already ASCII-safe bytes.
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +302,71 @@ mod tests {
         let h = "14D062F60A4BDE8CE8647DFC720349";
         assert_eq!(main_prng_seed(h), main_prng_seed(h));
         assert_ne!(main_prng_seed(h), cid_prng_seed("somecid"));
+    }
+
+    #[test]
+    fn prng_first_round_shifts_hand_traced() {
+        // seed = mix_int(1) = 270369 = 0x00042021. Rounds 0,1,2 (before
+        // any re-mix) shift by 16,8,0 then &255:
+        //   >>16 = 0x0004 → 4
+        //   >>8  = 0x0420 → 0x20 = 32
+        //   >>0  = 0x42021 → 0x21 = 33
+        let mut p = DdPrng::new(270_369, 0, false);
+        assert_eq!(p.next(false), 4);
+        assert_eq!(p.next(false), 32);
+        assert_eq!(p.next(false), 33);
+    }
+
+    #[test]
+    fn prng_use_alt_xors_predecremented_salt() {
+        // useAlt: result ^= --saltState. saltState 1000 → 999;
+        // first result 4 ^ 999 = 0x3E3; &255 = 0xE3 = 227.
+        let mut p = DdPrng::new(270_369, 1000, true);
+        assert_eq!(p.next(false), 227);
+    }
+
+    #[test]
+    fn prng_cache_repeats_on_flag() {
+        // flag=true arms a 1-deep cache: the NEXT call returns the same
+        // byte without advancing state.
+        let mut p = DdPrng::new(270_369, 0, false);
+        // next(true): round 0 → byte 4, cache armed (round stays 0).
+        let a = p.next(true);
+        // cache replay: returns 4 again WITHOUT advancing round.
+        let b = p.next(false);
+        assert_eq!(a, b, "flag cache must repeat the byte");
+        assert_eq!(a, 4);
+        // Stream resumes at round 1 (byte 32) — the cached call did not
+        // consume a round.
+        assert_eq!(p.next(false), 32);
+    }
+
+    #[test]
+    fn encryptor_deterministic_for_pinned_salt() {
+        // Same (hash,cid,salt,signals) ⇒ identical payload. Salt pinned
+        // so the result is fully deterministic (interstitial path
+        // supplies an explicit salt; byte-parity vs the Node reference
+        // is a separate fixed-salt-fixture test, see doc 18 §Port-plan).
+        let mk = || {
+            let mut e = DdEncryptor::new_interstitial(
+                "14D062F60A4BDE8CE8647DFC720349",
+                "test-cid-abc",
+                424242,
+            );
+            e.add("iaG6RD", DdValue::Str("1.16.2".into()));
+            e.add("PUuTxz", DdValue::Int(0));
+            e.add("flagk", DdValue::Bool(true));
+            e.add("xt1", DdValue::Int(9)); // must be skipped
+            e.finish()
+        };
+        let a = mk();
+        let b = mk();
+        assert_eq!(a, b, "encryptor must be deterministic for a pinned salt");
+        assert!(!a.is_empty());
+        // 'xt1' skipped ⇒ only 3 signals encoded; sanity on length
+        // (3 signals → buffer grows; payload is base64-ish, len > 0).
+        assert!(a.len() >= 8, "payload implausibly short: {a:?}");
+        // Custom-base64 output is ASCII printable.
+        assert!(a.bytes().all(|c| (45..=122).contains(&c)));
     }
 }
