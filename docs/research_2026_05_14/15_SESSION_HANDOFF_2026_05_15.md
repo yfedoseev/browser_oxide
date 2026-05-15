@@ -35,7 +35,48 @@ Chrome's +5: `airbnb, apple, bestbuy, primevideo, ya.ru`. **`bestbuy`
 is a direct, attributable W1.3 `_abck` Akamai win.** Zero regressions
 (0 sites lost on any profile).
 
-### Why the union didn't move (this is expected, not a failure)
+### The flat union HIDES real composition progress (corrected analysis)
+
+Final 4-profile sweep complete. The 6 universal blocks **changed
+membership** — the W1 work cracked two of the hardest ones:
+
+| Pre-W1 blocks | Post-W1 blocks |
+|---|---|
+| canadagoose | canadagoose |
+| hyatt | hyatt |
+| realtor | realtor |
+| **udemy** ✅ cracked | douyin |
+| douyin | **homedepot** ⚠ regressed (operational) |
+| **wildberries** ✅ cracked | **yelp** ⚠ regressed (investigate) |
+
+- **udemy CRACKED** — was the hardest CF Managed-Challenge universal
+  block. Now L3-RENDERS on the iPhone profile. This is **PLAN.md
+  finding #8 confirmed**: "Cloudflare iOS gap = Safari TLS gap; fixing
+  #7 (Safari iOS TLS) flips udemy/economist/quora." The W1.6–W1.10
+  Safari iOS TLS + W1.5 iOS-surface work did exactly that.
+- **wildberries CRACKED** — now passes on iPhone too.
+- **homedepot regressed** — diagnosis from the sweep log: sensor_data
+  POST returns `status=201` but `_abck` stays `NeedsSensor` forever
+  (`POST attempt 1/1 → NeedsSensor` loop). The W1.3 parser is working
+  correctly (it *correctly* detects NeedsSensor); Akamai is *rejecting
+  our sensor payload* because homedepot's `fileHash` rotates ≈ every
+  40 min and our static registry value is stale → wrong v3 envelope
+  encryption. **This is operational data-staleness, NOT an engine
+  capability regression** (bestbuy, same Akamai stack, flipped GREEN
+  this session). Fix = live fileHash extraction via oxc_ast (handoff
+  item 4 / W2.2-adjacent), ~1 week, already scoped.
+- **yelp regressed** — DataDome `t:'bv'`; was passing, now in the
+  block set. Could be DataDome key rotation or ±2 sweep variance.
+  Needs the §5.2 Playwright-MCP A/B re-check from PLAN.md.
+
+Net union 120→120, but **2 genuine universal-block cracks** (udemy is
+a marquee win) offset by 1 operational regression (homedepot stale
+fileHash — not an engine gap) + 1 to-investigate (yelp). With a fresh
+homedepot fileHash the union is **121**; with yelp resolved, **122** —
+PLAN.md's 122–124 projection is now in reach and udemy (the hardest
+CF case) is *already* done.
+
+### Why the raw union number didn't move
 
 The union ceiling is held by the **6 universal blocks**, which fail on
 *every* profile so per-profile robustness gains are routing-redundant:

@@ -3550,6 +3550,95 @@ async fn kasada_canadagoose_diagnostic() {
     .await;
 }
 
+/// CLEAN sentinel-identity probe — NO Function wrapper (avoids the
+/// §9.3 trace-harness artifact). Only an Object.prototype trap on the
+/// Kasada sentinel. Records, for every `obj[sentinel]=…` SET, the
+/// object's identity-tag; for every sentinel GET that misses (object
+/// has no own sentinel), whether that object was EVER tagged. In
+/// production (no Function wrapper) a `MISS everTaggedId:-1` on a
+/// function means the engine handed Kasada a different function
+/// instance than the one it tagged — the real identity bug. If there
+/// are 0 misses, the production sentinel loss is NOT lost-identity
+/// (→ cascading-value-divergence regime; see research doc 14).
+#[tokio::test]
+#[ignore = "network: clean Kasada sentinel-identity probe (no Fn wrapper)"]
+async fn kasada_sentinel_identity_clean() {
+    use browser::Page;
+    use std::time::Duration;
+
+    let init = r#"
+        (function(){
+            var _S='unjzomuybtbyyhwwkdpkxomylnab';
+            globalThis.__sTags=[]; globalThis.__sMiss=[];
+            var seq=0;
+            try {
+                Object.defineProperty(Object.prototype,_S,{
+                    configurable:true,
+                    set:function(v){
+                        var id=++seq, desc='?', ctor='?', isFn=false, src='';
+                        try{desc=Object.prototype.toString.call(this);}catch(e){}
+                        try{ctor=this&&this.constructor&&this.constructor.name;}catch(e){}
+                        try{isFn=typeof this==='function';}catch(e){}
+                        try{if(isFn)src=Function.prototype.toString.call(this).slice(0,80);}catch(e){}
+                        if(globalThis.__sTags.length<80)
+                            globalThis.__sTags.push({id:id,desc:desc,ctor:ctor,isFn:isFn,src:src});
+                        try{Object.defineProperty(this,'__sId',{value:id,configurable:true});}catch(e){}
+                        try{Object.defineProperty(this,_S,{value:v,writable:true,configurable:true});}catch(e){}
+                    },
+                    get:function(){
+                        if(globalThis.__sMiss.length<80){
+                            var desc='?', ctor='?', src='';
+                            try{desc=Object.prototype.toString.call(this);}catch(e){}
+                            try{ctor=this&&this.constructor&&this.constructor.name;}catch(e){}
+                            try{if(typeof this==='function')src=Function.prototype.toString.call(this).slice(0,80);}catch(e){}
+                            var was=-1; try{was=(this&&this.__sId!==undefined)?this.__sId:-1;}catch(e){}
+                            globalThis.__sMiss.push({missOn:desc,ctor:ctor,everTaggedId:was,src:src});
+                        }
+                        return undefined;
+                    }
+                });
+            } catch(e){ globalThis.__sErr=String(e); }
+        })();
+    "#;
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(120),
+        Page::navigate_with_init(
+            "https://www.canadagoose.com/",
+            stealth::presets::chrome_130_macos(),
+            3,
+            vec![init.to_string()],
+        ),
+    )
+    .await;
+
+    match page {
+        Ok(Ok(mut p)) => {
+            for _ in 0..25 {
+                let _ = p.evaluate("0");
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            let dump = p
+                .evaluate(
+                    r#"JSON.stringify({
+                        err: globalThis.__sErr||null,
+                        tags: (globalThis.__sTags||[]).length,
+                        miss: (globalThis.__sMiss||[]).length,
+                        tagSample: (globalThis.__sTags||[]).slice(0,8),
+                        missSample: (globalThis.__sMiss||[]).slice(0,12),
+                        missTaggedElsewhere: (globalThis.__sMiss||[])
+                            .filter(function(m){return m.everTaggedId>0;}).length,
+                    })"#,
+                )
+                .unwrap_or_else(|e| format!("ERR: {e}"));
+            println!("=== CLEAN SENTINEL PROBE (no Fn wrapper) ===\n{dump}");
+            std::fs::write("kasada_sentinel_clean.json", &dump).ok();
+        }
+        Ok(Err(e)) => println!("nav error: {e}"),
+        Err(_) => println!("nav timeout"),
+    }
+}
+
 /// T2C — capture the actual body of Kasada's error POST to
 /// `reporting.cdndex.io/error`. The 67 KB blob is what Kasada's
 /// JS-VM serialises when it can't complete the /tl handshake; it
@@ -6075,55 +6164,79 @@ async fn kasada_vm_dispatcher_trace() {
             // OK for performance — we just won't trace those.
             try { globalThis.Function = _wrappedFn; } catch (_) {}
 
-            // --- Sentinel pinpoint instrumentation (2026-05-15) ---
-            // The persistent throw is `eval(<anonymous>:3:82)` reading
-            // `X.unjzomuybtbyyhwwkdpkxomylnab` on undefined. Capture every
-            // eval'd source that mentions the sentinel so we can see the
-            // EXACT receiver expression Kasada uses, plus whether the
-            // receiver evaluates to undefined in our engine. This converts
-            // "some object loses identity" into "expression E is undefined
-            // at eval time" — a targeted, fixable signal.
-            globalThis.__sentinelEvals = [];
+            // --- Sentinel property trap (2026-05-15, refined) ---
+            // The eval-source interceptor was a dead end (the sentinel
+            // name is reconstructed from the XOR'd bytecode string table,
+            // never a literal in eval text). Instead trap the sentinel
+            // PROPERTY on Object.prototype: Kasada assigns
+            // `fn[sentinel] = {I:fn,E,Q,k}` via a normal member store.
+            // When `fn` has no own sentinel that store hits this setter,
+            // which records the tagged object's identity, then installs a
+            // real own data property so the value round-trips. Later the
+            // VM reads `fn[sentinel]`; if it gets a DIFFERENT fn instance
+            // (our engine handed out a fresh wrapper) the own prop is
+            // absent → undefined → the closure-identity check throws.
+            //
+            // We tag each recorded object with a monotonic id and also
+            // remember it in a Weak-keyed registry so the read side can
+            // report "tagged as #N" vs "untagged" — pinpointing exactly
+            // which object identity we fail to preserve.
+            globalThis.__sentinelTags = [];
+            globalThis.__sentinelReads = [];
             const _SENT = 'unjzomuybtbyyhwwkdpkxomylnab';
             try {
-                const _origEval = globalThis.eval;
-                const _hookedEval = function eval(src) {
-                    if (typeof src === 'string' && src.indexOf(_SENT) !== -1) {
-                        let receiverProbe = 'n/a';
-                        try {
-                            // Pull the token immediately before `.<SENT>` —
-                            // that is the receiver expression. Then eval JUST
-                            // that sub-expression in the same scope to see
-                            // what it resolves to (undefined ⇒ the bug site).
-                            const m = src.match(
-                                /([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])*)\s*\.\s*unjzomuybtbyyhwwkdpkxomylnab/);
-                            if (m && m[1]) {
-                                let v;
-                                try { v = _origEval.call(this, m[1]); }
-                                catch (e) { v = '<throws: ' + e.message + '>'; }
-                                receiverProbe = m[1] + ' => ' + (
-                                    v === undefined ? 'undefined'
-                                    : v === null ? 'null'
-                                    : (typeof v) + ' ' +
-                                      (Object.prototype.toString.call(v)));
-                            }
-                        } catch (_) {}
-                        if (globalThis.__sentinelEvals.length < 20) {
-                            globalThis.__sentinelEvals.push({
-                                srcHead: src.slice(0, 200),
-                                receiverProbe,
+                let _tagSeq = 0;
+                const _idOf = (o) => {
+                    try {
+                        if (o && o.__sentTagId !== undefined) return o.__sentTagId;
+                    } catch (_) {}
+                    return -1;
+                };
+                Object.defineProperty(Object.prototype, _SENT, {
+                    configurable: true,
+                    set(v) {
+                        const id = ++_tagSeq;
+                        let desc = '?';
+                        try { desc = Object.prototype.toString.call(this); } catch (_) {}
+                        let ctor = '?';
+                        try { ctor = this && this.constructor && this.constructor.name; } catch (_) {}
+                        let isFn = false;
+                        try { isFn = typeof this === 'function'; } catch (_) {}
+                        if (globalThis.__sentinelTags.length < 60) {
+                            globalThis.__sentinelTags.push({
+                                id, desc, ctor, isFn,
+                                fnName: isFn ? (this.name || '') : undefined,
                             });
                         }
-                    }
-                    return _origEval.call(this, src);
-                };
-                try {
-                    Object.defineProperty(_hookedEval, 'name',
-                        { value: 'eval', configurable: true });
-                    Object.defineProperty(_hookedEval, 'length',
-                        { value: 1, configurable: true });
-                } catch (_) {}
-                globalThis.eval = _hookedEval;
+                        try {
+                            Object.defineProperty(this, '__sentTagId',
+                                { value: id, configurable: true });
+                        } catch (_) {}
+                        // Install the real own property so reads on THIS
+                        // exact object instance succeed (only a different
+                        // instance — our wrapper churn — would miss it).
+                        try {
+                            Object.defineProperty(this, _SENT,
+                                { value: v, writable: true, configurable: true });
+                        } catch (_) {}
+                    },
+                    get() {
+                        // Only reached when `this` has no own sentinel —
+                        // i.e. the VM is reading the tag off an object we
+                        // never tagged (or a fresh wrapper instance).
+                        if (globalThis.__sentinelReads.length < 60) {
+                            let desc = '?';
+                            try { desc = Object.prototype.toString.call(this); } catch (_) {}
+                            let ctor = '?';
+                            try { ctor = this && this.constructor && this.constructor.name; } catch (_) {}
+                            globalThis.__sentinelReads.push({
+                                missOn: desc, ctor,
+                                everTaggedId: _idOf(this),
+                            });
+                        }
+                        return undefined;
+                    },
+                });
             } catch (_) {}
         })();
     "#;
@@ -6156,10 +6269,13 @@ async fn kasada_vm_dispatcher_trace() {
                     trace_size: (globalThis.__vmTrace || []).length,
                     first_throw_at: globalThis.__vmFirstThrowAt,
                     throw_stacks: (globalThis.__vmThrowStacks || []).slice(0, 10),
-                    // Sentinel pinpoint: which eval'd expressions reference
-                    // unjzomuy… and what their receiver resolves to. An
-                    // entry with `=> undefined` is the exact bug site.
-                    sentinel_evals: globalThis.__sentinelEvals || [],
+                    // Sentinel pinpoint: every object Kasada tagged with
+                    // fn[sentinel]={I,E,Q,k}, and every read that MISSED
+                    // (hit Object.prototype getter ⇒ wrong/fresh instance).
+                    // A `sentinel_reads` entry with everTaggedId === -1 on
+                    // a function ctor names the identity we fail to keep.
+                    sentinel_tags: globalThis.__sentinelTags || [],
+                    sentinel_reads: globalThis.__sentinelReads || [],
                     // Last 60 entries before the first throw (the slice that
                     // names the receiver Kasada was probing).
                     pre_throw_window: (function() {
