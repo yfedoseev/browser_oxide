@@ -6978,6 +6978,35 @@ async fn kasada_sentinel_identity_audit() {
     want_pass("\"valueIdentical\":true");
 }
 
+// Check what's UNDEFINED in our engine that real Chrome ships, focusing
+// on media surfaces (since the captured Kasada smc/csc/dpv probes all
+// errored on `Cannot read properties of undefined (reading 'unjzomu…')`).
+#[tokio::test]
+async fn kasada_undefined_media_surfaces() {
+    let result = check(
+        r#"
+        JSON.stringify({
+            mediaCapabilities: typeof navigator.mediaCapabilities,
+            mediaSession: typeof navigator.mediaSession,
+            mediaDevices: typeof navigator.mediaDevices,
+            MediaCapabilities: typeof MediaCapabilities,
+            MediaSession: typeof MediaSession,
+            MediaSource: typeof MediaSource,
+            HTMLMediaElement: typeof HTMLMediaElement,
+            HTMLVideoElement: typeof HTMLVideoElement,
+            mediaCapabilities_decodingInfo: navigator.mediaCapabilities?.decodingInfo ? 'function' : typeof navigator.mediaCapabilities?.decodingInfo,
+        });
+        "#,
+    )
+    .await;
+    eprintln!("media surfaces: {result}");
+    // mediaCapabilities is a critical Chrome surface — Kasada probes it
+    assert!(
+        result.contains("\"mediaCapabilities\":\"object\""),
+        "navigator.mediaCapabilities should be 'object' (real Chrome): {result}"
+    );
+}
+
 // Verify Kasada smc probe — MediaSource.isTypeSupported must return
 // true for video/mp4 (captured blob 2026-05-10 showed v=false; our
 // _supportedTypes Set includes video/mp4 — this is a regression guard).

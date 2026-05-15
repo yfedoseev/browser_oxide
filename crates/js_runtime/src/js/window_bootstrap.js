@@ -5488,6 +5488,163 @@
     }
 
     // ================================================================
+    // MediaCapabilities — `navigator.mediaCapabilities` is a real
+    // `MediaCapabilities` instance in every modern Chrome / Safari /
+    // Firefox. Kasada (ips.js handler #45), DataDome, FingerprintJS and
+    // CreepJS all probe it; when the property is `undefined` the probe
+    // throws `Cannot read properties of undefined (reading '…')` and
+    // the resulting error fingerprint is the "headless" signal.
+    // Spec: https://w3c.github.io/media-capabilities/
+    // ================================================================
+    {
+        const _supportedDecodingTypes = new Set([
+            "file", "media-source", "webrtc"
+        ]);
+        const _supportedEncodingTypes = new Set([
+            "record", "webrtc"
+        ]);
+        const _normaliseMime = (s) => String(s || "").trim().toLowerCase();
+        // Codec families that real Chrome reports as supported on
+        // desktop. Conservative: only the common families Kasada lists
+        // in its probe matrix (mp4/h264/h265, vp8/vp9, av1, opus, mp4a).
+        const _supportedFamilies = [
+            "video/mp4", "video/webm", "video/h264", "video/h265", "video/hevc",
+            "video/avc", "video/vp8", "video/vp9", "video/av1", "video/avs3",
+            "audio/mp4", "audio/webm", "audio/aac", "audio/mpeg", "audio/opus",
+            "audio/vorbis", "audio/flac", "audio/wav", "audio/ogg",
+            "application/x-mpegurl"
+        ];
+        function _supportsContentType(ct) {
+            const t = _normaliseMime(ct);
+            if (!t) return false;
+            for (let i = 0; i < _supportedFamilies.length; i++) {
+                if (t.indexOf(_supportedFamilies[i]) === 0) return true;
+            }
+            return false;
+        }
+        function _buildInfo(config, supportedDecodingType) {
+            const cfg = config && typeof config === "object" ? config : {};
+            const type = cfg.type;
+            const audio = cfg.audio && typeof cfg.audio === "object" ? cfg.audio : null;
+            const video = cfg.video && typeof cfg.video === "object" ? cfg.video : null;
+            let supported = supportedDecodingType
+                ? _supportedDecodingTypes.has(type)
+                : _supportedEncodingTypes.has(type);
+            if (supported && audio) supported = _supportsContentType(audio.contentType);
+            if (supported && video) supported = _supportsContentType(video.contentType);
+            return {
+                supported,
+                smooth: supported,
+                powerEfficient: supported,
+                configuration: cfg,
+                // keyStatuses appears in EME-bound decodingInfo; absent
+                // for plain configs — return undefined accessor to match
+                // Chrome.
+            };
+        }
+        class MediaCapabilities {
+            constructor() { /* spec: no constructor args */ }
+            decodingInfo(configuration) {
+                if (configuration == null || typeof configuration !== "object") {
+                    return Promise.reject(new TypeError(
+                        "Failed to execute 'decodingInfo' on 'MediaCapabilities': " +
+                        "1 argument required, but only 0 present."));
+                }
+                if (!_supportedDecodingTypes.has(configuration.type)) {
+                    return Promise.reject(new TypeError(
+                        "Failed to execute 'decodingInfo' on 'MediaCapabilities': " +
+                        "The provided value '" + configuration.type +
+                        "' is not a valid enum value of type MediaDecodingType."));
+                }
+                return Promise.resolve(_buildInfo(configuration, true));
+            }
+            encodingInfo(configuration) {
+                if (configuration == null || typeof configuration !== "object") {
+                    return Promise.reject(new TypeError(
+                        "Failed to execute 'encodingInfo' on 'MediaCapabilities': " +
+                        "1 argument required, but only 0 present."));
+                }
+                if (!_supportedEncodingTypes.has(configuration.type)) {
+                    return Promise.reject(new TypeError(
+                        "Failed to execute 'encodingInfo' on 'MediaCapabilities': " +
+                        "The provided value '" + configuration.type +
+                        "' is not a valid enum value of type MediaEncodingType."));
+                }
+                return Promise.resolve(_buildInfo(configuration, false));
+            }
+        }
+        Object.defineProperty(MediaCapabilities.prototype, Symbol.toStringTag, {
+            value: "MediaCapabilities", configurable: true,
+        });
+        globalThis.MediaCapabilities = MediaCapabilities;
+        const _mc = new MediaCapabilities();
+        try {
+            Object.defineProperty(_NavProto, 'mediaCapabilities', {
+                get() { return _mc; }, configurable: true, enumerable: true,
+            });
+        } catch (_) {
+            navigator.mediaCapabilities = _mc;
+        }
+        // Mask methods as native so toString catalogue stays Chrome-shaped.
+        try { _maskAsNative(MediaCapabilities.prototype, 'decodingInfo', 'encodingInfo'); } catch (_) {}
+    }
+
+    // ================================================================
+    // HTMLVideoElement.prototype.requestVideoFrameCallback — Chrome-only
+    // method (Chrome 83+, Safari 16+, Firefox 132+). Kasada and CreepJS
+    // probe for it as a strong "real Chrome" signal. Without it, the
+    // probe throws on `typeof v.requestVideoFrameCallback === "function"`.
+    // Spec: https://wicg.github.io/video-rvfc/
+    // ================================================================
+    if (typeof globalThis.HTMLVideoElement !== "undefined" &&
+        typeof globalThis.HTMLVideoElement.prototype.requestVideoFrameCallback !== "function") {
+        let _rvfcSeq = 1;
+        const _pendingRvfc = new Map();
+        const _requestVideoFrameCallback = function requestVideoFrameCallback(cb) {
+            if (typeof cb !== "function") {
+                throw new TypeError(
+                    "Failed to execute 'requestVideoFrameCallback' on 'HTMLVideoElement': " +
+                    "The callback provided as parameter 1 is not a function.");
+            }
+            const id = _rvfcSeq++;
+            // Schedule a single callback ~1 frame ahead. Real Chrome
+            // fires when a new frame is presented; without playback we
+            // approximate the rAF cadence.
+            const handle = setTimeout(() => {
+                _pendingRvfc.delete(id);
+                try {
+                    cb(performance.now(), {
+                        presentationTime: performance.now(),
+                        expectedDisplayTime: performance.now() + 16.67,
+                        width: 0, height: 0,
+                        mediaTime: 0, presentedFrames: 0,
+                        processingDuration: 0,
+                    });
+                } catch (_) {}
+            }, 16);
+            _pendingRvfc.set(id, handle);
+            return id;
+        };
+        const _cancelVideoFrameCallback = function cancelVideoFrameCallback(id) {
+            const handle = _pendingRvfc.get(id);
+            if (handle != null) {
+                clearTimeout(handle);
+                _pendingRvfc.delete(id);
+            }
+        };
+        Object.defineProperty(globalThis.HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+            value: _requestVideoFrameCallback, configurable: true, writable: true,
+        });
+        Object.defineProperty(globalThis.HTMLVideoElement.prototype, "cancelVideoFrameCallback", {
+            value: _cancelVideoFrameCallback, configurable: true, writable: true,
+        });
+        try {
+            _maskAsNative(globalThis.HTMLVideoElement.prototype,
+                "requestVideoFrameCallback", "cancelVideoFrameCallback");
+        } catch (_) {}
+    }
+
+    // ================================================================
     // P2 STUBS: Emerging APIs that anti-bot scripts probe for existence
     // ================================================================
 
