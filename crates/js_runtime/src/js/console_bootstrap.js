@@ -60,4 +60,8 @@
         timeLog() {},
         timeEnd() {},
     };
+    // Native-masking of these methods is applied by stealth_bootstrap.js
+    // (concatenated AFTER this file in the V8 snapshot, where
+    // _maskAsNative is defined). Doing it here would no-op because
+    // _maskAsNative does not exist yet at this point in the snapshot.
 })(globalThis);

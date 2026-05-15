@@ -8150,3 +8150,32 @@ async fn kasada_spd_probe_production_clean() {
         "spd probe returns n/a in PRODUCTION — real Kasada-ML fingerprint divergence: {result}"
     );
 }
+
+/// Kasada `ofc` probe: console.<method>.toString() must be native for
+/// ALL ~19 methods. decrypted_blob_0_pretty.json `/ofc/r` showed ours
+/// leaking `log(...args) { core.ops.op_console_log(...) }` — a
+/// non-Chrome tell feeding the dominant 30-40% browser-FP weight of
+/// Kasada's /tl ML score. Real Chrome: `function log() { [native code] }`.
+#[tokio::test]
+async fn kasada_console_methods_native_masked() {
+    let result = check(
+        r#"(function(){
+            const methods = ["log","warn","error","info","debug","dir",
+              "dirxml","trace","group","groupCollapsed","groupEnd","clear",
+              "count","countReset","assert","table","time","timeLog","timeEnd"];
+            const leaks = [];
+            for (const m of methods) {
+              const fn = console[m];
+              if (typeof fn !== "function") { leaks.push(m+":missing"); continue; }
+              const s = Function.prototype.toString.call(fn);
+              if (!s.includes("[native code]") || s.includes("op_console") || s.includes("core.ops")) {
+                leaks.push(m+":"+s.slice(0,40));
+              }
+            }
+            return JSON.stringify(leaks);
+        })()"#,
+    )
+    .await;
+    eprintln!("kasada-console-native: {result}");
+    assert_eq!(result, "[]", "console methods leak non-native toString: {result}");
+}

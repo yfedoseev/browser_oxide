@@ -100,4 +100,27 @@
     // self-corrected to Chrome's canonical shape.
     try { _maskFunction(eval, 'eval'); } catch (_) {}
 
+    // Native-mask every console method. console_bootstrap.js is
+    // concatenated BEFORE this file in the V8 snapshot (snapshot.rs),
+    // so it could not call _maskAsNative itself (undefined then) —
+    // `globalThis.console` already exists here, and _maskAsNative is
+    // now defined, so this is the correct place. Kasada's `ofc` probe
+    // dumps `console.<method>.toString()` for all ~19 methods into the
+    // /tl sensor (decrypted_blob_0_pretty.json `/ofc/r` showed ours
+    // leaking `log(...args) { core.ops.op_console_log(...) }` — a
+    // non-Chrome tell feeding the dominant 30-40% browser-fingerprint
+    // weight of Kasada's server ML score). Real Chrome returns
+    // `function log() { [native code] }` for every console method.
+    try {
+        if (globalThis.console) {
+            _maskAsNative(
+                globalThis.console,
+                'log', 'warn', 'error', 'info', 'debug', 'dir', 'dirxml',
+                'trace', 'group', 'groupCollapsed', 'groupEnd', 'clear',
+                'count', 'countReset', 'assert', 'table', 'time',
+                'timeLog', 'timeEnd',
+            );
+        }
+    } catch (_) {}
+
 })(globalThis);
