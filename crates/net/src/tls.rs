@@ -57,17 +57,13 @@ const CURVES_DESKTOP: &[SslCurve] = &[
     SslCurve::SECP384R1,
 ];
 
-/// Chrome Android elliptic curves. Per `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md`,
-/// Pixel-class Android Chrome lags desktop on PQC rollout: as of mid-2025 captures
-/// (lexiforest/curl-impersonate `curl_chrome131_android`), Android still ships the
-/// older Kyber768Draft00 curve rather than MLKEM768. Modern M147 Android may
-/// have rolled MLKEM by now — verify against fresh capture before assuming.
-const CURVES_ANDROID: &[SslCurve] = &[
-    SslCurve::X25519_KYBER768_DRAFT00,
-    SslCurve::X25519,
-    SslCurve::SECP256R1,
-    SslCurve::SECP384R1,
-];
+/// Chrome Android elliptic curves. Kyber768Draft00 (deprecated) was the
+/// canonical Chrome 124-130 PQ curve; Chrome 131+ desktop replaced it with
+/// MLKEM768 (codepoint 4588). The lexiforest `chrome_131.0.6778.81_android`
+/// capture shows no PQ at all (just 29/23/24), but Chrome Android shares the
+/// desktop codebase and by Chrome 147+ should have rolled MLKEM — verify
+/// against fresh Pixel capture if regressions appear.
+const CURVES_ANDROID: &[SslCurve] = CURVES_DESKTOP;
 
 /// iOS Safari 18 cipher suite list (20 ciphers, Apple's order). Per the
 /// canonical `lexiforest/curl-impersonate/tests/signatures/safari_18.0_iOS.yaml`.
@@ -84,18 +80,17 @@ const CIPHER_LIST_SAFARI_IOS: &str = concat!(
     ":TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
     ":TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
     ":TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
-    ":TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384",
-    ":TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
     ":TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
     ":TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
-    ":TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
-    ":TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
     ":TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
     ":TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
     ":TLS_RSA_WITH_AES_256_GCM_SHA384",
     ":TLS_RSA_WITH_AES_128_GCM_SHA256",
     ":TLS_RSA_WITH_AES_256_CBC_SHA",
     ":TLS_RSA_WITH_AES_128_CBC_SHA",
+    ":TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA",
+    ":TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
+    ":TLS_RSA_WITH_3DES_EDE_CBC_SHA",
 );
 
 /// iOS Safari signature algorithms (10 entries, includes the duplicated
@@ -106,10 +101,10 @@ const SIGALGS_LIST_SAFARI_IOS: &str = concat!(
     ":rsa_pss_rsae_sha256",
     ":rsa_pkcs1_sha256",
     ":ecdsa_secp384r1_sha384",
-    ":ecdsa_sha1",
     ":rsa_pss_rsae_sha384",
     ":rsa_pss_rsae_sha384",
     ":rsa_pkcs1_sha384",
+    ":rsa_pss_rsae_sha512",
     ":rsa_pkcs1_sha512",
     ":rsa_pkcs1_sha1",
 );
@@ -239,9 +234,14 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
         .set_alpn_protos(ALPN_PROTOS)
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
-    // TLS version range
+    // TLS version range. Safari iOS 18.x advertises 4 versions (1.0, 1.1,
+    // 1.2, 1.3) in supported_versions per canonical safari_18.4_iOS.yaml —
+    // visible as a length-difference on the extension. Servers still
+    // negotiate 1.3 because no real server speaks 1.0/1.1 anymore, but the
+    // ClientHello must advertise all four to fingerprint as Safari.
+    let min_version = if is_safari_ios { SslVersion::TLS1 } else { SslVersion::TLS1_2 };
     builder
-        .set_min_proto_version(Some(SslVersion::TLS1_2))
+        .set_min_proto_version(Some(min_version))
         .map_err(|e| NetError::Tls(e.to_string()))?;
     builder
         .set_max_proto_version(Some(SslVersion::TLS1_3))
