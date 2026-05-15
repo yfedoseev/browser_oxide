@@ -273,10 +273,11 @@ impl KasadaSessionStore {
     /// `duration` field (per Apr 2026 research — Kasada validates duration
     /// against PoW difficulty, not against an injected random).
     ///
-    /// Echoes back `x-kpsdk-st` as `st` and computes `rst = st + duration`
-    /// (the request-send-time per the deobfuscated ips.js source). Required
-    /// by stricter Kasada tenants like the `149e9513.../2d206a39...`
-    /// template (canadagoose, hyatt, VEVE).
+    /// Echoes back `x-kpsdk-st` as `st`. `rst` (Request Start Time) is a
+    /// page-relative offset in ms (2-8 s typical), NOT an absolute epoch —
+    /// real ips.js emits a navigation-relative value. Required by stricter
+    /// Kasada tenants like the `149e9513.../2d206a39...` template
+    /// (canadagoose, hyatt, VEVE).
     pub async fn compute_cd_header(&self, host: &str) -> Option<String> {
         let store = self.inner.read().await;
         let session = store.get(host)?;
@@ -515,13 +516,23 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&cd).unwrap();
         // st = server timestamp echo
         assert_eq!(parsed["st"].as_i64().unwrap(), server_ms);
-        // rst = work_time (request-start-time)
+        // rst = Request Start Time — a page-relative timestamp in ms,
+        // NOT the absolute epoch work_time. Commit 6d21fc9 deliberately
+        // changed this from `rst = work_time` to a realistic 2-8 s
+        // page-relative value (real ips.js emits a navigation-relative
+        // offset, not a Unix epoch). This test previously asserted the
+        // old absolute-epoch behavior and was never updated.
         let rst = parsed["rst"].as_f64().unwrap();
+        assert!(
+            (2000.0..=8001.0).contains(&rst),
+            "rst {rst} must be a page-relative ms offset in [2000, 8001)"
+        );
+        // workTime must still be the absolute epoch (sanity: far larger
+        // than any plausible page-relative rst).
         let work_time = parsed["workTime"].as_i64().unwrap() as f64;
         assert!(
-            (rst - work_time).abs() < 1.0,
-            "rst {rst} should ≈ work_time ({})",
-            work_time
+            work_time > 1.0e12,
+            "workTime {work_time} should be an absolute epoch (ms)"
         );
     }
 }
