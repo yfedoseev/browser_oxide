@@ -2384,6 +2384,19 @@
             },
         });
         iframeLocals.self = iframeWindow;
+        // W2.7 + DataDome iframe-proxy audit (research 09_KASADA_DEEP §4):
+        // real Chrome `iframe.contentWindow.window === iframe.contentWindow`
+        // and the same for `globalThis`. Without these self-loops, the
+        // Proxy falls through to the parent globalThis (or to undefined)
+        // and `proxy.window === proxy` returns false — a hard tell.
+        iframeLocals.window = iframeWindow;
+        iframeLocals.globalThis = iframeWindow;
+        // `window.frames` real-Chrome semantics: returns the window itself
+        // (the FrameList is identity-equal to the window when there are
+        // no child frames). `frames.length` reports child-frame count;
+        // we expose `length: 0` on iframeLocals so reads stay consistent.
+        iframeLocals.frames = iframeWindow;
+        iframeLocals.length = 0;
         state = { contentWindow: iframeWindow, contentDocument: iframeDoc, remoteRealm };
         _iframeState.set(el, state);
         return iframeWindow;

@@ -7369,6 +7369,9 @@ async fn kasada_iframe_proxy_handler_audit() {
                 catch (e) { return 'threw: ' + e.message; }
             })(),
             windowWindow: w.window === w,
+            framesIsWindow: w.frames === w,
+            globalThisIsWindow: w.globalThis === w,
+            length: w.length,
         };
         JSON.stringify(out);
     "#;
@@ -7381,6 +7384,25 @@ async fn kasada_iframe_proxy_handler_audit() {
     assert!(
         !result.contains("Reflect.get") && !result.contains("\"get\":[Function"),
         "iframe Proxy `get` trap source LEAKING via w.self.get.toString() — Kasada/DataDome will detect: {result}"
+    );
+    // Real Chrome iframe.contentWindow.window === iframe.contentWindow.
+    // Same for .frames and .globalThis. Absence of the self-loop is a
+    // hard fingerprint divergence.
+    assert!(
+        result.contains("\"windowWindow\":true"),
+        "iframe.contentWindow.window must self-loop: {result}"
+    );
+    assert!(
+        result.contains("\"framesIsWindow\":true"),
+        "iframe.contentWindow.frames must self-loop: {result}"
+    );
+    assert!(
+        result.contains("\"globalThisIsWindow\":true"),
+        "iframe.contentWindow.globalThis must self-loop: {result}"
+    );
+    assert!(
+        result.contains("\"length\":0"),
+        "iframe.contentWindow.length must be 0 (no child frames): {result}"
     );
 }
 
