@@ -55,16 +55,22 @@ membership** — the W1 work cracked two of the hardest ones:
   #7 (Safari iOS TLS) flips udemy/economist/quora." The W1.6–W1.10
   Safari iOS TLS + W1.5 iOS-surface work did exactly that.
 - **wildberries CRACKED** — now passes on iPhone too.
-- **homedepot regressed** — diagnosis from the sweep log: sensor_data
-  POST returns `status=201` but `_abck` stays `NeedsSensor` forever
-  (`POST attempt 1/1 → NeedsSensor` loop). The W1.3 parser is working
-  correctly (it *correctly* detects NeedsSensor); Akamai is *rejecting
-  our sensor payload* because homedepot's `fileHash` rotates ≈ every
-  40 min and our static registry value is stale → wrong v3 envelope
-  encryption. **This is operational data-staleness, NOT an engine
-  capability regression** (bestbuy, same Akamai stack, flipped GREEN
-  this session). Fix = live fileHash extraction via oxc_ast (handoff
-  item 4 / W2.2-adjacent), ~1 week, already scoped.
+- **homedepot regressed** — precise diagnosis (corrected): bestbuy
+  and homedepot BOTH loop `sensor_data POST → status=201
+  new_abck=NeedsSensor` (the `_abck`-never-Favorable state is NOT the
+  differentiator). The difference is the final served page:
+    - bestbuy → `L3-RENDERED len=6674` (Akamai served real content;
+      the NeedsSensor loop is cosmetic — no hard block)
+    - homedepot → `Akamai-CHL len=2661` (Akamai served a **challenge
+      interstitial** — hard block)
+  So homedepot's Akamai tenant **escalates to a challenge** (sec-cpt
+  PoW or pixel) that we do not solve, whereas bestbuy's does not
+  challenge us at all. This is the **W4.2 sec-cpt 428 PoW solver**
+  gap (~250 LOC port from Hyper SDK Go) — a real engine gap, not mere
+  fileHash staleness (the stale homedepot fileHash likely *triggers*
+  the escalation, but solving it also needs the challenge solver).
+  bestbuy flipping GREEN still proves the core Akamai sensor path
+  (W1.3 parser + v3 envelope) works; homedepot needs W4.2 on top.
 - **yelp regressed** — DataDome `t:'bv'`; was passing, now in the
   block set. Could be DataDome key rotation or ±2 sweep variance.
   Needs the §5.2 Playwright-MCP A/B re-check from PLAN.md.
