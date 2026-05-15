@@ -6978,6 +6978,175 @@ async fn kasada_sentinel_identity_audit() {
     want_pass("\"valueIdentical\":true");
 }
 
+// Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
+// Hypothesis 1 (40% HIGH): Function.prototype.toString signature
+// catalogue. Per Asad Ikram's 2026 guide, Kasada catalogues toString
+// output of ~30 commonly-patched native methods. Any byte-different
+// output from Chrome's reference = catalogue hit = bot.
+#[tokio::test]
+async fn kasada_function_toString_audit() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        const targets = [
+            ['Navigator.prototype.sendBeacon', () => Navigator.prototype.sendBeacon],
+            ['Navigator.prototype.vibrate', () => Navigator.prototype.vibrate],
+            ['Navigator.prototype.registerProtocolHandler', () => Navigator.prototype.registerProtocolHandler],
+            ['Navigator.prototype.javaEnabled', () => Navigator.prototype.javaEnabled],
+            ['Function.prototype.toString', () => Function.prototype.toString],
+            ['Function.prototype.bind', () => Function.prototype.bind],
+            ['Function.prototype.apply', () => Function.prototype.apply],
+            ['Function.prototype.call', () => Function.prototype.call],
+            ['Promise', () => Promise],
+            ['Promise.resolve', () => Promise.resolve],
+            ['Promise.all', () => Promise.all],
+            ['structuredClone', () => structuredClone],
+            ['fetch', () => fetch],
+            ['Object.getOwnPropertyDescriptor', () => Object.getOwnPropertyDescriptor],
+            ['Reflect.get', () => Reflect.get],
+            ['Reflect.construct', () => Reflect.construct],
+            ['Reflect.apply', () => Reflect.apply],
+            ['JSON.stringify', () => JSON.stringify],
+            ['JSON.parse', () => JSON.parse],
+            ['Array.prototype.map', () => Array.prototype.map],
+            ['Array.prototype.forEach', () => Array.prototype.forEach],
+            ['Array.prototype.filter', () => Array.prototype.filter],
+            ['Array.from', () => Array.from],
+            ['Object.keys', () => Object.keys],
+            ['Object.create', () => Object.create],
+            ['Object.defineProperty', () => Object.defineProperty],
+            ['String.prototype.match', () => String.prototype.match],
+            ['String.prototype.replace', () => String.prototype.replace],
+            ['Date.now', () => Date.now],
+            ['Math.random', () => Math.random],
+            ['performance.now', () => performance.now],
+            ['setTimeout', () => setTimeout],
+            ['setInterval', () => setInterval],
+            ['addEventListener', () => addEventListener],
+            ['removeEventListener', () => removeEventListener],
+        ];
+        const out = [];
+        for (const [name, getFn] of targets) {
+            try {
+                const fn = getFn();
+                if (typeof fn !== 'function') {
+                    out.push({ name, skip: 'not_function', type: typeof fn });
+                    continue;
+                }
+                const direct = Function.prototype.toString.call(fn);
+                const looksNative = /\[native code\]/.test(direct);
+                out.push({
+                    name,
+                    direct,
+                    looksNative,
+                    len: direct.length,
+                });
+            } catch (e) {
+                out.push({ name, error: e.message });
+            }
+        }
+        JSON.stringify(out);
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    std::fs::write("/tmp/kasada_tostring_audit.json", &result).ok();
+    // Print summary: any non-native ones?
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap_or(serde_json::json!([]));
+    let entries = parsed.as_array().cloned().unwrap_or_default();
+    let mut non_native = Vec::new();
+    let mut native_count = 0;
+    let mut skip_count = 0;
+    for e in &entries {
+        if e.get("skip").is_some() {
+            skip_count += 1;
+            continue;
+        }
+        if e.get("looksNative") == Some(&serde_json::json!(true)) {
+            native_count += 1;
+        } else if let Some(name) = e.get("name").and_then(|n| n.as_str()) {
+            non_native.push(format!(
+                "{name}: {}",
+                e.get("direct")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("<error>")
+                    .chars()
+                    .take(80)
+                    .collect::<String>()
+            ));
+        }
+    }
+    eprintln!("Kasada toString catalogue audit:");
+    eprintln!(
+        "  native shape: {}/{}, skipped: {}",
+        native_count,
+        entries.len() - skip_count,
+        skip_count
+    );
+    if !non_native.is_empty() {
+        eprintln!("  NON-NATIVE LEAKS ({}):", non_native.len());
+        for line in &non_native {
+            eprintln!("    {line}");
+        }
+    }
+    assert!(
+        non_native.is_empty(),
+        "{} toString outputs leaked non-native source",
+        non_native.len()
+    );
+}
+
+// Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
+// Hypothesis 2: iframe Proxy handler leak via .self.get.toString().
+// DataDome's 2024 paper says puppeteer-extra-stealth has exactly this
+// bug — `this` inside the Proxy `get` trap points to the handler obj
+// not the target window, so `w.self.get.toString()` returns the trap
+// source. If our engine leaks the same way, this is the load-bearing
+// Kasada/DataDome detection.
+#[tokio::test]
+async fn kasada_iframe_proxy_handler_audit() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        const iframe = document.createElement('iframe');
+        iframe.srcdoc = '';
+        document.body.appendChild(iframe);
+        const w = iframe.contentWindow;
+        const out = {
+            selfType: typeof w.self,
+            selfIsWindow: w.self === w,
+            selfGet: typeof w.self?.get,
+            selfGetToString: (w.self?.get?.toString?.()) || null,
+            getProxyHandlerToString: (w.get?.toString?.()) || null,
+            // DataDome's exact detection
+            dataDome: (() => {
+                try { return w.self.get?.toString?.() || 'no_get'; }
+                catch (e) { return 'threw: ' + e.message; }
+            })(),
+            windowWindow: w.window === w,
+        };
+        JSON.stringify(out);
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("kasada-iframe-proxy-handler-audit: {result}");
+    assert!(!result.starts_with("ERROR:"));
+    // CRITICAL: dataDome field MUST NOT contain "Reflect.get" or trap
+    // source. Real Chrome returns 'no_get' since real Window has no
+    // 'get' property.
+    assert!(
+        !result.contains("Reflect.get") && !result.contains("\"get\":[Function"),
+        "iframe Proxy `get` trap source LEAKING via w.self.get.toString() — Kasada/DataDome will detect: {result}"
+    );
+}
+
 // Diagnostic: does our PluginArray.prototype.namedItem leak source?
 // Per the captured Kasada fingerprint blob (Group F in
 // docs/research_2026_05_14/12_KASADA_FINGERPRINT_ERROR_AUDIT_2026_05_14.md),
