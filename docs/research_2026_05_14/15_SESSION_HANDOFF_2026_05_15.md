@@ -71,9 +71,26 @@ membership** — the W1 work cracked two of the hardest ones:
   the escalation, but solving it also needs the challenge solver).
   bestbuy flipping GREEN still proves the core Akamai sensor path
   (W1.3 parser + v3 envelope) works; homedepot needs W4.2 on top.
-- **yelp regressed** — DataDome `t:'bv'`; was passing, now in the
-  block set. Could be DataDome key rotation or ±2 sweep variance.
-  Needs the §5.2 Playwright-MCP A/B re-check from PLAN.md.
+- **yelp regressed** — diagnosed this session: yelp's union pass was
+  **entirely dependent on the single iPhone profile** (pre-W1: iphone
+  `L3-RENDERED len=448050`; chrome/firefox/pixel were ALL already
+  `DataDome-CHL` pre-W1). Post-W1 iphone flipped to `DataDome-CHL
+  len=1463`. Root mechanism: we have **no DataDome challenge handler**
+  (W3.8). When DataDome challenges, it returns the interstitial as a
+  document-level 403/redirect to `geo.captcha-delivery.com`; our
+  engine mis-routes it as a child iframe and the parent page's CSP
+  `frame-src` correctly refuses `geo.captcha-delivery.com` (the
+  `[csp] Refused to frame 'https://geo.captcha-delivery.com/...'` log
+  on 7 sweep logs is the visible symptom — the CSP code is *correct*,
+  the challenge handling is *missing*). The iphone flip itself is a
+  DataDome behavioral/`t:'bv'` score change (W1.5 made iOS more
+  authentic but the borderline score still tipped to challenge — or
+  run-to-run variance, since DataDome verdicts are probabilistic for
+  borderline scores). Real fix = W3.8 DataDome challenge handler
+  (~150 LOC: detect 403+tiny-body+`dd={…}`, eval the interstitial
+  body in the main context, re-issue with the solved cookie). Until
+  W3.8, every DataDome challenge site (yelp/etsy/tripadvisor/wsj/
+  reuters) can only pass when DataDome chooses *not* to challenge.
 
 Net union 120→120, but **2 genuine universal-block cracks** (udemy is
 a marquee win) offset by 1 operational regression (homedepot stale
