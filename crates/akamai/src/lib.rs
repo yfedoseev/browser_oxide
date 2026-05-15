@@ -53,6 +53,7 @@
 //! against bestbuy + homedepot in the holistic sweep.
 
 pub mod crypto;
+pub mod datadome_crypto;
 pub mod drain;
 pub mod payload;
 pub mod sec_cpt;
@@ -121,7 +122,10 @@ impl BotScoreVector {
                 return None;
             }
             return Some(BotScoreVector {
-                request_id: parts.first().filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                request_id: parts
+                    .first()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
                 timestamp: parts.get(1).and_then(|s| s.parse().ok()),
                 score_a: parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0),
                 score_b: parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0),
@@ -692,7 +696,10 @@ mod tests {
 </head><body bazadebezolkohpepadr="1647451213"></body></html>"#;
         let t = parse_tenant_from_html(html).expect("parsed");
         assert_eq!(t.tenant_seed, 1_647_451_213);
-        assert_eq!(t.sensor_post_path, "/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B");
+        assert_eq!(
+            t.sensor_post_path,
+            "/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B"
+        );
         assert_eq!(t.pixel_bootstrap_path.as_deref(), Some("/akam/13/3e35295b"));
     }
 
@@ -711,7 +718,8 @@ mod tests {
     #[test]
     fn parse_bm_sz_bestbuy_shape() {
         // Real bestbuy bm_sz: <hex>~<base64>~<cookieHash>~<metadata>
-        let cookie = "09BAC960F59A5E0209ED39333915B267~YAAQsTfLF66wrQSeAQAAWg0dJR9I6lX~3686980~3291191";
+        let cookie =
+            "09BAC960F59A5E0209ED39333915B267~YAAQsTfLF66wrQSeAQAAWg0dJR9I6lX~3686980~3291191";
         assert_eq!(parse_bm_sz(cookie), Some(3_686_980));
     }
 
@@ -753,7 +761,10 @@ mod tests {
         let cleartext = "test-cleartext-payload-of-modest-length-with-some-bytes";
         let a = build_v3(cleartext, 12345, "1,0,0,0,0,0", Some("h~b~111~222"));
         let b = build_v3(cleartext, 12345, "1,0,0,0,0,0", Some("h~b~333~444"));
-        assert_ne!(a, b, "different bm_sz cookieHash must produce different envelopes");
+        assert_ne!(
+            a, b,
+            "different bm_sz cookieHash must produce different envelopes"
+        );
     }
 
     #[test]
@@ -766,7 +777,8 @@ mod tests {
     fn parse_tenant_skips_akam13_path_for_sensor() {
         // Only /akam/13/... present; no deep obfuscated path → no
         // sensor_post_path → None.
-        let html = r#"<html bazadebezolkohpepadr="123"><script src="/akam/13/abc"></script></html>"#;
+        let html =
+            r#"<html bazadebezolkohpepadr="123"><script src="/akam/13/abc"></script></html>"#;
         assert!(parse_tenant_from_html(html).is_none());
     }
 
