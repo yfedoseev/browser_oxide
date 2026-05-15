@@ -67,3 +67,51 @@ Of the 6 true blockers:
 
 This supersedes the prior loop focus on W3.8 as a union lever. Honest,
 data-verified, per the goal's deep-research mandate.
+
+## W4.2 wiring design (ready to apply once the capture lands)
+
+`crates/akamai/src/sec_cpt.rs` is COMPLETE + verified vs
+hyper-sdk-go's `generateSecCptAnswers` (`solves_low_difficulty…`
+test passes) but `solve_crypto` is **never called** — pure dead code.
+Interface:
+
+```rust
+pub struct SecCptChallenge { token, timestamp:u64, nonce:String,
+    difficulty:u64, count:u32, timeout:u32, cpu:bool, verify_url:String }
+pub fn solve_crypto(&SecCptChallenge, sec:&str) -> Vec<String>  // PoW
+pub struct SecCptAnswerSubmission { token:String, answers:Vec<String> }
+```
+
+Wiring steps (in `page.rs`, the Akamai/nav path):
+
+1. **Detect**: homedepot serves the sec-cpt challenge as a ~2.6 KB
+   *page* (per `capture_bmak_js.rs` doc) after sensor rejection — NOT
+   a clean HTTP 428 JSON. The capture experiment (in flight,
+   `/tmp/homedepot_seccpt.txt`) determines whether the challenge JSON
+   is (a) inline in a `<script>` on that page, or (b) at a
+   `/_sec/cp_challenge/...` sub-resource the page fetches, plus the
+   `sec_cpt` cookie format and `verify_url`.
+2. **Parse** the `SecCptChallenge` from whichever the capture shows
+   (serde_json::from_str on the inline/sub-resource JSON).
+3. **`sec`** = substring of the `sec_cpt` Set-Cookie value before its
+   first `~` (per `solve_crypto` doc).
+4. **Solve**: `let answers = sec_cpt::solve_crypto(&chal, sec);`
+   (difficulty≈15000 ⇒ a few hundred ms on our CPU per the module
+   header note).
+5. **Verify**: POST `serde_json::to_string(&SecCptAnswerSubmission
+   { token: chal.token, answers })` to `chal.verify_url` (resolve
+   relative against the homedepot origin), `Content-Type:
+   application/json`, through the shared `HttpClient` so the
+   validated `sec_cpt` cookie lands in the jar.
+6. **Re-issue**: re-fetch the original URL (the existing
+   `navigate` iteration loop already re-fetches when a pending nav
+   is set; either trigger that or do an explicit re-GET). With the
+   sec_cpt cookie validated, Akamai serves real content → homedepot
+   flips `Akamai-CHL` → `L3-RENDERED`, union 120 → 121.
+
+Risk/unknowns the capture resolves: exact challenge delivery (inline
+vs sub-resource), the `sec_cpt` cookie name/shape, and whether
+homedepot uses the `crypto` provider (pure PoW — solver handles this)
+vs a `cpu`/WASM provider (would need more). Everything else is
+implemented + verified. This is the single highest-value
+in-environment union move and is now a precise, bounded wiring task.

@@ -183,3 +183,56 @@ async fn capture_via_http_client(url: &str, label: &str) {
     eprintln!("[{label}] saved to {path}");
     eprintln!("[{label}] next: cat {path} | node /tmp/akamai-v3-sensor-data-helper/src/extract_hash/index.js");
 }
+
+/// W4.2 — capture homedepot's sec-cpt CHALLENGE shape (not bmak.js):
+/// status, all headers (sec_cpt cookie, challenge token), and the
+/// ~2.6 KB body. Extracts the sec-cpt params (nonce/difficulty/
+/// timestamp/verify_url) needed to wire `akamai::sec_cpt::solve_crypto`
+/// into the nav flow. Writes /tmp/homedepot_seccpt.txt.
+#[tokio::test]
+#[ignore = "network: capture homedepot sec-cpt challenge shape"]
+async fn capture_homedepot_seccpt_challenge() {
+    let profile = stealth::presets::chrome_130_macos();
+    let client = match net::HttpClient::new(&profile) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("HttpClient init failed: {e}");
+            return;
+        }
+    };
+    let resp = match client.get("https://www.homedepot.com/").await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("fetch failed: {e}");
+            return;
+        }
+    };
+    let body = String::from_utf8_lossy(&resp.body).to_string();
+    let mut out = String::new();
+    out.push_str(&format!("STATUS={}\nURL={}\nBODY_LEN={}\n\n", resp.status, resp.url, body.len()));
+    out.push_str("=== HEADERS ===\n");
+    for (k, v) in &resp.headers {
+        out.push_str(&format!("{k}: {v}\n"));
+    }
+    out.push_str("\n=== BODY ===\n");
+    out.push_str(&body);
+    // Heuristic extraction of sec-cpt markers.
+    out.push_str("\n\n=== SEC-CPT MARKERS ===\n");
+    for needle in [
+        "sec_cpt", "sec-cpt", "cp_challenge", "challenge", "nonce",
+        "difficulty", "verify", "timestamp", "x-akamai", "?v=", "&t=",
+    ] {
+        if let Some(i) = body.find(needle) {
+            let s = i.saturating_sub(40);
+            let e = (i + 160).min(body.len());
+            out.push_str(&format!("[{needle}] …{}…\n", &body[s..e].replace('\n', " ")));
+        }
+    }
+    std::fs::write("/tmp/homedepot_seccpt.txt", &out).ok();
+    eprintln!("STATUS={} BODY_LEN={}", resp.status, body.len());
+    eprintln!("written: /tmp/homedepot_seccpt.txt");
+    // Echo the markers section to test output.
+    if let Some(idx) = out.find("=== SEC-CPT MARKERS ===") {
+        eprintln!("{}", &out[idx..]);
+    }
+}
