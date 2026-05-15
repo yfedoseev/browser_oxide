@@ -88,6 +88,96 @@ the nav budget cuts off the PoW, or the post-solve reload isn't
 re-fetched). Diagnosing requires a live homedepot run with nav
 tracing (BOXIDE_DEBUG_NAV) to see which step stops.
 
+## Pre-fix nav-trace result (2026-05-15, live homedepot, BOXIDE_DEBUG_NAV)
+
+```
+iter=0 url=homedepot html_len=2621
+[akamai] learn_abck: _abck=92C6EE7B…~-1~<blob>~-1~-1~-1~…   ← _abck IS set
+iter=0 FETCH GET homedepot
+iter=1 url=homedepot html_len=2621                          ← SAME page
+iter=1 V8DeadlineWatcher 35814ms remaining                  ← budget fine
+…iter=1 _abck re-issued (fresh blob), still 2621-byte page…
+```
+
+Confirms **root-cause A** (detection gap): the sec-cpt response DOES
+set `_abck` (in the Set-Cookie/header) but `_abck` is NOT in the 2621
+-byte BODY — so the pre-fix `is_anti_bot_challenge()` body-substring
+check (`_abck && sensor_data`) never matched. The
+`sec-if-cpt-container` marker fix (committed this session) addresses
+this. Budget is NOT the issue (35 s remained at iter=1) — retire the
+step-2 hypothesis.
+
+Surfaces **root-cause B** (open): even across iter 0→1 re-fetches the
+page stays the 2621-byte challenge — the `<script src="/Wjv3…?v=&t=">`
+self-solving bundle is **not completing its solve+verify+reload
+cycle** (no verify XHR, no content flip in the trace). Either it isn't
+executed, or it executes but its PoW/verify/reload doesn't finish.
+Detection (fix A) is necessary but likely not sufficient; B needs the
+post-fix run + challenge-script-execution instrumentation.
+
+## PRECISE root cause (full trace, net-trace decoded) — 2026-05-15
+
+The complete trace's `net-trace` shows our engine **DOES execute the
+sec-cpt challenge bundle** and POSTs to the sec-cpt endpoint
+`https://www.homedepot.com/Wjv3muMJul/…/BqRSxpZwgB`:
+
+```
+xhr  POST /Wjv3…/BqRSxpZwgB  body={"sensor_data":"3;0;1;0;8888888;…;74,0,0,3,10,0;…"} →201
+fetch POST same                                                                      →201
+xhr  POST /Wjv3…/BqRSxpZwgB  body={"sensor_data":"3;0;1;0;4599878;…;90,95,0,1,4,2279;…"}→201
+[JS LOG] [XHR] open/send POST /Wjv3…/BqRSxpZwgB
+```
+
+So the engine capability (execute the vendor bundle + round-trip)
+**works** — the bundle runs and POSTs. The bug is **payload-type
+conflation**:
+
+- `handle_akamai_flow` sees the challenge response's `_abck=…~-1~…`
+  (slot 1 = -1 ⇒ our W1.3 parser = `NeedsSensor`) and runs the
+  generic **Akamai BMP `sensor_data`** path, POSTing
+  `{"sensor_data":"3;0;1;0;<cookieHash>;…"}` to the `/Wjv3…` endpoint.
+- But `/Wjv3…` is the **sec-cpt PoW verify endpoint**. It expects a
+  PoW answer submission (`{token, answers}` — `SecCptAnswerSubmission`,
+  the shape `sec_cpt::solve_crypto` produces), NOT BMP sensor_data.
+- Akamai accepts the POST (`201`) but never clears `_abck` (it's the
+  wrong challenge response for a sec-cpt gate) → infinite
+  NeedsSensor loop → `Akamai-CHL`.
+
+(Field-5 detail: first POST uses `8888888` = the no-`bm_sz` default
+from `akamai/lib.rs::parse_bm_sz`; a later POST uses `4599878` once
+`bm_sz` parsed. Both 201, both ignored — confirming it's not a
+cookieHash-staleness issue but a **wrong challenge-type** issue.)
+
+### The corrected fix path
+
+Detection (the `sec-if-cpt-container` marker, committed) is necessary.
+The SOLVE must route by challenge type:
+
+- **sec-cpt gate** (page has `sec-if-cpt-container`, the `/Wjv3…?v=&t=`
+  bundle): the bundle should run its OWN PoW and submit the answer —
+  OR we extract the sec-cpt params and use `sec_cpt::solve_crypto` →
+  POST `SecCptAnswerSubmission{token,answers}` to the verify endpoint.
+  Do **not** run `handle_akamai_flow`'s BMP sensor_data POST for these.
+- **plain BMP** (`_abck` + `sensor_data` markers, no sec-cpt
+  container): existing `handle_akamai_flow` path (works — bestbuy
+  flips GREEN).
+
+The gate condition in `handle_akamai_flow` must additionally check
+"is this a sec-cpt challenge?" and, if so, route to the sec-cpt PoW
+submission instead of the BMP sensor POST. The sec-cpt bundle already
+executes in our engine (proven by the trace) — the issue is our Rust
+driver *also* fires the wrong BMP POST and never lets/makes the
+sec-cpt answer submission happen with the correct payload shape.
+
+This is the genuinely hard remaining engine work for homedepot:
+challenge-type-aware routing + sec-cpt answer submission. Multi-step;
+the root cause is now exact. `sec_cpt::solve_crypto` (byte-verified)
+supplies the answer; the open work is (a) extracting the sec-cpt
+challenge params (token/nonce/difficulty/verify_url) from the executed
+`/Wjv3…` bundle's context or a parseable sub-resource, and (b) gating
+`handle_akamai_flow` so BMP sensor_data is not POSTed to a sec-cpt
+endpoint.
+
 ## Next experiment
 
 Run a live homedepot navigation with `BOXIDE_DEBUG_NAV=1` + script-
