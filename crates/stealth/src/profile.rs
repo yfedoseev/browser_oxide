@@ -149,6 +149,15 @@ pub struct StealthProfile {
     pub prefers_color_scheme: String,
     pub pointer_type: String,
     pub hover_capability: String,
+    /// `color-gamut` media-query value. Per
+    /// `docs/research_2026_05_14/11_DETECTION_SIGNAL_CATALOG_2026_05_14.md`
+    /// T2.6: real Chrome on macOS / iPhone reports `"p3"` (wide gamut);
+    /// Windows / Linux / Android typically report `"srgb"`. Mismatch
+    /// against UA is a FingerprintJS inconsistency-class probe.
+    /// Default `"srgb"` to preserve back-compat for profiles that
+    /// don't yet set this explicitly.
+    #[serde(default = "default_color_gamut")]
+    pub color_gamut: String,
 
     // === Window dimensions ===
     pub inner_width: u32,
@@ -176,6 +185,10 @@ pub struct StealthProfile {
     /// `BOXIDE_CSP_BYPASS=1`.
     #[serde(default = "default_true")]
     pub enforce_csp: bool,
+}
+
+fn default_color_gamut() -> String {
+    "srgb".to_string()
 }
 
 fn default_true() -> bool {

@@ -3682,7 +3682,12 @@
                 case "scripting": return "enabled";
                 case "scan": return "progressive";
                 case "grid": return "0";
-                case "color-gamut": return "srgb";
+                case "color-gamut":
+                    // Per CreepJS / FingerprintJS Pro inconsistency probe:
+                    // real macOS/iPhone Chrome reports "p3" (wide gamut);
+                    // Win/Linux/Android typically report "srgb". Profile-
+                    // driven default with srgb fallback.
+                    return _profileFeature("color_gamut", "srgb");
                 case "dynamic-range": return "standard";
                 case "orientation": return _orientationValue();
                 default: return null;
