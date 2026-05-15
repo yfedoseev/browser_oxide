@@ -211,11 +211,10 @@ pub fn known_file_hash(host: &str) -> Option<u32> {
     //   cat /tmp/bmak_<host>.js | node \
     //     /tmp/akamai-v3-sensor-data-helper/src/extract_hash/index.js
     match host {
-        // Captured 2026-05-14:
+        // Captured 2026-05-14 via crates/browser/tests/capture_bmak_js.rs:
         "www.bestbuy.com" => Some(6_249_250),
         "www.macys.com" => Some(2_752_023),
-        // homedepot returned SBSD 2621-byte interstitial — bmak.js
-        // not directly accessible without solving SBSD first.
+        "www.homedepot.com" => Some(8_806_534),
         // hotels.com / h-m.com captures pending.
         _ => None,
     }
