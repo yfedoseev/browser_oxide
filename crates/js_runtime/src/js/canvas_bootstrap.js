@@ -1216,7 +1216,35 @@
             'drawImage', 'isPointInPath', 'isPointInStroke');
         
         _maskAsNative(RealOffscreenCanvas.prototype, 'getContext', 'transferToImageBitmap', 'convertToBlob');
-        
+
+        // HTMLCanvasElement.prototype.transferControlToOffscreen — Chrome
+        // 69+ method that returns a new OffscreenCanvas bound to this
+        // element. Heavily probed by Kasada/CreepJS as a real-Chrome
+        // signal. Spec: https://html.spec.whatwg.org/#dom-canvas-transfercontroltooffscreen
+        if (_HTMLCanvasProto && typeof _HTMLCanvasProto.transferControlToOffscreen !== "function") {
+            const _transferControlToOffscreen = function transferControlToOffscreen() {
+                const ok = this && (this.tagName === "CANVAS" ||
+                    this instanceof globalThis.HTMLCanvasElement);
+                if (!ok) {
+                    throw new TypeError(
+                        "Failed to execute 'transferControlToOffscreen' on 'HTMLCanvasElement': Illegal invocation");
+                }
+                if (this._offscreenTransferred) {
+                    throw new DOMException(
+                        "Cannot transfer control from a canvas for more than one time.",
+                        "InvalidStateError");
+                }
+                const w = this.width || 300;
+                const h = this.height || 150;
+                this._offscreenTransferred = true;
+                return new RealOffscreenCanvas(w, h);
+            };
+            Object.defineProperty(_HTMLCanvasProto, "transferControlToOffscreen", {
+                value: _transferControlToOffscreen, configurable: true, writable: true,
+            });
+            try { _maskAsNative(_HTMLCanvasProto, 'transferControlToOffscreen'); } catch (_) {}
+        }
+
         if (_HTMLCanvasProto) {
             _maskAsNative(_HTMLCanvasProto, 'getContext', 'toDataURL', 'toBlob');
         }
