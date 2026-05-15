@@ -5179,6 +5179,63 @@ async fn kasada_hyatt_clean_production() {
     }
 }
 
+/// DECISIVE clean-production homedepot measurement. homedepot is a
+/// DIFFERENT vendor (Akamai sec-cpt, not Kasada); the prior
+/// "multi-day RE / still-blocked" conclusion predates this session's
+/// 6 FP fixes (esp. #6 canvas Skia-rasterizer parity, which affects
+/// Akamai FP scoring too) AND used the confounded `antibot_smoke`
+/// (FN_TRACE wrapper + no humanize). Same spd/dip/§9.3 discipline as
+/// the hyatt clean-prod retest: re-measure clean-production
+/// (Page::navigate, humanized, no trace) before accepting the stale
+/// pre-fix conclusion. A real homedepot page is hundreds of KB; the
+/// Akamai sec-cpt interstitial is a small self-solving bundle page.
+#[tokio::test]
+#[ignore = "network: decisive clean-production homedepot (humanized, no FN_TRACE)"]
+async fn akamai_homedepot_clean_production() {
+    let profile = stealth::presets::chrome_130_macos();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        Page::navigate("https://www.homedepot.com/", profile, 3),
+    )
+    .await
+    {
+        Ok(Ok(mut p)) => {
+            let final_url = p.url().to_string();
+            let html_len = p
+                .evaluate(
+                    "document.documentElement ? document.documentElement.outerHTML.length : 0",
+                )
+                .unwrap_or_default()
+                .parse::<usize>()
+                .unwrap_or(0);
+            let body_len = p
+                .evaluate("document.body ? document.body.textContent.length : 0")
+                .unwrap_or_default()
+                .parse::<usize>()
+                .unwrap_or(0);
+            let title = p.title();
+            let has_cpt = p
+                .evaluate(
+                    "(document.documentElement && (document.documentElement.outerHTML.indexOf('sec-cpt')!==-1 || document.documentElement.outerHTML.indexOf('sec-if-cpt')!==-1)) ? 1 : 0",
+                )
+                .unwrap_or_default();
+            println!(
+                "AKAMAI-homedepot-CLEAN-PROD: final_url={final_url} html={html_len} body={body_len} sec_cpt={has_cpt} title={title:?}"
+            );
+            println!(
+                "AKAMAI-homedepot-CLEAN-PROD: verdict={}",
+                if html_len > 50000 && has_cpt.trim() != "1" {
+                    "RENDERED (prior pre-fix conclusion was stale!)"
+                } else {
+                    "still blocked (sec-cpt bundle, conclusion robust)"
+                }
+            );
+        }
+        Ok(Err(e)) => println!("AKAMAI-homedepot-CLEAN-PROD: nav error: {e}"),
+        Err(_) => println!("AKAMAI-homedepot-CLEAN-PROD: 300s timeout"),
+    }
+}
+
 #[tokio::test]
 #[ignore = "network: 2 alt-Kasada targets to isolate IP-gate vs fingerprint"]
 async fn kasada_alt_targets() {
