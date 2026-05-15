@@ -6978,6 +6978,45 @@ async fn kasada_sentinel_identity_audit() {
     want_pass("\"valueIdentical\":true");
 }
 
+// Diagnostic: does our PluginArray.prototype.namedItem leak source?
+// Per the captured Kasada fingerprint blob (Group F in
+// docs/research_2026_05_14/12_KASADA_FINGERPRINT_ERROR_AUDIT_2026_05_14.md),
+// the May-10 capture showed our PluginArray.namedItem leaking the full
+// inner source `function namedItem(n) { const len = _pluginsLen(); ... }`.
+// Today's toString patch re-enable should mask it — this test confirms.
+#[tokio::test]
+async fn pluginarray_namedItem_must_show_native_code() {
+    let result = check_secure(
+        r#"
+        const fn = navigator.plugins.namedItem;
+        const s1 = String(fn);
+        const s2 = fn.toString();
+        const s3 = Function.prototype.toString.call(fn);
+        // All three should return the masked native-code shape.
+        JSON.stringify({
+            implicit: s1,
+            instance: s2,
+            protoCall: s3,
+            leak_pluginsLen: s1.includes('_pluginsLen'),
+            leak_allPlugins: s1.includes('_allPlugins'),
+        });
+        "#,
+    ).await;
+    eprintln!("namedItem audit: {result}");
+    assert!(
+        result.contains("[native code]"),
+        "namedItem must mask to native shape; got: {result}"
+    );
+    assert!(
+        result.contains("\"leak_pluginsLen\":false"),
+        "namedItem leaks _pluginsLen identifier — toString masking broken: {result}"
+    );
+    assert!(
+        result.contains("\"leak_allPlugins\":false"),
+        "namedItem leaks _allPlugins identifier — toString masking broken: {result}"
+    );
+}
+
 // W3.2 — Cross-origin iframe postMessage round-trip. Cloudflare Managed
 // Challenge mounts the iframe from challenges.cloudflare.com and
 // communicates with the parent via postMessage. We don't load a real
