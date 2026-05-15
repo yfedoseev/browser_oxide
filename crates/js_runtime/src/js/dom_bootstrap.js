@@ -2332,8 +2332,14 @@
             colorDepth:  _parentScreen.colorDepth  || 24,
             pixelDepth:  _parentScreen.pixelDepth  || 24,
             orientation: _parentScreen.orientation,
-            isExtended:  false,
         };
+        // isExtended is Window Management API (Chrome 100+, not in Firefox).
+        // Only expose on non-Gecko UAs to avoid Firefox-shape divergence.
+        if (!/Firefox\/|Gecko\/20100101/.test(
+            (typeof navigator !== "undefined" && navigator.userAgent) || ""
+        )) {
+            _iframeScreen.isExtended = false;
+        }
         const iframeLocals = {
             document: iframeDoc,
             location: { href: "about:blank" },
