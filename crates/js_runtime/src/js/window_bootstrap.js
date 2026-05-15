@@ -5197,14 +5197,32 @@
 
     // ================================================================
     // P0 FIX: Error stack trace filtering
-    // Remove deno_core internal frames (ext:, deno:) from Error.stack
-    // CreepJS and fingerprinters read new Error().stack
+    // Remove deno_core internal frames AND all browser_oxide bootstrap
+    // script names from Error.stack. Per docs/research_2026_05_14/
+    // 09_KASADA_DEEP_2026_05_14.md Hypothesis 7, our trace captured
+    // `at h (<init_script_0>:51:34)` — Kasada literally sees the
+    // browser_oxide-internal script name. Real Chrome's stack frames
+    // never show such tags; they show either real URLs or <anonymous>.
+    //
+    // Filter strategy: drop any frame whose filename starts with `<`
+    // EXCEPT `<anonymous>` (which V8 legitimately emits for eval).
+    // This catches `<bootstrap>`, `<cleanup>`, `<init_script_N>`,
+    // `<structured_clone>`, `<canvas_bootstrap>`, `<timer_bootstrap>`,
+    // `<fetch_bootstrap>`, `<streams_bootstrap>`, `<worker_bootstrap>`,
+    // and any future bootstrap names without needing per-name additions.
     // ================================================================
     Error.prepareStackTrace = function(err, frames) {
         const filtered = frames.filter(f => {
             const file = f.getFileName() || '';
-            return !file.startsWith('ext:') && !file.startsWith('deno:')
-                && !file.includes('bootstrap') && !file.includes('core/');
+            if (file.startsWith('ext:') || file.startsWith('deno:')) return false;
+            if (file.includes('core/')) return false;
+            // Internal bootstrap script names — all match `<...>` shape.
+            // Preserve V8's legitimate <anonymous> tag for eval/Function-
+            // constructor frames; drop everything else angle-bracketed.
+            if (file.startsWith('<') && file.endsWith('>') && file !== '<anonymous>') {
+                return false;
+            }
+            return true;
         });
         if (filtered.length === 0) {
             return err.toString() + '\n    at <anonymous>:1:1';

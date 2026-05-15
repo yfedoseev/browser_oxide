@@ -6979,6 +6979,67 @@ async fn kasada_sentinel_identity_audit() {
 }
 
 // Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
+// Hypothesis 7 (MEDIUM): Error.stack must never expose our internal
+// bootstrap script names (`<init_script_0>`, `<cleanup>`, etc.). Our
+// own VM trace at VM_TRACE_FINDINGS_2026_05_12.md captured the
+// `<init_script_0>` filename — Kasada literally sees browser_oxide's
+// wrapper. The fix in window_bootstrap.js's prepareStackTrace filter
+// drops all `<…>`-tagged frames except <anonymous>.
+#[tokio::test]
+async fn kasada_error_stack_must_not_leak_internal_script_names() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        // Trigger an error that bounces through several bootstrap-installed
+        // surfaces so the stack passes through multiple internal frames.
+        let stack;
+        try {
+            navigator.permissions.query({ name: 'midi' }).catch(e => {
+                stack = e.stack;
+            });
+        } catch (e) {
+            stack = e.stack;
+        }
+        // Also a synchronous error path through our patched plugins.
+        let stack2;
+        try { throw new Error('probe'); } catch (e) { stack2 = e.stack; }
+        // Wait one microtask for the permissions reject.
+        Promise.resolve().then(() => {});
+        JSON.stringify({ stack, stack2 });
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("kasada_error_stack_audit: {result}");
+    // Forbidden frame names — any of these in the stack means we leak.
+    let forbidden = [
+        "<bootstrap>",
+        "<cleanup>",
+        "<init_script_",
+        "<structured_clone>",
+        "<canvas_bootstrap>",
+        "<timer_bootstrap>",
+        "<fetch_bootstrap>",
+        "<streams_bootstrap>",
+        "<worker_bootstrap>",
+        "<dom_bootstrap>",
+        "<window_bootstrap>",
+        "<stealth_bootstrap>",
+        "<shared_apis>",
+        "<interfaces_bootstrap>",
+    ];
+    for tag in &forbidden {
+        assert!(
+            !result.contains(tag),
+            "Error.stack leaks internal bootstrap script name {tag}: {result}"
+        );
+    }
+}
+
+// Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
 // Hypothesis 1 (40% HIGH): Function.prototype.toString signature
 // catalogue. Per Asad Ikram's 2026 guide, Kasada catalogues toString
 // output of ~30 commonly-patched native methods. Any byte-different
