@@ -2660,7 +2660,16 @@
             }
 
             if (entries.length === 0) {
+                // Fingerprint scripts (Kasada/DataDome/Akamai) probe
+                // `performance.getEntriesByType('resource').length` and
+                // a near-empty list is a tell. Synthesize the typical
+                // resource shape of a generic page: favicon + main JS
+                // bundle + main CSS bundle + analytics ping + sw.
                 entries.push(mk(`${origin}/favicon.ico`, 25, 42, "img", 1024));
+                entries.push(mk(`${origin}/main.js`, 12, 87, "script", 58600));
+                entries.push(mk(`${origin}/main.css`, 8, 33, "link", 14200));
+                entries.push(mk(`${origin}/analytics.gif?t=` + (Date.now() % 1_000_000), 65, 18, "img", 35));
+                entries.push(mk(`${origin}/sw.js`, 95, 14, "script", 1840));
             }
             return entries;
         };

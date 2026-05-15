@@ -1100,6 +1100,13 @@
         Object.defineProperty(_HTMLCanvasProto, "toDataURL", {
             value: function toDataURL(_type) {
                 _requireCanvas(this, "toDataURL");
+                // Auto-allocate a canvas if none yet — real Chrome
+                // serializes any HTMLCanvasElement, even one whose 2D
+                // context was never requested. The result is a fully
+                // transparent PNG of the element's width × height.
+                if (!this._canvasId) {
+                    try { this.getContext("2d"); } catch (_e) {}
+                }
                 if (!this._canvasId) return "data:,";
                 return ops.op_canvas_to_data_url(this._canvasId);
             },
