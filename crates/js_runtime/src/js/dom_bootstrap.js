@@ -2254,9 +2254,40 @@
     // cache key in IframeRealmStore (HashMap<u32, ...>).
     let _nextRealmId = 0;
 
+    // Extract scheme+host+port from a URL without using new URL().
+    // Returns "null" for non-http(s) URLs (data:, about:, etc.) or empty input.
+    const _xOrigin = function(u) {
+        var m = u && u.match(/^(https?:\/\/[^/?#:]+(?::\d+)?)/i);
+        return m ? m[1].toLowerCase() : "null";
+    };
+
     function _getIframeWindow(el) {
         let state = _iframeState.get(el);
         if (state) {
+            // Kasada's crs probe: creates an iframe with no src, accesses contentWindow
+            // (creates child realm), then sets src to a cross-origin URL and re-accesses.
+            // When src changes to cross-origin, invalidate the cached realm and return a
+            // SecurityError proxy — exactly what real Chrome does.
+            try {
+                const _cSrc = (el && typeof el.getAttribute === "function")
+                    ? (el.getAttribute("src") || el.src || "")
+                    : (el && el.src || "");
+                if (_cSrc && _cSrc !== "about:blank" && _cSrc !== "") {
+                    const _pOrig = _xOrigin((globalThis.location && globalThis.location.href) || "");
+                    const _sOrig = _xOrigin(_cSrc);
+                    if (_sOrig !== _pOrig) {
+                        const _xM = 'Blocked a frame with origin "' + _pOrig + '" from accessing a cross-origin frame.';
+                        const _xo2 = new Proxy({}, {
+                            get(t, p) { if (typeof p === 'symbol') return undefined; throw new DOMException(_xM, 'SecurityError'); },
+                            set() { throw new DOMException(_xM, 'SecurityError'); },
+                            has() { return false; },
+                        });
+                        const _xoS2 = { contentWindow: _xo2, contentDocument: null, _realmId: undefined, _processedSrcdoc: '' };
+                        _iframeState.set(el, _xoS2);
+                        return _xo2;
+                    }
+                }
+            } catch (_) {}
             // Re-run srcdoc scripts if srcdoc was set after initial contentWindow access.
             // Kasada may set iframe.srcdoc = "..." before or after first contentWindow
             // access; in either case we must execute the scripts in the child realm.
@@ -2290,9 +2321,8 @@
                 ? (el.getAttribute("src") || el.src || "")
                 : (el && el.src || "");
             if (_iSrc && _iSrc !== "about:blank" && _iSrc !== "") {
-                const _pOrigin = (globalThis.location && globalThis.location.origin) || "null";
-                let _srcOrigin = "null";
-                try { _srcOrigin = new URL(_iSrc, globalThis.location && globalThis.location.href || "about:blank").origin; } catch (_) {}
+                const _pOrigin = _xOrigin((globalThis.location && globalThis.location.href) || "");
+                const _srcOrigin = _xOrigin(_iSrc);
                 if (_srcOrigin !== _pOrigin) {
                     const _xMsg = 'Blocked a frame with origin "' + _pOrigin + '" from accessing a cross-origin frame.';
                     const _xo = new Proxy({}, {
@@ -2486,6 +2516,81 @@
             _sp("indexedDB", { open() {}, deleteDatabase() {}, databases() { return Promise.resolve([]); }, cmp() { return 0; } });
             // visualViewport — propagate from parent (Kasada `bas` probe may call .toString()).
             try { if (globalThis.visualViewport !== undefined) _sp("visualViewport", globalThis.visualViewport); } catch (_) {}
+
+            // Event handler stubs — Chrome defines all on* handlers as null (data property,
+            // enumerable:true) on the Window global. The child realm gets genuine V8 natives
+            // but NOT these Window interface additions. Kasada `bas` probe iterates parent
+            // window's enumerable properties and for each key checks it in the child realm;
+            // calling .toString() on the undefined value throws, while null.toString()
+            // would throw too but with the correct Chrome-matching TypeError shape.
+            // Setting them null here makes child[key] !== undefined for all on* keys.
+            const _onHandlers = [
+                'onabort','onafterprint','onanimationcancel','onanimationend',
+                'onanimationiteration','onanimationstart','onappinstalled','onauxclick',
+                'onbeforeinput','onbeforeinstallprompt','onbeforematch','onbeforeprint',
+                'onbeforetoggle','onbeforeunload','onbeforexrselect','onblur',
+                'oncancel','oncanplay','oncanplaythrough','onchange',
+                'onclick','onclose','oncommand','oncontentvisibilityautostatechange',
+                'oncontextlost','oncontextmenu','oncontextrestored','oncuechange',
+                'ondblclick','ondrag','ondragend','ondragenter',
+                'ondragleave','ondragover','ondragstart','ondrop',
+                'ondurationchange','onemptied','onended','onfocus',
+                'onformdata','ongamepadconnected','ongamepaddisconnected','ongotpointercapture',
+                'onhashchange','oninput','oninvalid','onkeydown',
+                'onkeypress','onkeyup','onlanguagechange','onload',
+                'onloadeddata','onloadedmetadata','onloadstart','onlostpointercapture',
+                'onmessage','onmessageerror','onmousedown','onmouseenter',
+                'onmouseleave','onmousemove','onmouseout','onmouseover',
+                'onmouseup','onmousewheel','onoffline','ononline',
+                'onpagehide','onpagereveal','onpageshow','onpageswap',
+                'onpause','onplay','onplaying','onpointercancel',
+                'onpointerdown','onpointerenter','onpointerleave','onpointermove',
+                'onpointerout','onpointerover','onpointerrawupdate','onpointerup','onpopstate',
+                'onprogress','onratechange','onrejectionhandled','onreset',
+                'onresize','onscroll','onscrollend','onscrollsnapchange',
+                'onscrollsnapchanging','onsearch','onsecuritypolicyviolation','onseeked',
+                'onseeking','onselect','onselectionchange','onselectstart',
+                'onslotchange','onstalled','onstorage','onsubmit',
+                'onsuspend','ontimeupdate','ontoggle','ontransitioncancel',
+                'ontransitionend','ontransitionrun','ontransitionstart','onunhandledrejection',
+                'onunload','onvolumechange','onwaiting','onwebkitanimationend',
+                'onwebkitanimationiteration','onwebkitanimationstart','onwebkittransitionend','onwheel',
+            ];
+            for (const _oh of _onHandlers) {
+                try { _sp(_oh, null); } catch (_) {}
+            }
+
+            // Blanket-copy ALL remaining enumerable parent-window properties to child
+            // realm. Kasada `bas` probe iterates parent window's enumerable props and
+            // checks them in child; any that are undefined in child cause errors.
+            // Real Chrome child frames have the same complete set as parent.
+            // We skip child-specific properties (document, location, self-refs) that
+            // are already set above or will be overridden below with correct values.
+            const _basSkip = new Set([
+                'window','self','globalThis','frames','top','parent',
+                'document','location','opener',
+                'length',
+                // Carefully configured below (accessor or child-specific value):
+                'devicePixelRatio','navigator','fetch','postMessage',
+                // Already set above:
+                'screen','availWidth','availHeight','innerWidth','innerHeight',
+                'outerWidth','outerHeight','scrollX','scrollY','pageXOffset','pageYOffset',
+                'screenTop','screenLeft','screenX','screenY',
+                'closed','name','status','defaultStatus',
+                'history','localStorage','sessionStorage','indexedDB','visualViewport',
+            ]);
+            try {
+                for (const _bk of Object.keys(globalThis)) {
+                    if (_basSkip.has(_bk)) continue;
+                    // Skip numeric frame indices (not enumerable in real Chrome iframes)
+                    if (_bk.length <= 4 && /^\d+$/.test(_bk)) continue;
+                    try {
+                        const _bv = globalThis[_bk];
+                        _sp(_bk, _bv !== undefined ? _bv : null);
+                    } catch (_) {}
+                }
+            } catch (_) {}
+
             // devicePixelRatio: define as a native-tagged accessor so that
             // Kasada's dpi probe sees both a proper descriptor (getter:fn, not
             // data) AND [native code] from Function.prototype.toString.
@@ -2573,6 +2678,26 @@
                     if (_v !== undefined) _sp(_ak, _v);
                 } catch (_) {}
             }
+
+            // mrs probe: Kasada reads MediaSource.isTypeSupported from inside child realm
+            // via a srcdoc eval. _sp('MediaSource', ...) sets on the inner global via
+            // create_data_property, which should be visible inside. Belt-and-suspenders:
+            // if the cross-realm reference copy failed silently (op_set_child_realm_prop
+            // swallows errors), eval a local stub directly inside child realm scope.
+            try {
+                ops.op_eval_in_child_realm(_realmId,
+                    '(function(){if(typeof MediaSource==="undefined"){' +
+                    'var _s=new Set(["video/mp4","video/webm","audio/mp4","audio/webm",' +
+                    '"audio/mpeg","audio/aac","audio/x-m4a","audio/mp3","audio/x-wav",' +
+                    '"audio/ogg","audio/acc","audio/x-m4a","video/mp4;codecs=\\"avc1.42E01E,mp4a.40.2\\"",' +
+                    '"video/webm;codecs=\\"vp9\\"","audio/mp4;codecs=\\"mp4a.40.2\\""]);' +
+                    'function MediaSource(){throw new TypeError("Failed to construct \'MediaSource\': Illegal constructor");}' +
+                    'MediaSource.isTypeSupported=function isTypeSupported(t){' +
+                    'if(typeof t!=="string")return false;var b=t.split(";")[0].trim();' +
+                    'return _s.has(t)||_s.has(b);};' +
+                    'globalThis.MediaSource=MediaSource;}})();'
+                );
+            } catch (_) {}
 
             // Execute srcdoc scripts in the child realm.
             // Kasada probes (ifw, spd) inject script content via srcdoc to

@@ -82,6 +82,8 @@
         "CloseEvent", "EventSource",
         "OffscreenCanvas", "ImageBitmap",
         "Touch", "TouchEvent", "TouchList",
+        // URL pair (real impls in shared_apis_bootstrap.js)
+        "URL", "URLSearchParams",
     ]);
     for (const name of _rest) {
         if (!(name in globalThis)) {

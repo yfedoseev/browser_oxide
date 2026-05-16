@@ -8506,6 +8506,55 @@ async fn kasada_spd_probe_production_clean() {
     );
 }
 
+/// Verify that properties set via op_set_child_realm_prop are visible from
+/// INSIDE the child realm (via srcdoc eval). This is the real Kasada `spd`
+/// scenario: Kasada runs a srcdoc script that reads screen/window dimensions
+/// from the child realm's scope chain.
+#[tokio::test]
+async fn kasada_spd_inside_realm_visibility() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+          const iframe = document.createElement('iframe');
+          // Simulate Kasada's spd probe: srcdoc reads from inside child realm
+          iframe.srcdoc = '<script>' +
+            'var r = {};' +
+            'try { r.innerWidth = innerWidth; } catch(e) { r.innerWidth = "ERR:"+e.message; }' +
+            'try { r.outerWidth = outerWidth; } catch(e) { r.outerWidth = "ERR:"+e.message; }' +
+            'try { r.screenAW = screen && screen.availWidth; } catch(e) { r.screenAW = "ERR:"+e.message; }' +
+            'window.parent.__spd_from_inside = JSON.stringify(r);' +
+          '</script>';
+          document.body.appendChild(iframe);
+          const cw = iframe.contentWindow;
+          return JSON.stringify({
+            fromOutside: { innerWidth: cw.innerWidth, screenAW: cw.screen && cw.screen.availWidth },
+            fromInside: globalThis.__spd_from_inside || "not_set"
+          });
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("kasada-spd-inside-realm: {result}");
+    assert!(!result.starts_with("ERROR:"));
+    // Both outside reads and inside reads should return real numeric values
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let from_inside: serde_json::Value = serde_json::from_str(
+        parsed["fromInside"].as_str().unwrap_or("{}")
+    ).unwrap_or_default();
+    assert_ne!(parsed["fromOutside"]["innerWidth"], serde_json::Value::Null,
+        "innerWidth not visible from outside child realm: {result}");
+    assert!(
+        from_inside["innerWidth"].is_number(),
+        "innerWidth not visible from INSIDE child realm (spd probe fails): inside={} result={}",
+        from_inside, result
+    );
+}
+
 /// Kasada `ofc` probe: console.<method>.toString() must be native for
 /// ALL ~19 methods. decrypted_blob_0_pretty.json `/ofc/r` showed ours
 /// leaking `log(...args) { core.ops.op_console_log(...) }` — a
@@ -8533,6 +8582,21 @@ async fn kasada_console_methods_native_masked() {
     .await;
     eprintln!("kasada-console-native: {result}");
     assert_eq!(result, "[]", "console methods leak non-native toString: {result}");
+}
+
+/// location.origin must be set correctly for secure pages (https://example.com).
+/// Root cause: interfaces_bootstrap installed an Illegal-constructor stub for
+/// URLSearchParams before shared_apis_bootstrap could install the real polyfill,
+/// making new URL() fail silently and leaving _locationData.origin = "null".
+#[tokio::test]
+async fn location_origin_secure_page() {
+    let result = check_secure(r#"JSON.stringify({
+        origin: location.origin,
+        url_ok: (()=>{try{return new URL('https://x.com/').origin;}catch(e){return 'ERR:'+e.message;}})()
+    })"#).await;
+    eprintln!("loc-origin: {result}");
+    assert_eq!(result, r#"{"origin":"https://example.com","url_ok":"https://x.com"}"#,
+               "location.origin or URL broken: {result}");
 }
 
 /// Kasada `sfc` probe: `String(globalThis.<ctor>)` for ~47 Web API
@@ -8776,4 +8840,270 @@ async fn kasada_bas_probe_diagnostic() {
         }
     }
     assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+}
+
+/// Kasada `ifw` probe simulation: creates an iframe with srcdoc containing a
+/// script, then reads navigator.webdriver via window[0] (the frame index approach).
+/// Kasada uses window.frames[0] === window[0] since frames===window.
+#[tokio::test]
+async fn kasada_ifw_probe_srcdoc_simulation() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        Some(stealth::presets::chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+            const results = {};
+            // Simulate Kasada ifw: create iframe with srcdoc script, read via frames[0]
+            try {
+                const ifr = document.createElement('iframe');
+                // Kasada uses srcdoc with a domain-setting script
+                ifr.srcdoc = '<head><script>document.domain="example.com";</script></head><body></body>';
+                document.body.appendChild(ifr);
+                // Kasada accesses via window.frames[0] (= window[0]) not contentWindow
+                results.winLen = window.length;
+                results.win0Type = typeof window[0];
+                const cw = window.frames[0];  // same as window[0] since frames===window
+                results.hasCW = (cw !== null && cw !== undefined);
+                try { results.navType = typeof cw.navigator; } catch(e) { results.navType = 'ERR:'+e.message; }
+                try { results.wdVal = String(cw.navigator.webdriver); } catch(e) { results.wdVal = 'ERR:'+e.message; }
+                // Also test contentWindow path for comparison
+                try { results.cwNavType = typeof ifr.contentWindow.navigator; } catch(e) { results.cwNavType = 'ERR:'+e.message; }
+            } catch(e) { results.outerErr = String(e); }
+            return JSON.stringify(results);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("ifw-srcdoc-simulation: {result}");
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+    assert!(result.contains("\"hasCW\":true"), "contentWindow must exist: {result}");
+    assert!(result.contains("\"navType\":\"object\""), "navigator must be object: {result}");
+    assert!(!result.contains("\"wdVal\":\"ERR:"), "webdriver access must not throw: {result}");
+}
+
+/// Kasada `bas` probe simulation: scan ALL window property names from main window
+/// and check that none are `undefined` in the child iframe contentWindow.
+/// This simulates what Kasada's VM does when it iterates window keys and
+/// calls .toString() on each value in the child realm.
+#[tokio::test]
+async fn kasada_bas_probe_full_window_scan() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        Some(stealth::presets::chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+            const ifr = document.createElement('iframe');
+            ifr.srcdoc = '<head></head><body></body>';
+            document.body.appendChild(ifr);
+            const cw = ifr.contentWindow;
+            // Scan all enumerable properties of main window
+            const undefined_in_child = [];
+            const null_in_child = [];
+            for (const k of Object.keys(window)) {
+                try {
+                    const v = cw[k];
+                    if (v === undefined) undefined_in_child.push(k);
+                    else if (v === null) null_in_child.push(k);
+                } catch(e) {
+                    undefined_in_child.push(k + ':ERR:' + e.message);
+                }
+            }
+            return JSON.stringify({
+                total: Object.keys(window).length,
+                undefined_in_child: undefined_in_child.slice(0, 20),
+                null_in_child: null_in_child.slice(0, 5),
+            });
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("bas-full-scan: {result}");
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+}
+
+/// Kasada `sbi` probe: wraps DOM functions in Proxy sentinels and calls
+/// Function.prototype.toString on them. V8's original FP.toString throws for
+/// Proxy objects even when the target is callable. Our native toString must
+/// Kasada `crs` probe: accessing iframe.contentWindow when src is cross-origin
+/// must throw a SecurityError (DOMException). The probe sets the src AFTER the
+/// first contentWindow access (which creates a cached child realm); our fix
+/// detects src-change-to-cross-origin and replaces the cached state with a
+/// SecurityError proxy.
+#[tokio::test]
+async fn kasada_crs_probe_cross_origin_throws() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+          var r = {};
+          // Case 1: src set BEFORE contentWindow (should already work)
+          try {
+            var ifr1 = document.createElement('iframe');
+            ifr1.src = 'https://cross-origin.evil.com/';
+            document.body.appendChild(ifr1);
+            var cw1 = ifr1.contentWindow;
+            try { var _d = cw1.document; r.case1_threw = false; }
+            catch(e) { r.case1_threw = true; r.case1_err_name = e.constructor.name; }
+          } catch(e) { r.case1_outer = e.message; }
+
+          // Case 2: contentWindow accessed FIRST, then src changed to cross-origin
+          // This is the Kasada crs probe pattern
+          try {
+            var ifr2 = document.createElement('iframe');
+            document.body.appendChild(ifr2);
+            var cw2_init = ifr2.contentWindow; // creates child realm
+            ifr2.src = 'https://cross-origin.evil.com/';
+            var cw2 = ifr2.contentWindow;   // should now return xo proxy
+            try { var _d2 = cw2.document; r.case2_threw = false; }
+            catch(e) { r.case2_threw = true; r.case2_err_name = e.constructor.name; }
+          } catch(e) { r.case2_outer = e.message; }
+
+          return JSON.stringify(r);
+        })()
+    "#;
+    // Add debug info
+    let debug_js = r#"
+        JSON.stringify({
+          loc_origin: String(globalThis.location && globalThis.location.origin),
+          url_cross: (function(){try{return new URL("https://cross.evil.com/","https://example.com/").origin;}catch(e){return "ERR:"+e.message;}})(),
+          src_getter: (function(){try{var el=document.createElement("iframe");el.src="https://cross.evil.com/";return String(el.getAttribute("src"));}catch(e){return "ERR:"+e.message;}})()
+        })
+    "#;
+    let debug_result = page.evaluate(debug_js).unwrap_or_else(|e| format!("ERR: {e}"));
+    eprintln!("kasada-crs-debug: {debug_result}");
+
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("kasada-crs-probe: {result}");
+    assert!(!result.starts_with("ERROR:"));
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(parsed["case1_threw"], serde_json::Value::Bool(true),
+        "case1: pre-set cross-origin src must throw SecurityError: {result}");
+    assert_eq!(parsed["case1_err_name"], serde_json::json!("DOMException"),
+        "case1: error must be DOMException: {result}");
+    assert_eq!(parsed["case2_threw"], serde_json::Value::Bool(true),
+        "case2 (crs probe pattern): post-set cross-origin src must throw SecurityError: {result}");
+    assert_eq!(parsed["case2_err_name"], serde_json::json!("DOMException"),
+        "case2: error must be DOMException: {result}");
+}
+
+/// detect callable Proxies and return a native-code string without throwing.
+#[tokio::test]
+async fn kasada_sbi_probe_callable_proxy_tostring() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        Some(stealth::presets::chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+            const results = {};
+            // Simulate Kasada sbi: wrap a native function in a Proxy sentinel
+            const origFetch = globalThis.fetch;
+            const sentinel = new Proxy(origFetch, {
+                apply(t, thisArg, args) { return Reflect.apply(t, thisArg, args); }
+            });
+            // FP.toString.call(proxy) must not throw
+            try {
+                const s = Function.prototype.toString.call(sentinel);
+                results.noThrow = true;
+                results.isNative = s.includes('[native code]');
+                results.str = s;
+            } catch(e) {
+                results.noThrow = false;
+                results.err = e.message;
+            }
+            // Also test with a named function target
+            function myFn() {}
+            const namedProxy = new Proxy(myFn, {});
+            try {
+                const s2 = Function.prototype.toString.call(namedProxy);
+                results.namedNoThrow = true;
+                results.namedStr = s2;
+            } catch(e) {
+                results.namedNoThrow = false;
+                results.namedErr = e.message;
+            }
+            // Non-callable proxy must still throw (it wraps a plain object)
+            const nonCallable = new Proxy({}, {});
+            try {
+                Function.prototype.toString.call(nonCallable);
+                results.nonCallableThrew = false;
+            } catch(e) {
+                results.nonCallableThrew = true;
+            }
+            return JSON.stringify(results);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("sbi-callable-proxy-tostring: {result}");
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+    assert!(result.contains("\"noThrow\":true"), "callable Proxy FP.toString must not throw: {result}");
+    assert!(result.contains("\"isNative\":true"), "callable Proxy must stringify as native code: {result}");
+    assert!(result.contains("\"namedNoThrow\":true"), "named-fn Proxy FP.toString must not throw: {result}");
+    assert!(result.contains("\"nonCallableThrew\":true"), "non-callable Proxy must still throw: {result}");
+}
+
+/// Kasada `mrs` probe: MediaSource.isTypeSupported must be accessible from
+/// inside a child iframe realm, not just the parent window.
+#[tokio::test]
+async fn kasada_mrs_probe_mediasource_in_child_realm() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        Some(stealth::presets::chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+            const results = {};
+            const ifr = document.createElement('iframe');
+            ifr.srcdoc = '<head></head><body></body>';
+            document.body.appendChild(ifr);
+            const cw = ifr.contentWindow;
+            // mrs probe: isTypeSupported must exist inside child realm
+            try {
+                const ms = cw.MediaSource;
+                results.msType = typeof ms;
+                results.msExists = ms !== undefined && ms !== null;
+                if (results.msExists) {
+                    const fn_ = ms.isTypeSupported;
+                    results.fnType = typeof fn_;
+                    // Call it with a known-supported MIME type
+                    try {
+                        const r = ms.isTypeSupported('video/mp4');
+                        results.videoMp4 = r;
+                        results.fnCallOk = true;
+                    } catch(e) {
+                        results.fnCallOk = false;
+                        results.fnCallErr = e.message;
+                    }
+                }
+            } catch(e) {
+                results.err = e.message;
+            }
+            // Also verify parent window still has it
+            results.parentMs = typeof MediaSource;
+            return JSON.stringify(results);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("mrs-child-realm: {result}");
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+    assert!(result.contains("\"msExists\":true"), "MediaSource must exist in child realm: {result}");
+    assert!(result.contains("\"fnType\":\"function\""), "isTypeSupported must be a function in child realm: {result}");
+    assert!(result.contains("\"fnCallOk\":true"), "isTypeSupported must be callable in child realm: {result}");
 }

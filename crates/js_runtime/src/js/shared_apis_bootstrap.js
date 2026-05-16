@@ -232,38 +232,39 @@
     // ================================================================
     // URL / URLSearchParams.
     // ================================================================
-    if (!globalThis.URLSearchParams) {
-        globalThis.URLSearchParams = class URLSearchParams {
-            #params;
-            constructor(init) {
-                this.#params = [];
-                if (typeof init === "string") {
-                    const s = init.startsWith("?") ? init.slice(1) : init;
-                    for (const pair of s.split("&")) { const [k, ...v] = pair.split("="); if (k) this.#params.push([decodeURIComponent(k), decodeURIComponent(v.join("="))]); }
-                } else if (init && typeof init === "object") { for (const [k, v] of Object.entries(init)) this.#params.push([String(k), String(v)]); }
-            }
-            get(name) { const p = this.#params.find(([k]) => k === name); return p ? p[1] : null; }
-            getAll(name) { return this.#params.filter(([k]) => k === name).map(([, v]) => v); }
-            has(name) { return this.#params.some(([k]) => k === name); }
-            set(name, value) {
-                let found = false;
-                this.#params = this.#params.filter(([k]) => { if (k === name && !found) { found = true; return true; } return k !== name; });
-                if (found) this.#params.find(([k]) => k === name)[1] = String(value);
-                else this.#params.push([name, String(value)]);
-            }
-            append(name, value) { this.#params.push([String(name), String(value)]); }
-            delete(name) { this.#params = this.#params.filter(([k]) => k !== name); }
-            toString() { return this.#params.map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&"); }
-            forEach(cb, thisArg) { for (const [k, v] of this.#params) cb.call(thisArg, v, k, this); }
-            keys() { return this.#params.map(([k]) => k)[Symbol.iterator](); }
-            values() { return this.#params.map(([, v]) => v)[Symbol.iterator](); }
-            entries() { return this.#params[Symbol.iterator](); }
-            [Symbol.iterator]() { return this.entries(); }
-            get size() { return this.#params.length; }
-        };
+    // Always install our polyfills. V8 may expose half-initialized native
+    // URLSearchParams/URL bindings that throw "Illegal constructor" —
+    // forcing our pure-JS implementations guarantees constructability.
+    {
+        const _uspMap = new WeakMap();
+        function URLSearchParams(init) {
+            const p = [];
+            if (typeof init === "string") {
+                const s = init.startsWith("?") ? init.slice(1) : init;
+                for (const pair of s.split("&")) { const eq = pair.indexOf("="); if (eq < 0) { if (pair) p.push([decodeURIComponent(pair), ""]); } else { p.push([decodeURIComponent(pair.slice(0, eq)), decodeURIComponent(pair.slice(eq + 1))]); } }
+            } else if (init && typeof init === "object") { for (const [k, v] of Object.entries(init)) p.push([String(k), String(v)]); }
+            _uspMap.set(this, p);
+        }
+        URLSearchParams.prototype.get = function(name) { const p = _uspMap.get(this); const e = p.find(([k]) => k === name); return e ? e[1] : null; };
+        URLSearchParams.prototype.getAll = function(name) { return _uspMap.get(this).filter(([k]) => k === name).map(([, v]) => v); };
+        URLSearchParams.prototype.has = function(name) { return _uspMap.get(this).some(([k]) => k === name); };
+        URLSearchParams.prototype.set = function(name, value) { const p = _uspMap.get(this); let f = false; const np = p.filter(([k]) => { if (k === name && !f) { f = true; return true; } return k !== name; }); if (f) np.find(([k]) => k === name)[1] = String(value); else np.push([name, String(value)]); _uspMap.set(this, np); };
+        URLSearchParams.prototype.append = function(name, value) { _uspMap.get(this).push([String(name), String(value)]); };
+        URLSearchParams.prototype.delete = function(name) { _uspMap.set(this, _uspMap.get(this).filter(([k]) => k !== name)); };
+        URLSearchParams.prototype.toString = function() { return _uspMap.get(this).map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&"); };
+        URLSearchParams.prototype.forEach = function(cb, t) { for (const [k, v] of _uspMap.get(this)) cb.call(t, v, k, this); };
+        URLSearchParams.prototype.keys = function() { return _uspMap.get(this).map(([k]) => k)[Symbol.iterator](); };
+        URLSearchParams.prototype.values = function() { return _uspMap.get(this).map(([, v]) => v)[Symbol.iterator](); };
+        URLSearchParams.prototype.entries = function() { return _uspMap.get(this)[Symbol.iterator](); };
+        URLSearchParams.prototype[Symbol.iterator] = function() { return this.entries(); };
+        Object.defineProperty(URLSearchParams.prototype, 'size', { get: function() { return _uspMap.get(this).length; } });
+        Object.defineProperty(URLSearchParams, 'name', { value: 'URLSearchParams', configurable: true });
+        try {
+            Object.defineProperty(globalThis, 'URLSearchParams', { value: URLSearchParams, writable: true, configurable: true, enumerable: false });
+        } catch (_) { globalThis.URLSearchParams = URLSearchParams; }
         _maskAsNative(globalThis.URLSearchParams);
     }
-    if (!globalThis.URL) {
+    {
         globalThis.URL = class URL {
             constructor(url, base) {
                 let full = String(url);
