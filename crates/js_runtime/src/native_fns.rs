@@ -137,14 +137,37 @@ fn fp_to_string_cb(
         }
     }
 
+    // Kasada `sbi` probe wraps DOM functions in Proxy sentinels and calls
+    // Function.prototype.toString on them. V8's original FP.toString throws
+    // "requires that 'this' be a Function" for Proxy objects even when the
+    // Proxy wraps a function (V8 checks the JSReceiver type directly, not
+    // [[Call]]). Pre-detect callable Proxies and return a native string.
+    if this.is_proxy() {
+        if let Ok(proxy) = v8::Local::<v8::Proxy>::try_from(this) {
+            let target = proxy.get_target(scope);
+            if target.is_function() {
+                let name = v8::Local::<v8::Object>::try_from(target)
+                    .ok()
+                    .and_then(|to| {
+                        v8::String::new(scope, "name")
+                            .and_then(|k| to.get(scope, k.into()))
+                            .map(|nv| nv.to_rust_string_lossy(scope))
+                    })
+                    .unwrap_or_default();
+                let s = format!("function {name}() {{ [native code] }}");
+                if let Some(out) = v8::String::new(scope, &s) {
+                    rv.set(out.into());
+                }
+                return;
+            }
+        }
+    }
+
     // Delegate to the GENUINE original Function.prototype.toString
     // (captured pre-bootstrap, passed via data). V8 handles:
     //   - JS user functions   → source text
     //   - Real native fns     → `function name() { [native code] }`
-    //   - Callable Proxy objs → unwraps to target (Kasada `sbi` proxFn*)
     //   - Non-callable vals   → throws its own TypeError (same message)
-    // We intentionally omit an early `!is_function()` throw so that
-    // callable Proxies (Kasada sentinel wrappers) are handled by V8.
     let data = args.data();
     if let Ok(orig) = v8::Local::<v8::Function>::try_from(data) {
         let recv = this;

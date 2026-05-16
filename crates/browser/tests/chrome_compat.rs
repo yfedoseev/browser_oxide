@@ -3896,6 +3896,179 @@ async fn kasada_sentinel_identity_clean() {
     }
 }
 
+/// Diagnostic: capture the full __fetchLog after canadagoose.com navigation
+/// to see if ips.js is posting to /tl, /error, or nothing at all.
+/// Also captures __scriptErrors to detect VM crashes.
+#[tokio::test]
+#[ignore = "network: kasada fetchlog diagnostic"]
+async fn kasada_fetchlog_diagnostic() {
+    use browser::Page;
+    use std::time::Duration;
+
+    // Init script: install a comprehensive fetch tracer BEFORE the page's
+    // native fetch wrapper runs, and also check _boxide presence.
+    let init = r#"
+        (function() {
+            // Track iframe creation and contentWindow access
+            globalThis.__iframeDebug = {created: 0, cwAccess: 0, cwCtorName: null, bodyCalled: 0};
+            try {
+                const _cwDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow');
+                if (_cwDesc && _cwDesc.get) {
+                    const _origCW = _cwDesc.get;
+                    Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+                        get: function() {
+                            globalThis.__iframeDebug.cwAccess++;
+                            let cw;
+                            try {
+                                cw = _origCW.call(this);
+                            } catch(e) {
+                                globalThis.__iframeDebug.cwGetterErr = String(e).substring(0, 120);
+                                return undefined;
+                            }
+                            globalThis.__iframeDebug.cwTypeOf = typeof cw;
+                            globalThis.__iframeDebug.cwIsNull = (cw === null || cw === undefined);
+                            // Record iframe src at time of access
+                            try { globalThis.__iframeDebug.iframeSrc = this.getAttribute && this.getAttribute('src') || this.src || 'noattr'; } catch(_) {}
+                            if (cw) {
+                                try { globalThis.__iframeDebug.cwCtorName = String(cw.constructor && cw.constructor.name); } catch(e) {
+                                    globalThis.__iframeDebug.cwCtorErr = String(e).substring(0,100);
+                                }
+                            }
+                            return cw;
+                        },
+                        configurable: true,
+                    });
+                }
+            } catch(e) { globalThis.__iframeDebug.cwErr = String(e); }
+            // Track HTMLIFrameElement.prototype.srcdoc getter calls
+            try {
+                const _sdDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'srcdoc');
+                if (_sdDesc && _sdDesc.set) {
+                    const _origSdSet = _sdDesc.set;
+                    const _origSdGet = _sdDesc.get;
+                    Object.defineProperty(HTMLIFrameElement.prototype, 'srcdoc', {
+                        get: _origSdGet,
+                        set: function(v) {
+                            globalThis.__iframeDebug.srcdocSet = (globalThis.__iframeDebug.srcdocSet || 0) + 1;
+                            globalThis.__iframeDebug.srcdocLen = String(v||'').length;
+                            return _origSdSet.call(this, v);
+                        },
+                        configurable: true,
+                        enumerable: true,
+                    });
+                }
+            } catch(_) {}
+            // Track document.body access (indicates ips.js is trying to append)
+            try {
+                const _bodyDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'body');
+                if (_bodyDesc && _bodyDesc.get) {
+                    const _origBody = _bodyDesc.get;
+                    Object.defineProperty(Document.prototype, 'body', {
+                        get: function() {
+                            globalThis.__iframeDebug.bodyCalled++;
+                            return _origBody.call(this);
+                        },
+                        configurable: true,
+                    });
+                }
+            } catch(e) {}
+            // Also install an independent tracer on globalThis so we can see
+            // all calls regardless of _boxide state.
+            globalThis.__fetchTrace = [];
+            const _orig = globalThis.fetch;
+            globalThis.fetch = async function(input, init) {
+                const url = typeof input === 'string' ? input : (input && (input.url || '')) || '';
+                globalThis.__fetchTrace.push({m: (init && init.method) || 'GET', u: String(url).substring(0, 150), t: Date.now()});
+                try {
+                    const r = await _orig.apply(this, arguments);
+                    globalThis.__fetchTrace[globalThis.__fetchTrace.length-1].st = r.status;
+                    return r;
+                } catch(e) {
+                    globalThis.__fetchTrace[globalThis.__fetchTrace.length-1].err = String(e.message||e).substring(0,80);
+                    throw e;
+                }
+            };
+            // XHR trace
+            globalThis.__xhrTrace = [];
+            const _XHR = globalThis.XMLHttpRequest;
+            if (_XHR) {
+                const _origOpen = _XHR.prototype.open;
+                const _origSend = _XHR.prototype.send;
+                _XHR.prototype.open = function(m, u) {
+                    this.__t = {m: String(m||'GET'), u: String(u||'').substring(0,150)};
+                    return _origOpen.apply(this, arguments);
+                };
+                _XHR.prototype.send = function(body) {
+                    const e = this.__t || {m:'?', u:'?'};
+                    e.hasBody = body != null;
+                    e.t = Date.now();
+                    globalThis.__xhrTrace.push(e);
+                    const self = this;
+                    const origRSC = this.onreadystatechange;
+                    this.onreadystatechange = function() {
+                        if (self.readyState === 4) e.st = self.status;
+                        if (origRSC) origRSC.apply(this, arguments);
+                    };
+                    return _origSend.apply(this, arguments);
+                };
+            }
+        })();
+    "#;
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(120),
+        Page::navigate_with_init(
+            "https://www.canadagoose.com/",
+            stealth::presets::chrome_130_macos(),
+            1,
+            vec![init.to_string()],
+        ),
+    )
+    .await;
+
+    match page {
+        Ok(Ok(mut p)) => {
+            for _ in 0..30 {
+                let _ = p.evaluate("0");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let boxide_ok = p.evaluate("typeof globalThis._boxide").unwrap_or_default();
+            let fetch_log = p
+                .evaluate("JSON.stringify(globalThis.__fetchTrace || [])")
+                .unwrap_or_default();
+            let xhr_log = p
+                .evaluate("JSON.stringify(globalThis.__xhrTrace || [])")
+                .unwrap_or_default();
+            let native_log = p
+                .evaluate("JSON.stringify((globalThis._boxide && globalThis._boxide.__fetchLog || []).map(e => ({m: e.method, u: (e.url||'').substring(0,120), st: e.status})))")
+                .unwrap_or_default();
+            let errors = p
+                .evaluate("JSON.stringify((globalThis.__scriptErrors || []).slice(0,10))")
+                .unwrap_or_default();
+            let iframe_debug = p
+                .evaluate("JSON.stringify(globalThis.__iframeDebug || {})")
+                .unwrap_or_default();
+            let body_exists = p
+                .evaluate("String(!!document.body) + ' body.id=' + (document.body && document.body.id || 'none')")
+                .unwrap_or_default();
+            println!("\n=== _boxide type: {} ===", boxide_ok.trim_matches('"'));
+            println!("=== iframe debug ===");
+            println!("{iframe_debug}");
+            println!("=== document.body exists: {} ===", body_exists.trim_matches('"'));
+            println!("=== fetch trace ({}) ===", fetch_log.len());
+            println!("{fetch_log}");
+            println!("=== XHR trace ===");
+            println!("{xhr_log}");
+            println!("=== native __fetchLog ===");
+            println!("{native_log}");
+            println!("=== script errors ===");
+            println!("{errors}");
+        }
+        Ok(Err(e)) => println!("nav err: {e}"),
+        Err(_) => println!("timeout"),
+    }
+}
+
 /// T2C — capture the actual body of Kasada's error POST to
 /// `reporting.cdndex.io/error`. The 67 KB blob is what Kasada's
 /// JS-VM serialises when it can't complete the /tl handshake; it
@@ -8209,6 +8382,108 @@ async fn window_frame_registry_after_append() {
     assert!(result.contains("\"windowLength\":1"), "window.length must be 1 after append: {result}");
     assert!(result.contains("\"hasW0\":true"), "window[0] must be defined after append: {result}");
     assert!(!result.contains("ERR:"), "window[0].navigator.webdriver must not throw: {result}");
+}
+
+/// Diagnostic: what do various iframe.contentWindow property accesses return?
+/// This mimics what Kasada's ifw probe checks (i_ciw, i_nwd, i_cwwd, etc.)
+#[tokio::test]
+async fn kasada_ifw_probe_diagnostic() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"(function(){
+        const iframe = document.createElement('iframe');
+        iframe.src = 'javascript:;';
+        document.body.appendChild(iframe);
+        const cw = iframe.contentWindow;
+        const safe = fn => { try { return fn(); } catch(e) { return 'ERR:'+e.message; } };
+
+        // set srcdoc to run checks inside child realm
+        iframe.srcdoc = '<script>window.__nwd=navigator.webdriver;window.__doctype=typeof document;<\/script>';
+
+        return JSON.stringify({
+            cwType: typeof cw,
+            // i_ciw candidates: instanceof Window checks
+            cwInstanceofParentWindow: safe(() => cw instanceof Window),
+            cwInstanceofOwnWindow: safe(() => cw instanceof cw.Window),
+            cwConstructorName: safe(() => cw.constructor && cw.constructor.name),
+            // i_nwd candidates: navigator.webdriver
+            cwNavWebdriver: safe(() => String(cw.navigator && cw.navigator.webdriver)),
+            cwWindowNavWebdriver: safe(() => String(cw.window && cw.window.navigator && cw.window.navigator.webdriver)),
+            // i_cwwd candidates: document access via window.document
+            cwDocType: safe(() => typeof cw.document),
+            cwWindowDocType: safe(() => typeof cw.window.document),
+            cwWindowDocNotNull: safe(() => cw.window.document !== null),
+            // self-loop
+            cwWindowIsCw: safe(() => cw.window === cw),
+            // MediaSource/MediaRecorder in child realm
+            cwMsType: safe(() => typeof cw.MediaSource),
+            cwMsIsTypeSupportedType: safe(() => typeof (cw.MediaSource && cw.MediaSource.isTypeSupported)),
+            cwMsResult: safe(() => String(cw.MediaSource && cw.MediaSource.isTypeSupported && cw.MediaSource.isTypeSupported('video/mp4'))),
+            cwMrType: safe(() => typeof cw.MediaRecorder),
+            cwMrIsTypeSupportedType: safe(() => typeof (cw.MediaRecorder && cw.MediaRecorder.isTypeSupported)),
+            // srcdoc inner results
+            cwInnerNwd: safe(() => String(cw.__nwd)),
+            cwInnerDocType: safe(() => String(cw.__doctype)),
+            // window[0]
+            win0IsCw: safe(() => window[0] === cw),
+            windowLength: safe(() => window.length),
+        });
+    })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("ifw-probe-diagnostic: {result}");
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+}
+
+/// Targeted test: what does MediaSource look like inside a child realm eval (srcdoc)?
+#[tokio::test]
+async fn kasada_smc_in_child_realm_eval() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        Some(stealth::presets::chrome_130_macos()),
+    )
+    .await
+    .unwrap();
+    let js = r#"(function(){
+        const iframe = document.createElement('iframe');
+        iframe.src = 'javascript:;';
+        document.body.appendChild(iframe);
+        const cw = iframe.contentWindow;
+
+        // Check from parent accessing child realm
+        const fromParent = {
+            msType: typeof cw.MediaSource,
+            istType: typeof (cw.MediaSource && cw.MediaSource.isTypeSupported),
+        };
+
+        // Check from inside child realm via srcdoc eval
+        iframe.srcdoc = '<script>' +
+            'var r={};' +
+            'try{r.msType=typeof MediaSource;}catch(e){r.msErr=e.message;}' +
+            'if(typeof MediaSource!=="undefined"){' +
+            '  try{r.istType=typeof MediaSource.isTypeSupported;}catch(e){r.istErr=e.message;}' +
+            '  try{r.istResult=String(MediaSource.isTypeSupported("video/mp4"));}catch(e){r.istCallErr=e.message;}' +
+            '}' +
+            'window.parent.__realm_eval_result=r;' +
+        '<\/script>';
+
+        return JSON.stringify({
+            fromParent: fromParent,
+            fromSrcdoc: window.__realm_eval_result || {note: 'not_set'}
+        });
+    })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("smc-child-realm-eval: {result}");
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+    assert!(result.contains("\"msType\":\"function\""), "MediaSource must be function in child realm: {result}");
+    assert!(result.contains("\"istType\":\"function\""), "isTypeSupported must be function in child realm: {result}");
 }
 
 // Diagnostic: does our PluginArray.prototype.namedItem leak source?

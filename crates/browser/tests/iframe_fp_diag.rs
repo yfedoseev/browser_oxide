@@ -79,3 +79,78 @@ async fn iframe_fp_surface_noprofile() {
         .unwrap_or_else(|e| format!("EVAL_ERR: {e}"));
     println!("OUR-ENGINE-IFRAME-FP (no profile):\n{r}");
 }
+
+#[tokio::test]
+#[ignore = "diagnostic: Kasada ifw+smc probe parity check"]
+async fn kasada_ifw_smc_probe() {
+    let profile = stealth::presets::chrome_130_macos();
+    let mut page = Page::from_html(
+        "<!DOCTYPE html><html><head></head><body></body></html>",
+        Some(profile),
+    )
+    .await
+    .unwrap();
+    // Mirrors Kasada's ifw and smc probe checks exactly:
+    //   i_ciw  = cw instanceof Window
+    //   i_nwd  = cw.navigator.webdriver
+    //   i_cwwd = cw.window === cw
+    //   smc    = typeof cw.MediaSource.isTypeSupported, result for "video/mp4"
+    let r = page.evaluate(r#"(function(){
+  try {
+    var f = document.createElement('iframe');
+    f.style.display = 'none';
+    (document.body || document.documentElement).appendChild(f);
+    var cw = f.contentWindow;
+    if (!cw) return JSON.stringify({err: 'contentWindow null'});
+    var ms = cw.MediaSource;
+    return JSON.stringify({
+      i_ciw: (cw instanceof Window),
+      i_nwd: (cw.navigator && cw.navigator.webdriver),
+      i_cwwd: (cw.window === cw),
+      i_self_eq_cw: (cw.self === cw),
+      ms_type: typeof ms,
+      its_type: (ms && typeof ms.isTypeSupported),
+      its_mp4: (ms && ms.isTypeSupported && ms.isTypeSupported('video/mp4')),
+      its_webm: (ms && ms.isTypeSupported && ms.isTypeSupported('video/webm')),
+      cw_win_type: typeof cw.window,
+      window_ciw: (typeof Window === 'function'),
+    });
+  } catch(e) { return JSON.stringify({PROBE_ERR: String(e), stack: e.stack}); }
+})()"#).unwrap_or_else(|e| format!("EVAL_ERR: {e}"));
+    println!("KASADA-IFW-SMC-PROBE: {r}");
+}
+
+#[tokio::test]
+#[ignore = "diagnostic: Kasada spd (screen pixel density) probe in child realm"]
+async fn kasada_spd_probe() {
+    let profile = stealth::presets::chrome_130_macos();
+    let mut page = Page::from_html(
+        "<!DOCTYPE html><html><head></head><body></body></html>",
+        Some(profile),
+    )
+    .await
+    .unwrap();
+    // Mirrors Kasada's spd probe: reads screen/viewport props from child iframe window.
+    let r = page.evaluate(r#"(function(){
+  try {
+    var f = document.createElement('iframe');
+    f.style.display = 'none';
+    (document.body || document.documentElement).appendChild(f);
+    var cw = f.contentWindow;
+    if (!cw) return JSON.stringify({err: 'contentWindow null'});
+    var scr = cw.screen;
+    return JSON.stringify({
+      availWidth: cw.availWidth !== undefined ? cw.availWidth : 'n/a',
+      availHeight: cw.availHeight !== undefined ? cw.availHeight : 'n/a',
+      width: scr ? scr.width : 'no-screen',
+      height: scr ? scr.height : 'no-screen',
+      innerWidth: cw.innerWidth !== undefined ? cw.innerWidth : 'n/a',
+      innerHeight: cw.innerHeight !== undefined ? cw.innerHeight : 'n/a',
+      outerWidth: cw.outerWidth !== undefined ? cw.outerWidth : 'n/a',
+      outerHeight: cw.outerHeight !== undefined ? cw.outerHeight : 'n/a',
+      dpr: cw.devicePixelRatio !== undefined ? cw.devicePixelRatio : 'n/a',
+    });
+  } catch(e) { return JSON.stringify({PROBE_ERR: String(e)}); }
+})()"#).unwrap_or_else(|e| format!("EVAL_ERR: {e}"));
+    println!("KASADA-SPD-PROBE: {r}");
+}

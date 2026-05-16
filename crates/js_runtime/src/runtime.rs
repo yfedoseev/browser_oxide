@@ -223,8 +223,6 @@ pub fn create_runtime_with_signals(
             include_str!("js/streams_bootstrap.js"),
             "\n",
             include_str!("js/structured_clone.js"),
-            "\n",
-            include_str!("js/cleanup_bootstrap.js"),
         );
 
         runtime
