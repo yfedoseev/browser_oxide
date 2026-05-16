@@ -1910,10 +1910,35 @@
         }
     }
 
+    // Window frame registry: tracks appended iframes so window[0], window[1], etc.
+    // work correctly. Kasada's ifw probe accesses window.frames[0].navigator.webdriver
+    // (which is window[0] since frames===window in our engine). Without this,
+    // window[0] is undefined → TypeError "Cannot read properties of undefined
+    // (reading 'webdriver')".
+    const _appendedIframes = [];
+
     // Wrap DOM mutation methods to fire MO notifications
     const _origAppendChild = Node.prototype.appendChild;
     Node.prototype.appendChild = function(child) {
         const result = _origAppendChild.call(this, child);
+        // Register iframes in the parent window's frame list (window[N] access)
+        try {
+            if (typeof HTMLIFrameElement !== 'undefined' && child instanceof HTMLIFrameElement) {
+                const _fi = _appendedIframes.length;
+                _appendedIframes.push(child);
+                // Define lazy getter for window[N] — contentWindow is created on demand
+                Object.defineProperty(globalThis, String(_fi), {
+                    get: function() { return _getIframeWindow(_appendedIframes[_fi]); },
+                    configurable: true, enumerable: false,
+                });
+                // Update window.length (= number of child frames)
+                try {
+                    Object.defineProperty(globalThis, 'length', {
+                        value: _appendedIframes.length, configurable: true, writable: true,
+                    });
+                } catch (_) {}
+            }
+        } catch (_) {}
         if (_moObservers.length > 0) {
             _notifyMO("childList", _getNodeId(this), { target: this, addedNodes: [child] });
         }

@@ -1373,6 +1373,9 @@
         });
     }
     globalThis.opener = null;
+    // window.length = number of child frames. Starts at 0; dom_bootstrap.js
+    // updates it when iframes are appended to the document.
+    try { Object.defineProperty(globalThis, 'length', { value: 0, configurable: true, writable: true }); } catch (_) {}
 
     // screen — prototype-backed so own-descriptor probe returns undefined.
     const _ScreenProto = Screen.prototype;
