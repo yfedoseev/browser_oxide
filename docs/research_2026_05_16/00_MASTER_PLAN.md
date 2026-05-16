@@ -472,6 +472,51 @@ sec-cpt) + Phase 4 etsy/tripadvisor (DataDome i.js)**. The live
 `#[ignore] kasada_identity_decisive_live_canadagoose` is corroboration
 only — the network-free invariant + the §6 evidence already settle it.
 
+**Phase 3/4/5 — SCOPED 2026-05-16 (honest, post-rebaseline; no
+speculative code added).** With Phase 0.2's false-positive elimination
+and Phase 2's Kasada-line closure, the true hard-6 reduce to two
+problem classes, both verified against code:
+
+- **Akamai (Phase 3) collapses to homedepot only.** 10/11 Akamai sites
+  render (Phase 0.2 `pass`). The BMP-vs-sec-cpt skip guard the docs
+  flagged is **already correctly implemented** (`page.rs:469-477`
+  returns `NeedsSecCpt`, skips the wrong POST). homedepot serves the
+  **rotating-obfuscated-bundle** sec-cpt variant: the 2.6 KB body is
+  `<div id="sec-if-cpt-container">` + `<script src="/Wjv3…">` with
+  **no parseable 428 JSON / no inline nonce·difficulty·verify_url** —
+  `sec_cpt::solve_crypto` (byte-verified) **cannot be fed without
+  executing the bundle** (confirmed: doc 05 §1a + `SecCptChallenge`
+  schema vs the body shape). G3 (live `wsl`/`din`) and G4 (fileHash
+  auto-extract) target the 10 already-rendering sites → flip zero
+  hard-6 and add akamai-sensor regression risk. Wiring `solve_crypto`
+  for the classic-428 variant is possible but **no target site serves
+  that variant** and there is **no captured parseable-428 fixture** to
+  verify an extractor against — building it would be unverifiable
+  speculative nav code (violates revert-if-not-green / verify-don't-
+  assume). ⇒ homedepot is a **Phase 5** problem.
+- **DataDome (Phase 4) = same shape.** `DdEncryptor` byte-verified,
+  zero callers; etsy/tripadvisor need in-engine **i.js + WASM
+  `boring_challenge` execution + same-origin round-trip**; DataDome
+  shipped a JS VM 2026-01-14 with 6-char **daily** key rotation —
+  HTTP-only solving is dead (doc 05 §2). Also **Phase 5**.
+
+**Net:** the master plan's own §4/§5 thesis is confirmed by code —
+"Phases 0-4 are the de-risking path to Phase 5 (the unified in-engine
+vendor-bundle self-solve)". Post-rebaseline there is **no safely-
+gateable single-commit site flip remaining**; the residual hard set
+(homedepot, etsy, tripadvisor) all require the Phase 5 capability
+(L, strategic), and Kasada×3 is the holistic tail with no lever. The
+decisive engineering win of this work is **measurement integrity**: the
+"22 engine-addressable / blocked" framing was inflated by classifier
+error; the engine already renders 18/29, the Kasada realm hunt is
+closed, and the real residual is a small, sharply-characterized Phase-5
+problem — not 22 scattered unknowns. Next session: build Phase 5
+directly (unified bundle-self-solve), starting with DataDome
+etsy/tripadvisor (M, the cheapest Phase-5 entry per doc 05 §2d) using a
+live capture as the dev oracle; do **not** re-chase Kasada realm/
+identity, Akamai wsl/din, or `solve_crypto` static-param extraction
+(all eliminated above).
+
 ## 8. One-line summary for the next session
 
 The realm wiring is **done** (older handoffs are stale); the engine is
