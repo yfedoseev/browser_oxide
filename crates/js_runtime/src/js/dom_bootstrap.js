@@ -2253,6 +2253,36 @@
             return state.contentWindow;
         }
 
+        // ── Cross-origin iframe detection (crs probe) ────────────────────
+        // Kasada's crs probe creates an iframe with a different origin (e.g. a
+        // data: URI or cross-origin https URL) and expects V8's SecurityError
+        // when accessing contentWindow.document. Return a Proxy that throws
+        // SecurityError on any property read — matches real Chrome behaviour.
+        try {
+            const _iSrc = (el && typeof el.getAttribute === "function")
+                ? (el.getAttribute("src") || el.src || "")
+                : (el && el.src || "");
+            if (_iSrc && _iSrc !== "about:blank" && _iSrc !== "") {
+                const _pOrigin = (globalThis.location && globalThis.location.origin) || "null";
+                let _srcOrigin = "null";
+                try { _srcOrigin = new URL(_iSrc, globalThis.location && globalThis.location.href || "about:blank").origin; } catch (_) {}
+                if (_srcOrigin !== _pOrigin) {
+                    const _xMsg = 'Blocked a frame with origin "' + _pOrigin + '" from accessing a cross-origin frame.';
+                    const _xo = new Proxy({}, {
+                        get(t, p) {
+                            if (typeof p === 'symbol') return undefined;
+                            throw new DOMException(_xMsg, 'SecurityError');
+                        },
+                        set() { throw new DOMException(_xMsg, 'SecurityError'); },
+                        has() { return false; },
+                    });
+                    const _xoState = { contentWindow: _xo, contentDocument: null, _realmId: undefined, _processedSrcdoc: '' };
+                    _iframeState.set(el, _xoState);
+                    return _xo;
+                }
+            }
+        } catch (_) {}
+
         // ── Build the iframe document shell ──────────────────────────────
         // W3.5 — srcdoc iframes: expose the source text for fingerprint-grade
         // reads (`iframe.contentDocument.body.innerHTML`).
