@@ -2229,7 +2229,29 @@
 
     function _getIframeWindow(el) {
         let state = _iframeState.get(el);
-        if (state) return state.contentWindow;
+        if (state) {
+            // Re-run srcdoc scripts if srcdoc was set after initial contentWindow access.
+            // Kasada may set iframe.srcdoc = "..." before or after first contentWindow
+            // access; in either case we must execute the scripts in the child realm.
+            if (state._realmId !== undefined) {
+                let _cur = "";
+                try { _cur = el.getAttribute("srcdoc") || el.srcdoc || ""; } catch (_) {}
+                if (_cur && _cur !== state._processedSrcdoc) {
+                    state._processedSrcdoc = _cur;
+                    try {
+                        const _re = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+                        let _m2;
+                        while ((_m2 = _re.exec(_cur)) !== null) {
+                            const _s2 = _m2[1];
+                            if (_s2 && _s2.trim()) {
+                                try { ops.op_eval_in_child_realm(state._realmId, _s2); } catch (_) {}
+                            }
+                        }
+                    } catch (_) {}
+                }
+            }
+            return state.contentWindow;
+        }
 
         // ── Build the iframe document shell ──────────────────────────────
         // W3.5 — srcdoc iframes: expose the source text for fingerprint-grade
@@ -2484,7 +2506,7 @@
                 } catch (_) {}
             }
 
-            state = { contentWindow: cw, contentDocument: iframeDoc };
+            state = { contentWindow: cw, contentDocument: iframeDoc, _realmId: _realmId, _processedSrcdoc: _srcdoc };
             _iframeState.set(el, state);
             return cw;
         }
@@ -2581,6 +2603,36 @@
         });
         Object.defineProperty(HTMLIFrameElement.prototype, 'contentDocument', {
             get: function() { return _getIframeDocument(this); },
+            configurable: true,
+            enumerable: true,
+        });
+        // srcdoc setter: when Kasada sets iframe.srcdoc = "..." BEFORE the first
+        // contentWindow access, the value lands on the element's own property dict
+        // (no setter exists, so JS creates an own data property). Our fallback in
+        // _getIframeWindow reads el.srcdoc if getAttribute("srcdoc") is empty.
+        //
+        // When srcdoc is set AFTER the first contentWindow access (child realm
+        // already cached), this setter fires immediately and re-executes the scripts.
+        const _srcdocValues = new WeakMap();
+        Object.defineProperty(HTMLIFrameElement.prototype, 'srcdoc', {
+            get: function() { return _srcdocValues.get(this) || this.getAttribute('srcdoc') || ''; },
+            set: function(v) {
+                _srcdocValues.set(this, String(v));
+                const _st = _iframeState.get(this);
+                if (_st && _st._realmId !== undefined && v && String(v) !== _st._processedSrcdoc) {
+                    _st._processedSrcdoc = String(v);
+                    try {
+                        const _re = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+                        let _m3;
+                        while ((_m3 = _re.exec(String(v))) !== null) {
+                            const _s3 = _m3[1];
+                            if (_s3 && _s3.trim()) {
+                                try { ops.op_eval_in_child_realm(_st._realmId, _s3); } catch (_) {}
+                            }
+                        }
+                    } catch (_) {}
+                }
+            },
             configurable: true,
             enumerable: true,
         });
