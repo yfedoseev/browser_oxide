@@ -415,6 +415,31 @@ verify content depth before declaring a site fully won. The big-body
 passes (costco/disneyplus/weather/wapo/uniqlo/hulu/macys/wayfair, all
 0.4–3.7 MB) are real renders.
 
+**Phase 1 G8 — DEFERRED 2026-05-16 (scoped follow-up, rationale).**
+G7/G9/G12 landed (commits `b728840`, `<G12>`). G8 (route
+`Page::navigate`'s `humanize.js` through `stealth::behavior`) is
+deliberately deferred, not skipped, because: (1) `humanize.js` *already*
+implements a sigma-lognormal Plamondon model inline (its header docs the
+exact `v(t)` curve) — the gap vs `behavior.rs` is model *richness*
+(handedness/Fitts/ChaCha determinism), a parity nicety, not a missing
+capability; (2) per the Phase 0.2 re-baseline the behavioral score is
+**not** the blocker for any of the true hard-6 (Kasada =
+allow-but-blocked identity paradox; homedepot = sec-cpt PoW;
+etsy/tripadvisor = DataDome i.js) — G8 flips zero hard-6 sites; (3) it
+is the one M-difficulty Phase-1 item and it feeds
+`__akamai_events`/`akamai/src/payload.rs`, so a trajectory-shape change
+carries real regression risk to the green 437-test gate for no
+site-flip return. Goal-optimal per "close out as many sites as
+possible" + mandatory revert-if-not-green: proceed to Phase 2 (the
+decisive Kasada experiment — highest leverage, 3 of the hard-6) rather
+than spend the heavy build/gate budget destabilizing a green engine on
+a non-hard-6 refactor. **Precise scoped follow-up when revisited:** add
+`op_behavior_mouse_trajectory` / `op_behavior_keystroke_timings`
+(thin wrappers over `behavior::mouse_trajectory_with_rng` /
+`keystroke_timings_with_rng`, seeded by `BehaviorProfile::rng_for`),
+have `humanize.js` *prefer* them with its current model as fallback
+(additive, gate-safe), then re-baseline the Akamai sensor tests.
+
 ## 8. One-line summary for the next session
 
 The realm wiring is **done** (older handoffs are stale); the engine is
