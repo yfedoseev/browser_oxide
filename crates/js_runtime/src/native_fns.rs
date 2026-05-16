@@ -40,10 +40,16 @@ const NATIVE_TAG: &str = "__boxide_native__";
 /// pre-bootstrap; it is installed into every child realm so cross-realm
 /// `toString` calls (`cw.Function.prototype.toString.call(parent.fetch)`)
 /// produce `[native code]` — same as the main window.
+///
+/// `native_tag_sym` is the JS-global-registry symbol `Symbol.for('__boxide_native__')`
+/// captured after bootstrap runs. It is the SAME symbol object that stealth_bootstrap.js
+/// uses to tag masked host functions. The V8 API registry symbol from
+/// `v8::Symbol::for_global` is a DIFFERENT registry and will NOT find these tags.
 pub struct IframeRealmStore {
     pub contexts: HashMap<u32, v8::Global<v8::Context>>,
     pub globals: HashMap<u32, v8::Global<v8::Object>>,
     pub orig_fp_tostring: Option<v8::Global<v8::Function>>,
+    pub native_tag_sym: Option<v8::Global<v8::Symbol>>,
 }
 
 impl IframeRealmStore {
@@ -52,6 +58,7 @@ impl IframeRealmStore {
             contexts: HashMap::new(),
             globals: HashMap::new(),
             orig_fp_tostring: None,
+            native_tag_sym: None,
         }
     }
 }
@@ -109,30 +116,78 @@ pub fn capture_original_fp_tostring(
 }
 
 /// The genuine-native `Function.prototype.toString` callback.
-/// `args.data()` carries the captured original (a `v8::Function`).
+///
+/// `args.data()` is an Array `[orig, sym]` where:
+///   - index 0: the captured genuine `Function.prototype.toString` (v8::Function)
+///   - index 1: the JS-global-registry `Symbol.for('__boxide_native__')` (v8::Symbol)
+///
+/// Using Array data is necessary because V8 callback data can only hold a
+/// single v8::Value. The symbol MUST come from the JS global registry
+/// (`Symbol::For`), not V8's API registry (`Symbol::ForApi` /
+/// `v8::Symbol::for_global`) — those are different tables. Stealth_bootstrap.js
+/// tags host functions via `Symbol.for('__boxide_native__')` which writes to
+/// the JS registry; looking up via `v8::Symbol::for_global` silently misses all tags.
 fn fp_to_string_cb(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
     let this: v8::Local<v8::Value> = args.this().into();
+    let data = args.data();
 
-    // Masked host fn? Read the global-registered native tag symbol
-    // BEFORE the `is_function()` check so Proxy-wrapped native-tagged
-    // objects also return the masked string.
-    // (stealth_bootstrap sets `Symbol.for('__boxide_native__')` = name.)
+    // Extract [orig, sym] from Array data, falling back to direct-function
+    // data for contexts where no symbol was available at install time.
+    let orig_fn: Option<v8::Local<v8::Function>>;
+    let tag_sym: Option<v8::Local<v8::Symbol>>;
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(data) {
+        orig_fn = arr
+            .get_index(scope, 0)
+            .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok());
+        tag_sym = arr
+            .get_index(scope, 1)
+            .and_then(|v| v8::Local::<v8::Symbol>::try_from(v).ok());
+    } else {
+        orig_fn = v8::Local::<v8::Function>::try_from(data).ok();
+        tag_sym = None;
+    }
+
+    // Masked host fn? Check via the JS-global-registry Symbol before the
+    // is_function() guard, so Proxy-wrapped tagged objects also stringify.
+    // stealth_bootstrap.js sets `fn[Symbol.for('__boxide_native__')] = name`.
     if let Ok(this_obj) = v8::Local::<v8::Object>::try_from(this) {
-        if let Some(key) = v8::String::new(scope, NATIVE_TAG) {
+        // Resolve which symbol to use for the tag lookup.
+        // Primary path: the JS-registry symbol from Array data.
+        // Fallback: v8::Symbol::for_global (V8 API registry, won't find
+        // JS-tagged symbols but avoids hard failure in no-sym contexts).
+        let maybe_tag: Option<String> = if let Some(sym) = tag_sym {
+            if let Some(tagv) = this_obj.get(scope, sym.into()) {
+                if tagv.is_string() {
+                    Some(tagv.to_rust_string_lossy(scope))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else if let Some(key) = v8::String::new(scope, NATIVE_TAG) {
             let sym = v8::Symbol::for_global(scope, key);
             if let Some(tagv) = this_obj.get(scope, sym.into()) {
                 if tagv.is_string() {
-                    let tag = tagv.to_rust_string_lossy(scope);
-                    let s = format!("function {tag}() {{ [native code] }}");
-                    if let Some(out) = v8::String::new(scope, &s) {
-                        rv.set(out.into());
-                        return;
-                    }
+                    Some(tagv.to_rust_string_lossy(scope))
+                } else {
+                    None
                 }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(tag) = maybe_tag {
+            let s = format!("function {tag}() {{ [native code] }}");
+            if let Some(out) = v8::String::new(scope, &s) {
+                rv.set(out.into());
+                return;
             }
         }
     }
@@ -164,14 +219,9 @@ fn fp_to_string_cb(
     }
 
     // Delegate to the GENUINE original Function.prototype.toString
-    // (captured pre-bootstrap, passed via data). V8 handles:
-    //   - JS user functions   → source text
-    //   - Real native fns     → `function name() { [native code] }`
-    //   - Non-callable vals   → throws its own TypeError (same message)
-    let data = args.data();
-    if let Ok(orig) = v8::Local::<v8::Function>::try_from(data) {
-        let recv = this;
-        if let Some(res) = orig.call(scope, recv, &[]) {
+    // (captured pre-bootstrap, stored at index 0 of the data Array).
+    if let Some(orig) = orig_fn {
+        if let Some(res) = orig.call(scope, this, &[]) {
             rv.set(res);
         }
         // If orig.call returns None the exception is already set on the
@@ -186,19 +236,42 @@ fn fp_to_string_cb(
 
 /// Install the genuine-native `Function.prototype.toString`, replacing
 /// the JS-level patch. `original` must be the builtin captured pre-
-/// bootstrap (see `capture_original_fp_tostring`). Run AFTER bootstrap
-/// + cleanup, before site/init scripts.
+/// bootstrap (see `capture_original_fp_tostring`). `native_tag_sym` must
+/// be `Symbol.for('__boxide_native__')` captured from the JS environment
+/// AFTER bootstrap runs — it is the JS-global-registry symbol that
+/// stealth_bootstrap.js uses to tag host functions. Pass `None` only when
+/// no bootstrap has run (e.g. child realms before symbol is captured).
+/// Run AFTER bootstrap + cleanup, before site/init scripts.
 pub fn install_native_fp_tostring(
     scope: &mut v8::HandleScope,
     original: &v8::Global<v8::Function>,
+    native_tag_sym: Option<&v8::Global<v8::Symbol>>,
 ) -> bool {
     let orig_local = v8::Local::new(scope, original);
+
+    // Pack [orig, sym] into an Array so the callback can access both.
+    // A single FunctionTemplate data slot can hold only one v8::Value,
+    // so we use an Array to carry the pair.
+    let data_val: v8::Local<v8::Value> = if let Some(sym_g) = native_tag_sym {
+        let sym_local = v8::Local::new(scope, sym_g);
+        let arr = v8::Array::new(scope, 2);
+        // v8::Object::set with integer key — guaranteed stable in all rusty_v8 versions.
+        let i0 = v8::Integer::new(scope, 0);
+        let i1 = v8::Integer::new(scope, 1);
+        arr.set(scope, i0.into(), orig_local.into());
+        arr.set(scope, i1.into(), sym_local.into());
+        arr.into()
+    } else {
+        // No symbol yet (child realm created before post-bootstrap capture).
+        // Fall back to direct function data; callback will use for_global.
+        orig_local.into()
+    };
 
     let tmpl = v8::FunctionTemplate::builder(fp_to_string_cb)
         .length(0)
         .constructor_behavior(v8::ConstructorBehavior::Throw)
         .side_effect_type(v8::SideEffectType::HasNoSideEffect)
-        .data(orig_local.into())
+        .data(data_val)
         .build(scope);
     if let Some(name) = v8::String::new(scope, "toString") {
         tmpl.set_class_name(name);

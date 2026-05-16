@@ -1153,17 +1153,26 @@ pub fn op_create_child_realm<'s>(
         }
     }
 
-    // Clone the `orig_fp_tostring` Global into a new handle BEFORE entering
-    // the child ContextScope (requires the parent scope for the new handle).
-    let orig_fpt: Option<v8::Global<v8::Function>> = {
+    // Clone the `orig_fp_tostring` and `native_tag_sym` Globals into new
+    // handles BEFORE entering the child ContextScope (requires parent scope).
+    let orig_fpt: Option<v8::Global<v8::Function>>;
+    let native_tag_sym: Option<v8::Global<v8::Symbol>>;
+    {
         let op_state = op_state_rc.borrow();
-        op_state.try_borrow::<IframeRealmStore>().and_then(|store| {
-            store.orig_fp_tostring.as_ref().map(|g| {
+        if let Some(store) = op_state.try_borrow::<IframeRealmStore>() {
+            orig_fpt = store.orig_fp_tostring.as_ref().map(|g| {
                 let local = v8::Local::new(scope, g);
                 v8::Global::new(scope, local)
-            })
-        })
-    };
+            });
+            native_tag_sym = store.native_tag_sym.as_ref().map(|g| {
+                let local = v8::Local::new(scope, g);
+                v8::Global::new(scope, local)
+            });
+        } else {
+            orig_fpt = None;
+            native_tag_sym = None;
+        }
+    }
 
     // Create the child context (vanilla v8::Context — full native intrinsics).
     let child_ctx = v8::Context::new(scope, v8::ContextOptions::default());
@@ -1230,8 +1239,10 @@ pub fn op_create_child_realm<'s>(
 
         // Install genuine-native Function.prototype.toString in child realm.
         // Closes the [[SourceText]] leak for child-realm functions too.
+        // Pass native_tag_sym (JS global registry) so tagged host fns
+        // in the child realm stringify correctly via the Array-data path.
         if let Some(ref orig) = orig_fpt {
-            install_native_fp_tostring(cs, orig);
+            install_native_fp_tostring(cs, orig, native_tag_sym.as_ref());
         }
 
         Some(v8::Global::new(cs, child_global))

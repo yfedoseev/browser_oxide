@@ -239,6 +239,41 @@ pub fn create_runtime_with_signals(
         .execute_script("<anonymous>", include_str!("js/cleanup_bootstrap.js"))
         .expect("cleanup failed");
 
+    // Capture Symbol.for('__boxide_native__') from the JS global registry
+    // AFTER bootstrap runs (stealth_bootstrap.js creates it at startup).
+    // This is the CORRECT symbol: v8::Symbol::for_global uses V8's API
+    // registry (Symbol::ForApi), which is a DIFFERENT table from the JS
+    // global registry (Symbol::For). Tags set via Symbol.for() in JS are
+    // invisible to for_global lookups — so we must capture the symbol
+    // from JS and pass it into the native FP.toString callback via Array data.
+    let native_tag_sym: Option<v8::Global<v8::Symbol>> = {
+        let scope = &mut runtime.handle_scope();
+        let src = v8::String::new(scope, "Symbol.for('__boxide_native__')");
+        src.and_then(|s| {
+            let script = v8::Script::compile(scope, s, None)?;
+            let val = script.run(scope)?;
+            let sym = v8::Local::<v8::Symbol>::try_from(val).ok()?;
+            Some(v8::Global::new(scope, sym))
+        })
+    };
+
+    // Store the symbol in IframeRealmStore so op_create_child_realm can
+    // pass it to install_native_fp_tostring for child realm contexts.
+    // Two separate blocks avoid double-borrowing `runtime`: the scope borrow
+    // must be dropped before the op_state borrow can be taken.
+    if let Some(ref sym) = native_tag_sym {
+        let sym_clone = {
+            let scope = &mut runtime.handle_scope();
+            let local = v8::Local::new(scope, sym);
+            v8::Global::new(scope, local)
+        };
+        runtime
+            .op_state()
+            .borrow_mut()
+            .borrow_mut::<crate::native_fns::IframeRealmStore>()
+            .native_tag_sym = Some(sym_clone);
+    }
+
     // Install the genuine-native `Function.prototype.toString` (raw
     // v8::FunctionTemplate API function) AFTER all bootstrap/cleanup,
     // replacing the JS-level patch. Closes the structurally-JS-
@@ -248,7 +283,7 @@ pub fn create_runtime_with_signals(
     // the `Symbol.for('__boxide_native__')` tag scheme. doc 27.
     if let Some(ref orig) = orig_fp_tostring {
         let scope = &mut runtime.handle_scope();
-        crate::native_fns::install_native_fp_tostring(scope, orig);
+        crate::native_fns::install_native_fp_tostring(scope, orig, native_tag_sym.as_ref());
     }
 
     // Run caller-provided init scripts after built-in cleanup.

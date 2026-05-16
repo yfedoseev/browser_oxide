@@ -1928,6 +1928,8 @@
             if (typeof HTMLIFrameElement !== 'undefined' && child instanceof HTMLIFrameElement) {
                 const _fi = _appendedIframes.length;
                 _appendedIframes.push(child);
+                // Debug counter — readable via window.__ifAppendCount for diagnostics
+                try { globalThis.__ifAppendCount = (_appendedIframes.length); } catch (_) {}
                 // Define lazy getter for window[N] — contentWindow is created on demand
                 Object.defineProperty(globalThis, String(_fi), {
                     get: function() { return _getIframeWindow(_appendedIframes[_fi]); },
@@ -1959,6 +1961,24 @@
     const _origInsertBefore = Node.prototype.insertBefore;
     Node.prototype.insertBefore = function(newChild, refChild) {
         const result = _origInsertBefore.call(this, newChild, refChild);
+        // Register iframes inserted via insertBefore (same logic as appendChild)
+        try {
+            if (typeof HTMLIFrameElement !== 'undefined' && newChild instanceof HTMLIFrameElement
+                    && !_appendedIframes.includes(newChild)) {
+                const _fi = _appendedIframes.length;
+                _appendedIframes.push(newChild);
+                try { globalThis.__ifAppendCount = (_appendedIframes.length); } catch (_) {}
+                Object.defineProperty(globalThis, String(_fi), {
+                    get: function() { return _getIframeWindow(_appendedIframes[_fi]); },
+                    configurable: true, enumerable: false,
+                });
+                try {
+                    Object.defineProperty(globalThis, 'length', {
+                        value: _appendedIframes.length, configurable: true, writable: true,
+                    });
+                } catch (_) {}
+            }
+        } catch (_) {}
         if (_moObservers.length > 0) {
             _notifyMO("childList", _getNodeId(this), { target: this, addedNodes: [newChild] });
         }
@@ -2254,6 +2274,69 @@
     // cache key in IframeRealmStore (HashMap<u32, ...>).
     let _nextRealmId = 0;
 
+    // Frame registry: window[0], window[1], ... and window.length.
+    // Kasada's ifw/spd/dpi/crs probes access child iframes via window[N]
+    // (frames[N]), NOT via iframe.contentWindow. Real Chrome updates
+    // window[N] and window.length when iframes are appended to the DOM.
+    const _frameRegistry = [];
+
+    // Register contentWindow cw at frame index _fi in the main window.
+    // Pass the iframe element el so we can find its DOM position and also
+    // handle cases where the iframe was inserted via a non-tracked method
+    // (insertBefore, innerHTML, insertAdjacentHTML, etc.).
+    function _registerFrame(cw, el) {
+        // Try to find the iframe's true DOM position
+        var _fi = -1;
+        // First: check if el is already tracked in _appendedIframes
+        if (el) {
+            for (var _ai = 0; _ai < _appendedIframes.length; _ai++) {
+                if (_appendedIframes[_ai] === el) { _fi = _ai; break; }
+            }
+        }
+        // Second: if not tracked, query the DOM for its position
+        if (_fi < 0) {
+            try {
+                var _all = document.getElementsByTagName && document.getElementsByTagName('iframe');
+                if (_all) {
+                    for (var _di = 0; _di < _all.length; _di++) {
+                        if (_all[_di] === el) { _fi = _di; break; }
+                    }
+                }
+            } catch (_) {}
+        }
+        // Fallback: use sequential registry length
+        if (_fi < 0) {
+            _fi = _frameRegistry.length;
+        }
+        // Track in registry
+        while (_frameRegistry.length <= _fi) _frameRegistry.push(null);
+        _frameRegistry[_fi] = cw;
+        // Register in _appendedIframes if not already there (for lazy getter)
+        if (el && _fi >= _appendedIframes.length) {
+            while (_appendedIframes.length < _fi) _appendedIframes.push(null);
+            _appendedIframes.push(el);
+            try { globalThis.__ifAppendCount = _appendedIframes.length; } catch (_) {}
+        }
+        // Install as window[N] — replace lazy getter (if any) with actual value
+        try {
+            Object.defineProperty(globalThis, String(_fi), {
+                value: cw, writable: true, enumerable: true, configurable: true,
+            });
+        } catch (_) {}
+        // Update window.length
+        var _newLen = _fi + 1;
+        try {
+            const _ld = Object.getOwnPropertyDescriptor(globalThis, 'length');
+            if (_ld && _ld.writable) {
+                if (globalThis.length < _newLen) globalThis.length = _newLen;
+            } else {
+                Object.defineProperty(globalThis, 'length', {
+                    value: _newLen, writable: true, configurable: true, enumerable: true,
+                });
+            }
+        } catch (_) {}
+    }
+
     // Extract scheme+host+port from a URL without using new URL().
     // Returns "null" for non-http(s) URLs (data:, about:, etc.) or empty input.
     const _xOrigin = function(u) {
@@ -2335,6 +2418,7 @@
                     });
                     const _xoState = { contentWindow: _xo, contentDocument: null, _realmId: undefined, _processedSrcdoc: '' };
                     _iframeState.set(el, _xoState);
+                    _registerFrame(_xo, el);
                     return _xo;
                 }
             }
@@ -2672,6 +2756,9 @@
                 'Node', 'Element', 'Document',
                 'HTMLElement', 'DocumentFragment',
                 'Notification',
+                // Singleton constructors the npc/crs probes expect in child realm.
+                'Navigator', 'Location', 'History', 'Screen',
+                'Performance', 'Permissions', 'ScreenOrientation',
             ];
             for (const _ak of _apisToCopy) {
                 try {
@@ -2735,6 +2822,7 @@
 
             state = { contentWindow: cw, contentDocument: iframeDoc, _realmId: _realmId, _processedSrcdoc: _srcdoc };
             _iframeState.set(el, state);
+            _registerFrame(cw, el);
             return cw;
         }
 
@@ -2814,6 +2902,7 @@
         iframeLocals.length = 0;
         state = { contentWindow: iframeWindow, contentDocument: iframeDoc };
         _iframeState.set(el, state);
+        _registerFrame(iframeWindow, el);
         return iframeWindow;
     }
     function _getIframeDocument(el) {
@@ -2824,7 +2913,9 @@
     // Install on HTMLIFrameElement.prototype — covers parsed AND created iframes.
     if (typeof HTMLIFrameElement !== 'undefined') {
         Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
-            get: function() { return _getIframeWindow(this); },
+            get: function() {
+                return _getIframeWindow(this);
+            },
             configurable: true,
             enumerable: true,
         });

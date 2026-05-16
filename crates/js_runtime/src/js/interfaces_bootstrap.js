@@ -17,11 +17,18 @@
         });
     }
 
-    _define("Navigator", class Navigator {});
-    _define("Location", class Location {});
-    _define("History", class History {});
-    _define("Screen", class Screen {});
-    _define("Performance", class Performance {});
+    // Singleton-only interfaces: not constructable in Chrome ("Illegal constructor").
+    // Must use _stub so `new Navigator()` etc. throw the correct error.
+    // _stub is a function declaration and is hoisted to the IIFE top.
+    _define("Navigator", _stub("Navigator"));
+    _define("Location", _stub("Location"));
+    _define("History", _stub("History"));
+    _define("Screen", _stub("Screen"));
+    _define("Performance", _stub("Performance"));
+    _define("Permissions", _stub("Permissions"));
+    _define("ScreenOrientation", _stub("ScreenOrientation"));
+
+    // Constructable interfaces — keep as real classes.
     _define("EventTarget", class EventTarget {});
     _define("Event", class Event {});
 
@@ -29,9 +36,7 @@
     _define("Headers", class Headers {});
     _define("Request", class Request {});
     _define("Response", class Response {});
-    
-    _define("Permissions", class Permissions {});
-    _define("ScreenOrientation", class ScreenOrientation {});
+
     _define("ViewTransition", _stub("ViewTransition"));
 
     function _stub(name, base = Object) {
