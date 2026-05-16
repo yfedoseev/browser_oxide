@@ -55,13 +55,19 @@ question: full-corpus standing → this file; hard-set engine work → §8.5.
 
 ## Validity / when to re-run
 
-These numbers are **still current**: every commit since the 2026-05-13
-sweep (`3739da9..7d748b2` — Phase 0/1/2 measurement-hygiene, parity, and
-research) was **non-site-affecting** — zero hard-6 flipped, gate green at
-HEAD (`chrome_compat` 437/0, `v8_natives` 11/11, `iframe_isolation` 5/5,
-`v8_inspector_parity` 3/3). **Do not re-run the full sweep to "check
-progress."** Re-run **only** when a Phase 3/4/5 site-flipping change lands,
-and then update this table + the date. Re-measure command:
+These numbers are **still current as of 2026-05-16**. Commits
+`3739da9..7d748b2` (Phase 0/1/2) were non-site-affecting. Commit
+`4cece4c` (Phase 5 DataDome Increment 1) **is** site-affecting; per
+this clause it was live re-measured **targeted** (etsy): the fix works
+(i.js now attempts its round-trip) but **etsy did not flip** — still
+`DataDome-CHL`, expected for Increment 1 of the L feature. ⇒ the
+126/120 table is **unchanged**; no full re-sweep was warranted (no flip
+to record). Gate green at HEAD (`chrome_compat` 437/0, `v8_natives`
+11/11, `iframe_isolation` 5/5, `v8_inspector_parity` 3/3, +8/8
+`datadome_handler`). **Do not re-run the full sweep to "check
+progress."** Re-run the **full** sweep **only** when a site-flipping
+change is confirmed by a targeted live check first, then update this
+table + the date. Re-measure command:
 
 ```bash
 BOXIDE_PROFILE=chrome_130_macos cargo test --release -p browser \

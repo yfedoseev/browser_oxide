@@ -521,6 +521,39 @@ live capture as the dev oracle; do **not** re-chase Kasada realm/
 identity, Akamai wsl/din, or `solve_crypto` static-param extraction
 (all eliminated above).
 
+**Phase 5 — IN PROGRESS 2026-05-16 (DataDome Increment 1 landed,
+gate-green, live-verified to move the blocker downstream).** Per the
+doc 05 §2d M-path (let DataDome's own `i.js` self-solve in our
+Chrome-faithful V8 rather than re-implement its signal-map / daily
+wire-key / WASM — the L/fragile path):
+
+- **Pre-work (commits `2f49d85`, `3dd8d1d`):** doc-only 126-corpus
+  ledger + the 3 inherited diagnostic files committed (`docs(ledger):`
+  / `test(diag):`); tracked tree clean.
+- **DataDome Increment 1 (commit `4cece4c`):** `page.rs:1247` log-only
+  → typed `DdSolvePlan` (`datadome_handler.rs`, `rt:'i'` only; `rt:'c'`
+  slider honestly `None`); at the CSP-install site the `<4 KB`
+  DataDome interstitial body no longer has the origin's restrictive
+  403 CSP enforced on it (doc 05 §2c's exact symptom —
+  `geo.captcha-delivery.com` refused). Narrowly gated to
+  `detect_datadome_interstitial()` ⇒ cannot touch normal pages or the
+  10 passing Akamai sites. Network-free verified: 8/8
+  `datadome_handler` unit tests; full §4 gate green (`chrome_compat`
+  437/0, `v8_natives` 11/11, `iframe_isolation` 5/5,
+  `v8_inspector_parity` 3/3).
+- **Live re-measure (targeted, per the §-Re-runs clause — etsy):**
+  the fix **works as intended** — i.js now runs and attempts the
+  `geo.captcha-delivery.com` round-trip (previously CSP-refused).
+  etsy not yet flipped (still `DataDome-CHL`, expected for Increment 1
+  of an L feature). Next concrete, evidence-driven blocker is the
+  full i.js POST round-trip / WASM `boring_challenge` completion, not
+  the CSP refusal — the H2→H1 fallback (`net/src/lib.rs:767-790`)
+  already handles `geo.captcha-delivery.com`'s http/1.1-only ALPN, so
+  that log line is non-fatal noise. **Honest status: Increment 1 is a
+  real, verified, gate-green de-risking step that moved the blocker
+  one stage downstream; Phase 5 DataDome is multi-increment L and not
+  "done".**
+
 ## 8. One-line summary for the next session
 
 The realm wiring is **done** (older handoffs are stale); the engine is
