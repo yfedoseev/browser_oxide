@@ -2239,6 +2239,11 @@
             if (el && typeof el.getAttribute === "function") {
                 _srcdoc = el.getAttribute("srcdoc") || "";
             }
+            // Also check direct JS property (set via el.srcdoc = "...") since
+            // property assignment may not update the HTML attribute in our DOM.
+            if (!_srcdoc && el && typeof el.srcdoc === "string") {
+                _srcdoc = el.srcdoc;
+            }
         } catch (_) {}
         const _mkHtmlMirror = (tag, inner) => ({
             tagName: tag.toUpperCase(),
