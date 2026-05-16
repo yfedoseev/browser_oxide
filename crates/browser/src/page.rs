@@ -110,6 +110,89 @@ impl Drop for V8DeadlineWatcher {
     }
 }
 
+/// Phase 0 measurement-hygiene typed page outcome.
+///
+/// Replaces the old bare boolean "blocked?" guess. Every navigated
+/// site resolves to exactly one of these so the re-baseline can tell a
+/// genuine challenge apart from a render-incomplete false positive
+/// (the cheap "wins" with zero stealth work).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChallengeVerdict {
+    /// Real content rendered, no structural challenge markers.
+    Pass,
+    /// No challenge markers but a thin/empty stub or an SPA shell that
+    /// never populated — a render-completeness issue, NOT a stealth
+    /// failure (e.g. mail-ru redirect, captcha-shell, washingtonpost-
+    /// style multi-MB body that the old classifier over-matched).
+    RenderIncomplete,
+    /// Challenge marker + small body: an explicit challenge/deny page
+    /// (Kasada 756 B 429, Akamai sec-cpt 2.6 KB PoW, Cloudflare managed
+    /// challenge, DataDome interstitial) was served before our JS could
+    /// earn trust — edge / interstitial class.
+    EdgeBlock,
+    /// Challenge marker + a large body that otherwise rendered: the
+    /// vendor JS ran and the sensor scored the telemetry as bot.
+    SensorFail,
+}
+
+impl ChallengeVerdict {
+    /// True for every served-challenge outcome — the exact semantics of
+    /// the old boolean `is_anti_bot_challenge`.
+    pub fn is_challenge(self) -> bool {
+        matches!(self, Self::EdgeBlock | Self::SensorFail)
+    }
+
+    /// Stable lowercase tag for JSON/audit output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::RenderIncomplete => "render-incomplete",
+            Self::EdgeBlock => "edge-block",
+            Self::SensorFail => "sensor-fail",
+        }
+    }
+}
+
+/// Shared structural anti-bot challenge classifier.
+///
+/// Requires *structural* challenge context, not bare cookie/vendor-name
+/// substrings that also occur inline on fully-rendered benign pages.
+/// The Phase-0 false-positive class the master plan calls out is the
+/// weak markers (`bm_sz` / `human security` / `dd_engagement`) appearing
+/// in a multi-MB rendered page (washingtonpost-style); those now only
+/// count when the body is stub-sized (a real challenge stub is small, a
+/// rendered page is large). All strong, near-zero-false-positive
+/// structural markers are kept unchanged so detection of genuine
+/// challenges is not weakened.
+fn body_has_challenge_marker(body: &str) -> bool {
+    // A challenge stub / interstitial / sensor-201 page is small; a
+    // fully rendered homepage is not. The weak markers below only
+    // qualify as a challenge when the body is stub-sized.
+    let stub_sized = body.len() < 50 * 1024;
+    // Strong structural markers (unchanged from the prior classifier).
+    (body.contains("ips.js") && body.contains("kpsdk")) // Kasada
+        || body.contains("checkpoint/interstitial") // Cloudflare
+        || body.contains("/cdn-cgi/challenge-platform/") // Cloudflare Managed Challenge
+        || (body.contains("_abck") && body.contains("sensor_data")) // Akamai BMP
+        // Akamai sec-cpt PoW interstitial — `sec-if-cpt-container` is an
+        // Akamai-sec-cpt-unique element id (near-zero false-positive).
+        || body.contains("sec-if-cpt-container")
+        || body.contains("sec-cpt-if")
+        || body.contains("px-captcha") // PerimeterX widget
+        || body.contains("smartcaptcha") // Yandex
+        || body.contains("checkbox-captcha")
+        // DataDome — captcha-delivery.com is the captcha iframe src;
+        // dd-script is the bootstrap loader. Both are structural.
+        || body.contains("captcha-delivery.com")
+        || body.contains("dd-script")
+        // Weak markers — only a challenge when the body is stub-sized.
+        // On a fully rendered multi-MB page these are inline-JS / copy
+        // false positives (the Phase-0 over-match removed here).
+        || (stub_sized && body.contains("bm_sz"))
+        || (stub_sized && body.contains("human security"))
+        || (stub_sized && body.contains("dd_engagement"))
+}
+
 /// A browser page. Owns a DOM, JS runtime, and event loop.
 ///
 /// # Example
@@ -172,39 +255,41 @@ impl Page {
     }
 
     /// Detect if the current page is an anti-bot challenge (Kasada, Akamai, etc.)
+    ///
+    /// Boolean drop-in retained for the four navigate-loop call sites.
+    /// Delegates to the shared structural classifier so the
+    /// false-positive tightening (Phase 0 measurement hygiene) applies
+    /// everywhere.
     pub fn is_anti_bot_challenge(&mut self) -> bool {
         let body = self.content();
-        // Look for more specific markers of common anti-bot challenge stubs.
-        // False positives on diagnostic sites (tls.peet.ws) trip infinite reloads.
-        (body.contains("ips.js") && body.contains("kpsdk"))
-            || body.contains("checkpoint/interstitial") // Cloudflare
-            || body.contains("/cdn-cgi/challenge-platform/") // Cloudflare Managed Challenge
-            || (body.contains("_abck") && body.contains("sensor_data")) // Akamai BMP
-            || body.contains("bm_sz")
-            // Akamai sec-cpt PoW interstitial. The 2.6 KB challenge page
-            // (verified via the live homedepot capture 2026-05-15,
-            // docs/research_2026_05_14/20_VENDOR_CHALLENGE_JS_UNIFIED)
-            // carries NONE of the BMP markers above (_abck/sensor_data/
-            // bm_sz) — it is a self-solving JS bundle wrapped in this
-            // container div. Without this marker the pipeline mis-classed
-            // it as final content and never continued iterations to let
-            // the sec-cpt self-solve + reload re-fetch complete, so
-            // homedepot stuck at Akamai-CHL. `sec-if-cpt-container` is an
-            // Akamai-sec-cpt-unique element id (near-zero false-positive).
-            || body.contains("sec-if-cpt-container")
-            || body.contains("sec-cpt-if")
-            || body.contains("px-captcha") // PerimeterX
-            || body.contains("human security")
-            || body.contains("smartcaptcha")
-            || body.contains("checkbox-captcha")
-            // DataDome — geo.captcha-delivery.com is the captcha iframe src;
-            // dd-script.min.js / dd_engagement_check are bootstrap markers;
-            // server header `x-datadome: protected` is also a tell but lives
-            // in headers not body. Caught yelp/etsy/leboncoin/wsj per the
-            // 2026-05-10 holistic sweep.
-            || body.contains("captcha-delivery.com")
-            || body.contains("dd-script")
-            || body.contains("dd_engagement")
+        body_has_challenge_marker(&body)
+    }
+
+    /// Phase 0 measurement hygiene — typed page outcome.
+    ///
+    /// Every navigated site gets exactly one [`ChallengeVerdict`] so a
+    /// "blocked" verdict is no longer a bare substring guess. This is
+    /// what the `audit_failing_sites` re-baseline consumes to separate
+    /// genuine challenges from render-incomplete false positives.
+    pub fn challenge_verdict(&mut self) -> ChallengeVerdict {
+        let body = self.content();
+        let len = body.len();
+        if body_has_challenge_marker(&body) {
+            // A served challenge: tiny ⇒ edge/interstitial deny before
+            // our JS earned trust; large ⇒ the vendor JS ran and the
+            // sensor scored the telemetry as bot.
+            if len < 50 * 1024 {
+                ChallengeVerdict::EdgeBlock
+            } else {
+                ChallengeVerdict::SensorFail
+            }
+        } else if len < 5 * 1024 {
+            // No challenge marker but a thin/empty stub or an SPA shell
+            // that never populated — render-completeness, NOT stealth.
+            ChallengeVerdict::RenderIncomplete
+        } else {
+            ChallengeVerdict::Pass
+        }
     }
 
     /// W7 / Cloudflare V1 — orchestrator-runner scaffolding.

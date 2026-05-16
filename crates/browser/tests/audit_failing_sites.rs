@@ -95,7 +95,8 @@ async fn capture_sites(sites: &[(&str, &str, &str)], out_dir: &str) {
         let elapsed_ms = t0.elapsed().as_millis() as u64;
         let mut record = build_record(key, bucket, url, elapsed_ms, result).await;
         eprintln!(
-            "  ok={} body_len={} cookies={} markers={:?} ms={}",
+            "  verdict={} ok={} body_len={} cookies={} markers={:?} ms={}",
+            record.verdict,
             record.ok,
             record.body_len,
             record.cookie_names.len(),
@@ -131,6 +132,7 @@ async fn build_record(
         url: url.to_string(),
         elapsed_ms,
         ok: false,
+        verdict: "navigate-error".to_string(),
         body_len: 0,
         final_url: String::new(),
         cookie_names: Vec::new(),
@@ -141,6 +143,7 @@ async fn build_record(
     match result {
         Ok(mut page) => {
             record.ok = true;
+            record.verdict = page.challenge_verdict().as_str().to_string();
             let body = page
                 .evaluate("document.documentElement.outerHTML")
                 .unwrap_or_default();
@@ -243,6 +246,7 @@ async fn audit_all_failing_sites() {
             url: url.to_string(),
             elapsed_ms,
             ok: false,
+            verdict: "navigate-error".to_string(),
             body_len: 0,
             final_url: String::new(),
             cookie_names: Vec::new(),
@@ -254,6 +258,7 @@ async fn audit_all_failing_sites() {
         match result {
             Ok(mut page) => {
                 record.ok = true;
+                record.verdict = page.challenge_verdict().as_str().to_string();
                 let body = page
                     .evaluate("document.documentElement.outerHTML")
                     .unwrap_or_default();
@@ -341,7 +346,8 @@ async fn audit_all_failing_sites() {
         }
 
         eprintln!(
-            "  ok={} body_len={} cookies={} markers={:?} ms={}",
+            "  verdict={} ok={} body_len={} cookies={} markers={:?} ms={}",
+            record.verdict,
             record.ok,
             record.body_len,
             record.cookie_names.len(),
@@ -366,9 +372,10 @@ async fn audit_all_failing_sites() {
     // Print a 2-line summary per site to stderr for at-a-glance review.
     for r in &summary {
         eprintln!(
-            "  {:<18} {:<18} body={:>8} cookies={:?}",
+            "  {:<18} {:<18} {:<17} body={:>8} cookies={:?}",
             r.key,
             r.vendor_bucket,
+            r.verdict,
             r.body_len,
             vendor_cookies(&r.cookie_names)
         );
@@ -413,6 +420,9 @@ struct SiteRecord {
     url: String,
     elapsed_ms: u64,
     ok: bool,
+    /// Phase 0 typed outcome: pass / render-incomplete / edge-block /
+    /// sensor-fail. Replaces eyeballing the raw marker list.
+    verdict: String,
     body_len: usize,
     final_url: String,
     cookie_names: Vec<String>,
