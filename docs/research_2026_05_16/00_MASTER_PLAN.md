@@ -440,6 +440,38 @@ a non-hard-6 refactor. **Precise scoped follow-up when revisited:** add
 have `humanize.js` *prefer* them with its current model as fallback
 (additive, gate-safe), then re-baseline the Akamai sensor tests.
 
+**Phase 2 — DONE 2026-05-16: the decisive experiment returned OUTCOME
+A. The Kasada realm/sentinel/identity line is CLOSED as not-the-bug.**
+`kasada_identity_decisive::kasada_global_identity_invariant_holds`
+(network-free, deterministic — the Chrome reference is the ECMAScript
+"one realm ⇒ one set of intrinsics" *spec invariant*, no live capture
+needed) measured, in our engine, the four global-acquisition paths
+Kasada's disassembled VM compares (`window` / `globalThis` /
+`(0,eval)('this')` / `Function('return this')()`) for the exact
+intrinsics it reads (`Array.prototype.slice/concat`,
+`Function.prototype.apply`, `Math.clz32`):
+
+  `slice:WGEF concat:WGEF apply:WGEF clz32:WGEF globals:WGEF`
+
+— every path resolves the **identical** object for every builtin, and
+the four globals are mutually `===`. This is exactly Chrome's pattern.
+Per the doc 04 §(f) Step-4 pre-registration this is **OUTCOME A: H1
+(Root 3, identity fragmentation) REJECTED**; the disjoint 80/80 clean
+sentinel is Chrome-faithful, not a bug. Converging evidence: child
+realm genuine (doc 02 §0), clean sentinel healthy
+(`missTaggedElsewhere:0`), client verdict `action:"allow"` (Phase 0.3).
+⇒ **The Kasada block on canadagoose/hyatt/realtor is the holistic
+Root-2 ML tail** (`bot1225.b:1` scored server-side from accumulated FP;
+no single client lever — and audio, the one named Root-2 input, already
+shipped without flipping). The realm/sentinel/identity line that 3+
+prior sessions chased is **definitively eliminated**. Actionable
+redirect: the 3 Kasada sites are not cheaply engine-flippable (holistic
+diminishing-returns, master-plan §6 dead-ends); spend remaining budget
+on the concrete, addressable hard-6: **Phase 3 homedepot (Akamai
+sec-cpt) + Phase 4 etsy/tripadvisor (DataDome i.js)**. The live
+`#[ignore] kasada_identity_decisive_live_canadagoose` is corroboration
+only — the network-free invariant + the §6 evidence already settle it.
+
 ## 8. One-line summary for the next session
 
 The realm wiring is **done** (older handoffs are stale); the engine is
