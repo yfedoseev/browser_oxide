@@ -81,6 +81,85 @@ async fn iframe_fp_surface_noprofile() {
 }
 
 #[tokio::test]
+#[ignore = "diagnostic: deep ifw probe — what does cw look like and why instanceof fails"]
+async fn kasada_ifw_deep_probe() {
+    let profile = stealth::presets::chrome_130_macos();
+    let mut page = Page::from_html(
+        "<!DOCTYPE html><html><head></head><body></body></html>",
+        Some(profile),
+    )
+    .await
+    .unwrap();
+    let r = page.evaluate(r#"(function(){
+  try {
+    var f = document.createElement('iframe');
+    f.style.display = 'none';
+    (document.body || document.documentElement).appendChild(f);
+    var cw = f.contentWindow;
+    if (!cw) return JSON.stringify({err: 'contentWindow null'});
+    var cwProto = Object.getPrototypeOf(cw);
+    var mainProto = Object.getPrototypeOf(window);
+    return JSON.stringify({
+      // instanceof checks
+      i_ciw: (cw instanceof Window),
+      i_ciw_type: typeof cw,
+      // prototype comparison
+      proto_same: (cwProto === mainProto),
+      cw_proto_str: cwProto ? String(cwProto) : 'null',
+      win_proto_str: mainProto ? String(mainProto) : 'null',
+      // Window constructor
+      main_win_proto: Object.getPrototypeOf(Window.prototype) === null ? 'null-parent' : 'has-parent',
+      cw_ctor: (cw.constructor && cw.constructor.name) || '?',
+      main_ctor: (window.constructor && window.constructor.name) || '?',
+      // check if cw.Window === Window
+      cw_win_same: (cw.Window === Window),
+      cw_win_type: typeof cw.Window,
+      // Can we use cw's own Window?
+      i_ciw_inner: (cw instanceof (cw.Window || {})),
+    });
+  } catch(e) { return JSON.stringify({PROBE_ERR: String(e), stack: e.stack}); }
+})()"#).unwrap_or_else(|e| format!("EVAL_ERR: {e}"));
+    println!("KASADA-IFW-DEEP-PROBE: {r}");
+}
+
+#[tokio::test]
+#[ignore = "diagnostic: frame index access (window[0], frames[0], window.length)"]
+async fn kasada_frame_index_probe() {
+    let profile = stealth::presets::chrome_130_macos();
+    let mut page = Page::from_html(
+        "<!DOCTYPE html><html><head></head><body></body></html>",
+        Some(profile),
+    )
+    .await
+    .unwrap();
+    // Mirrors Kasada's actual probe: access child iframe via window[0] / frames[0],
+    // NOT via iframe.contentWindow. If window[0] is undefined, all ifw/spd/dpi probes fail.
+    let r = page.evaluate(r#"(function(){
+  try {
+    var f = document.createElement('iframe');
+    f.style.display = 'none';
+    (document.body || document.documentElement).appendChild(f);
+    var cw0 = window[0];
+    var fr0 = frames[0];
+    var len = window.length;
+    var cwDirect = f.contentWindow;
+    return JSON.stringify({
+      win0_type: typeof cw0,
+      fr0_type: typeof fr0,
+      win_length: len,
+      win0_eq_cw: (cw0 === cwDirect),
+      fr0_eq_cw: (fr0 === cwDirect),
+      win0_nav_wd: (cw0 && cw0.navigator) ? cw0.navigator.webdriver : 'NO_NAV',
+      win0_plat: (cw0 && cw0.navigator) ? cw0.navigator.platform : 'NO_NAV',
+      win0_is_window: (cw0 instanceof Window),
+      win0_self_eq: (cw0 && cw0.self === cw0),
+    });
+  } catch(e) { return JSON.stringify({PROBE_ERR: String(e), stack: e.stack}); }
+})()"#).unwrap_or_else(|e| format!("EVAL_ERR: {e}"));
+    println!("KASADA-FRAME-INDEX-PROBE: {r}");
+}
+
+#[tokio::test]
 #[ignore = "diagnostic: Kasada ifw+smc probe parity check"]
 async fn kasada_ifw_smc_probe() {
     let profile = stealth::presets::chrome_130_macos();
@@ -95,6 +174,8 @@ async fn kasada_ifw_smc_probe() {
     //   i_nwd  = cw.navigator.webdriver
     //   i_cwwd = cw.window === cw
     //   smc    = typeof cw.MediaSource.isTypeSupported, result for "video/mp4"
+    // Also tests inner-realm perspective: what does `window` resolve to
+    // INSIDE the child realm (via cw.eval)?
     let r = page.evaluate(r#"(function(){
   try {
     var f = document.createElement('iframe');
@@ -103,6 +184,17 @@ async fn kasada_ifw_smc_probe() {
     var cw = f.contentWindow;
     if (!cw) return JSON.stringify({err: 'contentWindow null'});
     var ms = cw.MediaSource;
+    // Test inner-realm perspective via cw.eval (same-origin eval)
+    var inner_wt = 'no-eval';
+    var inner_ww = false;
+    var inner_self = false;
+    var inner_win_eq_cw = false;
+    try {
+      inner_wt = String(cw.eval('typeof window'));
+      inner_ww = cw.eval('window.window === window');
+      inner_self = cw.eval('self === window');
+      inner_win_eq_cw = cw.eval('window === (' + JSON.stringify(undefined) + ')') === true ? 'UNDEFINED' : 'defined';
+    } catch(e) { inner_wt = 'EVAL_ERR:' + String(e); }
     return JSON.stringify({
       i_ciw: (cw instanceof Window),
       i_nwd: (cw.navigator && cw.navigator.webdriver),
@@ -114,6 +206,9 @@ async fn kasada_ifw_smc_probe() {
       its_webm: (ms && ms.isTypeSupported && ms.isTypeSupported('video/webm')),
       cw_win_type: typeof cw.window,
       window_ciw: (typeof Window === 'function'),
+      inner_wt: inner_wt,
+      inner_ww: inner_ww,
+      inner_self: inner_self,
     });
   } catch(e) { return JSON.stringify({PROBE_ERR: String(e), stack: e.stack}); }
 })()"#).unwrap_or_else(|e| format!("EVAL_ERR: {e}"));

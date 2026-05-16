@@ -4229,6 +4229,59 @@ async fn kasada_error_blob_capture() {
     }
 }
 
+/// Diagnostic: does our child realm work in the actual navigate context?
+/// Run the same ifw/spd probes as Kasada, but via an init script that
+/// fires BEFORE ips.js, to isolate the engine from the Kasada VM.
+#[tokio::test]
+#[ignore = "network: child-realm probe in real navigate context (canadagoose)"]
+async fn kasada_child_realm_navigate_diagnostic() {
+    use browser::Page;
+    use std::time::Duration;
+    let probe_init = r#"
+        (function(){
+            globalThis.__realmProbe = null;
+            try {
+                var f = document.createElement('iframe');
+                f.style.display = 'none';
+                (document.body || document.documentElement).appendChild(f);
+                var cw = f.contentWindow;
+                var ms = cw && cw.MediaSource;
+                globalThis.__realmProbe = JSON.stringify({
+                    cw_type: typeof cw,
+                    cw_ctor: cw && cw.constructor && cw.constructor.name,
+                    i_ciw: cw instanceof Window,
+                    i_cwwd: cw && (cw.window === cw),
+                    aw: cw && cw.availWidth,
+                    dpr: cw && cw.devicePixelRatio,
+                    ms_type: typeof ms,
+                    its_type: ms && typeof ms.isTypeSupported,
+                    its_mp4: ms && ms.isTypeSupported && ms.isTypeSupported('video/mp4'),
+                });
+            } catch(e) {
+                globalThis.__realmProbe = JSON.stringify({err: String(e)});
+            }
+        })();
+    "#;
+    let page = tokio::time::timeout(
+        Duration::from_secs(60),
+        Page::navigate_with_init(
+            "https://www.canadagoose.com/",
+            stealth::presets::chrome_130_macos(),
+            1,
+            vec![probe_init.to_string()],
+        ),
+    )
+    .await;
+    match page {
+        Ok(Ok(mut p)) => {
+            let result = p.evaluate("globalThis.__realmProbe").unwrap_or_default();
+            println!("CHILD-REALM-NAVIGATE-DIAG: {result}");
+        }
+        Ok(Err(e)) => println!("CHILD-REALM-NAVIGATE-DIAG: nav error: {e}"),
+        Err(_) => println!("CHILD-REALM-NAVIGATE-DIAG: timeout"),
+    }
+}
+
 #[tokio::test]
 #[ignore = "network: WBAAS smoke against wildberries.ru with current pipeline"]
 async fn wbaas_wildberries_smoke() {
@@ -5468,9 +5521,18 @@ async fn kasada_hyatt_clean_production() {
                 .parse::<usize>()
                 .unwrap_or(0);
             let title = p.title();
+            // Diagnostics: check if our appendChild iframe-registration fired
+            let diag = p.evaluate(r#"JSON.stringify({
+                ifAppendCount: window.__ifAppendCount || 0,
+                wLen: window.length,
+                w0Type: typeof window[0],
+                w0isWin: (typeof window[0] === 'object' && window[0] !== null) ? (window[0] instanceof Window) : false,
+                w0winEqW0: (typeof window[0] === 'object' && window[0] !== null) ? (window[0].window === window[0]) : false,
+            })"#).unwrap_or_default();
             println!(
                 "KASADA-hyatt-CLEAN-PROD: final_url={final_url} html={html_len} body={body_len} title={title:?}"
             );
+            println!("KASADA-hyatt-CLEAN-PROD: iframe-diag={diag}");
             // The 756-byte Kasada interstitial is the block signature;
             // a real hyatt page is tens-to-hundreds of KB.
             println!(

@@ -443,4 +443,88 @@ mod tests {
              (real per-frame realm, not parent-aliased)"
         );
     }
+
+    /// Verifies Fix A (Symbol registry): `install_native_fp_tostring` with the
+    /// JS-global-registry Symbol returns `function <tag>() { [native code] }`
+    /// for tagged functions, instead of falling through to the wrong registry.
+    ///
+    /// This is the regression test for the v8::Symbol::for_global vs
+    /// Symbol::For bug: `for_global` uses the API registry (Symbol::ForApi),
+    /// not the JS global registry (Symbol::For). Tags set via Symbol.for() in
+    /// JS are INVISIBLE to for_global lookups.
+    #[test]
+    fn native_fp_tostring_uses_js_symbol_registry() {
+        use deno_core::JsRuntime;
+
+        let mut rt = JsRuntime::new(RuntimeOptions::default());
+
+        // Capture original FP.toString (pre-bootstrap).
+        let orig_g = {
+            let scope = &mut rt.handle_scope();
+            capture_original_fp_tostring(scope).expect("capture original")
+        };
+
+        // Simulate bootstrap: set Symbol.for('__boxide_native__') tag on a function.
+        rt.execute_script(
+            "<test>",
+            r#"
+                const _nativeTag = Symbol.for('__boxide_native__');
+                function myTaggedFn() {}
+                Object.defineProperty(myTaggedFn, _nativeTag, { value: 'myTaggedFn', configurable: true });
+                globalThis.__testFn = myTaggedFn;
+            "#,
+        )
+        .expect("setup script");
+
+        // Capture Symbol.for('__boxide_native__') from JS environment.
+        let native_tag_sym_g: Option<v8::Global<v8::Symbol>> = {
+            let scope = &mut rt.handle_scope();
+            let src = v8::String::new(scope, "Symbol.for('__boxide_native__')").unwrap();
+            let script = v8::Script::compile(scope, src, None).unwrap();
+            let val = script.run(scope).unwrap();
+            let sym = v8::Local::<v8::Symbol>::try_from(val).ok().unwrap();
+            Some(v8::Global::new(scope, sym))
+        };
+
+        // Install native FP.toString with the correct symbol.
+        {
+            let scope = &mut rt.handle_scope();
+            install_native_fp_tostring(scope, &orig_g, native_tag_sym_g.as_ref());
+        }
+
+        // Test: FP.toString.call(myTaggedFn) should return tagged string.
+        let s = rt
+            .execute_script(
+                "<test>",
+                "Function.prototype.toString.call(globalThis.__testFn)",
+            )
+            .map(|v| {
+                let scope = &mut rt.handle_scope();
+                let local = v8::Local::new(scope, &v);
+                local.to_rust_string_lossy(scope)
+            })
+            .expect("eval");
+        assert_eq!(
+            s, "function myTaggedFn() { [native code] }",
+            "tagged function should return native-code string; got: {s}"
+        );
+
+        // Test: FP.toString.call(Array.prototype.slice) should also work
+        // (real native - should return native string via orig delegation).
+        let s2 = rt
+            .execute_script(
+                "<test>",
+                "Function.prototype.toString.call(Array.prototype.slice)",
+            )
+            .map(|v| {
+                let scope = &mut rt.handle_scope();
+                let local = v8::Local::new(scope, &v);
+                local.to_rust_string_lossy(scope)
+            })
+            .expect("eval2");
+        assert!(
+            s2.contains("[native code]"),
+            "real native should return [native code]; got: {s2}"
+        );
+    }
 }
