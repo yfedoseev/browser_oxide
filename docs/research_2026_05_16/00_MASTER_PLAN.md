@@ -375,6 +375,46 @@ satisfies "self-verifying JA4 assert", removes the silent-drift hazard.
   the existing `stealth::behavior` model. Each lands as its own
   gate-checked commit.
 
+**Phase 0.2 — DONE 2026-05-16 (the decisive false-positive result).**
+Typed re-baseline of all 29 (`audit_all_failing_sites`,
+`Page::navigate(url, chrome_130_macos(), 1)`, committed `3739da9`
+classifier). `/tmp/audit_failing_sites/_index.json` tally:
+
+| verdict | n |
+|---|---|
+| **pass** (rendered >5 KB, no structural challenge) | **18** |
+| edge-block (challenge stub served) | 8 |
+| sensor-fail (large body + challenge marker) | 2 |
+| render-incomplete (thin stub, nav bug) | 1 |
+
+- **pass (18)**: bestbuy, brave, costco(3.7 MB), disneyplus(1.5 MB),
+  duolingo, expedia(495 KB), h-m, hulu(1.4 MB), leboncoin(460 KB),
+  **macys(1.7 MB — was Kasada)**, quora, skyscanner, spotify,
+  uniqlo(1.6 MB), walmart(354 KB), **washingtonpost(2.9 MB — the
+  suspected wapo FP, confirmed)**, **wayfair(1.3 MB — was greenfield
+  PerimeterX)**, weather(2 MB).
+- **edge-block (8)**: canadagoose(732 B), hyatt(737 B), realtor(1764 B)
+  [genuine Kasada 429]; homedepot(2766 B) [genuine Akamai **sec-cpt** —
+  confirms §1.3 "5/5 STALE"]; etsy(1424 B), tripadvisor(1430 B),
+  yelp(1424 B) [genuine DataDome interstitial]; medium(39 KB) [captcha].
+- **sensor-fail (2)**: udemy(476 KB, "just a moment" CF), substack(62 KB).
+- **render-incomplete (1)**: mail-ru(959 B) — nav/redirect bug, not
+  stealth (matches §2).
+
+**Headline: 10 of 11 Akamai sites, plus macys (Kasada) and wayfair
+(PerimeterX), were classifier false positives** — they render. The old
+"22 engine-addressable" framing was inflated by measurement error. The
+**true stealth-addressable hard set is ~6**: canadagoose/hyatt/realtor
+(Kasada), homedepot (Akamai sec-cpt), etsy/tripadvisor (DataDome); udemy
+is CF (sensor-fail, body renders); medium/yelp/substack are human-gate.
+This is exactly the cheap Phase-0 win the plan predicted; Phases 2–4
+should target the ~6, not 22. **Caveat:** `pass` = "rendered, no
+structural challenge marker on a 1-iteration nav"; small-body passes
+(bestbuy 7.8 KB, spotify 9.6 KB, duolingo 13 KB) are likely thin shells —
+verify content depth before declaring a site fully won. The big-body
+passes (costco/disneyplus/weather/wapo/uniqlo/hulu/macys/wayfair, all
+0.4–3.7 MB) are real renders.
+
 ## 8. One-line summary for the next session
 
 The realm wiring is **done** (older handoffs are stale); the engine is

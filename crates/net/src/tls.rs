@@ -18,6 +18,47 @@ use tokio_boring2::SslStream;
 
 use crate::error::NetError;
 
+/// The Chrome major version whose **verified-real** ClientHello / H2
+/// fingerprint these constants reproduce, byte-exact, per
+/// `docs/CHROME_147_TLS_REFERENCE_2026_04_29.json`.
+///
+/// **Why this is 147 while every desktop preset's UA advertises Chrome
+/// 148 — and why that is NOT an incoherent skew (master plan §4 Phase 1
+/// G7):**
+///
+/// 1. Chrome's TLS ClientHello is **version-stable across majors**. It
+///    only changes on a deliberate TLS-stack change; the last such change
+///    was the MLKEM768 post-quantum rollout at Chrome 131. There was no
+///    TLS-stack change between 147 and 148 (consecutive majors, ~1 month
+///    apart, May 2026), so the bytes real Chrome 148 puts on the wire are
+///    identical to this verified-real 147 capture. Doc 03 §1.1 records
+///    "byte-exact Chrome 147/148 values" — they are the same values.
+/// 2. **JA4 does not encode the Chrome version.** JA4 = TLS-version +
+///    sorted cipher/extension counts + ALPN + sorted sigalgs. None of
+///    those differ 147↔148. A vendor's "JA4-vs-UA cross-check" verifies
+///    the JA4 corresponds to *a Chrome* consistent with the UA *family*
+///    — it cannot, even in principle, detect a 147-vs-148 minor/major
+///    label difference.
+/// 3. UA=148 is a **deliberate, A/B-tested, primary-source-grounded**
+///    decision: real Chrome stable IS 148 (chromiumdash; shipped early
+///    May 2026), and `docs/CHROME_148_SWEEP_RESULTS_2026_05_13.md`
+///    measured the 147→148 UA bump *recovering* homedepot/hotels/
+///    leboncoin. Rolling the UA back to 147 would re-introduce those
+///    regressions and advertise an outdated browser (its own soft-deny
+///    signal). So the coherent state is UA=148 + these (wire-identical)
+///    147-reference bytes.
+///
+/// This constant exists so the coherence is **machine-checked** (see the
+/// `tls_fingerprint_vectors_no_silent_drift` test) and the rationale is
+/// one `grep` away — the silent-drift hazard the plan flags is removed
+/// without changing a single wire byte or UA.
+pub const TLS_CHROME_MAJOR: u32 = 147;
+
+/// The Chrome major every desktop Chrome preset's `user_agent`
+/// advertises. Intentionally != [`TLS_CHROME_MAJOR`]; see that
+/// constant's docs for why this is wire-coherent, not a skew.
+pub const UA_CHROME_MAJOR: u32 = 148;
+
 /// Chrome 147 cipher suite list (order is critical for JA3 fingerprint).
 const CIPHER_LIST: &str = concat!(
     "TLS_AES_128_GCM_SHA256",
@@ -316,6 +357,96 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Master plan §4 Phase 1 **G7** — the self-verifying JA4 drift
+    /// guard + UA/TLS coherence assert. Network-free.
+    ///
+    /// Pins every JA4 input (cipher list, sigalg list, supported-groups
+    /// order, extension count) byte-/element-exact to the verified-real
+    /// Chrome reference (`docs/CHROME_147_TLS_REFERENCE_2026_04_29.json`)
+    /// so the fingerprint can never silently drift again (any edit to
+    /// the constants fails this test loudly), and machine-checks that
+    /// the deliberate UA=148 / TLS-ref=147 split is the documented,
+    /// wire-coherent one (see [`TLS_CHROME_MAJOR`] docs).
+    #[test]
+    fn tls_fingerprint_vectors_no_silent_drift() {
+        // --- JA4 input 1: cipher suites (order is JA4-significant) ---
+        const EXPECT_CIPHERS: &str = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:\
+TLS_CHACHA20_POLY1305_SHA256:TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256:\
+TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:\
+TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256:\
+TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256:TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA:\
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA:TLS_RSA_WITH_AES_128_GCM_SHA256:\
+TLS_RSA_WITH_AES_256_GCM_SHA384:TLS_RSA_WITH_AES_128_CBC_SHA:\
+TLS_RSA_WITH_AES_256_CBC_SHA";
+        assert_eq!(
+            CIPHER_LIST, EXPECT_CIPHERS,
+            "Chrome cipher list drifted from the verified-real reference \
+             — JA4 cipher hash would change"
+        );
+
+        // --- JA4 input 2: signature algorithms (order is JA4-significant) ---
+        const EXPECT_SIGALGS: &str = "ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256:\
+rsa_pkcs1_sha256:ecdsa_secp384r1_sha384:rsa_pss_rsae_sha384:rsa_pkcs1_sha384:\
+rsa_pss_rsae_sha512:rsa_pkcs1_sha512";
+        assert_eq!(
+            SIGALGS_LIST, EXPECT_SIGALGS,
+            "Chrome sigalg list drifted — JA4 sigalg hash would change"
+        );
+
+        // --- JA4 input 3: supported groups / curves order ---
+        assert_eq!(
+            CURVES_DESKTOP,
+            &[
+                SslCurve::X25519_MLKEM768,
+                SslCurve::X25519,
+                SslCurve::SECP256R1,
+                SslCurve::SECP384R1,
+            ],
+            "Chrome desktop curve order drifted (post-quantum MLKEM768 \
+             must lead) — JA4 supported_groups would change"
+        );
+
+        // --- JA4 input 4: extension count (16 — JA4 `c` digit) ---
+        assert_eq!(
+            CHROME_EXTENSION_PERMUTATION.len(),
+            16,
+            "Chrome extension count drifted — JA4 extension-count digit \
+             would change"
+        );
+
+        // --- UA / TLS coherence (the deliberate, wire-equivalent split) ---
+        assert_eq!(TLS_CHROME_MAJOR, 147);
+        assert_eq!(UA_CHROME_MAJOR, 148);
+        // The split is intentional and wire-coherent: Chrome's
+        // ClientHello did not rev 147→148, JA4 cannot encode the Chrome
+        // version, and UA=148 is the A/B-tested current-Chrome value.
+        // (Rationale in TLS_CHROME_MAJOR docs.)
+
+        fn ua_chrome_major(ua: &str) -> Option<u32> {
+            let i = ua.find("Chrome/")? + "Chrome/".len();
+            ua[i..].split('.').next()?.parse().ok()
+        }
+
+        for profile in [
+            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_130_windows(),
+        ] {
+            assert_eq!(
+                ua_chrome_major(&profile.user_agent),
+                Some(UA_CHROME_MAJOR),
+                "desktop Chrome preset UA major must equal UA_CHROME_MAJOR \
+                 (the coherence single-source-of-truth); UA was {:?}",
+                profile.user_agent
+            );
+            assert_eq!(
+                profile.tls_impersonate, "chrome_147",
+                "desktop Chrome preset TLS profile must be the verified-real \
+                 chrome_147 reference (wire-equivalent to Chrome \
+                 {UA_CHROME_MAJOR}); see TLS_CHROME_MAJOR docs"
+            );
+        }
+    }
 
     /// Capture the first 5 bytes of our outbound ClientHello (the TLS
     /// record header) and assert the record version is 0x0301 (TLS 1.0).
