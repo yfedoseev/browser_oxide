@@ -6583,6 +6583,8 @@
     globalThis.clientInformation = globalThis.navigator;
     globalThis.offscreenBuffering = true;
     globalThis.defaultStatus = "";
+    globalThis.name = "";
+    globalThis.status = "";
     
     // (Phase J) Iframe indexing parity: define window[0], window[1] etc.
     // Real Chrome has numeric own-properties for each child frame.

@@ -1547,6 +1547,8 @@
         get forms() { return this.getElementsByTagName("form"); }
         get images() { return this.getElementsByTagName("img"); }
         get links() { return this.getElementsByTagName("a"); }
+        get embeds() { return this.getElementsByTagName("embed"); }
+        get anchors() { return this.querySelectorAll("a[name]"); }
         get styleSheets() {
             const count = ops.op_dom_get_stylesheet_count();
             const sheets = [];
@@ -2457,6 +2459,33 @@
             _sp("outerHeight",  globalThis.outerHeight || 1080);
             _sp("scrollX", 0); _sp("scrollY", 0);
             _sp("pageXOffset", 0); _sp("pageYOffset", 0);
+            // Window state properties expected by Kasada `bas` probe.
+            _sp("closed", false);
+            _sp("name", "");
+            _sp("status", "");
+            _sp("defaultStatus", "");
+            _sp("screenTop", globalThis.screenTop || 0);
+            _sp("screenLeft", globalThis.screenLeft || 0);
+            _sp("screenX", globalThis.screenX || 0);
+            _sp("screenY", globalThis.screenY || 0);
+            // history stub — basic object so `.toString()` doesn't throw.
+            _sp("history", { length: 0, state: null, scrollRestoration: "auto",
+                back() {}, forward() {}, go() {}, pushState() {}, replaceState() {} });
+            // Storage stubs — Kasada `bas` probe may call `.toString()` on these.
+            const _storageStub = Object.create(null);
+            Object.defineProperty(_storageStub, Symbol.toStringTag, { value: "Storage", configurable: true });
+            _storageStub.length = 0;
+            _storageStub.getItem = function getItem() { return null; };
+            _storageStub.setItem = function setItem() {};
+            _storageStub.removeItem = function removeItem() {};
+            _storageStub.clear = function clear() {};
+            _storageStub.key = function key() { return null; };
+            try { _sp("localStorage", _storageStub); } catch (_) {}
+            try { _sp("sessionStorage", _storageStub); } catch (_) {}
+            // indexedDB — basic stub so typeof is "object".
+            _sp("indexedDB", { open() {}, deleteDatabase() {}, databases() { return Promise.resolve([]); }, cmp() { return 0; } });
+            // visualViewport — propagate from parent (Kasada `bas` probe may call .toString()).
+            try { if (globalThis.visualViewport !== undefined) _sp("visualViewport", globalThis.visualViewport); } catch (_) {}
             // devicePixelRatio: define as a native-tagged accessor so that
             // Kasada's dpi probe sees both a proper descriptor (getter:fn, not
             // data) AND [native code] from Function.prototype.toString.
@@ -2489,6 +2518,7 @@
                     "vendor", "vendorSub", "product", "productSub",
                     "appName", "appVersion", "appCodeName", "cookieEnabled",
                     "onLine", "doNotTrack", "pdfViewerEnabled",
+                    "plugins", "mimeTypes",
                 ]) {
                     try {
                         const _v = _parentNav[_k];

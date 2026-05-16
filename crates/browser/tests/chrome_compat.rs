@@ -8174,6 +8174,43 @@ async fn kasada_iframe_proxy_handler_audit() {
     );
 }
 
+/// Verify window[N]/window.length frame registry (Kasada `ifw` probe).
+/// After document.body.appendChild(iframe), window[0] must return the
+/// iframe's contentWindow so window[0].navigator.webdriver is accessible.
+#[tokio::test]
+async fn window_frame_registry_after_append() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+            const iframe = document.createElement('iframe');
+            document.body.appendChild(iframe);
+            const len = window.length;
+            const w0 = window[0];
+            let wd = 'ERR_NO_W0';
+            try { wd = String(w0 && w0.navigator && w0.navigator.webdriver); }
+            catch(e) { wd = 'ERR:'+e.message; }
+            return JSON.stringify({
+                windowLength: len,
+                hasW0: typeof w0 !== 'undefined',
+                w0Type: typeof w0,
+                webdriver: wd,
+            });
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("window-frame-registry: {result}");
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+    assert!(result.contains("\"windowLength\":1"), "window.length must be 1 after append: {result}");
+    assert!(result.contains("\"hasW0\":true"), "window[0] must be defined after append: {result}");
+    assert!(!result.contains("ERR:"), "window[0].navigator.webdriver must not throw: {result}");
+}
+
 // Diagnostic: does our PluginArray.prototype.namedItem leak source?
 // Per the captured Kasada fingerprint blob (Group F in
 // docs/research_2026_05_14/12_KASADA_FINGERPRINT_ERROR_AUDIT_2026_05_14.md),
@@ -8212,6 +8249,86 @@ async fn pluginarray_namedItem_must_show_native_code() {
         result.contains("\"leak_allPlugins\":false"),
         "namedItem leaks _allPlugins identifier — toString masking broken: {result}"
     );
+}
+
+/// Kasada `hcp`/`cpl` probes: child realm navigator must expose plugins/mimeTypes.
+/// Kasada checks `iframe.contentWindow.navigator.plugins.length` (hcp) and
+/// `navigator.plugins.length` inside an srcdoc iframe (cpl). Both must return
+/// the same count as the parent realm (5 plugins). Without this fix the child
+/// realm navigator object is missing plugins/mimeTypes → TypeError on `.length`.
+#[tokio::test]
+async fn child_realm_navigator_plugins_accessible() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+            const ifr = document.createElement('iframe');
+            document.body.appendChild(ifr);
+            const cw = ifr.contentWindow;
+            let pluginsLen = 'ERR_NO_PLUGINS';
+            let mimeLen = 'ERR_NO_MIME';
+            try { pluginsLen = cw.navigator.plugins.length; } catch(e) { pluginsLen = 'ERR:'+e.message; }
+            try { mimeLen = cw.navigator.mimeTypes.length; } catch(e) { mimeLen = 'ERR:'+e.message; }
+            return JSON.stringify({
+                parentPlugins: navigator.plugins.length,
+                childPlugins: pluginsLen,
+                parentMime: navigator.mimeTypes.length,
+                childMime: mimeLen,
+            });
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("child-realm-navigator-plugins: {result}");
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+    assert!(result.contains("\"childPlugins\":5"), "child realm must have 5 plugins: {result}");
+    assert!(result.contains("\"childMime\":2"), "child realm must have 2 mimeTypes: {result}");
+}
+
+/// Kasada `ifw` probe: `iframe.contentWindow.navigator.webdriver` must not throw.
+/// The `ifw` probe error was "Cannot read properties of undefined (reading 'webdriver')"
+/// — this means `iframe.contentWindow.navigator` was undefined (not `webdriver`).
+/// After adding plugins/mimeTypes to child realm navigator, re-verify the full
+/// `contentWindow` access path used by Kasada (not just `window[0]`).
+#[tokio::test]
+async fn iframe_contentwindow_navigator_webdriver_no_throw() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+            const ifr = document.createElement('iframe');
+            document.body.appendChild(ifr);
+            const cw = ifr.contentWindow;
+            let r = {};
+            r.hasCW = typeof cw !== 'undefined';
+            try { r.navType = typeof cw.navigator; } catch(e) { r.navType = 'ERR:'+e.message; }
+            try {
+                const nav = cw.navigator;
+                r.wdVal = String(nav.webdriver);
+            } catch(e) { r.wdVal = 'ERR:'+e.message; }
+            try {
+                const nav = cw.navigator;
+                const desc = Object.getOwnPropertyDescriptor(nav, 'webdriver');
+                r.descDefined = desc !== undefined;
+            } catch(e) { r.descDefined = 'ERR:'+e.message; }
+            return JSON.stringify(r);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("ifw-probe-sim: {result}");
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
+    assert!(result.contains("\"hasCW\":true"), "iframe.contentWindow must exist: {result}");
+    assert!(result.contains("\"navType\":\"object\""), "iframe.contentWindow.navigator must be object: {result}");
+    assert!(!result.contains("ERR:"), "no property access must throw: {result}");
 }
 
 // W3.2 — Cross-origin iframe postMessage round-trip. Cloudflare Managed
@@ -8594,4 +8711,69 @@ async fn kasada_masked_fn_own_props_probe() {
         result, "[]",
         "masked-fn own-prop Chrome-parity divergence (toString family): {result}"
     );
+}
+
+/// Kasada `bas` probe diagnostic — finds which window/iframe properties
+/// return `undefined` when Kasada calls `.toString()` on them.
+/// Chrome result: `{w:{}, i:{}}` (nothing suspicious). Our engine throws
+/// "Cannot read properties of undefined (reading 'toString')".
+/// This test scans candidate properties to identify the culprit.
+#[tokio::test]
+async fn kasada_bas_probe_diagnostic() {
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let js = r#"
+        (function(){
+            const results = {};
+            // Properties that `bas` likely checks (w=window, i=iframe)
+            const winProps = [
+                'location', 'history', 'screen', 'performance', 'navigator',
+                'document', 'frames', 'parent', 'top', 'self',
+                'screenTop', 'screenLeft', 'screenX', 'screenY',
+                'pageXOffset', 'pageYOffset', 'scrollX', 'scrollY',
+                'devicePixelRatio', 'visualViewport', 'crypto',
+                'performance', 'indexedDB', 'sessionStorage', 'localStorage',
+                'opener', 'closed', 'name', 'status', 'defaultStatus',
+            ];
+            for (const k of winProps) {
+                try {
+                    const v = window[k];
+                    results['w_' + k] = v === undefined ? 'UNDEFINED' : typeof v;
+                } catch(e) {
+                    results['w_' + k] = 'ERR:' + e.message;
+                }
+            }
+            // Check iframe contentWindow properties
+            const ifr = document.createElement('iframe');
+            document.body.appendChild(ifr);
+            const cw = ifr.contentWindow;
+            for (const k of winProps) {
+                try {
+                    const v = cw[k];
+                    results['i_' + k] = v === undefined ? 'UNDEFINED' : typeof v;
+                } catch(e) {
+                    results['i_' + k] = 'ERR:' + e.message;
+                }
+            }
+            return JSON.stringify(results);
+        })()
+    "#;
+    let result = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
+    eprintln!("bas-diagnostic: {}", &result[..result.len().min(2000)]);
+    // Print any UNDEFINED properties
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&result) {
+        if let Some(obj) = v.as_object() {
+            let undefs: Vec<_> = obj.iter()
+                .filter(|(_, v)| v.as_str() == Some("UNDEFINED"))
+                .map(|(k, _)| k.as_str())
+                .collect();
+            eprintln!("UNDEFINED properties: {:?}", undefs);
+        }
+    }
+    assert!(!result.starts_with("ERROR:"), "eval failed: {result}");
 }

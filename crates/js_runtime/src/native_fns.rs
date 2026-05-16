@@ -117,52 +117,46 @@ fn fp_to_string_cb(
 ) {
     let this: v8::Local<v8::Value> = args.this().into();
 
-    // Spec step 2: `this` must be callable, else TypeError (matches the
-    // genuine builtin's `requires that 'this' be a Function`).
-    if !this.is_function() {
-        let msg = v8::String::new(
-            scope,
-            "Function.prototype.toString requires that 'this' be a Function",
-        )
-        .unwrap();
-        let exc = v8::Exception::type_error(scope, msg);
-        scope.throw_exception(exc);
-        return;
-    }
-    let this_obj = v8::Local::<v8::Object>::try_from(this).unwrap();
-
-    // Masked host fn? Read the global-registered native tag symbol.
+    // Masked host fn? Read the global-registered native tag symbol
+    // BEFORE the `is_function()` check so Proxy-wrapped native-tagged
+    // objects also return the masked string.
     // (stealth_bootstrap sets `Symbol.for('__boxide_native__')` = name.)
-    if let Some(key) = v8::String::new(scope, NATIVE_TAG) {
-        let sym = v8::Symbol::for_global(scope, key);
-        if let Some(tagv) = this_obj.get(scope, sym.into()) {
-            if tagv.is_string() {
-                let tag = tagv.to_rust_string_lossy(scope);
-                let s = format!("function {tag}() {{ [native code] }}");
-                if let Some(out) = v8::String::new(scope, &s) {
-                    rv.set(out.into());
-                    return;
+    if let Ok(this_obj) = v8::Local::<v8::Object>::try_from(this) {
+        if let Some(key) = v8::String::new(scope, NATIVE_TAG) {
+            let sym = v8::Symbol::for_global(scope, key);
+            if let Some(tagv) = this_obj.get(scope, sym.into()) {
+                if tagv.is_string() {
+                    let tag = tagv.to_rust_string_lossy(scope);
+                    let s = format!("function {tag}() {{ [native code] }}");
+                    if let Some(out) = v8::String::new(scope, &s) {
+                        rv.set(out.into());
+                        return;
+                    }
                 }
             }
         }
     }
 
-    // Untagged: delegate to the GENUINE original Function.prototype
-    // .toString (captured pre-bootstrap, passed via data). V8 itself
-    // then emits `[native code]` for real natives and the real source
-    // for genuine JS user functions — exactly correct.
+    // Delegate to the GENUINE original Function.prototype.toString
+    // (captured pre-bootstrap, passed via data). V8 handles:
+    //   - JS user functions   → source text
+    //   - Real native fns     → `function name() { [native code] }`
+    //   - Callable Proxy objs → unwraps to target (Kasada `sbi` proxFn*)
+    //   - Non-callable vals   → throws its own TypeError (same message)
+    // We intentionally omit an early `!is_function()` throw so that
+    // callable Proxies (Kasada sentinel wrappers) are handled by V8.
     let data = args.data();
     if let Ok(orig) = v8::Local::<v8::Function>::try_from(data) {
         let recv = this;
         if let Some(res) = orig.call(scope, recv, &[]) {
             rv.set(res);
-            return;
         }
+        // If orig.call returns None the exception is already set on the
+        // scope (e.g. non-callable `this` → TypeError). Just return.
+        return;
     }
     // Last-resort fallback (should be unreachable): anonymous native.
-    if let Some(out) =
-        v8::String::new(scope, "function () { [native code] }")
-    {
+    if let Some(out) = v8::String::new(scope, "function () { [native code] }") {
         rv.set(out.into());
     }
 }

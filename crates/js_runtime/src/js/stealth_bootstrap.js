@@ -49,7 +49,7 @@
 
     // --- Native code masking ---
     const _maskFunction = (fn, name) => {
-        if (!fn) return;
+        if (!fn) return fn;
         try {
             // Native fns have an own configurable `name` (Chrome-correct).
             Object.defineProperty(fn, 'name', { value: name, configurable: true });
@@ -74,6 +74,9 @@
             // for getOwnPropertyNames / hasOwnProperty('toString') /
             // toString-identity on EVERY masked fn in the engine.
         } catch (e) {}
+        // Return fn so callers can use `{ get: _maskFunction(getter, name) }`
+        // without the getter silently becoming undefined (property returns undefined).
+        return fn;
     };
 
     const _maskAsNative = (obj, ...names) => {
