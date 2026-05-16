@@ -295,6 +295,10 @@ re-confirms it loses within days).
   fully-specified decisive experiment; eliminated dead-ends.
 - **05_NON_KASADA_VENDORS_STATUS_AND_FIX.md** — Akamai/DataDome/CF/PX
   per-vendor code reality + concrete fixes + cross-vendor priority table.
+- **06_126_CORPUS_PROGRESS_LEDGER.md** — single source of truth for the
+  full 126-site corpus standing (~113 single-profile / 120 routed,
+  6 universal blocks). Trust this instead of re-running the ~70-min
+  sweep; re-measure only after a site-affecting commit.
 
 Prior context (still valid where not superseded by §1):
 `docs/research_2026_05_15/00_HANDOFF.md` (entry), `26/27` (disassembled
