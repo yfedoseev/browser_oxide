@@ -1245,10 +1245,28 @@ impl Page {
         // Chrome-correct audio+canvas FP (see docs/research_2026_05_14/
         // 16_AUDIO_BLINK_PARITY) before it can round-trip the cookie.
         if let Some(dd) = crate::datadome_handler::detect_datadome_interstitial(&html) {
-            eprintln!(
-                "[vendor-detect] datadome-interstitial rt={} host={} cid={} on {}",
-                dd.rt, dd.host, dd.cid, resp.url
-            );
+            // Phase 5 (doc 05 §2d): replace the old log-only telemetry
+            // with the typed in-engine self-solve plan. The behavioral
+            // round-trip is performed by the existing pieces — i.js runs
+            // in our V8, the shared cookie jar captures the resulting
+            // `datadome=` Set-Cookie, and the cookie-diff retry below
+            // re-issues the original URL. What was missing (and is fixed
+            // at the CSP-install site in navigate_loop_internal) is that
+            // the origin's restrictive 403 CSP must NOT be enforced on
+            // the DataDome challenge document, or i.js cannot reach
+            // geo.captcha-delivery.com (doc 05 §2c symptom).
+            match crate::datadome_handler::plan_datadome_solve(&dd, &resp.url) {
+                Some(plan) => eprintln!(
+                    "[datadome] interstitial rt={} cid={} — in-engine self-solve planned: \
+                     challenge_hosts={:?} renav={} (cookie-diff retry re-issues)",
+                    plan.rt, dd.cid, plan.challenge_hosts, plan.renav_url
+                ),
+                None => eprintln!(
+                    "[datadome] interstitial rt={} cid={} on {} — not auto-solvable \
+                     (human slider / out of stealth scope)",
+                    dd.rt, dd.cid, resp.url
+                ),
+            }
         }
         let resp_url = resp.url.clone();
         let timings = resp.timings.clone();
@@ -1337,7 +1355,25 @@ impl Page {
             // Bypass switch — useful to compare engine behaviour with
             // and without enforcement on the same site without rebuild.
             let env_bypass = std::env::var("BOXIDE_CSP_BYPASS").is_ok();
-            let enforce = profile.enforce_csp && !env_bypass;
+            // Phase 5 (doc 05 §2c/§2d): a DataDome `rt:'i'` interstitial
+            // is a DataDome-served challenge document, NOT the origin's
+            // page — enforcing the origin's restrictive 403-response CSP
+            // on it refuses geo.captcha-delivery.com and kills the i.js
+            // self-solve round-trip. Narrowly gated to the <4 KB
+            // interstitial shape (detect_datadome_interstitial), so it
+            // cannot affect normal pages or the 10 passing Akamai sites
+            // (their bodies don't match). The cookie-diff retry then
+            // re-issues the original URL once i.js lands `datadome=`.
+            let dd_challenge_doc = crate::datadome_handler::is_datadome_challenge_doc(&html);
+            let enforce = profile.enforce_csp && !env_bypass && !dd_challenge_doc;
+            if dd_challenge_doc {
+                if debug_nav {
+                    eprintln!(
+                        "[datadome] challenge document — origin CSP not enforced \
+                         (i.js round-trip to captcha-delivery.com permitted)"
+                    );
+                }
+            }
             if let Ok(origin) = url::Url::parse(&resp_url) {
                 if !policy_set.is_empty() {
                     if debug_nav {

@@ -153,6 +153,67 @@ fn extract_num(obj: &str, key: &str) -> Option<i64> {
     None
 }
 
+/// Phase-5 (doc 05 §2d) — a typed plan describing how the nav loop
+/// should let a DataDome `rt:'i'` interstitial **self-solve in-engine**.
+///
+/// We deliberately do not re-implement DataDome's signal map / daily
+/// wire-key / WASM `boring_challenge` (doc 05 §2d marks that the **L**,
+/// fragile path). The **M** path is to let DataDome's own `i.js` run in
+/// our Chrome-faithful V8, read our surface, and POST its payload — then
+/// consume the resulting `datadome=` cookie and re-issue the original
+/// URL. For that to work the challenge document must be allowed to talk
+/// to its own challenge hosts (the origin's 403-response CSP refuses
+/// `geo.captcha-delivery.com`, which is doc 05 §2c's exact symptom).
+///
+/// Only `rt:'i'` (invisible / auto) is plannable. `rt:'c'` is the human
+/// slider widget — out of stealth scope, honestly returns `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DdSolvePlan {
+    /// Response type carried through for telemetry (`"i"`).
+    pub rt: String,
+    /// Hosts the challenge document must be permitted to reach for the
+    /// `i.js` round-trip — these must be CSP-exempt for the challenge
+    /// document (doc 05 §2d "do NOT CSP-refuse as a child iframe").
+    pub challenge_hosts: Vec<String>,
+    /// The original page URL to re-navigate once `i.js` has landed a
+    /// fresh `datadome=` cookie in the shared jar (the existing
+    /// cookie-diff retry in `page.rs` performs the actual re-issue).
+    pub renav_url: String,
+}
+
+/// Build the in-engine self-solve plan for a detected interstitial.
+///
+/// Returns `Some` only for the auto-solvable invisible (`rt:'i'`)
+/// interstitial. The challenge-host set is derived from the parsed
+/// `host` plus the fixed DataDome challenge CDN apex so the loader
+/// (`ct.captcha-delivery.com/i.js`) and the verification endpoint
+/// (`geo.captcha-delivery.com`) are both reachable.
+pub fn plan_datadome_solve(dd: &DdInterstitial, page_url: &str) -> Option<DdSolvePlan> {
+    if dd.rt != "i" {
+        return None;
+    }
+    let mut challenge_hosts = vec![
+        "captcha-delivery.com".to_string(),
+        "ct.captcha-delivery.com".to_string(),
+        "geo.captcha-delivery.com".to_string(),
+    ];
+    if !dd.host.is_empty() && !challenge_hosts.iter().any(|h| h == &dd.host) {
+        challenge_hosts.push(dd.host.clone());
+    }
+    Some(DdSolvePlan {
+        rt: dd.rt.clone(),
+        challenge_hosts,
+        renav_url: page_url.to_string(),
+    })
+}
+
+/// Cheap predicate for the CSP-install site in the nav loop: is this
+/// response body a DataDome challenge document (so the origin's
+/// restrictive 403 CSP must NOT be enforced on it — doc 05 §2d)?
+pub fn is_datadome_challenge_doc(body: &str) -> bool {
+    detect_datadome_interstitial(body).is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +253,55 @@ mod tests {
     fn ignores_body_without_captcha_delivery() {
         let body = r#"<html><body><script>var dd={'rt':'i','cid':'x'}</script></body></html>"#;
         assert!(detect_datadome_interstitial(body).is_none());
+    }
+
+    #[test]
+    fn plans_self_solve_for_invisible_interstitial() {
+        let dd = detect_datadome_interstitial(REUTERS_BODY).expect("parsed");
+        let plan = plan_datadome_solve(&dd, "https://www.etsy.com/").expect("rt:'i' plannable");
+        assert_eq!(plan.rt, "i");
+        assert_eq!(plan.renav_url, "https://www.etsy.com/");
+        // Loader + verification hosts must both be reachable for the
+        // i.js round-trip (doc 05 §2d).
+        assert!(plan.challenge_hosts.iter().any(|h| h == "ct.captcha-delivery.com"));
+        assert!(plan.challenge_hosts.iter().any(|h| h == "geo.captcha-delivery.com"));
+        // The parsed `host` (geo.captcha-delivery.com here) is already in
+        // the fixed set — no duplicate appended.
+        assert_eq!(
+            plan.challenge_hosts
+                .iter()
+                .filter(|h| *h == "geo.captcha-delivery.com")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn does_not_plan_human_slider_captcha() {
+        // rt:'c' is the interactive slider widget — out of stealth scope.
+        let body = REUTERS_BODY.replace("'rt':'i'", "'rt':'c'");
+        let dd = detect_datadome_interstitial(&body).expect("parsed");
+        assert_eq!(dd.rt, "c");
+        assert!(
+            plan_datadome_solve(&dd, "https://www.tripadvisor.com/").is_none(),
+            "human slider must not be auto-planned"
+        );
+    }
+
+    #[test]
+    fn challenge_doc_predicate_matches_detector() {
+        assert!(is_datadome_challenge_doc(REUTERS_BODY));
+        assert!(!is_datadome_challenge_doc(
+            r#"<html><body>real rendered page, no challenge</body></html>"#
+        ));
+    }
+
+    #[test]
+    fn appends_unrecognized_challenge_host() {
+        let body = REUTERS_BODY
+            .replace("'host':'geo.captcha-delivery.com'", "'host':'c.example-dd.net'");
+        let dd = detect_datadome_interstitial(&body).expect("parsed");
+        let plan = plan_datadome_solve(&dd, "https://x/").expect("rt:'i'");
+        assert!(plan.challenge_hosts.iter().any(|h| h == "c.example-dd.net"));
     }
 }
