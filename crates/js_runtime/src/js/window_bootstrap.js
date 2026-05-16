@@ -65,6 +65,15 @@
             });
             if (typeof _maskFunction === "function") _maskFunction(Window, "Window");
             globalThis.Window = Window;
+            // Symbol.hasInstance: any global proxy where .window===self is a Window
+            // (covers both main realm and child realms for iframe instanceof Window)
+            Object.defineProperty(Window, Symbol.hasInstance, {
+                value: function(instance) {
+                    if (instance == null) return false;
+                    try { return instance.window === instance; } catch(_) { return false; }
+                },
+                configurable: true, writable: true
+            });
             // NOTE: do NOT Object.setPrototypeOf(globalThis, Window.prototype)
             // here — deno_core's V8 global object is special; swapping its
             // [[Prototype]] breaks `ops`/secure-context resolution
@@ -972,8 +981,7 @@
     _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
     _defNav('pdfViewerEnabled', () => true);
     // webdriver: present on Navigator.prototype per W3C WebDriver spec.
-    // Real non-automated Chrome: property exists with a getter returning undefined.
-    // Kasada wdt probe: value must be undefined (not false). wdd probe checks
+    // Non-automated Chrome returns undefined (not false). Kasada wdd probe checks
     // the getter source — _maskFunction makes it appear native.
     Object.defineProperty(Navigator.prototype, 'webdriver', {
         get: _maskFunction(function() { return undefined; }, 'get webdriver'),
@@ -1322,7 +1330,11 @@
         _locationData.hash = String(v).startsWith('#') ? v : '#' + v;
         _locationData.href = _locationData.origin + _locationData.pathname + _locationData.search + _locationData.hash;
     });
-    _defLoc('ancestorOrigins', () => ({ length: 0, item: () => null, contains: () => false }));
+    _defLoc('ancestorOrigins', () => {
+        const _ao = { length: 0, item: () => null, contains: () => false };
+        _ao[Symbol.iterator] = function*() {};
+        return _ao;
+    });
 
     _defProtoMethod(_LocProto, 'assign', (url) => {
         _parseLocationUrl(url);
@@ -5419,29 +5431,48 @@
         }
         _maskFunction(SourceBufferList, "SourceBufferList");
 
-        // Overwrite the stubs from interfaces_bootstrap
-        if (globalThis.MediaSource) {
-            const _MSProto = globalThis.MediaSource.prototype;
-            Object.defineProperty(globalThis.MediaSource, 'isTypeSupported', {
-                value: _isTypeSupported, configurable: true, writable: true, enumerable: false
-            });
-            Object.defineProperty(_MSProto, 'sourceBuffers', {
-                get: function() { return new SourceBufferList(); },
-                configurable: true, enumerable: true
-            });
-            Object.defineProperty(_MSProto, 'activeSourceBuffers', {
-                get: function() { return new SourceBufferList(); },
-                configurable: true, enumerable: true
-            });
-            _maskFunction(globalThis.MediaSource, "MediaSource");
-            _maskAsNative(_MSProto, 'sourceBuffers', 'activeSourceBuffers');
-        }
-        if (globalThis.MediaRecorder) {
-            Object.defineProperty(globalThis.MediaRecorder, 'isTypeSupported', {
-                value: _isTypeSupported, configurable: true, writable: true, enumerable: false
-            });
-            _maskFunction(globalThis.MediaRecorder, "MediaRecorder");
-        }
+        // Replace stubs with real (non-throwing) constructors so Kasada VM
+        // can call `new MediaSource()` during smc probe init without aborting.
+        (() => {
+            class MediaSource extends EventTarget {
+                constructor() {
+                    super();
+                    this.readyState = 'closed';
+                    this.duration = NaN;
+                    this.sourceBuffers = new SourceBufferList();
+                    this.activeSourceBuffers = new SourceBufferList();
+                }
+                addSourceBuffer() { throw new DOMException('InvalidStateError'); }
+                removeSourceBuffer() { throw new DOMException('InvalidStateError'); }
+                endOfStream() {}
+                setLiveSeekableRange() {}
+                clearLiveSeekableRange() {}
+                static isTypeSupported(type) { return _isTypeSupported(type); }
+                static canConstructInDedicatedWorker = false;
+            }
+            _maskFunction(MediaSource, "MediaSource");
+            globalThis.MediaSource = MediaSource;
+        })();
+        (() => {
+            class MediaRecorder extends EventTarget {
+                constructor(stream, options) {
+                    super();
+                    this.stream = stream || null;
+                    this.mimeType = (options && options.mimeType) || '';
+                    this.state = 'inactive';
+                    this.audioBitsPerSecond = 0;
+                    this.videoBitsPerSecond = 0;
+                }
+                start() {}
+                stop() {}
+                pause() {}
+                resume() {}
+                requestData() {}
+                static isTypeSupported(type) { return _isTypeSupported(type); }
+            }
+            _maskFunction(MediaRecorder, "MediaRecorder");
+            globalThis.MediaRecorder = MediaRecorder;
+        })();
 
         const _getCapabilities = ({
             getCapabilities(kind) {

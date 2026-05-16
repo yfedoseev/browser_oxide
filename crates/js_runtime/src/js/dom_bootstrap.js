@@ -2272,7 +2272,7 @@
                 const _cSrc = (el && typeof el.getAttribute === "function")
                     ? (el.getAttribute("src") || el.src || "")
                     : (el && el.src || "");
-                if (_cSrc && _cSrc !== "about:blank" && _cSrc !== "") {
+                if (_cSrc && _cSrc !== "about:blank" && !/^javascript:/i.test(_cSrc) && _cSrc !== "") {
                     const _pOrig = _xOrigin((globalThis.location && globalThis.location.href) || "");
                     const _sOrig = _xOrigin(_cSrc);
                     if (_sOrig !== _pOrig) {
@@ -2320,7 +2320,7 @@
             const _iSrc = (el && typeof el.getAttribute === "function")
                 ? (el.getAttribute("src") || el.src || "")
                 : (el && el.src || "");
-            if (_iSrc && _iSrc !== "about:blank" && _iSrc !== "") {
+            if (_iSrc && _iSrc !== "about:blank" && !/^javascript:/i.test(_iSrc) && _iSrc !== "") {
                 const _pOrigin = _xOrigin((globalThis.location && globalThis.location.href) || "");
                 const _srcOrigin = _xOrigin(_iSrc);
                 if (_srcOrigin !== _pOrigin) {
@@ -2630,8 +2630,9 @@
                         if (_v !== undefined) Object.defineProperty(_nav, _k, { value: _v, writable: true, configurable: true, enumerable: true });
                     } catch (_) {}
                 }
-                // webdriver: intentionally absent. Real Chrome has no webdriver property
-                // at all in non-automated mode; removing it makes the child realm match.
+                // webdriver: undefined in non-automated Chrome (property present, value undefined).
+                // Kasada ifw probe checks i_nwd = cw.navigator.webdriver (falsy is fine).
+                Object.defineProperty(_nav, 'webdriver', { value: undefined, writable: true, configurable: true, enumerable: true });
                 _sp("navigator", _nav);
             } catch (_) {}
 
@@ -2679,23 +2680,39 @@
                 } catch (_) {}
             }
 
-            // mrs probe: Kasada reads MediaSource.isTypeSupported from inside child realm
-            // via a srcdoc eval. _sp('MediaSource', ...) sets on the inner global via
-            // create_data_property, which should be visible inside. Belt-and-suspenders:
-            // if the cross-realm reference copy failed silently (op_set_child_realm_prop
-            // swallows errors), eval a local stub directly inside child realm scope.
+            // mrs/smc/dpv probes: Kasada reads MediaSource.isTypeSupported from inside
+            // child realm. Wrap in IIFE to prevent __kms leaking into child realm globals
+            // (Kasada's ltk probe detects unexpected global variables).
+            // globalThis.X = Y inside an IIFE IS visible to subsequent op_eval_in_child_realm
+            // calls because they all run in the same child v8::Context.
             try {
                 ops.op_eval_in_child_realm(_realmId,
-                    '(function(){if(typeof MediaSource==="undefined"){' +
-                    'var _s=new Set(["video/mp4","video/webm","audio/mp4","audio/webm",' +
+                    '(function(){\n' +
+                    'var __kms=new Set(["video/mp4","video/webm","audio/mp4","audio/webm",' +
                     '"audio/mpeg","audio/aac","audio/x-m4a","audio/mp3","audio/x-wav",' +
-                    '"audio/ogg","audio/acc","audio/x-m4a","video/mp4;codecs=\\"avc1.42E01E,mp4a.40.2\\"",' +
-                    '"video/webm;codecs=\\"vp9\\"","audio/mp4;codecs=\\"mp4a.40.2\\""]);' +
-                    'function MediaSource(){throw new TypeError("Failed to construct \'MediaSource\': Illegal constructor");}' +
-                    'MediaSource.isTypeSupported=function isTypeSupported(t){' +
-                    'if(typeof t!=="string")return false;var b=t.split(";")[0].trim();' +
-                    'return _s.has(t)||_s.has(b);};' +
-                    'globalThis.MediaSource=MediaSource;}})();'
+                    '"audio/ogg","audio/acc","audio/mp4;codecs=\\"mp4a.40.2\\"",' +
+                    '"video/mp4;codecs=\\"avc1.42E01E,mp4a.40.2\\"",' +
+                    '"video/webm;codecs=\\"vp9\\""]);\n' +
+                    'var _its=function isTypeSupported(t){if(typeof t!=="string")return false;var b=t.split(";")[0].trim();return __kms.has(t)||__kms.has(b);};\n' +
+                    'if(typeof MediaSource==="undefined"||MediaSource===undefined){\n' +
+                    'globalThis.MediaSource=function MediaSource(){throw new TypeError("Failed to construct \'MediaSource\': Illegal constructor");};\n' +
+                    '}\n' +
+                    'if(typeof MediaSource.isTypeSupported!=="function") MediaSource.isTypeSupported=_its;\n' +
+                    'if(typeof MediaRecorder==="undefined"||MediaRecorder===undefined){\n' +
+                    'globalThis.MediaRecorder=function MediaRecorder(){throw new TypeError("Failed to construct \'MediaRecorder\': Illegal constructor");};\n' +
+                    '}\n' +
+                    'if(typeof MediaRecorder.isTypeSupported!=="function") MediaRecorder.isTypeSupported=_its;\n' +
+                    '})();\n'
+                );
+            } catch (_) {}
+
+            // Align child realm globals with main window to prevent realm-divergence detection.
+            // Chrome without COOP/COEP: SharedArrayBuffer is disabled in all frames.
+            // Our V8 child context natively has SAB; delete it to match.
+            try {
+                ops.op_eval_in_child_realm(_realmId,
+                    'if(typeof SharedArrayBuffer!=="undefined"&&typeof globalThis.SharedArrayBuffer!=="undefined")' +
+                    '{try{delete globalThis.SharedArrayBuffer;}catch(_){globalThis.SharedArrayBuffer=undefined;}}'
                 );
             } catch (_) {}
 

@@ -21,7 +21,7 @@ fn console_log_capture() {
         .unwrap();
     let output = rt.console_output();
     assert_eq!(output.len(), 1);
-    assert_eq!(output[0].args[0], "hello from JS");
+    assert_eq!(output[0].args[0], "[string] hello from JS");
 }
 
 #[test]
@@ -275,7 +275,7 @@ fn stealth_profile_overrides_screen() {
     let mut rt = BrowserJsRuntime::with_profile(dom, profile);
 
     let w = rt.execute_script("screen.width", None).unwrap();
-    assert_eq!(w, "1440"); // macOS profile = 1440
+    assert_eq!(w, "1512"); // macOS M3 MacBook Pro profile = 1512
 
     let dpr = rt.execute_script("devicePixelRatio", None).unwrap();
     assert_eq!(dpr, "2"); // macOS Retina = 2x
