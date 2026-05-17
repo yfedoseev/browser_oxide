@@ -80,6 +80,13 @@ pub use session::{AbckState, AkamaiSession, AkamaiSessionStore};
 /// Lower scores → more human. A jump in any sub-score across runs is a
 /// regression signal that pinpoints which engine fingerprint we just
 /// broke. Used as a passive diagnostic; never as a gating condition.
+///
+/// **DEAD CODE (FP-Class-A, 2026-05-16).** `parse` has zero non-test
+/// callers — the `ak_p`/server-timing bot score is a free regression
+/// oracle we currently collect-and-discard (not logged in the nav
+/// loop). Labelled so its presence is not mistaken for live scoring.
+/// If wired (e.g. as a drift log) or given a non-test caller, update
+/// this label and `crates/akamai/tests/dead_code_labels.rs`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BotScoreVector {
     pub request_id: Option<String>,

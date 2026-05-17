@@ -12,7 +12,18 @@ silently mis-routes a real site. **P2** = capability-truth / hygiene
 
 ---
 
-## CLASS A — "Exists ≠ exercised" dead/unreached solver code  (P2, universal)
+## CLASS A — "Exists ≠ exercised" dead/unreached solver code  (P2, universal)  ✅ DONE — commit on `fix/engine-fp-backlog`
+
+**Status:** FIXED (truth-in-labeling). `DEAD CODE (FP-Class-A)`
+doc-comments added to `sec_cpt::solve_crypto`, `DdEncryptor`,
+`BotScoreVector` (each: zero non-test callers, why, "do not wire",
+pointer to update the guard). New guard test
+`crates/akamai/tests/dead_code_labels.rs` greps the workspace and
+**fails if any DEAD-labelled symbol gains a non-test caller** — the
+label can no longer silently drift back into "exists ≠ exercised".
+Cloudflare/PerimeterX "no solver at all" is documented in their engine
+docs §10; FP-E1 covers the iframe dead-downstream. Gate green (shared
+final run, incl. the new guard test).
 
 The crate advertises far more capability than the live `navigate()` path
 exercises. Each item: byte-verified or present, but **not in the live
@@ -110,7 +121,15 @@ from a true ~6).
   Note: the existing `medium_body_with_pxhd_substring_is_not_chl` only
   guards `_pxhd` — extend it to `px-captcha` and `captcha-delivery.com`.
 
-### FP-B3 — Thin-shell "pass" under-match (FP in the other direction)  (P1)
+### FP-B3 — Thin-shell "pass" under-match (FP in the other direction)  (P1)  ✅ DONE — commit on `fix/engine-fp-backlog`
+- **Status:** FIXED. Added `ChallengeVerdict::ThinShell`
+  (is_challenge=false, as_str "thin-shell") + `THIN_SHELL_MAX_BYTES`
+  (15 KB) in `classify`. `verdict_for`: `L3-RENDERED` & len <
+  THIN_SHELL ⇒ ThinShell (the bestbuy/spotify/duolingo shell class);
+  ≥ ⇒ Pass. The holistic `tag` stays `L3-RENDERED` (≥ 1000 B) so the
+  126-corpus ledger metric is byte-unchanged. Regression:
+  `classify::tests::fp_b3_thin_shell_band`. Gate green (shared final
+  run). Measurement-correctness, no site flip.
 - **Where:** `ChallengeVerdict::Pass` = rendered + no challenge marker on
   a 1-iteration nav.
 - **False claim:** "bestbuy/spotify/duolingo pass" (7.8 / 9.6 / 13 KB).
@@ -209,7 +228,20 @@ Code paths whose success branch can never execute given the upstream
 structural gap — they make the engine *look* capable and defeat loose
 tests.
 
-### FP-D1 — Inc-8 DataDome self-solve window unreachable for etsy  (P1)
+### FP-D1 — Inc-8 DataDome self-solve window unreachable for etsy  (P1)  ✅ DONE — commit on `fix/engine-fp-backlog`
+- **Status:** RESOLVED (verify-don't-assume). Inc-8 is the
+  *pending-nav* (homedepot-class) DD self-solve window; the
+  *etsy-class* `rt:'i'` (no early pending nav) is served by the
+  `pending_info.is_empty() && started_as_dd_challenge` poll, which now
+  also pumps `rematerialize_iframes` (FP-E1) and breaks on
+  `datadome_solved` (FP-D3) ⇒ the DD self-solve window is reachable on
+  **both** branches. Added the clarifying code comment at the Inc-8
+  site + a regression test pinning the poll-entry invariant
+  (`started_as_dd_challenge == is_datadome_challenge_doc(initial html)`):
+  `datadome_handler::tests::etsy_rt_i_body_enters_dd_self_solve_path`.
+  (The "Inc-8 unreachable for etsy" framing was an assumption; the
+  etsy path was reachable via the poll all along — now proven, not
+  inferred.) Gate green (shared final run).
 - **Where:** `page.rs:2224` (Inc-8 45 s self-solve poll), gated behind a
   pending GET nav branch.
 - **Why false:** the captured etsy trace shows i.js **never sets** that
@@ -223,7 +255,16 @@ tests.
 - **Regression test:** etsy-shaped trace fixture ⇒ assert the Inc-8 poll
   is entered (currently it is not).
 
-### FP-D2 — Cloudflare `cf_clearance`-in-jar success branches dead  (P1)
+### FP-D2 — Cloudflare `cf_clearance`-in-jar success branches dead  (P1)  ✅ DONE — commit on `fix/engine-fp-backlog`
+- **Status:** FIXED (truth-in-labeling). Added a clear doc-comment at
+  the `cf_clearance` success branches marking them STRUCTURALLY
+  UNREACHABLE under the current engine (nothing produces
+  `cf_clearance` until FP-E1's iframe interception lands), kept (not
+  deleted) as the correct shape. The verdict invariant that documents
+  the dead path is pinned by `classify::tests::fp_d2_cf_unsolved_never_passes`
+  (any CF challenge body — small stub or large shell — is_challenge &&
+  never Pass; large ⇒ ChallengeIncomplete, tying to FP-B4). Gate green
+  (shared final run).
 - **Where:** `page.rs:351-441` — the "cf_clearance already present /
   issued" success branches.
 - **Why false:** nothing in the codebase ever produces `cf_clearance`
@@ -314,7 +355,20 @@ tests.
 
 ---
 
-## CLASS F — Tests that pass offline but the live path differs  (P2)
+## CLASS F — Tests that pass offline but the live path differs  (P2)  ✅ DONE — commit on `fix/engine-fp-backlog`
+
+**Status:** FIXED (truth-in-labeling). FP-F1: `compute_cd_header`
+(`kasada_session.rs`) doc-commented `UNVERIFIED-VS-LIVE` — `rst`/`d`/
+aligned work-time are synthesized plausibles, self-replay-tested only,
+never differentially measured vs a live `/tl` acceptance. FP-F2:
+`perimeterx_surface_parity.rs` module header now states **surface
+parity only ≠ passing PX** (encrypted `_px3`/behavioral/server-ML/
+TLS/IP + iOS-consistency all unexercised). FP-F3: the
+`VM_TRACE_FINDINGS` "5 sentinel throws = the bug" claim is already
+marked eliminated in master plan §6 (Phase 2 OUTCOME A) — no code
+change, cross-referenced. Gate green (shared final run).
+
+
 
 | ID | Where | The false comfort | Fix |
 |---|---|---|---|

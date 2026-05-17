@@ -160,6 +160,22 @@ re-measure proves an actual flip.
   needs the interception + the authorized live-oracle regime (engine
   docs §11). Honest: FP-E1 is the explicitly-scoped structural item,
   experiment-proven not assumed.
+- **FP-B3 + FP-D1 + FP-D2 + Class A + Class F (DONE, final batch):**
+  B3 adds a `ThinShell` verdict band so small shells (bestbuy/spotify
+  class) aren't over-counted as full passes (holistic tag unchanged ⇒
+  ledger intact). D1 proves (verify-don't-assume) the etsy-class DD
+  self-solve poll IS reachable (Inc-8 is the homedepot-class path);
+  the "unreachable" framing was an assumption, now disproven + pinned.
+  D2 truth-labels the structurally-dead `cf_clearance` success path +
+  pins "CF unsolved never Pass". Class A: `DEAD CODE` doc-labels +
+  a workspace-grep **guard test** that fails on label drift. Class F:
+  `UNVERIFIED-VS-LIVE` / "surface-parity-only" labels on the
+  offline-passing Kasada/PX tests. All measurement-correctness /
+  truth-in-labeling — **no site flip, ledger 120/126 intact**.
+  **Backlog complete: all 9 P0/P1 items committed gate-green; FP-E1
+  is the one explicitly-marked scoped structural follow-up (its
+  remaining createElement/.src interception + the daily-oracle flips
+  require the authorized live-oracle regime, per engine docs §11).**
 
 ## Bottom line
 

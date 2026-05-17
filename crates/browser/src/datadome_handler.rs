@@ -370,6 +370,30 @@ mod tests {
         ));
     }
 
+    // FP-D1 (Inc-8 reachability): the navigate loop sets
+    // `started_as_dd_challenge = is_datadome_challenge_doc(initial html)`,
+    // which gates BOTH DD self-solve paths (the no-pending-nav poll —
+    // the etsy-class path — and the Inc-8 pending-nav window — the
+    // homedepot-class path). An etsy-shaped `rt:'i'` interstitial must
+    // therefore satisfy that predicate so the self-solve poll is
+    // entered (pre-this-analysis it was wrongly believed Inc-8 was
+    // unreachable for etsy; the poll path IS reachable — proven here).
+    #[test]
+    fn etsy_rt_i_body_enters_dd_self_solve_path() {
+        // REUTERS_BODY is the canonical DataDome `rt:'i'` interstitial
+        // shape; etsy/tripadvisor serve the identical structure.
+        assert!(
+            is_datadome_challenge_doc(REUTERS_BODY),
+            "rt:'i' interstitial must set started_as_dd_challenge ⇒ \
+             the DD self-solve poll IS entered (FP-D1 reachability)"
+        );
+        // A real rendered page must NOT (so the poll is not entered for
+        // a solved/benign nav).
+        assert!(!is_datadome_challenge_doc(
+            "<html><body>fully rendered etsy listing, no interstitial</body></html>"
+        ));
+    }
+
     #[test]
     fn dd_flow_summary_flags_cookie_gain() {
         let s = dd_flow_summary(true, false, true);

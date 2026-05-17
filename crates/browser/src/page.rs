@@ -133,6 +133,15 @@ pub enum ChallengeVerdict {
     /// Challenge marker + a large body that otherwise rendered: the
     /// vendor JS ran and the sensor scored the telemetry as bot.
     SensorFail,
+    /// FP-B3: rendered, no challenge marker, but the body is below a
+    /// real-content floor (above the THIN-BODY noise floor) — a thin
+    /// shell / SPA pre-hydration stub, not the full content. Distinct
+    /// from [`Self::Pass`] so a small shell is not over-counted as a
+    /// full win (the bestbuy 7.8 KB / spotify 9.6 KB class). NOT a
+    /// challenge (`is_challenge()==false`) — it is a content-depth
+    /// caveat, like [`Self::RenderIncomplete`] but above the thin-body
+    /// floor.
+    ThinShell,
     /// FP-B4: a challenge is structurally present in a *large* body but
     /// the vendor flow never *completed* (no clearance / no nav) — e.g.
     /// a Cloudflare Managed-Challenge orchestrator shell that ran but
@@ -164,6 +173,7 @@ impl ChallengeVerdict {
             Self::EdgeBlock => "edge-block",
             Self::SensorFail => "sensor-fail",
             Self::ChallengeIncomplete => "challenge-incomplete",
+            Self::ThinShell => "thin-shell",
         }
     }
 }
@@ -323,6 +333,19 @@ impl Page {
             return Some(ctx);
         }
 
+        // FP-D2 (dead-path truth-in-labeling): the `cf_clearance=`
+        // success branches below are STRUCTURALLY UNREACHABLE under the
+        // current engine — nothing fetches `/orchestrate/`, POSTs the
+        // CF flow, or runs the cross-origin Turnstile iframe, so no
+        // `cf_clearance` is ever produced (it only ever appears if an
+        // *external* orchestrator pre-seeded the jar). They are kept
+        // (not deleted) as the correct shape for when FP-E1's
+        // createElement/.src iframe-interception lands; until then a
+        // CF challenge resolves to `ChallengeVerdict::ChallengeIncomplete`
+        // (FP-B4), never `Pass` — the verdict invariant that documents
+        // this dead path is pinned by
+        // `classify::tests::fp_d2_cf_unsolved_never_passes`.
+        //
         // Check the cookie jar for a pre-existing cf_clearance — if present
         // this navigation already had clearance attached and we're done.
         let host = url::Url::parse(&self.url)
@@ -2318,6 +2341,18 @@ impl Page {
                 // success signal). Narrowly gated to
                 // `started_as_dd_challenge` ⇒ false for every non-DataDome
                 // site incl. the entire §4 gate ⇒ zero regression.
+                //
+                // FP-D1 (reachability, verify-don't-assume): this Inc-8
+                // window is the *pending-nav* (homedepot-class) DD path.
+                // The *etsy-class* `rt:'i'` flow (no early pending nav)
+                // is NOT served here — it is served by the
+                // `pending_info.is_empty() && started_as_dd_challenge`
+                // poll above, which now also pumps `rematerialize_iframes`
+                // (FP-E1) and breaks on `datadome_solved` (FP-D3). So the
+                // DD self-solve window is reachable on BOTH branches; the
+                // poll-entry invariant (`started_as_dd_challenge ==
+                // is_datadome_challenge_doc(initial html)`) is pinned by
+                // `datadome_handler::tests::etsy_rt_i_body_enters_dd_self_solve_path`.
                 if started_as_dd_challenge {
                     let dd_deadline =
                         std::time::Instant::now() + Duration::from_secs(45);

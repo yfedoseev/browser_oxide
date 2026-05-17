@@ -37,6 +37,14 @@ use crate::page::ChallengeVerdict;
 pub const INTERSTITIAL_MAX_BYTES: usize = 30 * 1024;
 pub const BLOCKED_WORD_MAX_BYTES: usize = 5 * 1024;
 pub const THIN_BODY_MAX_BYTES: usize = 1000;
+/// FP-B3: a rendered, challenge-free body below this floor (but above
+/// [`THIN_BODY_MAX_BYTES`]) is a thin shell / SPA pre-hydration stub —
+/// flagged `ThinShell`, not over-counted as a full `Pass`. Sized to
+/// cover the known small "pass" shells (bestbuy ~7.8 KB, spotify
+/// ~9.6 KB, duolingo ~13 KB). Only affects the coarse
+/// [`ChallengeVerdict`]; the holistic `tag` stays `L3-RENDERED`
+/// (≥ 1000 B) so the 126-corpus ledger metric is unchanged.
+pub const THIN_SHELL_MAX_BYTES: usize = 15 * 1024;
 /// Coarse edge-vs-sensor split for [`ChallengeVerdict`]: a served
 /// challenge in a small body is an edge/interstitial deny before our JS
 /// earned trust; in a large body the vendor JS ran and scored us bot.
@@ -115,6 +123,11 @@ const SMALL_BODY: &[(&str, &str)] = &[
 /// by [`SENSOR_SPLIT_BYTES`].
 fn verdict_for(tag: &str, len: usize) -> ChallengeVerdict {
     match tag {
+        // FP-B3: rendered + challenge-free but below the content floor
+        // ⇒ ThinShell (a small shell, not a full win). The holistic
+        // `tag` is still "L3-RENDERED" (ledger unchanged) — only this
+        // coarse verdict distinguishes the band.
+        "L3-RENDERED" if len < THIN_SHELL_MAX_BYTES => ChallengeVerdict::ThinShell,
         "L3-RENDERED" => ChallengeVerdict::Pass,
         "THIN-BODY" => ChallengeVerdict::RenderIncomplete,
         // FP-B4: a Cloudflare challenge in a *large* body is the
@@ -349,6 +362,67 @@ mod tests {
         assert!(!is_cf_challenge_doc(
             "<html><body>fully rendered course catalog, no CF challenge</body></html>"
         ));
+    }
+
+    // FP-B3 regression: a small rendered, challenge-free body is
+    // ThinShell (not over-counted as a full Pass); a large one is Pass;
+    // the holistic `tag` stays L3-RENDERED for BOTH (ledger unchanged);
+    // ThinShell is not a challenge.
+    #[test]
+    fn fp_b3_thin_shell_band() {
+        // ~3 KB rendered shell, no challenge marker.
+        let mut shell = String::from("<html><body>");
+        for _ in 0..60 {
+            shell.push_str("<div>spa hydration placeholder</div>");
+        }
+        shell.push_str("</body></html>");
+        assert!(
+            shell.len() > THIN_BODY_MAX_BYTES && shell.len() < THIN_SHELL_MAX_BYTES
+        );
+        let ec = engine_classify(&shell);
+        assert_eq!(ec.tag, "L3-RENDERED", "ledger tag unchanged");
+        assert_eq!(ec.verdict, ChallengeVerdict::ThinShell);
+        assert!(!ec.verdict.is_challenge(), "ThinShell is not a challenge");
+        // A large rendered body is a full Pass (same tag).
+        let mut full = String::from("<html><body>");
+        for _ in 0..1000 {
+            full.push_str("<article>real rendered content paragraph here</article>");
+        }
+        full.push_str("</body></html>");
+        assert!(full.len() >= THIN_SHELL_MAX_BYTES);
+        let fc = engine_classify(&full);
+        assert_eq!(fc.tag, "L3-RENDERED");
+        assert_eq!(fc.verdict, ChallengeVerdict::Pass);
+        // Below the thin-body floor stays RenderIncomplete (unchanged).
+        assert_eq!(
+            engine_classify("<html></html>").verdict,
+            ChallengeVerdict::RenderIncomplete
+        );
+    }
+
+    // FP-D2 regression: the dead `cf_clearance` success path means the
+    // engine can never *fabricate* a CF pass. Any CF challenge body
+    // (small stub OR large orchestrator shell) must classify as a
+    // challenge (is_challenge==true) and NEVER as Pass — the verdict
+    // invariant that documents the structurally-unreachable success
+    // branch until FP-E1's iframe interception lands.
+    #[test]
+    fn fp_d2_cf_unsolved_never_passes() {
+        // Small CF stub.
+        let stub = "<html><body>Just a moment...<script>window._cf_chl_opt={}</script></body></html>";
+        let s = engine_classify(stub);
+        assert!(s.verdict.is_challenge());
+        assert_ne!(s.verdict, ChallengeVerdict::Pass);
+        // Large CF orchestrator shell (udemy class).
+        let mut shell = String::from(r#"<script>window._cf_chl_opt={cvId:'3'}</script>"#);
+        for _ in 0..2500 {
+            shell.push_str("<div>cf shell padding padding padding</div>");
+        }
+        assert!(shell.len() >= SENSOR_SPLIT_BYTES);
+        let l = engine_classify(&shell);
+        assert!(l.verdict.is_challenge());
+        assert_ne!(l.verdict, ChallengeVerdict::Pass);
+        assert_eq!(l.verdict, ChallengeVerdict::ChallengeIncomplete);
     }
 
     #[test]

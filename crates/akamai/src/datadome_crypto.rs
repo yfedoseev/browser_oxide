@@ -160,6 +160,13 @@ pub enum DdValue {
 /// for determinism / byte-parity testing (the interstitial path also
 /// supplies the salt externally). `hash` and `cid` are the
 /// `dd={...}` interstitial fields.
+///
+/// **DEAD CODE (FP-Class-A, 2026-05-16).** Byte-verified by its unit
+/// tests but has **zero non-test callers** — the live DataDome path is
+/// the in-V8 i.js self-solve (FP-E1 / engine docs §11), not this Rust
+/// encryptor. Kept as verified "insurance"/reference, NOT wired. If
+/// you add a non-test caller, update this label and
+/// `crates/akamai/tests/dead_code_labels.rs`.
 pub struct DdEncryptor {
     cid: String,
     salt: i32,

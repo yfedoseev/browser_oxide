@@ -1,5 +1,14 @@
 //! PerimeterX (HUMAN Bot Defender) — JS surface parity check.
 //!
+//! **SCOPE (FP-Class-F truth-in-labeling, 2026-05-16): surface parity
+//! only — a green result here is NOT "we pass PerimeterX".** It
+//! exercises the JS-surface fingerprint shape, but NOT the encrypted
+//! `_px3` sensor payload, the behavioral channel, the per-customer
+//! server-side ML, or TLS/IP — none of which this engine implements
+//! (PerimeterX is greenfield; see engine docs §10 / 99 doc Class A).
+//! It also runs a single desktop profile, so PX's iOS consistency
+//! check is unexercised. Do not cite this test as a PX pass.
+//!
 //! Walmart's active bot detector is PerimeterX, not Akamai (Akamai is
 //! CSP-blocked from JS execution at walmart). PerimeterX runs an
 //! in-page sensor that fingerprints the JS surface and POSTs to

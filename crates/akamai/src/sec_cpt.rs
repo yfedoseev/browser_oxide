@@ -77,6 +77,15 @@ pub struct SecCptAnswerSubmission {
 /// `sec` is the leading portion of the sec_cpt cookie value (before
 /// the first `~`). It's used as challenge input prefix; the cookie
 /// itself is set by the 428-bearing response.
+///
+/// **DEAD CODE (FP-Class-A, 2026-05-16).** Byte-verified by its unit
+/// tests but has **zero non-test callers** — the live navigate path
+/// relies on the obfuscated sec-cpt bundle self-solving in V8, not on
+/// this Rust solver (homedepot serves no parseable 428 JSON to feed
+/// it). Kept as a verified reference, NOT wired. If you add a non-test
+/// caller, update this label and
+/// `crates/akamai/tests/dead_code_labels.rs`. Do NOT "wire it" — that
+/// is an explicitly-eliminated dead-end (master plan §6).
 pub fn solve_crypto(challenge: &SecCptChallenge, sec: &str) -> Vec<String> {
     let mut answers = Vec::with_capacity(challenge.count as usize);
     for i in 0..challenge.count {

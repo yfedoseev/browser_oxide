@@ -278,6 +278,16 @@ impl KasadaSessionStore {
     /// real ips.js emits a navigation-relative value. Required by stricter
     /// Kasada tenants like the `149e9513.../2d206a39...` template
     /// (canadagoose, hyatt, VEVE).
+    ///
+    /// **UNVERIFIED-VS-LIVE (FP-Class-F, 2026-05-16).** `rst` / `d` /
+    /// the aligned work-time here are *synthesized plausibles*, only
+    /// self-replay-tested — they pass our offline unit tests but have
+    /// never been differentially measured against a live Kasada `/tl`
+    /// acceptance. Treating green offline tests as "matches real
+    /// ips.js" is the FP-Class-F trap; real validation needs the
+    /// authorized live-oracle differential capture (Kasada engine doc
+    /// §11 / 99 doc Class F). Do not assert correctness from the unit
+    /// tests alone.
     pub async fn compute_cd_header(&self, host: &str) -> Option<String> {
         let store = self.inner.read().await;
         let session = store.get(host)?;
