@@ -861,77 +861,14 @@ fn sites_list() -> Vec<(&'static str, &'static str, &'static str)> {
 /// Akamai-CHL even when the page rendered with multi-MB content. See
 /// `docs/PHASE3_AUDIT_2026_04_29.md` for the per-site contexts that
 /// proved the false-positive pattern.
+/// FP-B1: thin wrapper over the single canonical classifier
+/// `browser::classify::engine_classify`. The marker tables and size
+/// gates that used to live inline here are now the shared source of
+/// truth `page.rs` / the audit harness also derive from; this returns
+/// the identical ledger-vocabulary tag (behavior is byte-for-byte the
+/// pre-unification function — pinned by `classifier_tests` below).
 fn classify(html: &str) -> String {
-    let lower = html.to_lowercase();
-    let len = html.len();
-
-    // Unambiguous interstitial tokens — CSS class names, URL paths, and
-    // encoded variables that don't legitimately appear in rendered
-    // content. Fire at any body size.
-    let unambiguous_titles: &[(&str, &str)] = &[
-        ("cf-browser-verification", "Cloudflare-CHL"),
-        ("/_sec/cp_challenge", "Akamai-sec-cpt-CHL"),
-        ("ddcaptchaencoded", "DataDome-CHL"),
-        ("px-captcha", "PerimeterX-CHL"),
-    ];
-    for (n, t) in unambiguous_titles {
-        if lower.contains(n) {
-            return t.to_string();
-        }
-    }
-    // English-phrase interstitial markers — these CAN appear in normal
-    // page text (article body, embedded loading widgets, cookie banner,
-    // privacy policy). Reuters' 1.1 MB rendered home page contains
-    // "just a moment" or "checking your browser" somewhere in its
-    // content, causing a false-positive Cloudflare-CHL classification
-    // when no challenge is actually being served. Only consult these
-    // when the body is interstitial-sized.
-    let phrase_titles: &[(&str, &str)] = &[
-        ("just a moment", "Cloudflare-CHL"),
-        ("checking your browser", "Cloudflare-CHL"),
-        ("captcha-delivery.com", "DataDome-CHL"),
-        ("press &amp; hold", "PerimeterX-PaH"),
-        ("pardon our interruption", "Akamai-CHL"),
-    ];
-
-    // Vendor "fingerprint markers" — these appear in BOTH normal pages
-    // (as analytics/SDK references) and on challenge interstitials. They
-    // count as a challenge ONLY when the body is interstitial-sized,
-    // i.e. the content was replaced.
-    let interstitial_size_threshold = 30 * 1024; // 30 KB
-    let small_body_markers: &[(&str, &str)] = &[
-        ("akam/13", "Akamai-CHL"),
-        ("_abck", "Akamai-CHL"),
-        ("_kpsdk", "Kasada-CHL"),
-        ("ips.js", "Kasada-CHL"),
-        ("_pxhd", "PerimeterX-CHL"),
-        ("captcha", "captcha-CHL"),
-        ("403 forbidden", "BLOCKED"),
-        ("access denied", "BLOCKED"),
-    ];
-    if len < interstitial_size_threshold {
-        for (n, t) in phrase_titles {
-            if lower.contains(n) {
-                return t.to_string();
-            }
-        }
-        for (n, t) in small_body_markers {
-            if lower.contains(n) {
-                return t.to_string();
-            }
-        }
-    }
-
-    // "blocked" alone is too noisy — a normal page might use the word.
-    // Only count it under the small-body threshold.
-    if len < 5 * 1024 && lower.contains("blocked") {
-        return "BLOCKED".to_string();
-    }
-
-    if len < 1000 {
-        return "THIN-BODY".to_string();
-    }
-    "L3-RENDERED".to_string()
+    browser::engine_classify(html).tag.to_string()
 }
 
 #[cfg(test)]

@@ -106,6 +106,24 @@ BOXIDE_PROFILE=chrome_130_macos cargo test --release -p browser \
   --test holistic_sweep holistic_sweep_parallel -- --ignored --nocapture
 ```
 
+## Engine-FP backlog (branch `fix/engine-fp-backlog`, 2026-05-16+)
+
+Working `docs/research/engines/99_CODE_FALSE_POSITIVES.md` in order.
+Ledger-relevant note: these are *measurement-correctness* fixes, so a
+verdict change here is a classifier becoming honest, **not** a site
+flip — the 120/126 routed number is unchanged unless a targeted live
+re-measure proves an actual flip.
+
+- **FP-B1 (DONE):** unified the 3 divergent classifiers into one
+  `crate::classify::engine_classify` (canonical = old
+  `holistic_sweep::classify`, the ledger metric). Gate green; the 10
+  holistic `classifier_tests` pass **unchanged** ⇒ the 126-corpus
+  metric is byte-for-byte preserved (ledger numbers stand). Side
+  effect: `page.rs`'s live verdict for udemy now matches what
+  `holistic_sweep` already reported (L3-RENDERED) — this only removes a
+  page.rs↔holistic disagreement; it is the real CF policy bug FP-B4 is
+  sequenced to fix, not a new flip.
+
 ## Bottom line
 
 126/126 corpus is fully accounted for: **120 open under routing**, 6

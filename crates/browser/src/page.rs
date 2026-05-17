@@ -155,42 +155,14 @@ impl ChallengeVerdict {
 
 /// Shared structural anti-bot challenge classifier.
 ///
-/// Requires *structural* challenge context, not bare cookie/vendor-name
-/// substrings that also occur inline on fully-rendered benign pages.
-/// The Phase-0 false-positive class the master plan calls out is the
-/// weak markers (`bm_sz` / `human security` / `dd_engagement`) appearing
-/// in a multi-MB rendered page (washingtonpost-style); those now only
-/// count when the body is stub-sized (a real challenge stub is small, a
-/// rendered page is large). All strong, near-zero-false-positive
-/// structural markers are kept unchanged so detection of genuine
-/// challenges is not weakened.
+/// FP-B1: this is now a thin delegate to the single canonical classifier
+/// [`crate::classify::engine_classify`] so `page.rs`, `holistic_sweep`,
+/// and the audit harness can never disagree about the same body again.
+/// The per-marker / per-gate logic (and its rationale — weak markers
+/// only count stub-sized, etc.) lives there as the single source of
+/// truth; this wrapper keeps the four navigate-loop call sites stable.
 fn body_has_challenge_marker(body: &str) -> bool {
-    // A challenge stub / interstitial / sensor-201 page is small; a
-    // fully rendered homepage is not. The weak markers below only
-    // qualify as a challenge when the body is stub-sized.
-    let stub_sized = body.len() < 50 * 1024;
-    // Strong structural markers (unchanged from the prior classifier).
-    (body.contains("ips.js") && body.contains("kpsdk")) // Kasada
-        || body.contains("checkpoint/interstitial") // Cloudflare
-        || body.contains("/cdn-cgi/challenge-platform/") // Cloudflare Managed Challenge
-        || (body.contains("_abck") && body.contains("sensor_data")) // Akamai BMP
-        // Akamai sec-cpt PoW interstitial — `sec-if-cpt-container` is an
-        // Akamai-sec-cpt-unique element id (near-zero false-positive).
-        || body.contains("sec-if-cpt-container")
-        || body.contains("sec-cpt-if")
-        || body.contains("px-captcha") // PerimeterX widget
-        || body.contains("smartcaptcha") // Yandex
-        || body.contains("checkbox-captcha")
-        // DataDome — captcha-delivery.com is the captcha iframe src;
-        // dd-script is the bootstrap loader. Both are structural.
-        || body.contains("captcha-delivery.com")
-        || body.contains("dd-script")
-        // Weak markers — only a challenge when the body is stub-sized.
-        // On a fully rendered multi-MB page these are inline-JS / copy
-        // false positives (the Phase-0 over-match removed here).
-        || (stub_sized && body.contains("bm_sz"))
-        || (stub_sized && body.contains("human security"))
-        || (stub_sized && body.contains("dd_engagement"))
+    crate::classify::engine_classify(body).verdict.is_challenge()
 }
 
 /// A browser page. Owns a DOM, JS runtime, and event loop.
@@ -272,24 +244,12 @@ impl Page {
     /// what the `audit_failing_sites` re-baseline consumes to separate
     /// genuine challenges from render-incomplete false positives.
     pub fn challenge_verdict(&mut self) -> ChallengeVerdict {
-        let body = self.content();
-        let len = body.len();
-        if body_has_challenge_marker(&body) {
-            // A served challenge: tiny ⇒ edge/interstitial deny before
-            // our JS earned trust; large ⇒ the vendor JS ran and the
-            // sensor scored the telemetry as bot.
-            if len < 50 * 1024 {
-                ChallengeVerdict::EdgeBlock
-            } else {
-                ChallengeVerdict::SensorFail
-            }
-        } else if len < 5 * 1024 {
-            // No challenge marker but a thin/empty stub or an SPA shell
-            // that never populated — render-completeness, NOT stealth.
-            ChallengeVerdict::RenderIncomplete
-        } else {
-            ChallengeVerdict::Pass
-        }
+        // FP-B1: derived from the single canonical classifier so the
+        // audit harness verdict and the holistic-sweep tag are computed
+        // from the identical marker/gate pass (no more pass↔block
+        // disagreement between call sites). The edge-vs-sensor split and
+        // the thin band live in `crate::classify` as named constants.
+        crate::classify::engine_classify(&self.content()).verdict
     }
 
     /// W7 / Cloudflare V1 — orchestrator-runner scaffolding.
