@@ -96,6 +96,29 @@ decoded sensor as a load-bearing failing VM probe.
    `unjzomuybtbyyhwwkdpkxomylnab` access → names the exact `undefined`
    object, turning fix #2 into a concrete patch. Highest-leverage
    remaining Kasada work.
+
+   **TRAP RESULT 2026-05-17 (`kasada_sentinel_trap.rs`, committed):**
+   879 sentinel SET calls captured — **ALL on `Function` objects**,
+   set from inside the ips.js VM (`eval at N (…/ips.js…)`). ⇒ ips.js
+   tags 879 functions with its per-build sentinel then re-reads them;
+   the `TypeError` (receiver `undefined`) ⇒ a **function-valued
+   property that yields a valid fn on first access but `undefined` on
+   a later access** in the smc/dpv path — empirically confirms
+   UNJZOMUY candidate #3 (`_maskFunction`/`_defProtoMethod` recreate
+   function objects per access; it is NOT mere tag-loss on a fresh
+   wrapper — the receiver itself goes `undefined`). **Patch family =
+   identity-stable masked-function wrappers** (memoize per
+   (target,name) so `obj.m===obj.m` and ips.js-set props persist).
+   **Still needed before patching (one more localization pass):** the
+   exact failing property — the engine-thrown `TypeError`'s stack is
+   truncated to `at eval`; capture a full-fidelity throw stack (an
+   engine stack-capture tweak, not JS) to name the specific accessor,
+   else an engine-wide "make all wrappers stable" change is
+   speculative + very high regression surface (chrome_compat's
+   native-masking/function-identity suite is exactly what it touches).
+   ⇒ Fix #2 = a careful own focused effort (localize → targeted patch
+   → full §4 gate), NOT a tail-of-session edit. Real progress: from
+   "mystery" to a named mechanism + concrete patch family.
 3. `wse`/`fsc`/`bfe`/`npc`/`esce`: align `Function.prototype.toString`
    / class-extends / structuredClone TypeError messages to Chrome's
    exact strings.
