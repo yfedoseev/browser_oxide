@@ -1405,6 +1405,20 @@ impl Page {
                 return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
             })()";
 
+        // Phase 5 (doc 05 §2d) — did THIS navigation start as a DataDome
+        // `rt:'i'` interstitial? Computed once from the original response
+        // body, *before* the loop mutates `current_html`. Load-bearing:
+        // i.js mutates the live DOM (removes its own inline `var dd` +
+        // `<script src=i.js>`), so the post-i.js `self.content()` no
+        // longer trips `body_has_challenge_marker` → `is_anti_bot_
+        // challenge()` flips false → the engine wrongly skips BOTH the
+        // pending-nav poll AND the cookie-diff retry, bailing before
+        // i.js's round-trip can land the `datadome=` cookie. This flag
+        // keeps the challenge-resolution path active for the DataDome
+        // nav specifically; it is false for every non-DataDome site, so
+        // it cannot regress any other flow / the §4 gate.
+        let started_as_dd_challenge =
+            crate::datadome_handler::is_datadome_challenge_doc(&html);
         let mut current_html = html;
         let mut current_url = resp_url;
         let mut current_storage: Option<
@@ -1700,7 +1714,9 @@ impl Page {
             // PoW completions, challenge-driven assigns). Replaces the previous
             // fixed 2s wait. Checks every 200ms for up to 10s total; exits early
             // on first hit.
-            if pending_info.is_empty() && page.is_anti_bot_challenge() {
+            if pending_info.is_empty()
+                && (page.is_anti_bot_challenge() || started_as_dd_challenge)
+            {
                 let deadline = std::time::Instant::now() + Duration::from_secs(90);
                 while std::time::Instant::now() < deadline {
                     let _ = page
@@ -1713,6 +1729,24 @@ impl Page {
                         .unwrap_or_default();
                     if !pending_info.is_empty() {
                         break;
+                    }
+                    // Phase 5: for a DataDome nav, i.js's round-trip
+                    // typically lands a fresh `datadome=` cookie WITHOUT
+                    // setting a pending nav — break as soon as it does so
+                    // the cookie-diff retry below re-issues the original
+                    // URL (instead of burning the full 90 s deadline).
+                    if started_as_dd_challenge {
+                        if let Some(p) = parsed_current.as_ref() {
+                            let now =
+                                client.cookies_for_url(p).await.unwrap_or_default();
+                            if crate::datadome_handler::cookies_have_datadome(&now)
+                                && !crate::datadome_handler::cookies_have_datadome(
+                                    &cookies_before,
+                                )
+                            {
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -1769,6 +1803,7 @@ impl Page {
                 // PHASE J: also retry if the origin just upgraded to Accept-CH
                 // (Wildberries parity). Only retry ONCE for the upgrade.
                 if (page.is_anti_bot_challenge()
+                    || started_as_dd_challenge
                     || (last_accept_ch_upgrade && !accept_ch_retry_done))
                     && iter + 1 < iterations
                 {
