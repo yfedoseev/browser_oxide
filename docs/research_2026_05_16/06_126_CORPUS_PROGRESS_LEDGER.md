@@ -56,13 +56,20 @@ question: full-corpus standing → this file; hard-set engine work → §8.5.
 ## Validity / when to re-run
 
 These numbers are **still current as of 2026-05-16**. Commits
-`3739da9..7d748b2` (Phase 0/1/2) were non-site-affecting. Commit
-`4cece4c` (Phase 5 DataDome Increment 1) **is** site-affecting; per
-this clause it was live re-measured **targeted** (etsy): the fix works
-(i.js now attempts its round-trip) but **etsy did not flip** — still
-`DataDome-CHL`, expected for Increment 1 of the L feature. ⇒ the
-126/120 table is **unchanged**; no full re-sweep was warranted (no flip
-to record). Gate green at HEAD (`chrome_compat` 437/0, `v8_natives`
+`3739da9..7d748b2` (Phase 0/1/2) were non-site-affecting. Phase 5
+Increments 1–5 (`4cece4c`, `201cac9`, `87cf3fa`, `dfd0645`) **are**
+site-affecting; per this clause both engine-addressable hard sites were
+live-re-measured **targeted** with all 5 increments active:
+- **homedepot** (`h_store_homedepot`): `in-V8 refetch 200/2615` loops on
+  the 2.6 KB sec-cpt interstitial — `/Wjv3…` bundle does not self-solve
+  → **NOT flipped**.
+- **etsy** (`h_store_etsy`): i.js loads `200/15014`, refetch `403/805`,
+  `holistic-end: DataDome-CHL` → **NOT flipped**.
+⇒ **ZERO engine-addressable flips with Inc 1–5; the 126/120 table is
+UNCHANGED.** No full re-sweep warranted (no flip to record — confirmed
+by targeted live measurement, not assumption). The single remaining
+blocker for both is the unbuilt Phase-5 L in-engine bundle-self-solve
+(see master plan §8.5 "MEASURED FINAL VERDICT"). Gate green at HEAD (`chrome_compat` 437/0, `v8_natives`
 11/11, `iframe_isolation` 5/5, `v8_inspector_parity` 3/3, +8/8
 `datadome_handler`). **Do not re-run the full sweep to "check
 progress."** Re-run the **full** sweep **only** when a site-flipping
