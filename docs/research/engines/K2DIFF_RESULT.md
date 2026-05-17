@@ -119,6 +119,28 @@ decoded sensor as a load-bearing failing VM probe.
    ⇒ Fix #2 = a careful own focused effort (localize → targeted patch
    → full §4 gate), NOT a tail-of-session edit. Real progress: from
    "mystery" to a named mechanism + concrete patch family.
+
+   **CODE AUDIT 2026-05-17 (narrowed further):** `_defProtoMethod`
+   (window_bootstrap.js:146) installs the masked wrapper as a FIXED
+   DATA property (`Object.defineProperty(proto,name,{value:wrapped})`)
+   called ONCE at bootstrap ⇒ `obj.m===obj.m` is identity-stable ⇒
+   **UNJZOMUY candidate #3 RULED OUT** for _defProtoMethod methods.
+   The 879-Function-tag throw is therefore a **getter that returns a
+   function then `undefined` on a later access** within the *specific*
+   smc/dpv probe path — i.e. UNJZOMUY candidate #1 territory
+   (navigator.mediaDevices / MediaSource for `smc`; the devtools-probe
+   accessor for `dpv`), or an object-getter that rebuilds. Throw-stack
+   localization is blocked (ips.js controls its own Error stack
+   formatting → only `at eval`). **Precise next RE step (defined, not
+   done):** a *targeted* instrumentation capture wrapping just the
+   smc/dpv-relevant native accessors (MediaSource, MediaSource.
+   isTypeSupported, navigator.mediaDevices + its methods, the
+   devtools-probe globals) to log receiver+return on each access and
+   catch which one yields fn-then-`undefined`. Narrower than the
+   sentinel trap; that names the exact accessor → minimal targeted
+   patch. Status: iterative deep VM RE, advanced again, not complete —
+   each session has cut the search space (mystery → smc/dpv → 879
+   Function tags → not-_defProtoMethod → getter-in-media/devtools-path).
 3. `wse`/`fsc`/`bfe`/`npc`/`esce`: align `Function.prototype.toString`
    / class-extends / structuredClone TypeError messages to Chrome's
    exact strings.
