@@ -475,7 +475,29 @@ impl HttpClient {
     /// Compute (and possibly inject) a Kasada `x-kpsdk-cd` header for an
     /// outgoing request to `host`. Returns the header pair if we have a
     /// session for that host; caller appends to its header list.
+    ///
+    /// **K1 (FP / nocdp-parity, 2026-05-17): deferred to the page's
+    /// ips.js by default.** Same lesson as `fetch_kasada_mfc_if_needed`
+    /// (made a deliberate no-op above): the correct session-derived
+    /// `x-kpsdk-cd` is computed *inside the ips.js VM* and emitted by
+    /// the page via `window.fetch()`; our `learn_from_headers` already
+    /// captures the resulting session. A Rust-side PoW computed *in
+    /// parallel* to ips.js produces a second, single-use `x-kpsdk-cd`
+    /// the page's own ips.js did not author — a self-inflicted bot
+    /// signature (a real Chrome emits exactly one ips.js-authored cd,
+    /// never a parallel native one). nocdp real Chrome — which has NO
+    /// such Rust path — passes canadagoose/hyatt/realtor from this IP,
+    /// so deferring here makes us *more* real-browser-faithful, not
+    /// less. The PoW impl is retained (not deleted) and can be
+    /// re-enabled for the page-less/no-V8 client path via
+    /// `BOXIDE_KASADA_RUST_CD=1`. Removes the K2-DIFF confound: the
+    /// `/tl` differential must compare ips.js's authored payload, not a
+    /// Rust/ips.js race. The call sites still `!has_header` so an
+    /// ips.js-set cd is always preserved.
     pub async fn kasada_cd_header(&self, host: &str) -> Option<(String, String)> {
+        if std::env::var("BOXIDE_KASADA_RUST_CD").as_deref() != Ok("1") {
+            return None; // let the page's ips.js own x-kpsdk-cd
+        }
         self.kasada_sessions
             .compute_cd_header(host)
             .await
@@ -1641,6 +1663,48 @@ mod tests {
         let profile = stealth::chrome_130_linux();
         let client = HttpClient::new(&profile);
         assert!(client.is_ok());
+    }
+
+    // K1 regression: with a live Kasada session present (compute_cd_header
+    // WOULD return Some), kasada_cd_header still returns None by default
+    // — the Rust PoW is deferred to the page's ips.js (nocdp-parity:
+    // a real Chrome emits no parallel native cd). Opt-in env restores
+    // the retained impl for the page-less client path.
+    #[tokio::test]
+    async fn k1_kasada_cd_deferred_to_ips_js_by_default() {
+        let profile = stealth::chrome_130_linux();
+        let client = HttpClient::new(&profile).expect("client");
+        let host = "k1-test.example";
+        let future_ms = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64
+            + 1000)
+            .to_string();
+        let mut hm = std::collections::HashMap::new();
+        hm.insert("x-kpsdk-cr".to_string(), "true".to_string());
+        hm.insert("x-kpsdk-st".to_string(), future_ms);
+        client.kasada_sessions().learn(host, &hm, None).await;
+
+        // Session exists ⇒ compute_cd_header itself yields Some …
+        assert!(
+            client.kasada_sessions().compute_cd_header(host).await.is_some(),
+            "precondition: a learned session must be cd-capable"
+        );
+        // … but K1 defers to ips.js: no parallel Rust cd by default.
+        std::env::remove_var("BOXIDE_KASADA_RUST_CD");
+        assert_eq!(
+            client.kasada_cd_header(host).await,
+            None,
+            "K1: Rust x-kpsdk-cd must be deferred to the page's ips.js"
+        );
+        // Retained impl still reachable for the page-less path.
+        std::env::set_var("BOXIDE_KASADA_RUST_CD", "1");
+        assert!(
+            client.kasada_cd_header(host).await.is_some(),
+            "opt-in env must restore the retained Rust PoW path"
+        );
+        std::env::remove_var("BOXIDE_KASADA_RUST_CD");
     }
 
     #[test]
