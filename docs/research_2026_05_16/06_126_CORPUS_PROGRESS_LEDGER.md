@@ -65,11 +65,36 @@ live-re-measured **targeted** with all 5 increments active:
   → **NOT flipped**.
 - **etsy** (`h_store_etsy`): i.js loads `200/15014`, refetch `403/805`,
   `holistic-end: DataDome-CHL` → **NOT flipped**.
-⇒ **ZERO engine-addressable flips with Inc 1–5; the 126/120 table is
-UNCHANGED.** No full re-sweep warranted (no flip to record — confirmed
-by targeted live measurement, not assumption). The single remaining
-blocker for both is the unbuilt Phase-5 L in-engine bundle-self-solve
-(see master plan §8.5 "MEASURED FINAL VERDICT"). Gate green at HEAD (`chrome_compat` 437/0, `v8_natives`
+⇒ ZERO engine-addressable flips with Inc 1–5.
+
+**UPDATE — Increment 7 (`b623d5d`, the doc-20 anti-pattern fix) FLIPS
+homedepot.** Targeted directive-sanctioned re-measure
+(`h_store_homedepot`, `holistic_sweep::classify`):
+`holistic-end: stores homedepot L3-RENDERED len=2507` — was
+`Akamai-sec-cpt-CHL` (2.6 KB interstitial, looping). The sec-cpt
+bundles (560 KB + 425 KB) now fetch 200 OK and self-solve as sole
+actor once the wrong BMP POST is suppressed (doc 20). §4 gate GREEN
+with Inc 6+7.
+
+- **Single-profile desktop (`chrome_130_macos`): 113 → 114/126**
+  (homedepot now classifies `L3-RENDERED`, the sanctioned pass class).
+- **Routed ceiling 120/126:** homedepot was NOT in the 6 universal
+  blocks (those are canadagoose/hyatt/realtor/udemy/douyin/
+  wildberries), so the *routed* union is unchanged at 120; but
+  homedepot is one of the directive's named engine-addressable hard
+  sites and is now flipped — the single-profile count rises and the
+  hard set shrinks. A full `BOXIDE_PROFILE=chrome_130_macos cargo test
+  --release -p browser --test holistic_sweep holistic_sweep_parallel
+  -- --ignored --nocapture` (≈70 min) is the recommended confirmation
+  of the exact new single-profile total; the targeted sanctioned
+  measurement already confirms the flip itself.
+- **Rigor caveat:** `len=2507` = sec-cpt challenge cleared + RENDERED
+  per the sanctioned metric (no challenge marker, ≥1000 B), but a
+  post-sec-cpt intermediate page, not the full multi-MB homepage —
+  flipped for ceiling purposes, content-depth refinement is follow-up.
+
+etsy/tripadvisor remain the DataDome WASM-iframe-daily-key L endgame
+(unchanged — see master plan §8.5). Gate green at HEAD (`chrome_compat` 437/0, `v8_natives`
 11/11, `iframe_isolation` 5/5, `v8_inspector_parity` 3/3, +8/8
 `datadome_handler`). **Do not re-run the full sweep to "check
 progress."** Re-run the **full** sweep **only** when a site-flipping

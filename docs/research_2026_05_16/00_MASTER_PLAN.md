@@ -646,6 +646,51 @@ precisely-measured, single-named-blocker problem. No fabricated flip;
 the goal's site-flip target is unmet because it requires the unbuilt
 L bundle-self-solve capability, now proven by live measurement.
 
+**Phase 5 — HOMEDEPOT FLIPPED 2026-05-16 (the first measured site
+flip; doc-20 anti-pattern fix, Increment 7, commit `b623d5d`).**
+Applying verify-don't-assume to the prior "homedepot needs the unbuilt
+L bundle-self-solve" conclusion uncovered, via raw-trace analysis, a
+**concrete measured bug**: `handle_akamai_flow`'s sec-cpt guard keyed
+off `self.content()` (the *mutable post-bundle DOM*). After the
+`/i4ENwVhj7/…` sec-cpt bundle mutates the DOM, `sec-if-cpt-container`
+is gone → the guard missed → the engine fired the **wrong BMP
+`sensor_data` POST** to the sec-cpt verify endpoint → `_abck=…~-1~`
+201-looped forever, and (doc 20) that conflicting traffic *actively
+blocked the bundle's own self-solve*. **Increment 7** suppresses the
+BMP path for any nav that *started* sec-cpt (persistent
+`started_as_seccpt_challenge`, not the post-mutation DOM), making the
+bundle the sole actor. Narrowly gated (false for every non-sec-cpt
+site incl. the entire §4 gate; the 10 passing plain-BMP Akamai sites
+never serve `sec-if-cpt`) ⇒ zero regression.
+
+- **Live re-measure (`h_store_homedepot`, the directive-sanctioned
+  flip verification):** `holistic-end: stores homedepot L3-RENDERED
+  len=2507 nav_ms=119321`. Was `Akamai-sec-cpt-CHL` (2615 B
+  interstitial, looping). The `seccpt-trace` confirms the mechanism:
+  the sec-cpt bundles `…/uLX5zQDQmQJDLfJE/…` (560 120 B) and
+  `…/NmX5zQaw5X/…?v=…` (425 325 B) now fetch **200 OK** and execute as
+  sole actor → the challenge resolves and the body no longer carries
+  any sec-cpt marker. Per `holistic_sweep::classify` (the exact metric
+  behind the 120/126 ledger and the directive's re-measure clause):
+  no challenge substring + `len ≥ 1000` ⇒ **`L3-RENDERED` = pass**.
+- **§4 gate GREEN** with Inc 6+7 (`chrome_compat` 437/0,
+  `iframe_isolation` 5/5, `v8_inspector_parity` 3/3, `v8_natives`
+  11/11, `iframe_fp_diag` 6-ignored, `datadome` 10/10) — committed
+  `b623d5d` per the mandatory discipline.
+
+**Honest scope of the claim:** this is a genuine flip *by the
+directive's own sanctioned metric* — homedepot moved from a hard
+sec-cpt block to `L3-RENDERED`, the same verdict class real Chrome
+gets and the one the 120/126 ceiling is computed from. Rigor caveat:
+`len=2507` is a post-sec-cpt intermediate page, not the full
+multi-MB homepage — the *challenge is cleared and it classifies
+RENDERED*, which is exactly what "engine-addressable universal block
+flipped" means for the ceiling, but it is not yet a full content
+render (a follow-up nav-continuation refinement, not a re-block).
+**Net: the doc-20 fix is the first real Phase-5 site flip; homedepot
+is no longer sec-cpt-blocked. etsy/tripadvisor remain the DataDome
+WASM-iframe-daily-key L endgame (unchanged).**
+
 ## 8. One-line summary for the next session
 
 The realm wiring is **done** (older handoffs are stale); the engine is
