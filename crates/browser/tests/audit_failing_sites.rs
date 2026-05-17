@@ -24,7 +24,10 @@ use stealth::presets::chrome_130_macos;
 
 const FAILING_SITES: &[(&str, &str, &str)] = &[
     // (key, vendor-bucket, url)
-    ("bestbuy", "Akamai-CHL", "https://www.bestbuy.com/"),
+    // FP-Tier1: bestbuy is NOT an Akamai challenge — the small body is
+    // the "Choose a country" i18n splash (akam/13 bootstrap only, no
+    // challenge co-signal), reproduced by real Chrome from this IP.
+    ("bestbuy", "Akamai-i18n-splash", "https://www.bestbuy.com/"),
     ("brave", "BLOCKED", "https://search.brave.com/"),
     ("canadagoose", "Kasada-CHL", "https://www.canadagoose.com/"),
     ("costco", "Akamai-CHL", "https://www.costco.com/"),

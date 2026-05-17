@@ -117,6 +117,54 @@ const SMALL_BODY: &[(&str, &str)] = &[
     ("access denied", "BLOCKED"),
 ];
 
+/// FP-Tier1: `akam/13` is the Akamai BMP bootstrap `<script>` that loads
+/// on **every** Akamai-fronted page including fully-benign ones (the
+/// classifier's own history documents this over-match). It only
+/// indicates a *challenge* when paired with one of these structural
+/// challenge markers. Without a co-signal, a small Akamai-fronted page
+/// (e.g. Best Buy's "Choose a country" i18n splash, 7.9 KB, akam/13
+/// only) must NOT be Akamai-CHL.
+const AKAMAI_CHALLENGE_COSIGNAL: &[&str] = &[
+    "sensor_data",
+    "bm-verify",
+    "sec-if-cpt-container",
+    "sec-cpt-if",
+    "/_sec/cp_challenge",
+    "pardon our interruption",
+];
+
+/// FP-Tier1: the bare token `captcha` also appears in the ALWAYS-ON
+/// **invisible reCAPTCHA-v3** SDK/badge that benign sites ship on every
+/// page — `grecaptcha-badge{display:none}`, the `g-recaptcha-response`
+/// textarea, the `gstatic.com/recaptcha` script (spotify 9.6 KB /
+/// duolingo's not-supported page = pure FP, zero anti-bot vendor
+/// cookies). v3 is scoreless/invisible — NOT a challenge. Only treat
+/// `captcha` as a challenge when a genuinely *interactive* widget is
+/// present.
+const INTERACTIVE_CAPTCHA_COSIGNAL: &[&str] = &[
+    "api2/bframe",
+    "api2/anchor",
+    "hcaptcha.com",
+    "cf-turnstile",
+    "challenges.cloudflare.com/turnstile",
+    "i'm not a robot",
+    "i\u{2019}m not a robot",
+    "verify you are human",
+    "are you a robot",
+    "select all images",
+    "recaptcha challenge",
+];
+
+/// FP-Tier1: gate the two documented over-match SMALL_BODY rows behind a
+/// required co-signal; all other rows are unconditional.
+fn small_body_row_qualifies(needle: &str, lower: &str) -> bool {
+    match needle {
+        "akam/13" => AKAMAI_CHALLENGE_COSIGNAL.iter().any(|c| lower.contains(c)),
+        "captcha" => INTERACTIVE_CAPTCHA_COSIGNAL.iter().any(|c| lower.contains(c)),
+        _ => true,
+    }
+}
+
 /// Map a canonical tag + body length to the coarse [`ChallengeVerdict`].
 /// `THIN-BODY` ⇒ render-completeness issue (not stealth); `L3-RENDERED`
 /// ⇒ pass; anything else is a served challenge/deny split edge-vs-sensor
@@ -165,7 +213,7 @@ pub fn engine_classify(body: &str) -> EngineClass {
                 }
             }
             for (n, t) in SMALL_BODY {
-                if lower.contains(n) {
+                if lower.contains(n) && small_body_row_qualifies(n, &lower) {
                     break 'tag t;
                 }
             }
@@ -423,6 +471,48 @@ mod tests {
         assert!(l.verdict.is_challenge());
         assert_ne!(l.verdict, ChallengeVerdict::Pass);
         assert_eq!(l.verdict, ChallengeVerdict::ChallengeIncomplete);
+    }
+
+    // FP-Tier1 regression: invisible reCAPTCHA-v3 SDK/badge is NOT a
+    // challenge (spotify/duolingo class), and the bare Akamai bootstrap
+    // alone is NOT a challenge (bestbuy i18n-splash class) — while a
+    // real interactive captcha / a co-signalled Akamai interstitial
+    // still classify as challenges.
+    #[test]
+    fn fp_t1_invisible_recaptcha_and_akam13_cosignal() {
+        // spotify shape: ~9.6 KB shell, only invisible v3 plumbing.
+        let mut spotify = String::from(r#"<html><head><style>.grecaptcha-badge { display: none !important }</style></head><body><textarea id="g-recaptcha-response-100000" name="g-recaptcha-response"></textarea><script src="https://www.gstatic.com/recaptcha/releases/abc/recaptcha__en.js"></script>"#);
+        for _ in 0..120 {
+            spotify.push_str("<div class=\"sp-shell\">spotify web player hydration placeholder</div>");
+        }
+        spotify.push_str("</body></html>");
+        assert!(spotify.len() > THIN_BODY_MAX_BYTES && spotify.len() < THIN_SHELL_MAX_BYTES);
+        let s = engine_classify(&spotify);
+        assert_eq!(s.tag, "L3-RENDERED", "invisible v3 is not a challenge");
+        assert!(!s.verdict.is_challenge());
+        assert_eq!(s.verdict, ChallengeVerdict::ThinShell); // <15 KB shell
+
+        // A genuinely interactive captcha is still detected.
+        let real_cap = r#"<html><body><iframe src="https://www.google.com/recaptcha/api2/bframe?k=x"></iframe><p>Select all images with a bus — verify you are human</p></body></html>"#;
+        assert_eq!(engine_classify(real_cap).tag, "captcha-CHL");
+        assert!(engine_classify(real_cap).verdict.is_challenge());
+
+        // bestbuy shape: ~7.9 KB, only the akam/13 bootstrap, no
+        // challenge co-signal ⇒ NOT Akamai-CHL (the i18n splash).
+        let mut bestbuy = String::from(r#"<html><head><script type="text/javascript" src="https://www.bestbuy.com/akam/13/62321f80" defer=""></script></head><body><h1>Choose a country</h1>"#);
+        for _ in 0..100 {
+            bestbuy.push_str("<a class=\"country\" href=\"/intl\">United States / Canada region selector</a>");
+        }
+        bestbuy.push_str("</body></html>");
+        assert!(bestbuy.len() > THIN_BODY_MAX_BYTES && bestbuy.len() < THIN_SHELL_MAX_BYTES);
+        let b = engine_classify(&bestbuy);
+        assert_eq!(b.tag, "L3-RENDERED");
+        assert!(!b.verdict.is_challenge());
+
+        // akam/13 WITH an Akamai challenge co-signal still → Akamai-CHL.
+        let akam_chl = r#"<html><head><script src="/akam/13/abc"></script></head><body><form id="bm-verify"></form></body></html>"#;
+        assert_eq!(engine_classify(akam_chl).tag, "Akamai-CHL");
+        assert!(engine_classify(akam_chl).verdict.is_challenge());
     }
 
     #[test]
