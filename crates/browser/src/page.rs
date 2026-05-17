@@ -2207,6 +2207,45 @@ impl Page {
                 let jitter_ms =
                     250 + (std::time::Instant::now().elapsed().as_nanos() & 0xFF) as u64;
                 tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
+                // Phase 5 Increment 8 (doc 05 §2d "let the bundle
+                // self-solve"): a DataDome `rt:'i'` nav sets a reload
+                // __pendingNavigation EARLY, so the flow lands here and
+                // (pre-fix) reloads after ~250 ms — long before i.js can
+                // create the geo.captcha-delivery.com challenge iframe,
+                // let it run its WASM boring_challenge + postMessage, and
+                // write the `datadome=` cookie. Increment 3's extended
+                // challenge poll is gated under `pending_info.is_empty()`
+                // so it is SKIPPED on this branch. Give the challenge a
+                // bounded self-solve window: pump the event loop and
+                // break the instant a `datadome=` cookie appears (the
+                // success signal). Narrowly gated to
+                // `started_as_dd_challenge` ⇒ false for every non-DataDome
+                // site incl. the entire §4 gate ⇒ zero regression.
+                if started_as_dd_challenge {
+                    let dd_deadline =
+                        std::time::Instant::now() + Duration::from_secs(45);
+                    let parsed_cur = url::Url::parse(&current_url).ok();
+                    while std::time::Instant::now() < dd_deadline {
+                        let _ = page
+                            .event_loop()
+                            .run_until_idle(Duration::from_millis(250))
+                            .await;
+                        if let Some(p) = parsed_cur.as_ref() {
+                            let now = client
+                                .cookies_for_url(p)
+                                .await
+                                .unwrap_or_default();
+                            if crate::datadome_handler::cookies_have_datadome(&now) {
+                                if debug_nav {
+                                    eprintln!(
+                                        "[datadome] self-solve window: datadome= cookie acquired, proceeding to reload"
+                                    );
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
                 let refetch_js = format!(
                     r#"
                     (async () => {{
