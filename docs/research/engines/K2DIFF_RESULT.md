@@ -68,11 +68,34 @@ decoded sensor as a load-bearing failing VM probe.
 ## Next (the fix program, ROI-ordered — each re-checkable via the decode)
 
 1. `wdt`: `navigator.webdriver` → `false` (defined), not `undefined`.
-   Smallest, highest-certainty.
+   Smallest, highest-certainty. **✅ DONE — commit `118c0d0`**
+   (3 bootstrap definition sites → `false`; 4 tests corrected to the
+   Chrome-faithful value; §4 gate green). Live re-verify (decode
+   shows `wdt.r`→"false") pending a fresh `kasada_tl_capture` run.
 2. `unjzomuy…` (`smc`/`dpv`): find why
    `…reading 'unjzomuybtbyyhwwkdpkxomylnab'` throws in our V8 (a
    Kasada VM-internal property read) — the single most load-bearing
    (it aborts sensor assembly → the `/error` divert).
+   **SHARPENED 2026-05-17 (diagnosed, NOT yet fixed — deep VM RE):**
+   `smc`+`dpv` throw the *identical* error;
+   `unjzomuybtbyyhwwkdpkxomylnab` is Kasada's **per-build sentinel
+   tag** (ips.js tags a native via its VM, re-reads `obj.<sentinel>`
+   to detect tamper) ⇒ **`obj` itself is `undefined`** at that read.
+   `smc.v:false` for `video/mp4` is a **symptom not a bug** —
+   `chrome_compat::kasada_smc_isTypeSupported_must_be_true_for_mp4`
+   passes 437/0; it reads false in the live sensor only because the
+   sentinel read throws & aborts the probe ⇒ **ONE root cause**,
+   consistent with UNJZOMUY candidate #3 (`_maskFunction`/
+   `_defProtoMethod` recreate wrapper objects per-access ⇒ the object
+   ips.js tagged ≠ the one it re-reads ⇒ a deeper access is
+   `undefined` ⇒ the sentinel read throws). Not patched this session
+   (deep Kasada-VM RE, not a speculative tail-of-marathon change).
+   **Precise next RE step:** extend `kasada_tl_capture.rs` with a
+   TypeError/stack trap (or wrap the smc/dpv probe entry) recording
+   the *receiver + full stack* at the first
+   `unjzomuybtbyyhwwkdpkxomylnab` access → names the exact `undefined`
+   object, turning fix #2 into a concrete patch. Highest-leverage
+   remaining Kasada work.
 3. `wse`/`fsc`/`bfe`/`npc`/`esce`: align `Function.prototype.toString`
    / class-extends / structuredClone TypeError messages to Chrome's
    exact strings.
