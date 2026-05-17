@@ -53,14 +53,21 @@ pub struct EngineClass {
     pub len: usize,
 }
 
-/// Any-size, near-zero-false-positive structural tokens (CSS class
-/// names / URL paths / encoded vars that do not legitimately appear in
-/// rendered content). Order is significant — first match wins.
+/// Any-size, near-zero-false-positive structural tokens. FP-B2: every
+/// entry here must be a token that does NOT legitimately appear in
+/// rendered content at any size — a unique URL path, an encoded
+/// variable, or a challenge-only CSS hook. `px-captcha` was removed
+/// from this table (it is a bare CSS class / cookie-consent manifest
+/// key string that occurs verbatim in fully-rendered pages — the
+/// historical wayfair false positive) and is now size-gated in
+/// [`SMALL_BODY`]. `captcha-delivery.com` is and stays phrase-gated in
+/// [`PHRASE`]. The three below are structural URL/var tokens that a
+/// real Chrome never sees on a passed page. Order is significant —
+/// first match wins.
 const UNAMBIGUOUS: &[(&str, &str)] = &[
     ("cf-browser-verification", "Cloudflare-CHL"),
     ("/_sec/cp_challenge", "Akamai-sec-cpt-CHL"),
     ("ddcaptchaencoded", "DataDome-CHL"),
-    ("px-captcha", "PerimeterX-CHL"),
 ];
 
 /// English-phrase interstitial markers — these CAN appear in normal page
@@ -83,6 +90,13 @@ const SMALL_BODY: &[(&str, &str)] = &[
     ("_kpsdk", "Kasada-CHL"),
     ("ips.js", "Kasada-CHL"),
     ("_pxhd", "PerimeterX-CHL"),
+    // FP-B2: `px-captcha` relocated here from UNAMBIGUOUS. It is a real
+    // PerimeterX interstitial hook, but those interstitials are small —
+    // gating it `< INTERSTITIAL_MAX_BYTES` keeps true detection while
+    // killing the wayfair-class FP (literal `px-captcha` in a multi-MB
+    // rendered page's CSS / cookie-consent manifest). MUST precede the
+    // bare `captcha` row so PerimeterX attribution wins over captcha-CHL.
+    ("px-captcha", "PerimeterX-CHL"),
     ("captcha", "captcha-CHL"),
     ("403 forbidden", "BLOCKED"),
     ("access denied", "BLOCKED"),
@@ -200,6 +214,46 @@ mod tests {
         }
     }
 
+    // FP-B2 regression: a fully-rendered multi-MB page that merely
+    // *contains the literal substring* `px-captcha` / `captcha-delivery.com`
+    // (CSS class, analytics key, cookie-consent JSON manifest — the
+    // historical wayfair FP root) must classify as a pass, while a real
+    // small interstitial with the same token must still be detected.
+    #[test]
+    fn fp_b2_literal_strong_markers_size_gated() {
+        let big = |seed: &str| {
+            let mut h = String::from("<html><body>");
+            h.push_str(seed);
+            for _ in 0..40000 {
+                h.push_str("<div>actual rendered product card content</div>");
+            }
+            h.push_str("</body></html>");
+            assert!(h.len() > 1_000_000);
+            h
+        };
+        // wayfair shape: px-captcha only in a cookie-consent manifest.
+        let wf = big(r#"<script>window.__CONSENT={"_px3":"NECESSARY","px-captcha":"NECESSARY"};</script>"#);
+        assert_eq!(engine_classify(&wf).tag, "L3-RENDERED");
+        assert_eq!(engine_classify(&wf).verdict, ChallengeVerdict::Pass);
+        // captcha-delivery.com literal in a large rendered page.
+        let dd = big(r#"<img src="https://x.captcha-delivery.com/pixel.gif">"#);
+        assert_eq!(engine_classify(&dd).tag, "L3-RENDERED");
+        assert_eq!(engine_classify(&dd).verdict, ChallengeVerdict::Pass);
+        // True detection preserved: a real small PerimeterX interstitial
+        // whose only signal is the `px-captcha` hook is still detected as
+        // a PerimeterX challenge via the relocated SMALL_BODY row (and
+        // the bare-`captcha` row does not steal the attribution). No
+        // "press & hold" text here — that is a separate, also-valid
+        // PerimeterX-PaH phrase and would mask the row this test pins.
+        let px_chl = r#"<html><body><div id="px-captcha"></div><p>verifying</p></body></html>"#;
+        assert_eq!(engine_classify(px_chl).tag, "PerimeterX-CHL");
+        assert!(engine_classify(px_chl).verdict.is_challenge());
+        // And the PaH phrase still classifies as a PerimeterX challenge.
+        let pah = r#"<html><body><p>Press &amp; Hold to confirm</p></body></html>"#;
+        assert_eq!(engine_classify(pah).tag, "PerimeterX-PaH");
+        assert!(engine_classify(pah).verdict.is_challenge());
+    }
+
     #[test]
     fn verdict_mapping_is_consistent() {
         assert_eq!(engine_classify("<html></html>").verdict, ChallengeVerdict::RenderIncomplete);
@@ -207,10 +261,11 @@ mod tests {
             engine_classify("<html><body>Just a moment...</body></html>").verdict,
             ChallengeVerdict::EdgeBlock
         );
-        // Unambiguous literal in a large body ⇒ SensorFail (the only way
-        // a challenge tag co-occurs with a ≥50 KB body under canonical
-        // policy). FP-B2 will size-gate this away.
-        let mut big = String::from(r#"<div class="px-captcha">x</div>"#);
+        // A still-any-size structural UNAMBIGUOUS token in a ≥50 KB body
+        // ⇒ SensorFail (post-FP-B2 only the genuinely-structural URL/var
+        // tokens remain any-size; `px-captcha` is now size-gated and
+        // would instead be a pass here — see fp_b2_* test).
+        let mut big = String::from(r#"<script>var ddcaptchaEncoded="z";</script>"#);
         for _ in 0..3000 {
             big.push_str("<p>padding padding padding padding</p>");
         }

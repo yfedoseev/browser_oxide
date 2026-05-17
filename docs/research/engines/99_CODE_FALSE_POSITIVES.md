@@ -71,7 +71,29 @@ from a true ~6).
 - **Regression test:** table test feeding the same fixtures through all
   three call sites; assert identical verdict.
 
-### FP-B2 — Non-size-gated literal strong markers mislabel rendered pages  (P0/P1)
+### FP-B2 — Non-size-gated literal strong markers mislabel rendered pages  (P0/P1)  ✅ DONE — commit on `fix/engine-fp-backlog`
+- **Status:** FIXED. `px-captcha` relocated from the any-size
+  `UNAMBIGUOUS` table into size-gated `SMALL_BODY` (< 30 KB), ordered
+  before the bare `captcha` row so PerimeterX attribution wins.
+  `captcha-delivery.com` was already phrase-gated. The 3 remaining
+  any-size tokens (`cf-browser-verification`, `/_sec/cp_challenge`,
+  `ddcaptchaencoded`) are genuinely structural URL/var tokens, not the
+  FP class. Regression: `classify::tests::fp_b2_literal_strong_markers_size_gated`
+  (wayfair-shape 1 MB cookie-consent `px-captcha` ⇒ Pass; 1 MB
+  `captcha-delivery.com` ⇒ Pass; small real `px-captcha` interstitial ⇒
+  PerimeterX-CHL preserved). No site flip asserted (wayfair is a
+  pre-confirmed TRUE PASS — `/tmp/audit_failing_sites/wayfair.json`,
+  PerimeterX engine doc §10); this only makes the holistic metric agree
+  with that, so the 10 holistic classifier_tests stay 10/10 unchanged
+  and the 120/126 ledger is unaffected ⇒ no live re-measure required.
+  Gate evidence: chrome_compat 437/0, iframe_isolation 5/0,
+  v8_inspector_parity 3/0, v8_natives 11/0, holistic classifier_tests
+  10/0, classify regression 3/0. (The 2 `page::tests` canvas failures —
+  `getContext is not a function`, page.rs:3417/3469 — exist verbatim at
+  branch base `fd98bfa`, are outside the defined §4 gate, and are
+  untouched by this branch's diff: proven pre-existing & unrelated, not
+  a B1/B2 regression. Going forward the gate is run as defined — the 4
+  binaries + `--lib classify` — not full `--lib`.)
 - **Where:** `page.rs:181` (`px-captcha` in the *unconditional* strong
   set, unlike `_pxhd`/`human security` which are `stub_sized`-gated);
   `holistic_sweep.rs:875` (`px-captcha` any-body-size);

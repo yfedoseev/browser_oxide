@@ -123,6 +123,14 @@ re-measure proves an actual flip.
   `holistic_sweep` already reported (L3-RENDERED) — this only removes a
   page.rs↔holistic disagreement; it is the real CF policy bug FP-B4 is
   sequenced to fix, not a new flip.
+- **FP-B2 (DONE):** relocated literal `px-captcha` out of the any-size
+  marker table into the < 30 KB size-gated bucket (the wayfair-FP
+  root). wayfair is a pre-confirmed TRUE PASS, so this only makes the
+  holistic metric stop mislabeling it PerimeterX-CHL — **not a flip**;
+  the 10 holistic classifier_tests stay 10/0 unchanged ⇒ 120/126 ledger
+  intact. Gate green (chrome_compat 437/0 + iframe/v8/inspector +
+  classify regression 3/0). Pre-existing unrelated `page::tests` canvas
+  failures noted, outside the §4 gate.
 
 ## Bottom line
 
