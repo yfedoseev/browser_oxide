@@ -981,10 +981,15 @@
     _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
     _defNav('pdfViewerEnabled', () => true);
     // webdriver: present on Navigator.prototype per W3C WebDriver spec.
-    // Non-automated Chrome returns undefined (not false). Kasada wdd probe checks
-    // the getter source — _maskFunction makes it appear native.
+    // Modern Chrome (>=89, incl. the Chrome-148 we impersonate) ALWAYS
+    // defines navigator.webdriver: it returns `false` for normal
+    // browsing (`undefined` is the old/headless tell). Confirmed by the
+    // K2-DIFF decoded Kasada sensor (wdt.r="undefined" was flagged
+    // anomalous) and consistent with worker_bootstrap.js (already
+    // `false`). The prior "returns undefined" was a wrong assumption.
+    // Kasada wdd probe checks the getter source — _maskFunction native.
     Object.defineProperty(Navigator.prototype, 'webdriver', {
-        get: _maskFunction(function() { return undefined; }, 'get webdriver'),
+        get: _maskFunction(function() { return false; }, 'get webdriver'),
         enumerable: true,
         configurable: true
     });
@@ -1615,9 +1620,10 @@
         // here was a divergence. Real Chrome's webdriver getter is
         // owned-on-prototype and IS enumerable (visible to for..in on
         // Navigator.prototype).
-        // webdriver: defined identically to the Navigator.prototype block above.
+        // webdriver: defined identically to the Navigator.prototype block
+        // above — `false` (Chrome-148-faithful; K2-DIFF wdt fix).
         Object.defineProperty(_NavProto, 'webdriver', {
-            get: _maskFunction(function() { return undefined; }, 'get webdriver'),
+            get: _maskFunction(function() { return false; }, 'get webdriver'),
             enumerable: true,
             configurable: true
         });

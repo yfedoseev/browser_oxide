@@ -264,8 +264,11 @@ async fn nav_pdf_viewer_enabled() {
 }
 #[tokio::test]
 async fn nav_webdriver() {
-    // Real Chrome: navigator.webdriver is undefined in non-automated sessions.
-    assert_eq!(check("typeof navigator.webdriver").await, "undefined");
+    // Modern Chrome (>=89, incl. Chrome-148) ALWAYS defines
+    // navigator.webdriver === false for normal browsing; `undefined`
+    // is the old/headless tell (K2-DIFF: Kasada flagged wdt.r="undefined").
+    assert_eq!(check("navigator.webdriver").await, "false");
+    assert_eq!(check("typeof navigator.webdriver").await, "boolean");
 }
 #[tokio::test]
 async fn nav_plugins_length() {
@@ -1773,9 +1776,12 @@ async fn k_no_script_id_webdriver_not_on_instance() {
 }
 
 #[tokio::test]
-async fn k_no_script_id_webdriver_on_prototype_returns_undefined() {
-    // Real Chrome: navigator.webdriver is undefined in non-automated sessions (not false).
-    assert_eq!(check("navigator.webdriver === undefined").await, "true");
+async fn k_no_script_id_webdriver_on_prototype_returns_false() {
+    // Modern Chrome (>=89): navigator.webdriver === false for normal
+    // browsing, owned-on-prototype (K2-DIFF wdt fix; the prior
+    // "undefined" assertion encoded a wrong assumption now contradicted
+    // by the live Kasada sensor + worker_bootstrap's existing `false`).
+    assert_eq!(check("navigator.webdriver === false").await, "true");
 }
 
 #[tokio::test]
@@ -2274,8 +2280,11 @@ async fn screen_avail_top_linux_is_0() {
 
 #[tokio::test]
 async fn nav_webdriver_typeof_boolean() {
-    // Real Chrome: navigator.webdriver is undefined in non-automated sessions.
-    assert_eq!(check("typeof navigator.webdriver").await, "undefined");
+    // Modern Chrome (>=89, incl. Chrome-148): navigator.webdriver is a
+    // boolean `false` for normal browsing (the fn name was always right;
+    // the prior "undefined" assertion was the wrong assumption —
+    // K2-DIFF wdt fix, Kasada flagged wdt.r="undefined").
+    assert_eq!(check("typeof navigator.webdriver").await, "boolean");
 }
 
 #[tokio::test]

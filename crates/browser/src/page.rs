@@ -3490,8 +3490,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn page_webdriver_undefined() {
-        // Real non-automated Chrome: navigator.webdriver is undefined (W3C spec).
+    async fn page_webdriver_false() {
+        // Modern Chrome (>=89, incl. Chrome-148): navigator.webdriver
+        // === false for normal browsing (`undefined` is the old/headless
+        // tell). K2-DIFF wdt fix — evidence-backed (Kasada flagged
+        // wdt.r="undefined"); supersedes the prior W3C-spec misreading.
         let mut page = Page::from_html(
             "<html><head></head><body></body></html>",
             None::<stealth::StealthProfile>,
@@ -3499,9 +3502,9 @@ mod tests {
         .await
         .unwrap();
         let result = page.evaluate("typeof navigator.webdriver").unwrap();
-        assert_eq!(result, "undefined");
+        assert_eq!(result, "boolean");
         let val = page.evaluate("navigator.webdriver").unwrap();
-        assert_eq!(val, "undefined");
+        assert_eq!(val, "false");
     }
 
     #[tokio::test]

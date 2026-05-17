@@ -2714,9 +2714,11 @@
                         if (_v !== undefined) Object.defineProperty(_nav, _k, { value: _v, writable: true, configurable: true, enumerable: true });
                     } catch (_) {}
                 }
-                // webdriver: undefined in non-automated Chrome (property present, value undefined).
-                // Kasada ifw probe checks i_nwd = cw.navigator.webdriver (falsy is fine).
-                Object.defineProperty(_nav, 'webdriver', { value: undefined, writable: true, configurable: true, enumerable: true });
+                // webdriver: `false` in modern Chrome (property present,
+                // value false; `undefined` is the headless tell — K2-DIFF
+                // wdt fix). Kasada ifw probe checks i_nwd =
+                // cw.navigator.webdriver (false is the Chrome-faithful value).
+                Object.defineProperty(_nav, 'webdriver', { value: false, writable: true, configurable: true, enumerable: true });
                 _sp("navigator", _nav);
             } catch (_) {}
 
