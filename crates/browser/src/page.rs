@@ -1419,6 +1419,18 @@ impl Page {
         // it cannot regress any other flow / the §4 gate.
         let started_as_dd_challenge =
             crate::datadome_handler::is_datadome_challenge_doc(&html);
+        // Akamai sec-cpt analog (master plan §4 Phase 3 / §8.5): homedepot
+        // serves the rotating-obfuscated-bundle sec-cpt variant
+        // (`<div id="sec-if-cpt-container">` + `<script src="/Wjv3…">`).
+        // The bundle self-solves in our V8 and sets the `sec_cpt` cookie,
+        // but it mutates the DOM the same way DataDome's i.js does, so the
+        // post-exec `is_anti_bot_challenge()` can flip false and skip the
+        // poll + cookie-diff retry before the bundle's round-trip lands.
+        // Same narrow gating ⇒ false for every non-sec-cpt site ⇒ zero
+        // regression / §4 gate unaffected. (If the marker happens to
+        // persist post-exec this OR-in is simply a harmless no-op.)
+        let started_as_seccpt_challenge =
+            html.contains("sec-if-cpt-container") || html.contains("sec-cpt-if");
         let mut current_html = html;
         let mut current_url = resp_url;
         let mut current_storage: Option<
@@ -1715,7 +1727,9 @@ impl Page {
             // fixed 2s wait. Checks every 200ms for up to 10s total; exits early
             // on first hit.
             if pending_info.is_empty()
-                && (page.is_anti_bot_challenge() || started_as_dd_challenge)
+                && (page.is_anti_bot_challenge()
+                    || started_as_dd_challenge
+                    || started_as_seccpt_challenge)
             {
                 let deadline = std::time::Instant::now() + Duration::from_secs(90);
                 while std::time::Instant::now() < deadline {
@@ -1804,6 +1818,7 @@ impl Page {
                 // (Wildberries parity). Only retry ONCE for the upgrade.
                 if (page.is_anti_bot_challenge()
                     || started_as_dd_challenge
+                    || started_as_seccpt_challenge
                     || (last_accept_ch_upgrade && !accept_ch_retry_done))
                     && iter + 1 < iterations
                 {
@@ -1821,8 +1836,7 @@ impl Page {
                     // did not complete (the next increment's target);
                     // `true` ⇒ the existing retry already re-issues.
                     // debug_nav-gated ⇒ zero §4-gate impact.
-                    if debug_nav && crate::datadome_handler::is_datadome_challenge_doc(&current_html)
-                    {
+                    if debug_nav && started_as_dd_challenge {
                         eprintln!(
                             "{}",
                             crate::datadome_handler::dd_flow_summary(
@@ -1831,6 +1845,17 @@ impl Page {
                                 crate::datadome_handler::cookies_have_datadome(&cookies_after),
                             )
                         );
+                        // What did i.js actually do? Dump its post-exec
+                        // fetch log so the next increment sees whether the
+                        // 15 KB loader fired its verification POST to
+                        // geo.captcha-delivery.com and what came back.
+                        let fl = page
+                            .event_loop()
+                            .execute_script(
+                                "JSON.stringify((globalThis._boxide&&globalThis._boxide.__fetchLog)||[])",
+                            )
+                            .unwrap_or_default();
+                        eprintln!("[datadome-trace] i.js __fetchLog={fl}");
                     }
 
                     let mut should_retry = (cookies_after != cookies_before
