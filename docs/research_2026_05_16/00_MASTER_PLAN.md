@@ -541,18 +541,31 @@ wire-key / WASM — the L/fragile path):
   `datadome_handler` unit tests; full §4 gate green (`chrome_compat`
   437/0, `v8_natives` 11/11, `iframe_isolation` 5/5,
   `v8_inspector_parity` 3/3).
-- **Live re-measure (targeted, per the §-Re-runs clause — etsy):**
-  the fix **works as intended** — i.js now runs and attempts the
-  `geo.captcha-delivery.com` round-trip (previously CSP-refused).
-  etsy not yet flipped (still `DataDome-CHL`, expected for Increment 1
-  of an L feature). Next concrete, evidence-driven blocker is the
-  full i.js POST round-trip / WASM `boring_challenge` completion, not
-  the CSP refusal — the H2→H1 fallback (`net/src/lib.rs:767-790`)
-  already handles `geo.captcha-delivery.com`'s http/1.1-only ALPN, so
-  that log line is non-fatal noise. **Honest status: Increment 1 is a
-  real, verified, gate-green de-risking step that moved the blocker
-  one stage downstream; Phase 5 DataDome is multi-increment L and not
-  "done".**
+- **DataDome Increment 2 (commit `201cac9`):** gate-safe flow
+  instrumentation — pure unit-tested helpers (`cookies_have_datadome`,
+  `dd_flow_summary`, 10/10 `datadome_handler`) + two env/debug-gated
+  trace points (i.js external-script fetch; cookie-diff decision
+  point). Zero §4-gate behavioral change; full gate green.
+- **Decisive evidence captured (live etsy, traces on):**
+  1. `[datadome-trace] i.js fetch OK …/i.js status=200 bytes=15014`
+     (×3) — **i.js loads cleanly**. The CSP fix works end-to-end. And
+     **15 KB = the small loader, NOT the "VM-obfuscated" bundle doc 05
+     §2a assumed** ⇒ likely *more* tractable than the L/fragile framing.
+  2. The `dd_flow_summary` trace **never fires** ⇒ the etsy flow
+     **never reaches the universal cookie-diff retry primitive**. It
+     exits via the `v8_html_is_real` path (`page.rs:1854`), which
+     explicitly excludes `captcha-delivery.com` → Rust reload GET →
+     same interstitial → loop → `DataDome-CHL`.
+- **Next increment (precisely pinned, no longer guesswork):** route
+  the post-i.js DataDome challenge flow **into** the cookie-diff retry
+  primitive (or otherwise consume i.js's verification result) instead
+  of the `captcha-delivery.com`-excluded `v8_html_is_real` dead-end.
+  This is a concrete, in-engine, likely gate-safe routing change — NOT
+  the irreducible WASM/daily-key RE the prior framing feared. **Honest
+  status: Increments 1+2 are real, verified, gate-green de-risking
+  steps; the instrumentation converted an assumed-L-irreducible
+  blocker into a concrete routing target. Phase 5 DataDome still not
+  "done" but materially de-risked.**
 
 ## 8. One-line summary for the next session
 
