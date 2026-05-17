@@ -204,6 +204,33 @@ nicety — no holistic-metric site flip). K1 verified live: realtor run
 logged `[kasada] LEARNED x-kpsdk-ct` with the Rust cd correctly
 deferred to ips.js.
 
+## Full 126-corpus multi-mode re-measure (2026-05-17, HEAD `01f45ef`)
+
+Live debug sweep (release build was pathologically contention-blocked;
+outcome is build-mode-independent — only `nav_ms` isn't
+benchmark-grade; sustained external CPU contention understates
+timing-sensitive sites ⇒ these are a conservative floor):
+
+| Mode | PASS (L3-RENDERED) / 126 |
+|---|---|
+| Desktop Chrome `chrome_130_macos` | **117** |
+| Android `pixel_9_pro_chrome_147` | **119** |
+| iOS `iphone_15_pro_safari_18` | **113 / 125 measured** (1 debug straggler) |
+| Firefox `firefox_135_macos` | pending (driver serialized) |
+
+**Per-domain routed union (any profile opens): 121/126 — up from the
+prior 120.** Only 5 routed-blocked: canadagoose/hyatt/realtor
+(Kasada — the K2-DIFF named-divergence target), homedepot (Akamai
+sec-cpt; passes under the sanctioned 3-iter metric per `b623d5d` +
+Task#3, blocked only under this 1-iter holistic lens), iphey (a
+fingerprint *test page*, THIN-BODY timing artifact — not a real
+target). True engine-addressable hard residual = **Kasada×3 +
+homedepot (4)**. Single-profile 117/119 are **above the prior
+~113–115 baseline** = the Tier-1 classifier-correctness gain. etsy/
+duolingo/yelp/wayfair open under ≥1 profile (mobile clears DataDome
+sites desktop doesn't). Firefox + the iOS straggler append when the
+contention-bound driver reaches them.
+
 ## Bottom line
 
 126/126 corpus is fully accounted for: **120 open under routing**, 6
