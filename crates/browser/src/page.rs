@@ -133,13 +133,27 @@ pub enum ChallengeVerdict {
     /// Challenge marker + a large body that otherwise rendered: the
     /// vendor JS ran and the sensor scored the telemetry as bot.
     SensorFail,
+    /// FP-B4: a challenge is structurally present in a *large* body but
+    /// the vendor flow never *completed* (no clearance / no nav) — e.g.
+    /// a Cloudflare Managed-Challenge orchestrator shell that ran but
+    /// did not issue `cf_clearance`. Distinct from [`Self::SensorFail`]
+    /// (which implies the sensor *scored us bot* ⇒ misdirects work to
+    /// fingerprint tuning) and from [`Self::Pass`] (the page never
+    /// rendered real content). udemy's 476 KB CF shell is the motivating
+    /// case — it must not read as either a sensor-fail or a pass.
+    ChallengeIncomplete,
 }
 
 impl ChallengeVerdict {
     /// True for every served-challenge outcome — the exact semantics of
     /// the old boolean `is_anti_bot_challenge`.
     pub fn is_challenge(self) -> bool {
-        matches!(self, Self::EdgeBlock | Self::SensorFail)
+        // ChallengeIncomplete IS an unsolved challenge (not a pass) — it
+        // must keep the navigate-loop retry/poll paths active.
+        matches!(
+            self,
+            Self::EdgeBlock | Self::SensorFail | Self::ChallengeIncomplete
+        )
     }
 
     /// Stable lowercase tag for JSON/audit output.
@@ -149,6 +163,7 @@ impl ChallengeVerdict {
             Self::RenderIncomplete => "render-incomplete",
             Self::EdgeBlock => "edge-block",
             Self::SensorFail => "sensor-fail",
+            Self::ChallengeIncomplete => "challenge-incomplete",
         }
     }
 }
@@ -1391,6 +1406,20 @@ impl Page {
         // persist post-exec this OR-in is simply a harmless no-op.)
         let started_as_seccpt_challenge =
             html.contains("sec-if-cpt-container") || html.contains("sec-cpt-if");
+        // FP-C2: the last live doc-20 mutable-state guard. The
+        // cookie-diff retry / pending-nav poll below gate on
+        // `page.is_anti_bot_challenge()` (the *post-mutation* DOM). A
+        // Cloudflare orchestrator mutates the body, so the `_cf_chl_opt`
+        // / `/cdn-cgi/challenge-platform/` marker can drop from the live
+        // DOM while `cf_clearance` was NEVER issued ⇒ a
+        // body-mutated-but-unsolved CF page silently slips past the
+        // retry gate. DD and sec-cpt already have persistent
+        // origin-flags; Cloudflare did not. Capture it from the
+        // *initial* response `html` (pre-mutation), mirroring the
+        // existing detector at `handle_cloudflare_flow`. Narrow ⇒ false
+        // for every non-CF site ⇒ §4 gate unaffected.
+        let started_as_cf_challenge =
+            crate::classify::is_cf_challenge_doc(&html);
         let mut current_html = html;
         let mut current_url = resp_url;
         let mut current_storage: Option<
@@ -1689,7 +1718,8 @@ impl Page {
             if pending_info.is_empty()
                 && (page.is_anti_bot_challenge()
                     || started_as_dd_challenge
-                    || started_as_seccpt_challenge)
+                    || started_as_seccpt_challenge
+                    || started_as_cf_challenge)
             {
                 let deadline = std::time::Instant::now() + Duration::from_secs(90);
                 while std::time::Instant::now() < deadline {
@@ -1713,11 +1743,15 @@ impl Page {
                         if let Some(p) = parsed_current.as_ref() {
                             let now =
                                 client.cookies_for_url(p).await.unwrap_or_default();
-                            if crate::datadome_handler::cookies_have_datadome(&now)
-                                && !crate::datadome_handler::cookies_have_datadome(
-                                    &cookies_before,
-                                )
-                            {
+                            // FP-D3: a `datadome=` cookie is set on every
+                            // nav incl. the failing 403 — break only on a
+                            // genuine solve (cookie present AND the body
+                            // is no longer a DD challenge document), not
+                            // on a bare/gained cookie (false success).
+                            if crate::datadome_handler::datadome_solved(
+                                &now,
+                                &page.content(),
+                            ) {
                                 break;
                             }
                         }
@@ -1796,6 +1830,7 @@ impl Page {
                 if (page.is_anti_bot_challenge()
                     || started_as_dd_challenge
                     || started_as_seccpt_challenge
+                    || started_as_cf_challenge
                     || (last_accept_ch_upgrade && !accept_ch_retry_done))
                     && iter + 1 < iterations
                 {
@@ -2195,10 +2230,18 @@ impl Page {
                                 .cookies_for_url(p)
                                 .await
                                 .unwrap_or_default();
-                            if crate::datadome_handler::cookies_have_datadome(&now) {
+                            // FP-D3: require a genuine solve (cookie +
+                            // body no longer a DD challenge doc) — the
+                            // bare `datadome=` cookie is set on the 403
+                            // fail too, so the old check broke the
+                            // self-solve window on a false success.
+                            if crate::datadome_handler::datadome_solved(
+                                &now,
+                                &page.content(),
+                            ) {
                                 if debug_nav {
                                     eprintln!(
-                                        "[datadome] self-solve window: datadome= cookie acquired, proceeding to reload"
+                                        "[datadome] self-solve window: datadome cookie + non-challenge body — solved, proceeding to reload"
                                     );
                                 }
                                 break;

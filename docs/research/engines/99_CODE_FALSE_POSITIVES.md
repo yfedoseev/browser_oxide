@@ -123,7 +123,24 @@ from a true ~6).
 - **Regression test:** fixtures of known thin shells vs real renders;
   assert `ThinShell` vs `Pass` split.
 
-### FP-B4 — udemy mislabeled `SensorFail`  (P1, Cloudflare)
+### FP-B4 — udemy mislabeled `SensorFail`  (P1, Cloudflare)  ✅ DONE — commit on `fix/engine-fp-backlog`
+- **Status:** FIXED. Added `ChallengeVerdict::ChallengeIncomplete`
+  (is_challenge=true, as_str="challenge-incomplete"); `_cf_chl_opt`
+  added to the any-size `UNAMBIGUOUS` table (the challenge-only inline
+  CF options blob — NOT `/cdn-cgi/challenge-platform/` which also stays
+  on passed pages); `verdict_for` maps `Cloudflare-CHL` + body ≥
+  SENSOR_SPLIT ⇒ ChallengeIncomplete (was SensorFail). Regression:
+  `classify::tests::fp_b4_cf_incomplete_split_from_sensorfail` (large
+  CF shell ⇒ ChallengeIncomplete≠SensorFail≠Pass; small stub ⇒
+  EdgeBlock; passed page w/ only the JSD URL ⇒ Pass). Gate green:
+  chrome_compat effectively 437/0 (the lone fail
+  `worker_hardware_concurrency_matches_window` is a load-32 timing
+  flake — 500 ms worker budget; passes 1/0 in isolation; zero
+  worker-code in this diff; was 437/0 in B1+B2 runs), holistic 10/0,
+  iframe 5/0, v8_inspector 3/0, v8_natives 11/0. Co-committed with
+  FP-D3+FP-C2 (intermingled page.rs/classify.rs hunks; non-interactive
+  git cannot split — each item has its own named regression test +
+  shared gate run for traceability).
 - **Where:** `page.rs:175/277` classifies udemy's 476 KB body as
   `SensorFail`.
 - **False claim:** "udemy fails the fingerprint/sensor stage."
@@ -158,7 +175,17 @@ the marker disappears, the guard misses, the wrong traffic fires.
   post-mutation DOM (sec-cpt marker gone) with origin=sec-cpt; assert no
   BMP POST.
 
-### FP-C2 — Cloudflare cookie-delta retry: SAME bug, NOT fenced  (P1, live)
+### FP-C2 — Cloudflare cookie-delta retry: SAME bug, NOT fenced  (P1, live)  ✅ DONE — commit on `fix/engine-fp-backlog`
+- **Status:** FIXED. Added `crate::classify::is_cf_challenge_doc` (single
+  source of truth for CF-origin substrings) and a persistent
+  `started_as_cf_challenge` flag set from the *initial* response html
+  (mirrors `started_as_dd_challenge`/`started_as_seccpt_challenge`),
+  OR-ed into both the pending-nav poll gate and the cookie-delta retry
+  gate so a CF page whose body the orchestrator mutated (marker dropped)
+  but which never issued `cf_clearance` no longer slips the retry gate.
+  Regression: `classify::tests::fp_c2_cf_challenge_doc_predicate`.
+  Gate green (shared run — see FP-B4 status). Co-committed with
+  FP-B4+FP-D3.
 - **Where:** `page.rs:1836` cookie-delta retry gated on mutable
   post-build `self.content()`. **There is no persistent
   `started_as_cf_challenge` flag** (unlike DD/sec-cpt).
@@ -210,7 +237,19 @@ tests.
 - **Regression test:** end-to-end CF fixture asserting `cf_clearance`
   absent ⇒ verdict `CfChallengeIncomplete` (ties to FP-B4).
 
-### FP-D3 — `cookies_have_datadome` false-success  (P0/P1)
+### FP-D3 — `cookies_have_datadome` false-success  (P0/P1)  ✅ DONE — commit on `fix/engine-fp-backlog`
+- **Status:** FIXED. Added `datadome_handler::datadome_solved(cookies,
+  body)` = `cookies_have_datadome(cookies) && !is_datadome_challenge_doc(body)`
+  (a `datadome=` cookie alone is set on the 403 fail too — solved
+  requires the body to no longer be a DD challenge doc). Replaced the
+  two bare-cookie success checks in the navigate loop (the pending-nav
+  poll break + the Inc-8 self-solve window break) with it; left the
+  diagnostic-only trace on `cookies_have_datadome`. Regression:
+  `datadome_handler::tests::datadome_solved_requires_cookie_and_non_challenge_body`.
+  Gate green (shared run — see FP-B4 status). Co-committed with
+  FP-B4+FP-C2. Honest scope: this kills the *body-observable*
+  false-success; it cannot confirm server-side daily-key acceptance
+  (that needs the live-oracle regime — datadome engine doc §11).
 - **Where:** `crate::datadome_handler::cookies_have_datadome` (used by
   the Inc-8 break condition and the poll/retry).
 - **False claim:** "a `datadome=` cookie ⇒ challenge solved."

@@ -63,9 +63,16 @@ pub struct EngineClass {
 /// [`SMALL_BODY`]. `captcha-delivery.com` is and stays phrase-gated in
 /// [`PHRASE`]. The three below are structural URL/var tokens that a
 /// real Chrome never sees on a passed page. Order is significant —
-/// first match wins.
+/// first match wins. FP-B4 adds `_cf_chl_opt` — the inline Cloudflare
+/// challenge-options JS object that is present *only* on the CF
+/// challenge / Managed-Challenge orchestrator shell and is gone once
+/// the challenge clears and real content is served (so it is the
+/// any-size structural signal that catches the large udemy CF shell
+/// `/cdn-cgi/challenge-platform/` alone cannot — that JSD URL also
+/// stays on *passed* CF pages, so it is deliberately NOT used here).
 const UNAMBIGUOUS: &[(&str, &str)] = &[
     ("cf-browser-verification", "Cloudflare-CHL"),
+    ("_cf_chl_opt", "Cloudflare-CHL"),
     ("/_sec/cp_challenge", "Akamai-sec-cpt-CHL"),
     ("ddcaptchaencoded", "DataDome-CHL"),
 ];
@@ -110,6 +117,15 @@ fn verdict_for(tag: &str, len: usize) -> ChallengeVerdict {
     match tag {
         "L3-RENDERED" => ChallengeVerdict::Pass,
         "THIN-BODY" => ChallengeVerdict::RenderIncomplete,
+        // FP-B4: a Cloudflare challenge in a *large* body is the
+        // orchestrator shell that ran but never cleared (udemy class) —
+        // ChallengeIncomplete, NOT SensorFail (the body was never
+        // replaced with real content, so the sensor did not "score us
+        // bot"; mislabeling it SensorFail misdirects work to fingerprint
+        // tuning). A small CF stub stays EdgeBlock (classic edge deny).
+        "Cloudflare-CHL" if len >= SENSOR_SPLIT_BYTES => {
+            ChallengeVerdict::ChallengeIncomplete
+        }
         _ if len < SENSOR_SPLIT_BYTES => ChallengeVerdict::EdgeBlock,
         _ => ChallengeVerdict::SensorFail,
     }
@@ -155,6 +171,22 @@ pub fn engine_classify(body: &str) -> EngineClass {
         verdict: verdict_for(tag, len),
         len,
     }
+}
+
+/// FP-C2: does this *initial response body* indicate a Cloudflare
+/// challenge / Managed-Challenge orchestrator? Mirrors the
+/// `datadome_handler::is_datadome_challenge_doc` pattern so the navigate
+/// loop can set a *persistent* `started_as_cf_challenge` origin flag.
+/// Without it, the cookie-diff retry / pending-nav poll gate on the
+/// *post-mutation* DOM; CF's orchestrator rewrites the body, so the
+/// marker drops while `cf_clearance` was never issued and a
+/// body-mutated-but-unsolved CF page silently slips the retry gate
+/// (the doc-20 mutable-state-guard class). Single source of truth for
+/// the CF-origin substrings.
+pub fn is_cf_challenge_doc(body: &str) -> bool {
+    body.contains("_cf_chl_opt")
+        || body.contains("/cdn-cgi/challenge-platform/")
+        || body.contains("cf-browser-verification")
 }
 
 #[cfg(test)]
@@ -252,6 +284,71 @@ mod tests {
         let pah = r#"<html><body><p>Press &amp; Hold to confirm</p></body></html>"#;
         assert_eq!(engine_classify(pah).tag, "PerimeterX-PaH");
         assert!(engine_classify(pah).verdict.is_challenge());
+    }
+
+    // FP-B4 regression: a large Cloudflare orchestrator shell that ran
+    // but never cleared (udemy class) classifies ChallengeIncomplete —
+    // NOT SensorFail (no fingerprint scoring happened) and NOT Pass (no
+    // real content). A small CF stub stays EdgeBlock. A genuinely
+    // passed CF page that merely retains the always-on
+    // `/cdn-cgi/challenge-platform/` JSD URL (but no `_cf_chl_opt`)
+    // stays a pass — proving the discriminator is the challenge-only
+    // `_cf_chl_opt`, not the JSD URL.
+    #[test]
+    fn fp_b4_cf_incomplete_split_from_sensorfail() {
+        let mut shell = String::from(
+            r#"<html><head><title>Just a moment...</title></head><body>
+               <script>window._cf_chl_opt={cvId:'3',cType:'managed'};</script>"#,
+        );
+        for _ in 0..2000 {
+            shell.push_str("<div>cf challenge orchestrator shell padding</div>");
+        }
+        shell.push_str("</body></html>");
+        assert!(shell.len() >= SENSOR_SPLIT_BYTES);
+        let ec = engine_classify(&shell);
+        assert_eq!(ec.tag, "Cloudflare-CHL");
+        assert_eq!(ec.verdict, ChallengeVerdict::ChallengeIncomplete);
+        assert_ne!(ec.verdict, ChallengeVerdict::SensorFail);
+        assert_ne!(ec.verdict, ChallengeVerdict::Pass);
+        assert!(ec.verdict.is_challenge(), "incomplete CF is still an unsolved challenge");
+
+        // Small CF stub ⇒ EdgeBlock (unchanged classic edge deny).
+        let stub = "<html><body><script>window._cf_chl_opt={}</script>Just a moment...</body></html>";
+        assert_eq!(engine_classify(stub).verdict, ChallengeVerdict::EdgeBlock);
+
+        // Passed CF page: real content + the always-on JSD URL but NO
+        // `_cf_chl_opt` ⇒ must remain a pass (no false ChallengeIncomplete).
+        let mut passed = String::from(
+            r#"<html><body><script src="/cdn-cgi/challenge-platform/h/b/jsd"></script>"#,
+        );
+        for _ in 0..3000 {
+            passed.push_str("<article>real rendered course catalog content</article>");
+        }
+        passed.push_str("</body></html>");
+        assert!(passed.len() >= SENSOR_SPLIT_BYTES);
+        assert_eq!(engine_classify(&passed).tag, "L3-RENDERED");
+        assert_eq!(engine_classify(&passed).verdict, ChallengeVerdict::Pass);
+    }
+
+    // FP-C2 regression: the persistent CF-origin predicate fires on the
+    // CF challenge / orchestrator shell (so the navigate-loop retry/poll
+    // stays active even after the orchestrator mutates the DOM and the
+    // marker drops from the live body) and does NOT fire on benign
+    // rendered content.
+    #[test]
+    fn fp_c2_cf_challenge_doc_predicate() {
+        assert!(is_cf_challenge_doc(
+            r#"<script>window._cf_chl_opt={cvId:'3'};</script>"#
+        ));
+        assert!(is_cf_challenge_doc(
+            r#"<script src="/cdn-cgi/challenge-platform/h/b/jsd/r/x"></script>"#
+        ));
+        assert!(is_cf_challenge_doc(
+            r#"<html class="cf-browser-verification"><body>...</body></html>"#
+        ));
+        assert!(!is_cf_challenge_doc(
+            "<html><body>fully rendered course catalog, no CF challenge</body></html>"
+        ));
     }
 
     #[test]

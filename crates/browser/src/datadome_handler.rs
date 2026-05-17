@@ -223,6 +223,23 @@ pub fn cookies_have_datadome(cookies: &str) -> bool {
         .any(|c| c.trim_start().starts_with("datadome="))
 }
 
+/// FP-D3: a `datadome=` cookie alone is NOT a success signal — DataDome
+/// sets/refreshes a `datadome=` cookie on **every** navigation including
+/// the failing 403 interstitial. Treating bare presence as "solved"
+/// makes the poll / cookie-diff / Inc-8 break conditions fire on a
+/// *false success* and report a pass that did not happen.
+///
+/// "Solved" requires BOTH: the cookie is present AND the current
+/// document is no longer a DataDome challenge document (i.js mutated the
+/// DOM away from the interstitial / the reissued response is real
+/// content). This is the body-observable success invariant; it cannot
+/// confirm server-side acceptance of a daily-key round-trip (that needs
+/// the live-oracle regime — see datadome engine doc §11), but it
+/// eliminates the bare-cookie false positive.
+pub fn datadome_solved(cookies: &str, current_body: &str) -> bool {
+    cookies_have_datadome(cookies) && !is_datadome_challenge_doc(current_body)
+}
+
 /// One-line Phase-5 flow trace (diagnostic only — never gates flow).
 /// `still_challenge` = body after the iteration is still a DD challenge
 /// doc; `dd_before`/`dd_after` = `datadome=` present in the shared jar
@@ -330,6 +347,27 @@ mod tests {
         // Substring must not false-positive on a different cookie name.
         assert!(!cookies_have_datadome("xdatadome=1; not_datadome=2"));
         assert!(!cookies_have_datadome(""));
+    }
+
+    // FP-D3: the fail cookie + 403 interstitial body must NOT read as
+    // solved; the cookie + real content must; no cookie is never solved.
+    #[test]
+    fn datadome_solved_requires_cookie_and_non_challenge_body() {
+        // DataDome sets a `datadome=` cookie even on the failing 403.
+        assert!(
+            !datadome_solved("datadome=FAILCOOKIE", REUTERS_BODY),
+            "bare cookie + still-interstitial body must NOT be 'solved'"
+        );
+        // Cookie present AND body is no longer a challenge doc ⇒ solved.
+        assert!(datadome_solved(
+            "foo=1; datadome=OKCOOKIE",
+            "<html><body>real rendered product page</body></html>"
+        ));
+        // No cookie ⇒ never solved regardless of body.
+        assert!(!datadome_solved(
+            "foo=1; bar=2",
+            "<html><body>real rendered product page</body></html>"
+        ));
     }
 
     #[test]

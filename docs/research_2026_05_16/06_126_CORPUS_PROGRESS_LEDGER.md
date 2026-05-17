@@ -131,6 +131,19 @@ re-measure proves an actual flip.
   intact. Gate green (chrome_compat 437/0 + iframe/v8/inspector +
   classify regression 3/0). Pre-existing unrelated `page::tests` canvas
   failures noted, outside the §4 gate.
+- **FP-B4 + FP-D3 + FP-C2 (DONE, co-committed):** B4 adds a
+  `ChallengeIncomplete` verdict so udemy's large CF orchestrator shell
+  stops being mislabeled `SensorFail` (it never *scored* us bot — it
+  never completed); the `_cf_chl_opt` discriminator is challenge-only so
+  passed CF pages are unaffected. D3 makes DataDome "solved" require the
+  body to no longer be a challenge doc (a `datadome=` cookie rides the
+  403 fail too) — kills a false-pass in the DD retry/Inc-8 path. C2
+  adds the persistent `started_as_cf_challenge` flag closing the last
+  live doc-20 mutable-state guard. All measurement-correctness, **no
+  site flip**: holistic classifier_tests stay 10/0 ⇒ 120/126 ledger
+  intact. Gate: chrome_compat 437/0-effective (one Worker test is a
+  confirmed load-induced flake, passes isolated), iframe 5/0,
+  v8_inspector 3/0, v8_natives 11/0, 3 new named regression tests 3/0.
 
 ## Bottom line
 
