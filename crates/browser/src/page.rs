@@ -1795,10 +1795,27 @@ impl Page {
             }
 
             // Phase A.5 — Akamai sensor_data POST.
-            let akamai_state = page
-                .handle_akamai_flow(&client)
-                .await
-                .unwrap_or(akamai::AbckState::Unknown);
+            // Phase 5 homedepot fix (measured doc-20 anti-pattern):
+            // `handle_akamai_flow`'s sec-cpt guard checks `self.content()`
+            // (the *mutable current DOM*). After the `/Wjv3…` sec-cpt
+            // bundle runs and mutates the DOM, `sec-if-cpt-container` is
+            // gone, so the guard misses and the engine fires the WRONG
+            // BMP `sensor_data` POST to the sec-cpt verify endpoint —
+            // Akamai 201s `NeedsSensor` forever (`_abck=…~-1~` never
+            // clears) AND, per doc 20, that conflicting traffic actively
+            // prevents the bundle's own self-solve flow. Use the
+            // persistent "this nav started as sec-cpt" signal so the BMP
+            // path is suppressed for the WHOLE nav, letting the bundle be
+            // the sole actor. Narrowly gated (false for every non-sec-cpt
+            // site incl. the entire §4 gate) ⇒ zero regression; the 10
+            // passing plain-BMP Akamai sites never serve sec-if-cpt.
+            let akamai_state = if started_as_seccpt_challenge {
+                akamai::AbckState::NeedsSecCpt
+            } else {
+                page.handle_akamai_flow(&client)
+                    .await
+                    .unwrap_or(akamai::AbckState::Unknown)
+            };
 
             // W7 / Cloudflare V1 — orchestrator runner. Detect Managed/JS
             // Challenge from the rendered body and drive the event loop until
@@ -1856,6 +1873,27 @@ impl Page {
                             )
                             .unwrap_or_default();
                         eprintln!("[datadome-trace] i.js __fetchLog={fl}");
+                    }
+                    // Phase 5 (homedepot): same diagnostic for the
+                    // sec-cpt bundle — did `/Wjv3…` actually run and fire
+                    // its PoW-answer verify POST? debug_nav-gated ⇒ zero
+                    // §4 gate impact.
+                    if debug_nav && started_as_seccpt_challenge {
+                        let fl = page
+                            .event_loop()
+                            .execute_script(
+                                "JSON.stringify((globalThis._boxide&&globalThis._boxide.__fetchLog)||[])",
+                            )
+                            .unwrap_or_default();
+                        let secck = page
+                            .event_loop()
+                            .execute_script(
+                                "(function(){try{return /sec_cpt=/.test(document.cookie)?'sec_cpt-present':'no-sec_cpt'}catch(e){return 'err'}})()",
+                            )
+                            .unwrap_or_default();
+                        eprintln!(
+                            "[seccpt-trace] post-bundle cookie={secck} __fetchLog={fl}"
+                        );
                     }
 
                     let mut should_retry = (cookies_after != cookies_before
@@ -2485,12 +2523,28 @@ impl Page {
                     // gate.
                     let dd_trace = full_url.contains("captcha-delivery.com")
                         && std::env::var("BOXIDE_DD_TRACE").is_ok();
+                    // Phase 5 (homedepot): trace EVERY external-script
+                    // fetch when BOXIDE_SC_TRACE is set, so we can see
+                    // whether the obfuscated `/Wjv3…` sec-cpt bundle is
+                    // actually fetched + its size/status (the unknown the
+                    // "bundle doesn't self-solve" verdict assumed but
+                    // never measured). Env-gated, default off ⇒ zero §4
+                    // gate impact.
+                    let sc_trace = std::env::var("BOXIDE_SC_TRACE").is_ok();
                     match client.get_follow_with_headers(&full_url, &hdrs, 5).await {
                         Ok(resp) if resp.ok() => {
                             let text = resp.text();
                             if dd_trace {
                                 eprintln!(
                                     "[datadome-trace] i.js fetch OK {} status={} bytes={}",
+                                    full_url,
+                                    resp.status,
+                                    text.len()
+                                );
+                            }
+                            if sc_trace {
+                                eprintln!(
+                                    "[seccpt-trace] script fetch OK {} status={} bytes={}",
                                     full_url,
                                     resp.status,
                                     text.len()
@@ -2513,6 +2567,12 @@ impl Page {
                             if dd_trace {
                                 eprintln!(
                                     "[datadome-trace] i.js fetch NON-OK {} status={}",
+                                    full_url, resp.status
+                                );
+                            }
+                            if sc_trace {
+                                eprintln!(
+                                    "[seccpt-trace] script fetch NON-OK {} status={}",
                                     full_url, resp.status
                                 );
                             }
