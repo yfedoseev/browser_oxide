@@ -2761,6 +2761,27 @@
                 // Singleton constructors the npc/crs probes expect in child realm.
                 'Navigator', 'Location', 'History', 'Screen',
                 'Performance', 'Permissions', 'ScreenOrientation',
+                // K2-DIFF fix #2 (2026-05-17): the canvas/graphics
+                // constructor surface. Without these, an iframe child
+                // realm has `CanvasRenderingContext2D === undefined`
+                // (proven: kasada_proto_surface_probe — all 37 ctx2d
+                // proto methods missing on the child realm). Kasada's
+                // `esd.cpt` (canvas-paint) probe — and the shared
+                // `smc`/`dpv` path — fetch such a constructor/method via
+                // the VM, get `undefined`, and the CALL handler (rec 111:
+                // `l=e(n); if(l[h]&&l[h].I===l){} else l.apply(o,_)`)
+                // then evaluates `l[<sentinel>]` on `undefined` → the
+                // exact `TypeError: Cannot read properties of undefined
+                // (reading 'unjzomuybtbyyhwwkdpkxomylnab')` that aborts
+                // sensor assembly → /error instead of /tl. Real Chrome
+                // iframe realms expose the full set. Only names that are
+                // genuine main-realm globals are copied (the loop skips
+                // `undefined`), so this is Chrome-faithful, not a stub.
+                'CanvasRenderingContext2D', 'HTMLCanvasElement',
+                'OffscreenCanvas', 'ImageData', 'Path2D', 'ImageBitmap',
+                'WebGLRenderingContext', 'WebGL2RenderingContext',
+                'DOMMatrix', 'DOMMatrixReadOnly', 'DOMPoint',
+                'DOMRect', 'DOMRectReadOnly',
             ];
             for (const _ak of _apisToCopy) {
                 try {

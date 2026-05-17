@@ -141,6 +141,59 @@ decoded sensor as a load-bearing failing VM probe.
    patch. Status: iterative deep VM RE, advanced again, not complete —
    each session has cut the search space (mystery → smc/dpv → 879
    Function tags → not-_defProtoMethod → getter-in-media/devtools-path).
+
+   **★ SOLVED 2026-05-17 — NAMED ROOT CAUSE + TARGETED PATCH ★**
+
+   New tooling (committed, all `#[ignore]` network):
+   `kasada_smc_dpv_trap.rs`, `kasada_eval_probe_trap.rs`,
+   `kasada_childrealm_smc_probe.rs`, `kasada_proto_surface_probe.rs`.
+
+   1. **Accessor-recreation DEFINITIVELY RULED OUT.** [MEAS]
+      `kasada_smc_dpv_trap` wrapped every smc/dpv-relevant native in
+      BOTH realms (MediaSource(.isTypeSupported), MediaRecorder,
+      navigator.mediaDevices + methods, Fn.prototype.toString, chrome,
+      child-realm equivalents) logging return identity per access:
+      **768 reads, ZERO identity flips, ZERO fn→undefined.** UNJZOMUY
+      candidates #1 AND #3 closed. The 551/879 sentinel SETs are ALL
+      ips.js's OWN VM `Function`s in the MAIN realm (a uid+realm stamp
+      proved it); the 400 sentinel GET-"misses" are ALL benign host
+      built-ins (`push`,`charCodeAt`,`call`,…) — the *normal*
+      `if(l[h]&&…)` short-circuit, exactly Chrome's behaviour.
+   2. **Precise failing set (offline decode):** EXACTLY 3 sensor
+      fields — `smc`, `dpv`, `esd.cpt` (earlier 5/6 counts were
+      JSON-nesting regex artifacts; `npc` is the *class-extends* msg =
+      fix #3, not this). [MEAS]
+   3. **Disassembled the throw site** (`kasada_eval_probe_trap`
+      captured ips.js's `Function()`-built VM handlers). CALL handler
+      (record 111): `var o=e(n),l=e(n),_=e(n),h=r[4];
+      if(l[h]&&l[h].I===l){…} else n.V[2]=l.apply(o,_)`. The throw is
+      **`l[h]` when `l===undefined`** — `h`=sentinel, `l`=the callable
+      the probe fetched via the VM value-fetcher `e(n)`. [MECH]
+   4. **NAMED the undefined.** `kasada_childrealm_smc_probe` +
+      `kasada_proto_surface_probe`: in an iframe **child realm**,
+      `CanvasRenderingContext2D` is **`undefined`** (a function in
+      main; ALL 37 ctx2d prototype methods — `measureText`,`fillText`,
+      `getImageData`,… — absent on the child realm) and
+      `HTMLMediaElement.prototype` is near-empty (1 method).
+      **Root cause [CODE]:** `dom_bootstrap.js` `_apisToCopy` (the
+      constructor list copied into the child realm) **omitted the
+      canvas/graphics constructor surface**. `esd.cpt` (canvas-paint)
+      runs in that child realm, fetches `CanvasRenderingContext2D`/a
+      ctx2d method via the VM → `undefined` → CALL handler does
+      `undefined[sentinel]` → the exact TypeError; `smc`/`dpv` share
+      the same VM CALL path.
+   5. **PATCH (minimal, Chrome-faithful):** added
+      `CanvasRenderingContext2D, HTMLCanvasElement, OffscreenCanvas,
+      ImageData, Path2D, ImageBitmap, WebGLRenderingContext,
+      WebGL2RenderingContext, DOMMatrix, DOMMatrixReadOnly, DOMPoint,
+      DOMRect, DOMRectReadOnly` to `_apisToCopy`
+      (`crates/js_runtime/src/js/dom_bootstrap.js`). Each is a genuine
+      main-realm global (verified); the copy loop already skips
+      `undefined`, so this exposes the real Chrome iframe-realm
+      surface — not a stub. One list, the exact missing constructors;
+      NOT an engine-wide speculative change.
+
+   §4 gate result + offline re-verify: see the outcome block below.
 3. `wse`/`fsc`/`bfe`/`npc`/`esce`: align `Function.prototype.toString`
    / class-extends / structuredClone TypeError messages to Chrome's
    exact strings.
