@@ -142,7 +142,12 @@ decoded sensor as a load-bearing failing VM probe.
    each session has cut the search space (mystery → smc/dpv → 879
    Function tags → not-_defProtoMethod → getter-in-media/devtools-path).
 
-   **★ SOLVED 2026-05-17 — NAMED ROOT CAUSE + TARGETED PATCH ★**
+   **★ 2026-05-17 — SEARCH SPACE EXHAUSTED + ONE REAL DIVERGENCE
+   CLOSED (throw NOT yet resolved — honest) ★**
+   (A confidently-named *candidate* root cause was patched gate-green
+   and Chrome-faithfully, then the offline decode proved it is NOT the
+   load-bearing cause — see the RE-VERIFY block. Net: a decisive
+   elimination + reusable tooling, not a fix of the throw.)
 
    New tooling (committed, all `#[ignore]` network):
    `kasada_smc_dpv_trap.rs`, `kasada_eval_probe_trap.rs`,
@@ -169,19 +174,21 @@ decoded sensor as a load-bearing failing VM probe.
       if(l[h]&&l[h].I===l){…} else n.V[2]=l.apply(o,_)`. The throw is
       **`l[h]` when `l===undefined`** — `h`=sentinel, `l`=the callable
       the probe fetched via the VM value-fetcher `e(n)`. [MECH]
-   4. **NAMED the undefined.** `kasada_childrealm_smc_probe` +
+   4. **A strong candidate divergence (later disproven as THE
+      cause).** `kasada_childrealm_smc_probe` +
       `kasada_proto_surface_probe`: in an iframe **child realm**,
-      `CanvasRenderingContext2D` is **`undefined`** (a function in
-      main; ALL 37 ctx2d prototype methods — `measureText`,`fillText`,
-      `getImageData`,… — absent on the child realm) and
-      `HTMLMediaElement.prototype` is near-empty (1 method).
-      **Root cause [CODE]:** `dom_bootstrap.js` `_apisToCopy` (the
-      constructor list copied into the child realm) **omitted the
-      canvas/graphics constructor surface**. `esd.cpt` (canvas-paint)
-      runs in that child realm, fetches `CanvasRenderingContext2D`/a
-      ctx2d method via the VM → `undefined` → CALL handler does
-      `undefined[sentinel]` → the exact TypeError; `smc`/`dpv` share
-      the same VM CALL path.
+      `CanvasRenderingContext2D` was **`undefined`** (a function in
+      main; ALL 37 ctx2d prototype methods absent on the child realm)
+      and `HTMLMediaElement.prototype` near-empty. [CODE]
+      `dom_bootstrap.js` `_apisToCopy` (the constructor list copied
+      into the child realm; WebIDL ctors are non-enumerable so the
+      `Object.keys()` blanket-copy misses them) **omitted the
+      canvas/graphics constructor surface**. HYPOTHESIS [HYP]: the
+      child-realm `esd.cpt`/`smc`/`dpv` VM path fetches such a
+      ctor/method → `undefined` → rec-111 `undefined[sentinel]`. This
+      was a real Chrome-divergence worth closing regardless; the
+      offline re-verify (below) then **falsified it as the
+      load-bearing cause** (throw persists) — a clean elimination.
    5. **PATCH (minimal, Chrome-faithful):** added
       `CanvasRenderingContext2D, HTMLCanvasElement, OffscreenCanvas,
       ImageData, Path2D, ImageBitmap, WebGLRenderingContext,
@@ -193,7 +200,60 @@ decoded sensor as a load-bearing failing VM probe.
       surface — not a stub. One list, the exact missing constructors;
       NOT an engine-wide speculative change.
 
-   §4 gate result + offline re-verify: see the outcome block below.
+   **§4 GATE: GREEN** (commit `80818a5`). chrome_compat 437/0,
+   holistic 10/0 (ledger byte-equiv), iframe_isolation 5/0 (+1
+   ignored fp_e1), v8_inspector_parity 3/0, v8_natives 11/0. No
+   chrome_compat test needed correction (the patch is purely
+   additive). Only failures anywhere = the 2 pre-existing
+   `page::tests` canvas tests (`page.rs` untouched by the patch —
+   verified `git diff --stat`; env `getContext` limit; outside the
+   gate — the documented acceptable exception).
+
+   **OFFLINE RE-VERIFY: HONEST NEGATIVE (decisive elimination).** [MEAS]
+   `kasada_proto_surface_probe` on the patched build confirms the fix
+   LANDED — child realm now has `CanvasRenderingContext2D` as a
+   function with **all 37 ctx2d prototype methods** (`bothProto=37,
+   missing=0`; was `child=undefined, missing=37`); `HTMLCanvasElement`
+   fully populated. **BUT** a fresh `kasada_tl_capture` + decode
+   (`/tmp/kasada_tl/decoded_POSTPATCH.json` vs
+   `decoded_PREPATCH_baseline.json`): `smc`, `dpv`, `esd.cpt` STILL
+   carry the IDENTICAL sentinel `TypeError` (FIXED: none; REGRESSED:
+   none; `esd.cpt` stack still `at eval (<anonymous>:3:66) ← at
+   U(ips.js)`). So the missing child-realm canvas/graphics
+   constructor surface was **a real Chrome-divergence (now closed,
+   Chrome-faithful, gate-green) but NOT the load-bearing cause** of
+   the unjzomuy throw. This is a *decisive elimination*, not a
+   regression: it removes a confounder and proves the `undefined`
+   does NOT come from a missing child-realm constructor/proto method.
+
+   **What is now RULED OUT for the unjzomuy throw (hard data):**
+   (a) UNJZOMUY cand #1/#3 accessor-recreation — 768 reads, 0 flips;
+   (b) sentinel tag-loss on ips.js's own VM frames — 551 SETs all
+   succeed (main realm, uid-stamped); the 400 GET-"misses" are the
+   benign host `if(l[h]&&…)` short-circuit (Chrome-identical);
+   (c) child-realm constructor/prototype-surface absence — patched &
+   re-verified, throw persists; (d) `smc.v:false` symptom — unchanged
+   diagnosis (chrome_compat passes).
+
+   **SHARPENED NEXT STEP (defined, not done).** The throw is
+   `l[h]` with `l===undefined` in CALL handler rec 111
+   (`var o=e(n),l=e(n),_=e(n),h=r[4]`). `l` is fetched by the VM
+   value-fetcher `e(n)` from `n.V` (the VM value array). For EXACTLY
+   `smc`/`dpv`/`esd.cpt` (3 of 123; `mrs`/`spd`/`ifw` which also use
+   the child realm do NOT throw), `e(n)` yields `undefined` at a
+   FIXED column (`<anonymous>:3:66`) ⇒ a structural code-shape /
+   VM-bytecode-path divergence, NOT a missing host API (a missing API
+   would vary by probe). Next: instrument the VM **value-fetcher
+   itself** — wrap/shadow `n.V` element reads (or the `e`/`v` fn
+   refs passed into the rec-111 handler) to log, at the first
+   `l===undefined`, the preceding `a(n,…)` writes into that VM slot
+   for the smc/dpv/cpt invocation — i.e. trace WHY `n.V[k]` is
+   `undefined` (which earlier opcode failed to populate it). That is
+   the last localization layer; it requires hooking the VM's own
+   `e`/`a`/`v` closures (capturable: they are args to the
+   `Function()`-built handler bodies `kasada_eval_probe_trap` already
+   records) rather than any host accessor — host-accessor space is
+   now exhausted.
 3. `wse`/`fsc`/`bfe`/`npc`/`esce`: align `Function.prototype.toString`
    / class-extends / structuredClone TypeError messages to Chrome's
    exact strings.
