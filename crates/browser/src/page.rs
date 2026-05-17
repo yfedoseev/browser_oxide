@@ -1778,6 +1778,26 @@ impl Page {
                         String::new()
                     };
 
+                    // Phase 5 instrumentation: at the exact decision point
+                    // where the cookie-diff retry would re-issue the
+                    // original URL, record whether the DataDome i.js
+                    // round-trip actually landed a `datadome=` cookie.
+                    // `cookie_gained=false` here ⇒ the bundle's VM/WASM
+                    // did not complete (the next increment's target);
+                    // `true` ⇒ the existing retry already re-issues.
+                    // debug_nav-gated ⇒ zero §4-gate impact.
+                    if debug_nav && crate::datadome_handler::is_datadome_challenge_doc(&current_html)
+                    {
+                        eprintln!(
+                            "{}",
+                            crate::datadome_handler::dd_flow_summary(
+                                page.is_anti_bot_challenge(),
+                                crate::datadome_handler::cookies_have_datadome(&cookies_before),
+                                crate::datadome_handler::cookies_have_datadome(&cookies_after),
+                            )
+                        );
+                    }
+
                     let mut should_retry = (cookies_after != cookies_before
                         && !cookies_after.is_empty())
                         || (last_accept_ch_upgrade && !accept_ch_retry_done);
@@ -2397,9 +2417,25 @@ impl Page {
                     hdrs.push(("sec-fetch-mode".to_string(), "no-cors".to_string()));
                     hdrs.push(("sec-fetch-site".to_string(), "cross-site".to_string()));
                     
+                    // Phase 5 instrumentation (doc 05 §2d follow-up):
+                    // trace the DataDome i.js external-script fetch so the
+                    // next increment has hard evidence of whether the
+                    // bundle even loads + its size. Env-gated, default
+                    // off ⇒ zero behavioral/perf/log change to the §4
+                    // gate.
+                    let dd_trace = full_url.contains("captcha-delivery.com")
+                        && std::env::var("BOXIDE_DD_TRACE").is_ok();
                     match client.get_follow_with_headers(&full_url, &hdrs, 5).await {
                         Ok(resp) if resp.ok() => {
                             let text = resp.text();
+                            if dd_trace {
+                                eprintln!(
+                                    "[datadome-trace] i.js fetch OK {} status={} bytes={}",
+                                    full_url,
+                                    resp.status,
+                                    text.len()
+                                );
+                            }
                             if full_url.contains("qauth") || full_url.contains("ips.js") || full_url.contains("antibot") {
                                 let safe_name = full_url.replace("/", "_").replace(":", "_").replace("?", "_");
                                 let _ = std::fs::write(format!("oxide_dump/{}", safe_name), &text);
@@ -2414,10 +2450,22 @@ impl Page {
                             }
                         }
                         Ok(resp) => {
+                            if dd_trace {
+                                eprintln!(
+                                    "[datadome-trace] i.js fetch NON-OK {} status={}",
+                                    full_url, resp.status
+                                );
+                            }
                             tracing::warn!(script_index = i, url = %full_url, status = resp.status, "Script fetch returned non-OK status");
                             None
                         }
                         Err(e) => {
+                            if dd_trace {
+                                eprintln!(
+                                    "[datadome-trace] i.js fetch ERR {} err={:?}",
+                                    full_url, e
+                                );
+                            }
                             tracing::warn!(script_index = i, url = %full_url, error = ?e, "Script fetch failed");
                             None
                         }

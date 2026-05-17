@@ -214,6 +214,32 @@ pub fn is_datadome_challenge_doc(body: &str) -> bool {
     detect_datadome_interstitial(body).is_some()
 }
 
+/// True iff a `Cookie:`-style jar string carries a `datadome=` value
+/// (the cookie a successful i.js round-trip lands). Used by the Phase-5
+/// flow diagnostic to answer "did the self-solve actually progress?".
+pub fn cookies_have_datadome(cookies: &str) -> bool {
+    cookies
+        .split(';')
+        .any(|c| c.trim_start().starts_with("datadome="))
+}
+
+/// One-line Phase-5 flow trace (diagnostic only — never gates flow).
+/// `still_challenge` = body after the iteration is still a DD challenge
+/// doc; `dd_before`/`dd_after` = `datadome=` present in the shared jar
+/// before/after the challenge document ran its i.js. The interesting
+/// signal for the next increment is `cookie_gained=true`
+/// (round-trip succeeded) vs `false` (i.js VM/WASM did not complete).
+pub fn dd_flow_summary(still_challenge: bool, dd_before: bool, dd_after: bool) -> String {
+    format!(
+        "[datadome-trace] still_challenge={} datadome_cookie_before={} \
+         datadome_cookie_after={} cookie_gained={}",
+        still_challenge,
+        dd_before,
+        dd_after,
+        dd_after && !dd_before
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +320,27 @@ mod tests {
         assert!(!is_datadome_challenge_doc(
             r#"<html><body>real rendered page, no challenge</body></html>"#
         ));
+    }
+
+    #[test]
+    fn cookies_have_datadome_detects_only_real_cookie() {
+        assert!(cookies_have_datadome("foo=1; datadome=ABC123; bar=2"));
+        assert!(cookies_have_datadome("datadome=XYZ"));
+        assert!(!cookies_have_datadome("foo=1; bar=2"));
+        // Substring must not false-positive on a different cookie name.
+        assert!(!cookies_have_datadome("xdatadome=1; not_datadome=2"));
+        assert!(!cookies_have_datadome(""));
+    }
+
+    #[test]
+    fn dd_flow_summary_flags_cookie_gain() {
+        let s = dd_flow_summary(true, false, true);
+        assert!(s.contains("cookie_gained=true"));
+        let s2 = dd_flow_summary(true, false, false);
+        assert!(s2.contains("cookie_gained=false"));
+        // Already-present cookie is not a "gain".
+        let s3 = dd_flow_summary(false, true, true);
+        assert!(s3.contains("cookie_gained=false"));
     }
 
     #[test]
