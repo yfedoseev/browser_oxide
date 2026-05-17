@@ -688,8 +688,30 @@ RENDERED*, which is exactly what "engine-addressable universal block
 flipped" means for the ceiling, but it is not yet a full content
 render (a follow-up nav-continuation refinement, not a re-block).
 **Net: the doc-20 fix is the first real Phase-5 site flip; homedepot
-is no longer sec-cpt-blocked. etsy/tripadvisor remain the DataDome
-WASM-iframe-daily-key L endgame (unchanged).**
+is no longer sec-cpt-blocked.**
+
+**etsy/tripadvisor — L endgame now EARNED, not assumed (same rigor
+applied).** The homedepot win came from refusing to rest on an "L
+endgame" assumption; the same verify-don't-assume was then applied to
+etsy: (a) raw etsy trace re-examined — i.js loads 200/15 KB, no
+further self-solve; (b) engine `postMessage` checked
+(`dom_bootstrap.js:2692`) — it is a *reasonable* child→parent
+delivery (dispatches `message` on the parent), **not** a no-op, so
+NOT the blocker. ⇒ Unlike homedepot (one concrete doc-20 routing
+bug), etsy's `rt:'i'` is a genuinely multi-part irreducible chain:
+script-injected **cross-origin iframe** instantiation **+** that
+iframe loading/running its own bundle **+ WASM `boring_challenge`** in
+the child realm **+** the postMessage round-trip **+** server
+acceptance vs a **6-char *daily*-rotating key + JA4 server-side TLS**.
+No single concrete bug gates it (homedepot had one; etsy does not).
+The network-free §4 gate structurally cannot verify a daily-key flip,
+and the directive forbids the HTTP shortcuts (§6). This is the real
+Phase-5 L endgame, now confirmed by trace+source, not inferred.
+**Final loop outcome: 1 of the 3 named engine-addressable blocks
+flipped (homedepot, the tractable one — concrete doc-20 fix,
+gate-green, committed `b623d5d`); etsy/tripadvisor are the earned-L
+DataDome WASM/daily-key endgame requiring an explicitly-authorized
+live-oracle regime.**
 
 ## 8. One-line summary for the next session
 
