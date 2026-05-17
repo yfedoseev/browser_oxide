@@ -3265,6 +3265,26 @@
 
     // MutationObserver — real implementation in dom_bootstrap.js
 
+    // Task#2: real Chrome exposes `IntersectionObserverEntry` as a
+    // global whose PROTOTYPE carries `intersectionRatio` /
+    // `isIntersecting` (readonly accessors). duolingo's
+    // `supportsIntersectionObserver` capability gate checks exactly
+    // `"IntersectionObserverEntry" in window && "intersectionRatio" in
+    // window.IntersectionObserverEntry.prototype && "isIntersecting" in
+    // …prototype`; without a real entry class the homepage
+    // self-redirects to /errors/not-supported.html. Class getters land
+    // on the prototype, satisfying the `in prototype` checks.
+    globalThis.IntersectionObserverEntry = class IntersectionObserverEntry {
+        constructor(init = {}) { this._i = init || {}; }
+        get target() { return this._i.target ?? null; }
+        get isIntersecting() { return this._i.isIntersecting ?? false; }
+        get intersectionRatio() { return this._i.intersectionRatio ?? 0; }
+        get boundingClientRect() { return this._i.boundingClientRect ?? null; }
+        get intersectionRect() { return this._i.intersectionRect ?? null; }
+        get rootBounds() { return this._i.rootBounds ?? null; }
+        get time() { return this._i.time ?? 0; }
+    };
+
     // IntersectionObserver — fires immediately since all elements are "in viewport" in headless
     globalThis.IntersectionObserver = class IntersectionObserver {
         constructor(callback, options = {}) {
@@ -3277,7 +3297,7 @@
             // In headless mode, all elements are considered intersecting
             Promise.resolve().then(() => {
                 if (!this._elements.has(target)) return;
-                const entry = {
+                const entry = new globalThis.IntersectionObserverEntry({
                     target,
                     isIntersecting: true,
                     intersectionRatio: 1.0,
@@ -3285,7 +3305,7 @@
                     intersectionRect: target.getBoundingClientRect ? target.getBoundingClientRect() : {},
                     rootBounds: null,
                     time: performance.now(),
-                };
+                });
                 this._callback([entry], this);
             });
         }

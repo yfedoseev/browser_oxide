@@ -115,6 +115,24 @@
             this.method = (init.method ?? "GET").toUpperCase();
             this.headers = new Headers(init.headers ?? {});
             this.body = init.body ?? null;
+            this._signal = init.signal ?? null;
+        }
+        // Task#2: real Chrome's Request has a readonly `signal`
+        // accessor ON Request.prototype (per the Fetch spec). Defined
+        // as a class getter so `Object.hasOwnProperty.call(
+        // Request.prototype,"signal")` is true — duolingo's
+        // `supportsAbortController` capability gate requires exactly
+        // that; without it the homepage self-redirects to
+        // /errors/not-supported.html. Lazily backs an AbortSignal so
+        // `request.signal` is a non-null AbortSignal like real Chrome.
+        get signal() {
+            if (this._signal == null
+                && typeof globalThis.AbortController === "function") {
+                try {
+                    this._signal = new globalThis.AbortController().signal;
+                } catch (_e) { /* leave null if AbortController throws */ }
+            }
+            return this._signal;
         }
     }
 
