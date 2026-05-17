@@ -43,6 +43,33 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Task#3: has the in-V8 sec-cpt bundle reached the **solved** state?
+///
+/// The `sec_cpt` cookie is `sec_cpt=<sec>~<state>~…`; Akamai advances
+/// `<state>` to `3` once the obfuscated bundle's PoW + enforced
+/// `chlg_duration` wait complete and the challenge is cleared (the
+/// `~3~` marker, per docs.hypersolutions.co / 02_AKAMAI.md §5). Bare
+/// presence of the cookie is NOT success — it is set unsolved on the
+/// 428 too (same false-success class as DataDome's cookie; cf.
+/// `datadome_handler::datadome_solved`).
+///
+/// **Structural invariant (documented, enforced by the navigate loop,
+/// not here):** clearing sec-cpt needs **≥2 nav iterations** — iter 0
+/// serves the interstitial and the bundle self-solves to `~3~`; the
+/// post-solve reload that fetches the real content is hard-gated
+/// `iter + 1 < iterations` in `navigate_loop_internal`. A 1-iteration
+/// nav can reach `~3~` but structurally cannot render the cleared
+/// page. (This is why the strict 1-iter audit shows homedepot blocked
+/// while the sanctioned 3-iter `holistic_sweep` metric shows it
+/// `L3-RENDERED` — different lenses, not a regression.)
+pub fn sec_cpt_solved(cookies: &str) -> bool {
+    cookies
+        .split(';')
+        .map(|c| c.trim())
+        .filter_map(|c| c.strip_prefix("sec_cpt="))
+        .any(|v| v.contains("~3~"))
+}
+
 /// sec-cpt challenge payload as decoded from the 428 response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecCptChallenge {
@@ -131,6 +158,20 @@ fn find_answer(prefix: &str, difficulty: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Task#3 regression: only the `~3~` solved state counts; the bare
+    // (unsolved) sec_cpt cookie set on the 428 must NOT read as solved.
+    #[test]
+    fn sec_cpt_solved_requires_state_3() {
+        // Unsolved: cookie present but state != 3 (set on the 428).
+        assert!(!sec_cpt_solved("foo=1; sec_cpt=abc~1~xyz; bar=2"));
+        assert!(!sec_cpt_solved("sec_cpt=abc~2~xyz"));
+        assert!(!sec_cpt_solved("")); // no cookie
+        assert!(!sec_cpt_solved("notsec_cpt=abc~3~")); // wrong cookie name
+        // Solved: state advanced to 3 by the in-V8 bundle.
+        assert!(sec_cpt_solved("foo=1; sec_cpt=abc~3~deadbeef; bar=2"));
+        assert!(sec_cpt_solved("sec_cpt=longprefix~3~tail"));
+    }
 
     #[test]
     fn solves_low_difficulty_within_seconds() {

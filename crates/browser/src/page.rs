@@ -1587,10 +1587,19 @@ impl Page {
             {
                 90_000
             }
-            // Akamai BMP-protected.
+            // Akamai sec-cpt PoW (Task#3): the obfuscated sec-cpt
+            // bundle runs a heavy in-page VM PoW comparable to Kasada
+            // and needs ≥2 iterations (build → bundle self-solve →
+            // `sec_cpt=…~3~` → post-solve reload). 25 s (the plain-BMP
+            // tier) is too tight — the b623d5d flip was observed at
+            // nav_ms≈119 s, surviving only on budget-extend stacking.
+            // Give it the Kasada heavy-PoW tier so the flip is
+            // deterministic, not budget-luck. (bestbuy is the benign
+            // i18n splash — Task#1 — so it stays in the plain-BMP tier.)
+            Some(h) if h.ends_with("homedepot.com") => 45_000,
+            // Akamai BMP-protected (plain sensor_data, no sec-cpt PoW).
             Some(h)
                 if h.ends_with("bestbuy.com")
-                    || h.ends_with("homedepot.com")
                     || h.ends_with("nike.com")
                     || h.ends_with("adidas.com")
                     || h.ends_with("samsclub.com")
@@ -1877,6 +1886,32 @@ impl Page {
                                 &now,
                                 &page.content(),
                             ) {
+                                break;
+                            }
+                        }
+                    }
+                    // Task#3 (homedepot deterministic sec-cpt): the
+                    // Akamai sec-cpt bundle self-solves in our V8 and
+                    // transitions the `sec_cpt` cookie to the `~3~`
+                    // (solved) state WITHOUT setting a pending nav —
+                    // exactly analogous to the DataDome break above.
+                    // Pre-fix, the b623d5d flip survived only on
+                    // incidental budget-stacking (observed nav_ms≈119s);
+                    // break the instant the documented `~3~` success
+                    // marker appears so the post-sec-cpt reload is
+                    // deterministic, not budget-luck. Gated by
+                    // `started_as_seccpt_challenge` ⇒ false for every
+                    // non-sec-cpt site ⇒ zero §4 regression.
+                    if started_as_seccpt_challenge {
+                        if let Some(p) = parsed_current.as_ref() {
+                            let now =
+                                client.cookies_for_url(p).await.unwrap_or_default();
+                            if akamai::sec_cpt::sec_cpt_solved(&now) {
+                                if debug_nav {
+                                    eprintln!(
+                                        "[seccpt] sec_cpt cookie reached ~3~ (solved) — breaking poll for the post-solve reload"
+                                    );
+                                }
                                 break;
                             }
                         }
