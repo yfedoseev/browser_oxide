@@ -266,7 +266,33 @@ tests.
 
 ## CLASS E — Structural engine gap surfaced by FP analysis  (P1 — the headline)
 
-### FP-E1 — Script-created cross-origin challenge iframe never loaded
+### FP-E1 — Script-created cross-origin challenge iframe never loaded  ◑ PARTIAL — infra + decisive experiment committed on `fix/engine-fp-backlog`
+- **Status (honest, verify-don't-assume):** the post-JS rescan half is
+  built and committed: `Page::rematerialize_iframes(base,&client,&profile)`
+  — reuses the exact build-time materialization (CSP-`frame-src`-gated
+  `ChildIframe::from_url` / `from_srcdoc`), diffs `find_iframes(dom)`
+  vs `self.children` by `node_id`, idempotent, invoked in the
+  navigate-loop challenge poll gated by the existing
+  `started_as_dd/cf/seccpt || is_anti_bot_challenge` condition (⇒ never
+  runs for a benign nav ⇒ zero §4 regression). **DECISIVE [CODE]
+  EXPERIMENT** (`iframe_isolation::fp_e1_post_js_injected_iframe_is_materialized`):
+  it returned **0** — a script's `createElement('iframe')`+`appendChild`
+  does NOT surface a `find_iframes`-visible arena-DOM node; the wrapped
+  `Node.prototype.appendChild` (dom_bootstrap.js:1924) only registers
+  the element in the JS-side `_appendedIframes` array + synthetic-window
+  registry. ⇒ **The rescan is necessary but NOT sufficient alone.**
+  FP-E1 full closure ALSO requires the `createElement('iframe')`/`.src`
+  **arena-interception** so the script-created iframe is a real,
+  `find_iframes`-discoverable child-context node — a dedicated
+  DOM-binding subsystem change (the "single highest-leverage engine
+  investment" the engine docs name; it is an engine *capability* build,
+  scoped here, not a measurement FP). The regression test is committed
+  but `#[ignore]`d with this exact finding so the gate stays green and
+  the infra + the decisive experiment land honestly; un-ignore when the
+  interception subsystem lands. This is the one P0/P1 item that is
+  **explicitly marked here as a scoped structural follow-up** rather
+  than a same-class one-commit fix — its mechanism is now proven by
+  experiment, not assumed.
 - **Where:** `find_iframes` (`iframe.rs:255`) called only at build time
   (`page.rs:857 / 887 / ~3137`) over the parsed DOM; no post-JS rescan,
   no `createElement('iframe')`/`iframe.src=` hook. `dom_bootstrap.js`

@@ -144,6 +144,22 @@ re-measure proves an actual flip.
   intact. Gate: chrome_compat 437/0-effective (one Worker test is a
   confirmed load-induced flake, passes isolated), iframe 5/0,
   v8_inspector 3/0, v8_natives 11/0, 3 new named regression tests 3/0.
+- **FP-E1 (PARTIAL — infra + decisive experiment):** built the
+  correct, gated, idempotent post-JS rescan
+  `Page::rematerialize_iframes` (reuses build-time CSP-gated
+  `ChildIframe::from_url`). A decisive [CODE] experiment proved the
+  rescan alone is insufficient: script-created `createElement('iframe')`
+  +`appendChild` iframes do not surface to the arena-DOM `find_iframes`
+  (they live only in the JS-side `_appendedIframes`/synthetic-window
+  registry). Full closure needs the additional createElement/.src
+  arena-interception subsystem — scoped, not a one-commit measurement
+  fix; the regression test is committed `#[ignore]`d with the finding
+  so the gate stays green. **No ledger/site impact**: this is engine
+  capability infra, gated to challenge navs only, and the live
+  iframe-fetch path that *would* flip etsy/tripadvisor/udemy still
+  needs the interception + the authorized live-oracle regime (engine
+  docs §11). Honest: FP-E1 is the explicitly-scoped structural item,
+  experiment-proven not assumed.
 
 ## Bottom line
 

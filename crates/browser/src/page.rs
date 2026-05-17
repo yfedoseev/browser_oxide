@@ -887,6 +887,92 @@ impl Page {
         self.children.len()
     }
 
+    /// FP-E1: post-JS DOM rescan — materialize **script-injected**
+    /// iframes.
+    ///
+    /// `find_iframes` runs only at *build time* over the parsed DOM
+    /// (`build_page_with_scripts_init_and_storage`). When a vendor
+    /// challenge script `appendChild`s `<iframe src="https://
+    /// geo.captcha-delivery.com/…">` (DataDome) or `challenges.
+    /// cloudflare.com` (Cloudflare Turnstile) *after* build, the
+    /// `dom_bootstrap.js` hook only fabricates a synthetic
+    /// `contentWindow` — the challenge document is **never fetched or
+    /// executed**, which structurally blocks DataDome
+    /// etsy/tripadvisor and every modern CF Managed Challenge
+    /// (`docs/research/engines/99_CODE_FALSE_POSITIVES.md` FP-E1, the
+    /// single highest-leverage gap).
+    ///
+    /// This rescans the *current* (post-JS) DOM and, for every iframe
+    /// whose `node_id` is not already materialized in `self.children`,
+    /// performs the SAME real cross-origin fetch + child-context
+    /// execution the build-time path does (`ChildIframe::from_url`,
+    /// CSP-`frame-src`-gated identically to build time). Returns the
+    /// number of newly materialized iframes. Idempotent: re-running
+    /// only picks up iframes injected since the last call.
+    ///
+    /// Caller MUST gate this on a challenge-origin flag (it is invoked
+    /// only inside the challenge poll) so it never runs for a benign
+    /// nav ⇒ zero §4-gate regression risk, same narrow-gating
+    /// discipline as `started_as_dd/cf/seccpt_challenge`.
+    pub async fn rematerialize_iframes(
+        &mut self,
+        base_url: &str,
+        client: &net::HttpClient,
+        profile: &stealth::StealthProfile,
+    ) -> usize {
+        // Snapshot the current DOM's iframes (scoped borrow, dropped
+        // before any await / before touching self.children).
+        let iframes = {
+            let dom_ref = self.event_loop.runtime_mut().inner();
+            let state = dom_ref.op_state();
+            let state = state.borrow();
+            let dom_state = state.borrow::<js_runtime::state::DomState>();
+            iframe::find_iframes(&dom_state.dom)
+        };
+        let already: Vec<_> = self.children.iter().map(|c| c.node_id).collect();
+        let mut materialized = 0usize;
+        for info in &iframes {
+            if already.iter().any(|n| *n == info.node_id) {
+                continue; // already a real child context — not script-new
+            }
+            if let Some(srcdoc) = &info.srcdoc {
+                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, profile)
+                    .await
+                {
+                    Ok(child) => {
+                        self.children.push(child);
+                        materialized += 1;
+                    }
+                    Err(e) => tracing::warn!(error = %e, "rematerialize srcdoc error"),
+                }
+            } else if let Some(src) = &info.src {
+                if src.is_empty() || src.starts_with("javascript:") {
+                    continue; // blank/JS frames are handled at build time
+                }
+                if let Some(full_src) = Self::resolve_url(base_url, src) {
+                    match iframe::ChildIframe::from_url(
+                        info.node_id,
+                        &full_src,
+                        client,
+                        Some(profile),
+                    )
+                    .await
+                    {
+                        Ok(child) => {
+                            self.children.push(child);
+                            materialized += 1;
+                        }
+                        Err(e) => tracing::warn!(
+                            src = %full_src, error = %e,
+                            "rematerialize src-iframe error (CSP-blocked or fetch failed)"
+                        ),
+                    }
+                }
+            }
+        }
+        materialized
+    }
+
     /// Evaluate arbitrary JavaScript and return the result as a string.
     pub fn evaluate(&mut self, js: &str) -> Result<String, deno_core::error::AnyError> {
         self.event_loop.execute_script(js)
@@ -1726,6 +1812,22 @@ impl Page {
                     let _ = page
                         .event_loop()
                         .run_until_idle(Duration::from_millis(200))
+                        .await;
+                    // FP-E1: a challenge script may have appendChild'd a
+                    // cross-origin challenge iframe (DataDome
+                    // geo.captcha-delivery.com / Cloudflare
+                    // challenges.cloudflare.com) during the tick above.
+                    // `find_iframes` ran only at build time, so such a
+                    // script-injected iframe otherwise gets ONLY a
+                    // synthetic contentWindow shim and its challenge
+                    // document is never fetched/executed (the structural
+                    // blocker for etsy/tripadvisor + every modern CF
+                    // Managed Challenge). Materialize it for real here.
+                    // Idempotent + cheap (DOM walk only) when nothing new
+                    // appeared; gated by this poll's challenge condition
+                    // ⇒ never runs for a benign nav (zero §4 regression).
+                    let _ = page
+                        .rematerialize_iframes(&current_url, &client, &profile)
                         .await;
                     pending_info = page
                         .event_loop()
