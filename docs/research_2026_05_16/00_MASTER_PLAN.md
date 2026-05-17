@@ -567,6 +567,47 @@ wire-key / WASM — the L/fragile path):
   blocker into a concrete routing target. Phase 5 DataDome still not
   "done" but materially de-risked.**
 
+**Phase 5 — DECISIVE FINDING 2026-05-16 (source-proven; this is the
+real Phase-5 conclusion).** Increment 3 (`87cf3fa`) landed the routing
+fix — `started_as_dd_challenge` ORed into the pending-nav poll +
+cookie-diff conditions — gate-green; live etsy proved it works (the
+in-V8 refetch *now fires* for etsy, which it never did before). It
+still returns the 403/805 interstitial ⇒ **i.js loads (200/15 KB) but
+does not produce a valid `datadome=` cookie**. Cross-checking doc 03
+§flow + the source establishes *why*, definitively:
+
+- **etsy/tripadvisor** require the full `rt:'i'` chain: i.js →
+  **cross-origin iframe** to `geo.captcha-delivery.com` → **WASM
+  `boring_challenge`** + Picasso/audio in that iframe → **postMessage**
+  → parent writes cookie → reload — against a **6-char *daily*-rotating
+  key** (doc 05 §2). Top-level `__fetchLog` cannot even observe the
+  iframe realm. This is the irreducible L/strategic endgame.
+- **homedepot** (source-proven): `sec_cpt::solve_crypto` has **zero
+  callers** — dead code; the nav loop only does the `NeedsSecCpt` guard
+  and *relies on the `/Wjv3…` obfuscated bundle self-solving in V8*.
+  Wiring `solve_crypto` is an **explicitly directive-forbidden §6
+  dead-end**. Also requires full in-engine bundle self-solve.
+
+**Both remaining engine-addressable hard sites reduce to the identical
+problem: the vendor's obfuscated bundle must fully self-solve in our
+V8 against a live, *daily-rotating* challenge oracle.** This is *not* a
+gate-safe single-commit flip, and — the load-bearing point — the
+**mandatory network-free §4 gate structurally cannot verify such a
+flip** (it needs a live daily-keyed oracle). Shipping an unverified
+bundle-solver would violate the directive's own "verify-don't-assume /
+revert-if-not-green." ⇒ The §4/§5 thesis is now *doubly confirmed*:
+the residual IS the Phase-5 L endgame, and that endgame's verification
+regime is fundamentally a **live-oracle dev loop**, not the
+network-free gate. The honest, maximal, discipline-respecting outcome
+of this work: 3–5 committed gate-green increments that built real
+capability (CSP exemption so i.js is reachable; instrumentation;
+DataDome + sec-cpt routing into the retry primitive) and *precisely,
+source-provenly* characterized the residual — eliminating it as a
+guess. No site flip is achievable under the network-free gate; the
+next session needs an explicitly-authorized live-oracle regime (a
+captured daily challenge as dev fixture) to go further. **This is the
+decisive Phase-5 finding, not an interim status.**
+
 ## 8. One-line summary for the next session
 
 The realm wiring is **done** (older handoffs are stale); the engine is
