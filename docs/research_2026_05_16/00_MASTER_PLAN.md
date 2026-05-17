@@ -608,6 +608,44 @@ next session needs an explicitly-authorized live-oracle regime (a
 captured daily challenge as dev fixture) to go further. **This is the
 decisive Phase-5 finding, not an interim status.**
 
+**Phase 5 — MEASURED FINAL VERDICT 2026-05-16 (live, both hard sites,
+not assumption).** Increments 4–5 landed (extra `__fetchLog` instr +
+homedepot `started_as_seccpt_challenge` routing analog), `datadome`
+unit 10/10, full §4 gate re-run. Live targeted re-measure of both
+engine-addressable hard sites with all 5 increments active:
+
+- **homedepot** (`h_store_homedepot`, live): `[akamai] sec-cpt
+  interstitial detected … skipping BMP POST` (guard correct) →
+  Increment 5 routing keeps the retry active → `iter=0/1 in-V8 refetch
+  status=200 html_len=2615` **looping on the 2.6 KB sec-cpt
+  interstitial**. The `/Wjv3…` obfuscated sec-cpt bundle **does not
+  self-solve in our V8** → no `sec_cpt` cookie → **NOT flipped**.
+- **etsy** (`h_store_etsy`, live): `i.js fetch OK …/i.js status=200
+  bytes=15014` (×3, loads cleanly) → `in-V8 refetch status=403
+  html_len=805` → `holistic-end: stores etsy DataDome-CHL len=1450`
+  → i.js's verification round-trip never lands a `datadome=` cookie →
+  **NOT flipped**.
+
+**Conclusion (measured, not inferred): zero of the engine-addressable
+hard sites flip with Increments 1–5; the 120/126 routed ceiling is
+unchanged.** Increments 1–5 are real, gate-green capability +
+de-risking that *built and proved* every upstream stage (CSP exemption
+→ i.js/bundle reachable & loads; instrumentation → exact failure point;
+routing → the retry primitive now fires for both) and reduced the
+residual to a single, sharply-located missing piece: **the vendor's
+obfuscated bundle executing-to-solution in our V8** (DataDome i.js
+WASM-iframe-postMessage chain vs 6-char daily key; Akamai `/Wjv3…`
+sec-cpt bundle). That is Phase 5's L/strategic core — *not* a
+gate-safe single commit, and the mandatory network-free §4 gate
+structurally cannot verify such a flip (only a live daily-rotating
+oracle can; the directive's own `holistic_sweep` re-measure is that
+verification, and it was run — both measure NOT flipped). The honest
+maximal outcome under the stated constraints: 5 committed gate-green
+increments that converted an opaque multi-session unknown into a
+precisely-measured, single-named-blocker problem. No fabricated flip;
+the goal's site-flip target is unmet because it requires the unbuilt
+L bundle-self-solve capability, now proven by live measurement.
+
 ## 8. One-line summary for the next session
 
 The realm wiring is **done** (older handoffs are stale); the engine is
