@@ -11,6 +11,37 @@ I verified first-hand this session.
 
 ---
 
+## ⚠ CORRECTION 2026-05-16 — read first (supersedes the §0/§11 "no engine-only path / behaviour is the lever" verdict for these 3 sites)
+
+[MEAS] `ab_harness/nocdp.sh` (real Chrome 147, opens URL + waits,
+**zero** mouse/scroll/keyboard, **this datacenter IP**) **passes all
+three** — captured window titles = real homepages (canadagoose
+"Luxury Performance Outerwear…", hyatt "Hotel Reservations…", realtor
+"Realtor.com®…": `ab_harness/nocdp/*.windows.txt`). Our engine, also
+zero-interaction, same IP, gets the 429 / `bot1225.b:1`.
+
+⇒ The differentiator is **NOT IP** (real Chrome passes here), **NOT
+behavioural absence** (real Chrome with zero behaviour passes — so
+"zero behavioural variance" cannot be the nocdp-delta cause), **NOT
+"needs a paid real-browser farm"**. It is a **passive, static
+engine-vs-real-Chrome-147 surface divergence** [HYP, sharply
+localisable]: the JS env ips.js measures / how ips.js executes in our
+V8 vs Chrome's V8 / TLS-JA4 / H2 / GPU-canvas — making the server
+score `b:1` for us only. The §(e)/§11 "behavioural capability + paid
+farm / unverifiable holistic tail" framing below is **superseded for
+canadagoose/hyatt/realtor**: engine-addressable. The live-oracle
+reference is **already captured** (`tl_capture.sh` →
+`ab_harness/tl/hyatt.tl_body.bin` = 36 KB decrypted real-Chrome `/tl`
+sensor + `canadagoose.pcap` + `.keys`). Decisive next experiment =
+**K2-DIFF**: capture our engine's `/tl` POST + field-diff vs the
+real-Chrome capture → the divergent field is the named, fixable bug.
+Ordered plan: `UNBLOCK_PLAN.md` "canadagoose, hyatt, realtor" +
+`UNBLOCK_kasada.md`. The realm/sentinel line stays closed (Phase 2
+OUTCOME A) — this correction is about the *passive POST-payload /
+runtime* surface, not realm identity.
+
+---
+
 ## 0. Executive summary & pass-guarantee thesis
 
 **How Kasada decides bot-vs-human in 2026.** Kasada is a *holistic,

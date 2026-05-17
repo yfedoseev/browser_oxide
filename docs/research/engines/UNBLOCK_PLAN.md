@@ -172,15 +172,28 @@ done): `tl_capture.sh` recorded real Chrome 147's decrypted Kasada
   PoW OFF when ips.js self-solves — a competing single-use
   `x-kpsdk-cd` is a plausible self-inflicted `b:1` confound; remove it
   before differencing.
-- **K2-DIFF (M, the decisive engine experiment — now the priority):**
-  capture **our engine's** `/tl` sensor POST for hyatt/canadagoose
-  (we already run ips.js in V8; surface what it POSTs), then
-  **field-by-field diff against the captured real-Chrome `/tl`**
-  (`hyatt.tl_body.bin`). The divergent field(s) localise *exactly*
-  which passive surface element our engine emits wrong → a concrete,
-  named, fixable engine bug, not a mystery. This is no longer "build a
-  live-oracle regime" — the oracle exists; this is "capture our side +
-  diff."
+- **K2-DIFF (M/L, decisive — METHOD CORRECTED 2026-05-17):** the
+  captured real-Chrome reference `ab_harness/tl/hyatt.tl_body.bin` is
+  the **encrypted** Kasada sensor POST (36 KB binary, per-session
+  keyed — first bytes `00 02 42 79 e2 c5 a1 36 …`). A **raw byte-diff
+  vs our encrypted POST is methodologically INVALID** — per-session
+  nonce/key makes ~every byte differ even for identical inputs; it
+  reveals nothing. The decisive experiment is the **in-VM
+  plaintext-sensor dump**: hook the point in ips.js (in our V8) where
+  it assembles the sensor *field map* **before** XOR/encrypt + POST,
+  dump that plaintext field set+values for hyatt, and **audit each
+  field against the documented Kasada sensor taxonomy**
+  (`docs/research_2026_05_14/01_KASADA.md` §6, 60+ fields) + the
+  expected real-Chrome value. The divergent field(s) = the named,
+  fixable passive-surface bug. Scaffolding: extend the existing
+  `tier0_kasada.rs` `new Function()` capture-hook (`:740-820`,
+  "Hook new Function() to capture every compiled body") to also
+  intercept the sensor-assembly object pre-encrypt. This is genuine
+  multi-step RE instrumentation (M/L), **not** a quick "capture + diff"
+  — the oracle existing only solves the *real-Chrome reference* half;
+  our half needs the in-VM hook + the taxonomy audit. Scoped, honest:
+  the single decisive next experiment, but an instrumentation build,
+  not a one-shot.
 - **K3 (M, downgraded):** wire `stealth::behavior` into `Page::navigate`
   — still worth doing for cross-vendor (DataDome Track A1) and stricter
   ML, but explicitly **not** the nocdp-delta fix and not a prerequisite
@@ -193,6 +206,34 @@ than "holistic tail". This is the single most promising
 currently-blocked cluster, not the most hopeless.
 
 ---
+
+## Behaviour-wiring (the "shared lever") — DEFERRED, re-confirmed 2026-05-17
+
+The unblock research framed wiring `stealth::behavior` into
+`Page::navigate` as the top shared lever. Re-examined against ground
+truth, it is **deliberately deferred**, not done, for three honest
+reasons:
+1. **Already largely present:** `humanize.js` (the script
+   `Page::navigate` injects) *already* implements an inline
+   sigma-lognormal Plamondon `v(t)` model (master plan §8.5 G8). The
+   gap vs `behavior.rs` is model *richness* (handedness/Fitts/ChaCha
+   determinism) — a parity nicety, not a missing capability.
+2. **Not the Kasada lever:** nocdp real Chrome passes
+   canadagoose/hyatt/realtor from this IP with **zero** behaviour, so
+   richer behaviour cannot be what closes that delta (the corrected
+   thesis above). Its only real upside is DataDome Track-A1
+   (`_initialCoordsList`) + stricter-ML margin.
+3. **Un-gateable regression risk:** Akamai `sensor_data` couples mouse
+   events; synthetic injection can shift the sensor payload and regress
+   the 10/11 currently-passing Akamai sites — and the **network-free §4
+   gate structurally cannot detect that** (no live Akamai). Blind-
+   landing a modest-value change with an un-verifiable regression risk
+   violates verify-don't-assume. It needs the same live-oracle / live-
+   Akamai regime as the deep flips. Master plan §8.5 reached this exact
+   conclusion (G8 DEFERRED); this re-confirms it + adds reason (2).
+
+⇒ Not wired. Revisit only with a live-Akamai-safe verification regime,
+bundled with DataDome Track-A.
 
 ## Recommended order (ROI-first)
 

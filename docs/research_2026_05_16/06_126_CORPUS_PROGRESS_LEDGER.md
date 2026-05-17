@@ -177,6 +177,33 @@ re-measure proves an actual flip.
   remaining createElement/.src interception + the daily-oracle flips
   require the authorized live-oracle regime, per engine docs §11).**
 
+## UNBLOCK-execution re-measure (2026-05-17, branch `fix/engine-fp-backlog`)
+
+Live 27/29-set typed audit BEFORE → AFTER the Tier-1 + K1 + homedepot
+commits (`308f8ad`, `d455794`, `8c4afae`):
+
+| | pass | thin-shell | render-incomplete | edge-block |
+|---|---:|---:|---:|---:|
+| before | 18 | 0 | 1 | **10** |
+| after  | 18 | 3 | 1 | **7** |
+
+**3 false "blocks" eliminated** (the measurement is now honest, not a
+new flip): bestbuy (→ `Akamai-i18n-splash` thin-shell — was mislabeled
+Akamai-CHL; it's the benign "Choose a country" splash), spotify
+(invisible reCAPTCHA-v3 only → thin-shell), duolingo (reCAPTCHA-v3 SDK
++ UA-redirect page → thin-shell). The genuine engine-addressable hard
+residual is now precisely **7 edge-block**: Kasada×3
+(canadagoose/hyatt/realtor — the scoped K2-DIFF passive-parity hunt),
+DataDome×2 (etsy/tripadvisor — iframe subsystem), yelp (DataDome
+interactive human-gate — out of scope), homedepot (Akamai sec-cpt —
+edge-block under the strict 1-iter audit lens only; passes under the
+sanctioned 3-iter `holistic_sweep` metric per `b623d5d` + Task#3
+determinism). Routed 120/126 / holistic classifier_tests 10/0
+unchanged (this batch was measurement-correctness + a budget-tier
+nicety — no holistic-metric site flip). K1 verified live: realtor run
+logged `[kasada] LEARNED x-kpsdk-ct` with the Rust cd correctly
+deferred to ips.js.
+
 ## Bottom line
 
 126/126 corpus is fully accounted for: **120 open under routing**, 6
