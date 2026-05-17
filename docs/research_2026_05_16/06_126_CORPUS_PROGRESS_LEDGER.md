@@ -215,8 +215,8 @@ timing-sensitive sites ⇒ these are a conservative floor):
 |---|---|
 | Desktop Chrome `chrome_130_macos` | **117** |
 | Android `pixel_9_pro_chrome_147` | **119** |
-| iOS `iphone_15_pro_safari_18` | **113 / 125 measured** (1 debug straggler) |
-| Firefox `firefox_135_macos` | pending (driver serialized) |
+| iOS `iphone_15_pro_safari_18` | **113 / 125 measured** (1 debug straggler killed to unblock Firefox) |
+| Firefox `firefox_135_macos` | **115 / 126** (FINAL — up from prior ~112) |
 
 **Per-domain routed union (any profile opens): 121/126 — up from the
 prior 120.** Only 5 routed-blocked: canadagoose/hyatt/realtor
