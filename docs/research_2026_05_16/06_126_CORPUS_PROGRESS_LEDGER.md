@@ -1,5 +1,11 @@
 # 06 — 126-CORPUS PROGRESS LEDGER (single source of truth)
 
+> **Canonical arc consolidation (read-first):**
+> `docs/research/engines/HOLISTIC_REPORT_2026_05_17.md` — the final
+> #11 4-mode+routed re-sweep (HEAD `a561459`, conservative debug+
+> contention floor) is recorded there with all caveats; routed
+> ~120–121/126, true hard residual = Kasada×3 + homedepot.
+
 **Purpose.** One canonical, consistent record of how many of the 126 sites
 we open, so a session does **not** need to re-run the full ~70-min sweep to
 know where we stand. Re-measure only after a *site-affecting* commit lands;
