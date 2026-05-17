@@ -172,6 +172,20 @@ done): `tl_capture.sh` recorded real Chrome 147's decrypted Kasada
   PoW OFF when ips.js self-solves — a competing single-use
   `x-kpsdk-cd` is a plausible self-inflicted `b:1` confound; remove it
   before differencing.
+- **K2-DIFF — EXECUTED & SUCCEEDED 2026-05-17 (see `K2DIFF_RESULT.md`).**
+  Built `kasada_tl_capture.rs`; found our engine never POSTs `/tl` — it
+  diverts to `cdndex.io/error` (~31 KB). That blob decodes
+  (`b64→JSON.data→b64→XOR omgtopkek`) to the **full 23.8 KB plaintext
+  Kasada sensor** (123 fields, §6-taxonomy-aligned). The residual is
+  now a **concrete named divergence set** (NOT a mystery): `wdt`
+  webdriver=`undefined`(vs Chrome `false`); the `unjzomuybtbyyhwwkdpkxomylnab`
+  VM-probe TypeError aborting sensor assembly (`smc`/`dpv` — matches
+  prior UNJZOMUY work); V8-vs-Chrome `Function.prototype.toString`
+  error-message mismatches (`wse`/`fsc`/`bfe`/`npc`/`esce`);
+  screen/devicePixelRatio = `"n/a"` (`dpi`/`spd`); stack-format leak of
+  the injected ips.js path (`pev`/`dpv`). Reusable offline decode =
+  per-fix re-measurement. Fix program ROI-ordered in `K2DIFF_RESULT.md`.
+  Original (now-superseded) scoping:
 - **K2-DIFF (M/L, decisive — METHOD CORRECTED 2026-05-17):** the
   captured real-Chrome reference `ab_harness/tl/hyatt.tl_body.bin` is
   the **encrypted** Kasada sensor POST (36 KB binary, per-session
