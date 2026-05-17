@@ -707,6 +707,28 @@ No single concrete bug gates it (homedepot had one; etsy does not).
 The network-free §4 gate structurally cannot verify a daily-key flip,
 and the directive forbids the HTTP shortcuts (§6). This is the real
 Phase-5 L endgame, now confirmed by trace+source, not inferred.
+
+**etsy — deepest trace finding (2026-05-16, homedepot-level rigor):**
+two full unfiltered live runs establish: i.js loads (200/15014 B),
+executes, and *connects to* `geo.captcha-delivery.com` (the
+`[net] H2 connection failed … not h2` log proves the attempt; the
+h2→h1 fallback at `net/lib.rs` 877→923 / 1258→1304 / 1417→1454 is
+source-verified present, so the request itself is not hard-failed) —
+**but ZERO child iframe is ever created** (no iframe instantiation,
+no `[csp] Refused to frame`, no `iframe src error` across both
+traces), even though the nav-loop builder's src-iframe path
+(`page.rs:3106` `ChildIframe::from_url`, CSP-cleared by Inc 1) is
+present and functional. ⇒ The concrete next sub-question is "why does
+i.js not proceed to inject the `geo.captcha-delivery.com` challenge
+iframe after its initial connection" (needs proper in-builder
+`__fetchLog`/script-error surfacing — the harness has no tracing
+subscriber so `RUST_LOG` doesn't expose the existing dump; that is a
+gated instrumentation increment). But even resolving that leaves the
+iframe→WASM `boring_challenge`→postMessage→**daily-key/JA4 server
+acceptance** chain, whose deepest parts are unverifiable under the
+network-free §4 gate. Net: homedepot-level rigor on etsy yielded **no
+single concrete gate-safe bug** (it did for homedepot) — the residual
+is genuinely the multi-unknown L endgame, now earned by evidence.
 **Final loop outcome: 1 of the 3 named engine-addressable blocks
 flipped (homedepot, the tractable one — concrete doc-20 fix,
 gate-green, committed `b623d5d`); etsy/tripadvisor are the earned-L
