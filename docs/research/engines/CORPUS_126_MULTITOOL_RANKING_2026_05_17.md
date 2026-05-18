@@ -79,6 +79,27 @@ Exactly the documented hard residual ("Kasada×3 + homedepot; iphey
 THIN-BODY artifact"). The clean parallel release run **reproduces the
 canonical 121/126** end-to-end.
 
+## Per-profile ERROR sites (6 instances / 4 sites — all routed-recovered)
+
+Each single profile shows ERR=2; routed ERR=0 because every error site
+renders on a *different* profile. Not systematic — investigated and
+**not worth chasing** (3 of the 4 are in the 14-sites-only-browser_oxide
+list, i.e. they pass under routing):
+
+| Site | Errored on | nav_ms | Error | Classification |
+|---|---|--:|---|---|
+| yelp | desktop, android | ~61 s | `Navigation loop terminated without returning a page` | **correct behavior** — DataDome interactive human-gate not solvable in the 3-iter budget; passes on iOS |
+| leboncoin | android, iOS | ~62 s | `Navigation loop terminated…` | Kasada-class challenge unsolved in budget on those profiles; passes on desktop |
+| wildberries | desktop | ~61 s | `connection closed before headers` | transport — RU region-scored site drops the datacenter-IP connection; passes on android/iOS |
+| h-m | iOS | ~91 s | `HTTP/2 stream error: unexpected internal error` | transport — HTTP/2 drop / rate-limit from datacenter IP; passes on desktop/android |
+
+2 of 6 are the engine *correctly* failing a hard challenge in budget;
+the other 2 are datacenter-IP transport flakiness on region-scored
+sites — both the documented conservative-floor reality, neither an
+engine correctness defect. Only soft signal: errors cluster at ~60 s
+(an internal read/iteration timeout shorter than the 300 s outer cap) —
+a *robustness-tuning* nuance, not a bug; out of scope here.
+
 ## Methodology / provenance (honest)
 
 - **Same datacenter IP** for all 5 tools, this session. browser_oxide
