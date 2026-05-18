@@ -6,13 +6,23 @@ slice in `COMPETITOR_COMPARISON_2026_05_17.md`.
 
 ## Headline
 
-| Tool | PASS | THIN | BLOCKED | ERR | measured | class |
+browser_oxide is shown as its **3 clean profiles + the routed union**;
+the 4 competitors are single-config tools (one row each).
+
+| Tool / profile | PASS | THIN | BLOCKED | ERR | measured | class |
 |---|--:|--:|--:|--:|--:|---|
-| **browser_oxide** | **121** | 1 | 4 | 0 | 126/126 | from-scratch Rust + embedded V8 (no real binary) |
-| **camoufox** | 96 | 17 | 13 | 0 | 126/126 | patched real Firefox |
-| **nodriver** | 81 | 14 | 31 | 0 | 126/126 | real Chrome 147 (CDP) |
-| **patchright** | 79 | 12 | 31 | 4 | 126/126 | real Chrome 147 (Playwright) |
-| **curl_cffi** | 65 | 38 | 23 | 0 | 126/126 | TLS-impersonation HTTP, no JS engine |
+| **browser_oxide · desktop** (`chrome_130_macos`) | **118** | 1 | 5 | 2 | 126/126 | from-scratch Rust + embedded V8 (no real binary) |
+| **browser_oxide · android** (`pixel_9_pro_chrome_147`) | **119** | 1 | 4 | 2 | 126/126 | from-scratch Rust + embedded V8 |
+| **browser_oxide · iOS** (`iphone_15_pro_safari_18`) | **115** | 3 | 6 | 2 | 126/126 | from-scratch Rust + embedded V8 |
+| **browser_oxide · ROUTED** (best-per-site of the 3) | **121** | 1 | 4 | 0 | 126/126 | per-domain profile routing |
+| camoufox | 96 | 17 | 13 | 0 | 126/126 | patched real Firefox |
+| nodriver | 81 | 14 | 31 | 0 | 126/126 | real Chrome 147 (CDP) |
+| patchright | 79 | 12 | 31 | 4 | 126/126 | real Chrome 147 (Playwright) |
+| curl_cffi | 65 | 38 | 23 | 0 | 126/126 | TLS-impersonation HTTP, no JS engine |
+
+*(ERR=2 per single profile = the 2 sites that error on that one
+profile but render on another — routing nets them out, hence routed
+ERR=0.)*
 
 **browser_oxide wins the corpus outright at 121/126 — ahead of every
 free-OSS tool including the two real-browser drivers and the
