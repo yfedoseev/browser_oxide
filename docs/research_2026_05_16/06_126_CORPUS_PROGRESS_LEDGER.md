@@ -237,6 +237,39 @@ duolingo/yelp/wayfair open under ≥1 profile (mobile clears DataDome
 sites desktop doesn't). Firefox + the iOS straggler append when the
 contention-bound driver reaches them.
 
+## Clean parallel-release re-measure + 5-tool ranking (2026-05-17)
+
+Full re-run via `holistic_sweep_parallel` (`ParallelPager`, 6 workers,
+**release** — the canonical fast path; ~8 min/profile vs ~70 serial,
+identical metric) on a freed box, **3 clean profiles** (firefox
+excluded — only reached 100/126 under external CPU contention):
+
+| Profile | PASS / 126 |
+|---|--:|
+| `chrome_130_macos` | **118** |
+| `pixel_9_pro_chrome_147` | **119** |
+| `iphone_15_pro_safari_18` | **115** |
+| **Routed (3-profile)** | **121** |
+
+Confirms the documented **121/126 routed**; residual = **Kasada×3
+(canadagoose/hyatt/realtor) + homedepot** BLOCKED, `iphey` THIN
+(test-page artifact) — exactly the canonical hard set.
+
+**Corpus-wide 5-tool ranking, same datacenter IP** (`[MEAS]`,
+`docs/research/engines/CORPUS_126_MULTITOOL_RANKING_2026_05_17.md`):
+browser_oxide **121** ≫ camoufox 96 > nodriver 81 > patchright 79 >
+curl_cffi 65. **14 hard sites only browser_oxide passes** (etsy,
+bestbuy, tripadvisor, expedia, zillow, h-m, reuters, wildberries, vk,
+bofa, areyouheadless, imdb, yelp, udemy) — block all real-browser
+drivers + curl_cffi. 3 universal-block for everyone = Kasada
+(realtor/canadagoose/hyatt).
+
+**Two measurement lessons (pinned):** (1) never score browser_oxide's
+`*-CHL` raw — size-gate ≥30 KB = rendered FP, else the metric
+undercounts (109 vs real 121); (2) always use the **parallel** sweep
+target — the serial `--test-threads=1` path is ~10× slower for no
+metric difference.
+
 ## Bottom line
 
 126/126 corpus is fully accounted for: **120 open under routing**, 6

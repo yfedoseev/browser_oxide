@@ -1,5 +1,13 @@
 # Free-OSS Competitor Comparison vs browser_oxide — 2026-05-17
 
+> **SUPERSEDED for corpus-wide numbers by
+> `CORPUS_126_MULTITOOL_RANKING_2026_05_17.md`** — that doc has the full
+> measured 126-site head-to-head (browser_oxide **121** ≫ camoufox 96 >
+> nodriver 81 > patchright 79 > curl_cffi 65; 14 hard sites only
+> browser_oxide passes). This file remains valid for the *hard-subset*
+> deep-dive + the architecture/box-honesty narrative.
+
+
 **Scope:** FREE open-source tools only. **Paid tools (Scrapfly, Hyper
 Solutions, ZenRows, CapSolver, Bright/Oxylabs, commercial anti-detect
 browsers) are OUT OF SCOPE** — no budget; none were run, installed, or
