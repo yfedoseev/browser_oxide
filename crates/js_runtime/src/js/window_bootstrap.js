@@ -555,7 +555,7 @@
     //   typeof IdentityCredential, typeof IdentityProvider
     // No real authenticator is implemented — this is a shape stub. Profile
     // fields has_platform_authenticator and conditional_mediation drive the
-    // resolved values. See docs/SOTA_ROADMAP_2026.md §1.1.
+    // resolved values.
     // ================================================================
 
     class AuthenticatorResponse {}
@@ -1423,7 +1423,6 @@
     // isSecureContext: per-URL, computed from scheme on the Rust side
     // (https/wss/file or http://localhost). Drives the ~18
     // secure-context-only Web Platform APIs at IDL `[SecureContext]`.
-    // Phase 7 fix — see docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md.
     Object.defineProperty(globalThis, 'isSecureContext', {
         get: () => ops.op_is_secure_context(),
         configurable: true,
@@ -1453,7 +1452,7 @@
 
     // Scroll + screen position — OWN accessor properties on the window
     // instance (globalThis), per real Chrome (verified via Playwright
-    // MCP capture in docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md):
+    // MCP capture):
     //
     //   Object.getOwnPropertyDescriptor(window, 'scrollX')
     //     → { get: f, set: f, enumerable: true, configurable: true }
@@ -1614,9 +1613,8 @@
     if (globalThis.navigator) {
         // Match Chrome 148's exact descriptor for webdriver:
         //   { get: ƒ, set: undefined, enumerable: true, configurable: true }
-        // BotD detector #16 (and Castle, per docs/research_2026_05_14/
-        // 11_DETECTION_SIGNAL_CATALOG_2026_05_14.md T1.4) verifies the
-        // enumerable bit specifically — the older `enumerable: false`
+        // BotD detector #16 (and Castle) verifies the enumerable bit
+        // specifically — the older `enumerable: false`
         // here was a divergence. Real Chrome's webdriver getter is
         // owned-on-prototype and IS enumerable (visible to for..in on
         // Navigator.prototype).
@@ -1891,7 +1889,7 @@
                 // pump suspends on a tokio::sync::Notify so the loop
                 // is only marked pending while there's an actual
                 // pending message — same correctness, no perpetual
-                // pinning. See docs/W5b_SPA_HYDRATION_PROFILE_2026_05_10.md.
+                // pinning.
                 const self = this;
                 const _drainOnce = () => {
                     if (!self._id) return;
@@ -5180,8 +5178,7 @@
     }
 
     // ================================================================
-    // Stubs for Web APIs that Kasada/DataDome probe (W4 fixes per
-    // docs/W4a_KASADA_PROBE_IDENTIFICATION_2026_05_10.md). All defined
+    // Stubs for Web APIs that Kasada/DataDome probe. All defined
     // as globalThis classes + (where applicable) navigator/window
     // accessors. These return defined-but-functionally-stub objects
     // so antibot probes that read `.SOME_PROPERTY` get a non-undefined
@@ -5342,9 +5339,8 @@
     // ================================================================
     // P0 FIX: Error stack trace filtering
     // Remove deno_core internal frames AND all browser_oxide bootstrap
-    // script names from Error.stack. Per docs/research_2026_05_14/
-    // 09_KASADA_DEEP_2026_05_14.md Hypothesis 7, our trace captured
-    // `at h (<init_script_0>:51:34)` — Kasada literally sees the
+    // script names from Error.stack. A captured VM trace previously
+    // showed `at h (<init_script_0>:51:34)` — Kasada literally saw the
     // browser_oxide-internal script name. Real Chrome's stack frames
     // never show such tags; they show either real URLs or <anonymous>.
     //
@@ -5396,7 +5392,6 @@
     // The op applies LogNormal(μ=ln 8 µs, σ=0.4) jitter clamped [0,35] µs
     // plus rare exponential spike. Installed on Performance.prototype so the
     // own-descriptor probe still returns undefined on the instance.
-    // See docs/SOTA_ROADMAP_2026.md §1.3.
     // ================================================================
     if (typeof globalThis.Performance === 'function' && globalThis.performance) {
         const _PProto = globalThis.Performance.prototype;
@@ -6028,8 +6023,6 @@
     // either rejects (network APIs) or no-ops (UI APIs). We mirror the
     // shape so detection probes don't see absence.
     //
-    // See docs/PHASE6_FINGERPRINT_INVENTORY_FINDINGS_2026_04_29.md
-    // for per-surface detection sources and rationale.
     // ================================================================
 
     // (1) globalThis.caches — CacheStorage (Service Worker spec)

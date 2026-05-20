@@ -18,7 +18,6 @@
 # .stack_size(64 * 1024 * 1024) — the env var ensures the OS thread
 # the proxy runs ON is at least that big in case the explicit setter
 # fails.
-#
-# Reference: HANDOFF_2026_04_28.md item V8 #60.
+
 [env]
 RUST_MIN_STACK = "67108864"

@@ -54,8 +54,7 @@
     // --- WorkerNavigator (matches StealthProfile) ---
     if (!self.navigator) {
         // navigator.userAgentData — must be present in Worker realm AND
-        // return values consistent with the main thread. Per W6a research
-        // (docs/W6a_DATADOME_PROBE_GAP_MATRIX_2026_05_10.md): DataDome's
+        // return values consistent with the main thread. DataDome's
         // tags.js v5.6.3 spawns a Worker that reads
         // `navigator.userAgentData ? .mobile : "NA"`. Main returns false,
         // worker previously returned "NA" — a cross-realm contradiction

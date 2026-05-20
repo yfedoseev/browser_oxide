@@ -384,8 +384,8 @@
     });
 
     // Mask Function.prototype.toString so antibot probes (Kasada `sfc`
-    // field — see docs/CANADA_GOOSE_DIAGNOSIS_2026_05_10_PART2.md) see
-    // `function fetch() { [native code] }` instead of our literal source.
+    // field) see `function fetch() { [native code] }` instead of our
+    // literal source.
     if (typeof globalThis._maskFunction === 'function') {
         try { globalThis._maskFunction(globalThis.fetch, 'fetch'); } catch (_) {}
         if (globalThis.Request) try { globalThis._maskFunction(globalThis.Request, 'Request'); } catch (_) {}

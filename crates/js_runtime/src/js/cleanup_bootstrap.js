@@ -4,7 +4,7 @@
     // The V8 snapshot bootstraps with is_secure_context=true so all
     // [SecureContext]-only Web Platform APIs are baked in. On insecure
     // pages (data:/http:/about:blank) we strip them here to match real
-    // Chrome — see docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md.
+    // Chrome.
     try {
         const _ops = Deno && Deno.core && Deno.core.ops;
         const _isSecure = _ops && _ops.op_is_secure_context && _ops.op_is_secure_context();
@@ -144,9 +144,8 @@
         }
 
         // -- iOS Safari profile: strip 16 declined APIs + add iOS globals --
-        // Per Apple's "16 web APIs declined for privacy" policy + the audit
-        // in docs/RESEARCH_2026_05_12_mobile_and_kasada.md §2.4. The single
-        // highest-ROI mobile patch — many leaks vanish at once.
+        // Per Apple's "16 web APIs declined for privacy" policy. The
+        // single highest-ROI mobile patch — many leaks vanish at once.
         const _deviceClass = (_hasProfile && ops.op_get_profile_value)
             ? ops.op_get_profile_value("device_class")
             : "Desktop";
