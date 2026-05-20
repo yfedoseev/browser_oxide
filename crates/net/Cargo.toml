@@ -7,8 +7,8 @@ authors.workspace = true
 description = "Stealth HTTP client with Chrome TLS/HTTP2 fingerprint impersonation (boring2/BoringSSL)"
 
 [dependencies]
-stealth = { path = "../stealth" }
-akamai = { path = "../akamai" }
+stealth = { workspace = true }
+akamai = { workspace = true }
 
 # TLS (BoringSSL)
 # boring2 5.0-alpha removed the Chrome-impersonation APIs we rely on:

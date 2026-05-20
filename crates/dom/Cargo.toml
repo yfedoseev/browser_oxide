@@ -7,5 +7,5 @@ authors.workspace = true
 description = "Arena-allocated DOM tree with Shadow DOM support"
 
 [dependencies]
-css_selectors = { path = "../css_selectors" }
+css_selectors = { workspace = true }
 thiserror = "2"

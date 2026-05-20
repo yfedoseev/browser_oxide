@@ -7,11 +7,11 @@ authors.workspace = true
 description = "Browser event loop: timers, microtasks, requestAnimationFrame, idle detection"
 
 [dependencies]
-js_runtime = { path = "../js_runtime" }
-dom = { path = "../dom" }
+js_runtime = { workspace = true }
+dom = { workspace = true }
 deno_core = "0.311"
 tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
-html_parser = { path = "../html_parser" }
+html_parser = { workspace = true }
 tokio = { version = "1", features = ["full", "test-util"] }

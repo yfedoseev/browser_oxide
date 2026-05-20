@@ -15,14 +15,14 @@ default = []
 webgl-render = ["js_runtime/webgl-render"]
 
 [dependencies]
-dom = { path = "../dom" }
-html_parser = { path = "../html_parser" }
-js_runtime = { path = "../js_runtime" }
-event_loop = { path = "../event_loop" }
-css_selectors = { path = "../css_selectors" }
-net = { path = "../net" }
-stealth = { path = "../stealth" }
-akamai = { path = "../akamai" }
+dom = { workspace = true }
+html_parser = { workspace = true }
+js_runtime = { workspace = true }
+event_loop = { workspace = true }
+css_selectors = { workspace = true }
+net = { workspace = true }
+stealth = { workspace = true }
+akamai = { workspace = true }
 deno_core = "0.311"
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
@@ -32,9 +32,9 @@ tracing = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
-protocol = { path = "../protocol" }
-stealth = { path = "../stealth" }
-net = { path = "../net" }
+protocol = { workspace = true }
+stealth = { workspace = true }
+net = { workspace = true }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"

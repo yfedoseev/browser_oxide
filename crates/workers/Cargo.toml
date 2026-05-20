@@ -7,8 +7,8 @@ authors.workspace = true
 description = "Web Workers (separate V8 isolates) for browser_oxide"
 
 [dependencies]
-js_runtime = { path = "../js_runtime" }
-dom = { path = "../dom" }
+js_runtime = { workspace = true }
+dom = { workspace = true }
 deno_core = "0.311"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

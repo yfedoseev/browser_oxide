@@ -7,7 +7,7 @@ authors.workspace = true
 description = "Akamai Bot Manager (web) sensor_data v2 encoder for browser_oxide. Generates the encrypted POST body that upgrades _abck from unfavorable to favorable."
 
 [dependencies]
-stealth = { path = "../stealth" }
+stealth = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

@@ -29,23 +29,25 @@ authors = ["Yury Fedoseev"]
 repository = "https://github.com/yfedoseev/browser_oxide"
 
 [workspace.dependencies]
-# Internal crates
-css_parser = { path = "crates/css_parser" }
-css_selectors = { path = "crates/css_selectors" }
-css_values = { path = "crates/css_values" }
-css_cascade = { path = "crates/css_cascade" }
-dom = { path = "crates/dom" }
-html_parser = { path = "crates/html_parser" }
-js_runtime = { path = "crates/js_runtime" }
-canvas = { path = "crates/canvas" }
-layout = { path = "crates/layout" }
-net = { path = "crates/net" }
-event_loop = { path = "crates/event_loop" }
-workers = { path = "crates/workers" }
-stealth = { path = "crates/stealth" }
-protocol = { path = "crates/protocol" }
-akamai = { path = "crates/akamai" }
-browser = { path = "crates/browser" }
+# Internal crates — explicit version pinned to the workspace version
+# so cargo-deny's `wildcards = "deny"` rule doesn't trip on path-only
+# `version = "*"` resolution.
+css_parser = { version = "0.1.0", path = "crates/css_parser" }
+css_selectors = { version = "0.1.0", path = "crates/css_selectors" }
+css_values = { version = "0.1.0", path = "crates/css_values" }
+css_cascade = { version = "0.1.0", path = "crates/css_cascade" }
+dom = { version = "0.1.0", path = "crates/dom" }
+html_parser = { version = "0.1.0", path = "crates/html_parser" }
+js_runtime = { version = "0.1.0", path = "crates/js_runtime" }
+canvas = { version = "0.1.0", path = "crates/canvas" }
+layout = { version = "0.1.0", path = "crates/layout" }
+net = { version = "0.1.0", path = "crates/net" }
+event_loop = { version = "0.1.0", path = "crates/event_loop" }
+workers = { version = "0.1.0", path = "crates/workers" }
+stealth = { version = "0.1.0", path = "crates/stealth" }
+protocol = { version = "0.1.0", path = "crates/protocol" }
+akamai = { version = "0.1.0", path = "crates/akamai" }
+browser = { version = "0.1.0", path = "crates/browser" }
 
 # JS Engine (V8)
 # rusty_v8 = "129"

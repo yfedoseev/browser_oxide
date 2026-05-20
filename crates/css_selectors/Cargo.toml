@@ -7,5 +7,5 @@ authors.workspace = true
 description = "CSS Selectors Level 4 parser and matching engine"
 
 [dependencies]
-css_parser = { path = "../css_parser" }
+css_parser = { workspace = true }
 thiserror = "2"

@@ -7,7 +7,7 @@ authors.workspace = true
 description = "CSS cascade, specificity, inheritance, @layer, @media, @container"
 
 [dependencies]
-css_parser = { path = "../css_parser" }
-css_selectors = { path = "../css_selectors" }
-css_values = { path = "../css_values" }
+css_parser = { workspace = true }
+css_selectors = { workspace = true }
+css_values = { workspace = true }
 thiserror = "2"

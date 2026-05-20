@@ -7,11 +7,11 @@ authors.workspace = true
 description = "Chrome DevTools Protocol (CDP) server for browser_oxide"
 
 [dependencies]
-browser = { path = "../browser" }
-dom = { path = "../dom" }
-js_runtime = { path = "../js_runtime" }
-stealth = { path = "../stealth" }
-net = { path = "../net" }
+browser = { workspace = true }
+dom = { workspace = true }
+js_runtime = { workspace = true }
+stealth = { workspace = true }
+net = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.27"
 futures-util = "0.3"

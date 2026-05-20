@@ -14,15 +14,15 @@ default = []
 webgl-render = ["canvas/webgl-render"]
 
 [dependencies]
-dom = { path = "../dom" }
-html_parser = { path = "../html_parser" }
-css_selectors = { path = "../css_selectors" }
-css_parser = { path = "../css_parser" }
-css_values = { path = "../css_values" }
-stealth = { path = "../stealth" }
-net = { path = "../net" }
-canvas = { path = "../canvas" }
-layout = { path = "../layout" }
+dom = { workspace = true }
+html_parser = { workspace = true }
+css_selectors = { workspace = true }
+css_parser = { workspace = true }
+css_values = { workspace = true }
+stealth = { workspace = true }
+net = { workspace = true }
+canvas = { workspace = true }
+layout = { workspace = true }
 deno_core = "0.311"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

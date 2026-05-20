@@ -7,5 +7,5 @@ authors.workspace = true
 description = "CSS property value parsing and typed representations"
 
 [dependencies]
-css_parser = { path = "../css_parser" }
+css_parser = { workspace = true }
 thiserror = "2"
