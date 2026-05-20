@@ -2568,7 +2568,7 @@ impl Page {
         ))
     }
 
-    /// [DEPRECATED] Legacy name — now a thin wrapper around [`Page::navigate`].
+    /// **DEPRECATED**: Legacy name — now a thin wrapper around [`Page::navigate`].
     ///
     /// This used to contain Kasada / WBAAS / Akamai-specific logic, which
     /// has been removed in favor of the generic `__pendingNavigation`

@@ -79,7 +79,7 @@ pub fn op_blob_fetch_text(#[string] url: String) -> String {
 /// flow doesn't have to reach into the HTTP client for blob: URLs.
 #[derive(serde::Serialize)]
 pub struct JsBlobResponse {
-    /// Raw bytes of the blob. Transported as a Vec<u8> so binary data
+    /// Raw bytes of the blob. Transported as a `Vec<u8>` so binary data
     /// survives round-trip (a base64 detour would be lossy for some
     /// encodings and needlessly slow for big buffers).
     pub bytes: Vec<u8>,

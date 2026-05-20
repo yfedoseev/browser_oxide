@@ -14,9 +14,9 @@
 //!   `ngenix_jscv_*` — empty placeholder we must populate with the plaintext
 //!
 //! Flow:
-//!   1. GET / → 403 + Set-Cookie: ngenix_jscc_<id>=<base64(iv+key+ct)>
+//!   1. GET / → 403 + `Set-Cookie: ngenix_jscc_{id}=base64(iv+key+ct)`
 //!   2. Page contains a `<script>` that AES-CBC-decrypts the bundle
-//!      and sets `ngenix_jscv_<id>=<plaintext>` via document.cookie
+//!      and sets `ngenix_jscv_{id}={plaintext}` via document.cookie
 //!   3. Retry GET / with both cookies → 200
 //!
 //! This module computes the plaintext natively, skipping the JS execution.
@@ -225,7 +225,7 @@ fn aes128_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], ct: &[u8]) -> Option<Vec<u8
 // Public API
 // ============================================================================
 
-/// Decoded NGENIX challenge bundle (parsed from the `ngenix_jscc_<id>` cookie).
+/// Decoded NGENIX challenge bundle (parsed from the `ngenix_jscc_&lt;id&gt;` cookie).
 #[derive(Debug, Clone)]
 pub struct NgenixChallenge {
     /// 16-byte AES-128 key.
@@ -236,7 +236,7 @@ pub struct NgenixChallenge {
     pub ciphertext: Vec<u8>,
 }
 
-/// Parse the `ngenix_jscc_<id>` cookie value into a challenge bundle.
+/// Parse the `ngenix_jscc_&lt;id&gt;` cookie value into a challenge bundle.
 ///
 /// The bundle layout (after base64-url decode) is:
 ///   `[iv:16][key:16][ciphertext:N*16]`
@@ -287,7 +287,7 @@ fn decode_base64_url_or_std(s: &str) -> Option<Vec<u8>> {
 }
 
 /// Solve the NGENIX challenge: AES-128-CBC decrypt the ciphertext, PKCS#7-unpad,
-/// and return the plaintext hex-encoded — the value for `ngenix_jscv_<id>`.
+/// and return the plaintext hex-encoded — the value for `ngenix_jscv_{id}`.
 ///
 /// Returns an empty string on any decryption error so the caller can fall back
 /// to JS execution without crashing.

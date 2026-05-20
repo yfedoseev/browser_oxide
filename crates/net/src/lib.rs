@@ -654,7 +654,7 @@ impl HttpClient {
     /// Fetch-API-style GET: uses `chrome_headers_fetch` (accept: */*, no
     /// upgrade-insecure-requests, sec-fetch-dest: empty, etc.) as the base
     /// header set, with caller's extras merged in. `origin` is the page's
-    /// origin string (e.g. "https://www.canadagoose.com"); if `None`, the
+    /// origin string (e.g. `"https://www.example.com"`); if `None`, the
     /// request looks like it came from a `no-origin` context (first navigation).
     pub async fn fetch_get(
         &self,

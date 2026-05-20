@@ -1,6 +1,6 @@
 //! Drain `globalThis.__akamai_events` (set up by humanize.js taps in
 //! `crates/browser/src/js/humanize.js`) into typed Rust events ready
-//! for [`payload::build_cleartext`].
+//! for [`crate::payload::build_cleartext`].
 //!
 //! The browser_oxide Page driver calls `page.evaluate(DRAIN_JS)` to
 //! pull the buffer contents as a JSON string, then [`parse_drained`]

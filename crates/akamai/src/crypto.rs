@@ -299,7 +299,7 @@ pub fn shuffle_tokens_v3(input: &str, seed: u32) -> String {
 /// `"3;0;1;0;<cookieHash>;<ver_static_b64>;<counter>;<encryptedData>"`
 ///
 /// where:
-///   - `cookieHash` = `bm_sz` parts[2] (parsed by `parse_bm_sz`)
+///   - `cookieHash` = `bm_sz` `parts[2]` (parsed by `parse_bm_sz`)
 ///   - `ver_static_b64` = SHA-256 of bmak.js content (static per-host).
 ///     Glizzy's placeholder: `wS5KmeE4vP5vBcKRIM2pPQlq4qZivf0B53dgMqmUH4E=`.
 ///   - `counter` = single integer for v3 (not the 6-CSV tuple of v2).

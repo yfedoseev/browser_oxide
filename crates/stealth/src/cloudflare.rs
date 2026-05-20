@@ -126,7 +126,7 @@ impl CfChallengeContext {
 /// Detect a Cloudflare challenge response.
 ///
 /// `headers` should be a header-name (lowercase) → value map; pass the
-/// top-level response headers (the same map our [`net`] crate already
+/// top-level response headers (the same map our `net` crate already
 /// surfaces). `body` is the response body as a `&str`.
 ///
 /// Returns `Some(ctx)` if **either** the `cf-mitigated: challenge`

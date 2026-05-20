@@ -96,7 +96,7 @@ pub struct SecCptAnswerSubmission {
 
 /// Solve the `crypto` provider PoW for the given challenge. The `sec`
 /// argument is the leading-`~` portion of the `sec_cpt` cookie (the
-/// part before the first `~`). Returns Vec<answer-string> of length
+/// part before the first `~`). Returns `Vec<answer-string>` of length
 /// `challenge.count`.
 ///
 /// `sec` is the leading portion of the sec_cpt cookie value (before
