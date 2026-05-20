@@ -111,7 +111,7 @@ browser_oxide/
 | `cookie_store` | MIT/Apache-2.0 | RFC 6265 cookie jar | net |
 | `serde` / `serde_json` | MIT/Apache-2.0 | Serialization | all |
 
-**No MPL-2.0 dependencies.** CSS parsing, selectors, values, and cascade are all implemented from scratch.
+**No GPL/LGPL/AGPL dependencies.** CSS parsing, selectors, values, and cascade are all implemented from scratch — we do not pull in Servo's MPL crates. The only MPL-2.0 in the default tree is `cooked-waker`, pulled in transitively via `deno_core` → `v8` and linked unmodified; MPL-2.0 is file-scope copyleft so this does not infect downstream code. An optional `blocker` Cargo feature (off by default) on the `net` crate adds Brave's MPL-2.0 `adblock` crate. Both are tracked as explicit per-crate exceptions in `deny.toml`.
 
 ## Anti-Bot Detection Coverage
 

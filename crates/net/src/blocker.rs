@@ -5,29 +5,32 @@
 //! `op_net_fetch_sync` log was dominated by gtm.js, gpt.js, doubleclick,
 //! cookielaw, etc.).
 //!
-//! Uses Brave's `adblock` crate which parses Adblock-Plus syntax (the
-//! same format as EasyList, EasyPrivacy, uBlock filter lists). We bundle
-//! a minimal high-impact baseline and accept extra rules from the
-//! `BOXIDE_BLOCKER_RULES` env var for users who want full EasyList
-//! integration.
+//! Gated behind the optional `blocker` Cargo feature. When the feature
+//! is off (the default), `should_block` always returns `false` and
+//! `classify_request_type` falls back to URL-extension heuristics.
 //!
-//! Disable entirely via `BOXIDE_NO_BLOCKER=1`. Useful for benchmarking
-//! purity or for sites whose challenges depend on tracker cookies being
-//! present.
+//! When the feature is on, uses Brave's `adblock` crate (MPL-2.0) which
+//! parses Adblock-Plus syntax (the same format as EasyList,
+//! EasyPrivacy, uBlock filter lists). We bundle a minimal high-impact
+//! baseline and accept extra rules from the `BOXIDE_BLOCKER_RULES` env
+//! var for users who want full EasyList integration. The runtime path
+//! is *also* opt-in via `BOXIDE_BLOCKER=1`.
 
-use adblock::lists::{FilterFormat, FilterSet, ParseOptions};
-use adblock::request::Request;
-use adblock::Engine;
-use std::cell::OnceCell;
+#[cfg(feature = "blocker")]
+mod engine {
+    use adblock::Engine;
+    use adblock::lists::{FilterFormat, FilterSet, ParseOptions};
+    use adblock::request::Request;
+    use std::cell::OnceCell;
 
-/// Top tracker / ad-network domains that show up in the holistic-sweep
-/// `op_net_fetch_sync` log. This baseline is only ~30 rules — full
-/// EasyList has ~100K and provides much broader coverage. To enable full
-/// EasyList, set `BOXIDE_BLOCKER_RULES=/path/to/easylist.txt`.
-///
-/// Format: Adblock-Plus syntax. `||domain^` blocks any request to that
-/// domain. The `^` anchor matches end-of-domain or a path separator.
-const BUILTIN_RULES: &str = "
+    /// Top tracker / ad-network domains that show up in the holistic-sweep
+    /// `op_net_fetch_sync` log. This baseline is only ~30 rules — full
+    /// EasyList has ~100K and provides much broader coverage. To enable full
+    /// EasyList, set `BOXIDE_BLOCKER_RULES=/path/to/easylist.txt`.
+    ///
+    /// Format: Adblock-Plus syntax. `||domain^` blocks any request to that
+    /// domain. The `^` anchor matches end-of-domain or a path separator.
+    const BUILTIN_RULES: &str = "
 ||google-analytics.com^
 ||googletagmanager.com^
 ||google-tag-manager.com^
@@ -78,60 +81,72 @@ const BUILTIN_RULES: &str = "
 ||wordpress.com/_static^
 ";
 
-// `adblock::Engine` is not `Sync` (uses interior mutability for the
-// internal regex cache). Use thread-local storage so each worker thread
-// in the parallel pager has its own engine. Initialization is one-time
-// per thread (~ms cost for a 30-rule list).
-thread_local! {
-    static ENGINE: OnceCell<Option<Engine>> = const { OnceCell::new() };
-}
-
-fn build_engine() -> Option<Engine> {
-    // Opt-in by default. Holistic-sweep testing (Phase E) showed the
-    // blocker does NOT speed things up materially in the parallel-pager
-    // configuration (Phase D already eliminated the dominant network
-    // wait via concurrency), AND some sites' challenges depend on
-    // tracker cookies being loaded (cookielaw/OneTrust banners,
-    // segment.io initialization) — blocking them costs ~2 PASSes.
-    //
-    // Default off; users who want to drop tracker requests for batch
-    // scraping where stealth doesn't matter can set BOXIDE_BLOCKER=1.
-    if std::env::var("BOXIDE_BLOCKER").is_err() {
-        return None;
+    // `adblock::Engine` is not `Sync` (uses interior mutability for the
+    // internal regex cache). Use thread-local storage so each worker thread
+    // in the parallel pager has its own engine. Initialization is one-time
+    // per thread (~ms cost for a 30-rule list).
+    thread_local! {
+        static ENGINE: OnceCell<Option<Engine>> = const { OnceCell::new() };
     }
 
-    let mut rules = String::from(BUILTIN_RULES);
-    if let Ok(path) = std::env::var("BOXIDE_BLOCKER_RULES") {
-        match std::fs::read_to_string(&path) {
-            Ok(extra) => {
-                rules.push('\n');
-                rules.push_str(&extra);
-            }
-            Err(e) => {
-                eprintln!(
-                    "[blocker] WARN: BOXIDE_BLOCKER_RULES={} failed to read: {}",
-                    path, e
-                );
+    fn build_engine() -> Option<Engine> {
+        // Opt-in by default. Holistic-sweep testing (Phase E) showed the
+        // blocker does NOT speed things up materially in the parallel-pager
+        // configuration (Phase D already eliminated the dominant network
+        // wait via concurrency), AND some sites' challenges depend on
+        // tracker cookies being loaded (cookielaw/OneTrust banners,
+        // segment.io initialization) — blocking them costs ~2 PASSes.
+        //
+        // Default off; users who want to drop tracker requests for batch
+        // scraping where stealth doesn't matter can set BOXIDE_BLOCKER=1.
+        if std::env::var("BOXIDE_BLOCKER").is_err() {
+            return None;
+        }
+
+        let mut rules = String::from(BUILTIN_RULES);
+        if let Ok(path) = std::env::var("BOXIDE_BLOCKER_RULES") {
+            match std::fs::read_to_string(&path) {
+                Ok(extra) => {
+                    rules.push('\n');
+                    rules.push_str(&extra);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[blocker] WARN: BOXIDE_BLOCKER_RULES={} failed to read: {}",
+                        path, e
+                    );
+                }
             }
         }
+
+        let mut filter_set = FilterSet::new(false);
+        let parse_opts = ParseOptions {
+            format: FilterFormat::Standard,
+            ..Default::default()
+        };
+        filter_set.add_filter_list(&rules, parse_opts);
+        Some(Engine::from_filter_set(filter_set, true))
     }
 
-    let mut filter_set = FilterSet::new(false);
-    let parse_opts = ParseOptions {
-        format: FilterFormat::Standard,
-        ..Default::default()
-    };
-    filter_set.add_filter_list(&rules, parse_opts);
-    Some(Engine::from_filter_set(filter_set, true))
-}
+    fn with_engine<R>(f: impl FnOnce(Option<&Engine>) -> R) -> R {
+        ENGINE.with(|cell| {
+            let opt = cell.get_or_init(build_engine);
+            f(opt.as_ref())
+        })
+    }
 
-/// Run a closure with access to this thread's engine, or `None` if the
-/// engine is disabled. Used internally by `should_block`.
-fn with_engine<R>(f: impl FnOnce(Option<&Engine>) -> R) -> R {
-    ENGINE.with(|cell| {
-        let opt = cell.get_or_init(build_engine);
-        f(opt.as_ref())
-    })
+    pub fn should_block(url: &str, source_url: &str, request_type: &str) -> bool {
+        with_engine(|opt_eng| {
+            let Some(eng) = opt_eng else { return false };
+            // Falls back to `false` on any parse error — fail-open is safer
+            // than fail-closed for an opt-in blocker.
+            let req = match Request::new(url, source_url, request_type) {
+                Ok(r) => r,
+                Err(_) => return false,
+            };
+            eng.check_network_request(&req).matched
+        })
+    }
 }
 
 /// Hint to the filter engine about what kind of request this is.
@@ -173,17 +188,17 @@ pub fn classify_request_type(url: &str, hint: Option<&str>) -> &'static str {
 /// Returns true if the request URL matches a block rule.
 /// `source_url` is the page that made the request (for first-party vs
 /// third-party scoring); pass empty string if unknown.
+///
+/// With the `blocker` Cargo feature off (the default), this is a stub
+/// that always returns `false`.
+#[cfg(feature = "blocker")]
 pub fn should_block(url: &str, source_url: &str, request_type: &str) -> bool {
-    with_engine(|opt_eng| {
-        let Some(eng) = opt_eng else { return false };
-        // Falls back to `false` on any parse error — fail-open is safer
-        // than fail-closed for an opt-in blocker.
-        let req = match Request::new(url, source_url, request_type) {
-            Ok(r) => r,
-            Err(_) => return false,
-        };
-        eng.check_network_request(&req).matched
-    })
+    engine::should_block(url, source_url, request_type)
+}
+
+#[cfg(not(feature = "blocker"))]
+pub fn should_block(_url: &str, _source_url: &str, _request_type: &str) -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -202,14 +217,13 @@ mod tests {
         ));
     }
 
-    // Tests that exercise the actual engine require BOXIDE_BLOCKER=1 to
-    // be set in the env. Run them via:
-    //   BOXIDE_BLOCKER=1 cargo test -p net --lib blocker -- --ignored
+    // Tests that exercise the actual engine require the `blocker`
+    // Cargo feature *and* BOXIDE_BLOCKER=1. Run them via:
+    //   BOXIDE_BLOCKER=1 cargo test -p net --features blocker --lib blocker -- --ignored
+    #[cfg(feature = "blocker")]
     #[test]
     #[ignore]
     fn blocks_known_tracker_when_enabled() {
-        // Manual verification: with BOXIDE_BLOCKER=1, google-analytics
-        // is blocked when called from a third-party page.
         std::env::set_var("BOXIDE_BLOCKER", "1");
         assert!(should_block(
             "https://www.google-analytics.com/analytics.js",
@@ -218,6 +232,7 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "blocker")]
     #[test]
     #[ignore]
     fn allows_legitimate_request_when_enabled() {

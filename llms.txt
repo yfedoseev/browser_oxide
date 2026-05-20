@@ -8,7 +8,7 @@
 > agents, security research, and CTF — see SCOPE.md.
 
 - Documentation: https://github.com/yfedoseev/browser_oxide
-- License: MIT OR Apache-2.0 (no MPL / AGPL transitive deps)
+- License: MIT OR Apache-2.0 (no GPL/LGPL/AGPL; one MPL-2.0 transitive `cooked-waker` via `deno_core` → `v8`, plus optional `blocker` feature adds MPL-2.0 `adblock` — both explicit `deny.toml` exceptions)
 - Language: Rust (workspace of 15 crates)
 - Maturity: pre-1.0, API surfaces not yet stable
 

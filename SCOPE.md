@@ -54,9 +54,14 @@ asked them?* If yes, you're fine. If no, this is the wrong tool.
 - **Honesty over marketing.** Measured numbers, named residuals, and
   explicit caveats live in the README. Aspirational marketing does
   not.
-- **Permissive license, no copyleft transitive deps.** Dual MIT /
-  Apache-2.0; we do not pull in MPL or AGPL crates. Drop-in for
-  proprietary downstream is intentional.
+- **Permissive license, minimal copyleft.** Dual MIT / Apache-2.0; no
+  GPL/LGPL/AGPL. One MPL-2.0 transitive (`cooked-waker`, via
+  `deno_core` → `v8`) which we link but do not modify, and an
+  optional `blocker` Cargo feature (off by default) that adds Brave's
+  MPL-2.0 `adblock` crate. MPL-2.0 is file-scope copyleft and does
+  not infect downstream code. Both are tracked as explicit per-crate
+  exceptions in `deny.toml`. Drop-in for proprietary downstream is
+  intentional.
 - **Reproducible measurement.** Every claim in `README.md` traces to
   a test in `crates/browser/tests/` or a benchmark in `benches/`. If
   it doesn't, it doesn't go in the README.

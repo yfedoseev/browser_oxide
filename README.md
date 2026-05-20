@@ -97,8 +97,13 @@ HTML → DOM (+ Shadow DOM) → CSS → Layout → JS (V8 + WASM) ← Stealth pr
   └────── HTTP/1+2 (stealth TLS) ────┘
 ```
 
-15 crates, no MPL, no AGPL, no copyleft. Full crate inventory in
-`docs/ARCHITECTURE.md`.
+15 crates, MIT OR Apache-2.0. No GPL/LGPL/AGPL. The only MPL-2.0 in
+the default tree is `cooked-waker`, pulled in transitively via
+`deno_core` → `v8` and linked unmodified; MPL-2.0 is file-scope
+copyleft so this does not infect downstream code. An optional
+`blocker` Cargo feature (off by default) adds Brave's MPL-2.0
+`adblock` crate. Both are explicit per-crate exceptions in
+`deny.toml`. Full crate inventory in `docs/ARCHITECTURE.md`.
 
 | Crate | Description |
 |---|---|

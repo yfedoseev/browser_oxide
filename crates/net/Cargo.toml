@@ -7,6 +7,14 @@ authors.workspace = true
 description = "Stealth HTTP client with Chrome TLS/HTTP2 fingerprint impersonation (boring2/BoringSSL)"
 publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
+[features]
+default = []
+# Optional ad/tracker blocker via Brave's Rust `adblock` crate. Off by
+# default because (a) the runtime path is already opt-in via the
+# `BOXIDE_BLOCKER=1` env var, and (b) `adblock` is MPL-2.0 which we
+# don't want to force on downstream consumers.
+blocker = ["dep:adblock"]
+
 [dependencies]
 stealth = { workspace = true }
 akamai = { workspace = true }
@@ -37,9 +45,9 @@ brotli = "7"
 zstd = "0.13"
 
 # Resource blocker (Brave's Rust adblock engine — Adblock-Plus syntax,
-# parses EasyList/EasyPrivacy/uBlock rules). Uses default features so the
-# embedded domain resolver (publicsuffix list) is available out of the box.
-adblock = "0.12"
+# parses EasyList/EasyPrivacy/uBlock rules). MPL-2.0, gated behind the
+# `blocker` feature (off by default) so default builds stay MPL-free.
+adblock = { version = "0.12", optional = true }
 
 # Core
 tokio = { version = "1", features = ["full"] }

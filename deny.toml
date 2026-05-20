@@ -46,7 +46,8 @@ ignore = [
 # of the canonical text while still flagging genuinely unusual variants.
 confidence-threshold = 0.93
 
-# Allow-list. NO MPL, NO AGPL, NO copyleft. Permissive only.
+# Allow-list. NO AGPL, NO GPL/LGPL. Permissive only — except for one
+# explicit MPL-2.0 exception (cooked-waker) listed below.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -64,10 +65,19 @@ allow = [
     "CC0-1.0",
 ]
 
-# Per-crate exceptions go here ONLY when a transitive dep ships under an
-# otherwise-deny-listed license but the *usage* is non-distributive
-# (build script only, etc.). None at present.
-exceptions = []
+# Per-crate exceptions. MPL-2.0 is *file-scope* copyleft: only modified
+# MPL-licensed source files need to stay MPL. Linking from MIT/Apache
+# code is fine and does not infect downstream. Each entry MUST cite the
+# reason and the transitive root that pulls it in.
+exceptions = [
+    # cooked-waker is pulled in by deno_core 0.311 → v8. We do not vendor
+    # or modify it, just link against it. Removing requires forking the
+    # V8 stack. Re-evaluate on every deno_core bump.
+    { name = "cooked-waker", allow = ["MPL-2.0"] },
+    # adblock is the engine behind the optional `blocker` feature in the
+    # `net` crate (off by default). Default builds do not pull it.
+    { name = "adblock", allow = ["MPL-2.0"] },
+]
 
 # Explicit clarifications for crates whose license metadata is ambiguous
 # but the actual licensing is clear from upstream.

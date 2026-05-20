@@ -19,8 +19,11 @@ cargo doc --no-deps --workspace
 - **16 crates** in `[workspace.members]` — see `Cargo.toml`. Each crate
   has a single responsibility (see `docs/ARCHITECTURE.md` for the full
   inventory).
-- **License:** MIT OR Apache-2.0, no MPL/AGPL transitive deps —
-  mechanically enforced by `deny.toml` + the `deny` CI job.
+- **License:** MIT OR Apache-2.0; no GPL/LGPL/AGPL. One MPL-2.0
+  transitive (`cooked-waker` via `deno_core` → `v8`) and one optional
+  MPL-2.0 (`adblock`, behind the `blocker` feature in `net`, off by
+  default), both tracked as per-crate exceptions in `deny.toml`.
+  Mechanically enforced by `deny.toml` + the `deny` CI job.
 - **V8** via `deno_core 0.311` (prebuilt binaries, ~130 MB on first
   fetch).
 - **HTTP/TLS:** own stack in `crates/net/` using `boring2` (Cloudflare
