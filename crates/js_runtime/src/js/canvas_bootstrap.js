@@ -965,12 +965,16 @@
     // HTMLCanvasElement.prototype so `standalone instanceof HTMLCanvasElement`
     // returns true.
     //
-    // We DO NOT copy the standalone methods (getContext, toDataURL, ...) onto
-    // the dom HTMLCanvasElement.prototype because those methods reference
-    // `#canvasId`, a private field only standalone instances have. Parsed
-    // <canvas> elements go through the Element.prototype.getContext patch
-    // at the bottom of this file instead, which reads `_canvasId` lazily.
+    // Capture the DOM-side HTMLCanvasElement.prototype BEFORE the swap so we
+    // can also install the lazy `_canvasId`-based methods (getContext,
+    // toDataURL, ...) onto it. HTML-parsed <canvas> elements have THIS
+    // prototype in their chain — not the standalone's — so without this
+    // double install they would not see `getContext`. The lazy methods
+    // installed further down work on both kinds of canvas (`_canvasId`
+    // is initialised on demand via `_lazyInitCanvas`).
+    let _domCanvasProto = null;
     if (globalThis.HTMLCanvasElement) {
+        _domCanvasProto = globalThis.HTMLCanvasElement.prototype;
         Object.setPrototypeOf(HTMLCanvasElement.prototype, globalThis.HTMLCanvasElement.prototype);
         Object.setPrototypeOf(HTMLCanvasElement, globalThis.HTMLCanvasElement);
     }
@@ -1254,6 +1258,22 @@
 
         if (_HTMLCanvasProto) {
             _maskAsNative(_HTMLCanvasProto, 'getContext', 'toDataURL', 'toBlob');
+        }
+
+        // Mirror the lazy-init canvas methods onto the DOM-side
+        // HTMLCanvasElement.prototype too. HTML-parsed <canvas> elements
+        // returned by `document.getElementById(...)` have that prototype
+        // in their chain — not the standalone one — so without this
+        // mirror, `elem.getContext` is `undefined` on every parsed canvas.
+        // The standalone methods read `this._canvasId` (initialised lazily
+        // via `_lazyInitCanvas`), which works for both kinds of canvas.
+        if (_domCanvasProto && _domCanvasProto !== _HTMLCanvasProto) {
+            for (const name of ['getContext', 'toDataURL', 'toBlob', 'transferControlToOffscreen']) {
+                const desc = Object.getOwnPropertyDescriptor(_HTMLCanvasProto, name);
+                if (desc && !Object.getOwnPropertyDescriptor(_domCanvasProto, name)) {
+                    Object.defineProperty(_domCanvasProto, name, desc);
+                }
+            }
         }
 
         if (globalThis.AudioContext) {
