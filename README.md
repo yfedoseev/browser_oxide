@@ -1,203 +1,215 @@
 # browser_oxide
 
-The fastest stealth headless browser. Built from scratch in Rust.
+A headless browser engine written from scratch in Rust. Real HTML/CSS/DOM
+parser, V8-backed JS runtime, own CSS engine (not Servo's MPL crates), own
+stealth-grade HTTP stack with BoringSSL TLS impersonation, CDP-compatible
+remote-debugging surface, no Chromium underneath.
 
-## Numbers
+> **Status: research-grade, pre-1.0.** Works against a 126-site corpus of
+> commercially-protected pages (see "What it can do" below for measured
+> numbers). API surfaces are not stable. License is MIT OR Apache-2.0.
 
-| | browser_oxide | Chrome 146 | Puppeteer+Stealth | Camoufox | Lightpanda |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **Stealth score** | **18/18** | 16/18 | 14/18 | 13/18 | 8/18 |
-| **Memory (RSS)** | **34 MB** | 663 MB | 74 MB | ~300 MB | 72 MB |
-| **Startup** | **56ms** | — | 3028ms | 1471ms | — |
-| **JS eval speed** | **0.05ms** | 0.35ms | — | — | 0.07ms |
-| **Page load** | 251ms/pg | 392ms/pg | — | — | 432ms/pg |
-| **TLS fingerprint** | Chrome-identical | Chrome | Chrome (real) | Firefox | Zig |
-| **Anti-bot (71 sites)** | **71/71** | — | ~30/71 | ~65/71 | ~10/71 |
-| **CDP leak** | **None** | Leaks | Leaks | None | — |
+## Why this exists
 
-All numbers from real measurements, not estimates. Benchmark scripts in `benchmarks/`. Full methodology in [BROWSER_COMPARISON.md](docs/BROWSER_COMPARISON.md).
+Every stealth tool today wraps a real browser and hides the puppet strings.
+Puppeteer/Playwright + stealth plugins patch ~12 JS properties at runtime
+and lose to `Function.prototype.toString` checks. Patched-Chromium forks
+still inherit Chromium's CDP detection vectors. Patched-Firefox forks
+(Camoufox et al.) have ~3% browser-market-share which is itself a signal.
 
-## Why
+`browser_oxide` is a different bet: build the engine from the parser up so
+the fingerprint properties are *native*, not *injected*. There is no
+Chrome process, no CDP client, no WebDriver, no patched-fork inheritance.
+Whether that's the *right* bet is empirical — see the numbers section.
 
-Every stealth tool today fights the same losing battle: **wrapping Chrome and hiding the puppet strings**.
+## What it is
 
-- **Puppeteer/Playwright + stealth plugins** patch ~12 JS properties after Chrome launches. Anti-bot systems detect this by inspecting `Function.prototype.toString()` and the prototype chain. Fails Cloudflare, DataDome, Kasada.
+A complete browser engine for scraping, archival, and AI agent workloads:
 
-- **Patched Chromium forks** (CloakBrowser, BotBrowser) modify Chrome's C++ source. Better, but still inherit all of Chromium's CDP detection vectors — the `Runtime.enable` prototype-chain Proxy leak is deterministic and unpatched as of 2026.
+- **V8 JavaScript** via `deno_core` 0.311 — full ES2024+, WASM, JIT
+- **Arena-allocated DOM** with `NodeId` (Copy, u32) handles, Shadow DOM, iframes
+- **Own CSS engine** — Syntax L3 tokenizer, Selectors L4 matcher, cascade,
+  `@layer`/`@media`/`@container`, computed styles
+- **Real Canvas** — 2D rendering via `tiny-skia`, WebGL stubs, AudioContext
+- **Layout** via `taffy` with font metrics for `getBoundingClientRect()`
+- **Stealth HTTP** — own TLS stack (`boring2`/BoringSSL), Chrome-matched
+  ClientHello, HTTP/1.1 + HTTP/2 (HTTP/3 wired but disabled by default —
+  vanilla `quinn-proto` emits randomized transport parameters which is a
+  worse fingerprint than not speaking h3)
+- **CDP-compatible debugging surface** — drop-in target for Puppeteer/
+  Playwright via WebSocket
+- **EventSource (SSE)** for streaming endpoints
+- **Configurable browser identity** — load profiles from YAML or JSON at
+  runtime, or use the built-in `chrome_148_*` / `firefox_135_*` /
+  `pixel_9_pro_chrome_148` / `iphone_15_pro_safari_18` presets
 
-- **Patched Firefox** (Camoufox) avoids CDP by using Juggler protocol. Strong stealth, but Firefox has 3% browser market share — its TLS fingerprint is inherently suspicious to anti-bot systems that weight by rarity.
+## What it can do (measured, not estimated)
 
-- **Commercial anti-detect browsers** (Multilogin, Kameleo) charge $45-100+/month and are closed-source desktop apps. Can't embed in a container farm.
+Anti-bot coverage measured against a 126-site corpus of commercially-
+protected pages (Cloudflare, Akamai, DataDome, PerimeterX, Kasada,
+Shape/F5, etc.) on 2026-05-17:
 
-**browser_oxide doesn't have puppet strings.** There's no Chrome underneath. No CDP client. No WebDriver. No patched fork. It's a browser engine built from scratch — the stealth properties are native, not injected. Anti-bot systems can't detect what doesn't exist.
+| Profile (per-site routing) | L3-rendered / 126 |
+|---|---:|
+| Chrome 148 macOS | 117 |
+| Pixel 9 Pro Chrome 148 (Android) | 119 |
+| iPhone 15 Pro Safari 18 | 113 |
+| Firefox 135 macOS | 115 |
+| **Per-domain best-of-profile (routed)** | **121** |
 
-The result: **19x less memory than Chrome, 54x faster startup than Puppeteer, and the only tool that passes all 18 stealth checks and all 71 anti-bot test sites.**
+**The five sites that no current profile passes** are three Kasada-
+protected pages (`canadagoose.com`, `hyatt.com`, `realtor.com`),
+`homedepot.com` (Akamai sec-cpt — passes the 3-iter holistic metric, fails
+under a strict 1-iter lens), and `iphey.com` (a thin-body fingerprint test
+page, debug-build render artifact under contention).
 
-## What It Is
+Numbers are debug-build, single-threaded (V8 isolate constraint), from one
+datacenter IP, on 2026-05-17. Release builds and clean IPs improve on
+these. We do not claim "all of Kasada" — Kasada has a known residual we
+have a named (not yet shipped) fix list for. See the engine docs in
+`docs/` and the test harness in `crates/browser/tests/` for the
+underlying measurements.
 
-A complete headless browser engine for web scraping and AI agents:
+### Things to know before believing the numbers
 
-- **V8 JavaScript** — full ES2024+, WASM, JIT compilation (same V8 as Chrome, via deno_core)
-- **Real DOM** — arena-allocated, Shadow DOM, iframes with separate V8 contexts
-- **Real CSS** — our own parser (not Servo's MPL crates), cascade, computed styles, media queries
-- **Real Canvas** — 2D rendering via tiny-skia, WebGL stubs, AudioContext fingerprints
-- **Real Layout** — flexbox/grid via taffy, `getBoundingClientRect()` with font metrics
-- **Stealth HTTP** — own TLS stack (boring2/BoringSSL), Chrome-identical JA4 fingerprint, HTTP/1.1 + HTTP/2 + HTTP/3 (QUIC)
-- **CDP compatible** — drop-in replacement for Puppeteer/Playwright via WebSocket
-- **EventSource (SSE)** — crawl LLM agent APIs that stream responses
-- **Human-like input** — Bezier curve mouse movements, variable typing speed
+- **Free-OSS SOTA parity, not "we beat Chrome"**: On the broad corpus we
+  measure in the same tier as real-browser-driver tools (Camoufox,
+  Patchright, nodriver). The point isn't that we win — it's that a
+  from-scratch engine reaches that tier at all.
+- **No live competitor sweep was run for this README.** Comparison
+  numbers cited in older versions of this file (e.g. "Puppeteer 30/71")
+  were not freshly re-measured and have been removed.
+- **Kasada is the OSS-wide gap.** No open-source tool publicly passes
+  Kasada from scratch. The published 2026 winners are paid real-browser
+  farms (Scrapfly et al.).
+- **Memory and startup numbers** depend heavily on workload and OS — we
+  don't have a recent apples-to-apples benchmark we'd defend in this
+  README, so they're removed. The benchmark scaffolding lives in
+  `crates/browser/tests/browser_comparison.rs`.
 
 ## Architecture
 
 ```
-HTML → DOM (+ Shadow DOM) → CSS → Layout → JS (V8 + WASM) ← Stealth profiles
+HTML → DOM (+ Shadow DOM) → CSS → Layout → JS (V8 + WASM) ← Stealth profile
   ↑          ↑                       ↓
   │       iframes              Canvas 2D (tiny-skia)
   │                                  ↓
-  └────── HTTP/1+2+3 (stealth TLS) ──┘
+  └────── HTTP/1+2 (stealth TLS) ────┘
 ```
 
-15 crates, all MIT/Apache-2.0. No MPL, no AGPL, no copyleft.
-
-## Quick Start
-
-```rust
-use browser::Page;
-use stealth::chrome_130_linux;
-
-// Load a page with stealth
-let profile = chrome_130_linux();
-let page = Page::navigate_stealth("https://example.com", profile).await?;
-println!("{}", page.title()); // "Example Domain"
-
-// Evaluate JavaScript
-let result = page.evaluate("document.querySelectorAll('a').length")?;
-
-// Human-like interaction
-page.human_click("button.submit")?;
-page.human_type("input[name=email]", "user@example.com")?;
-```
-
-```rust
-// CDP server — connect with Puppeteer/Playwright
-use protocol::CdpServer;
-
-let server = CdpServer::start_navigable(9222)?;
-// Connect: ws://127.0.0.1:9222
-// Navigate via Page.navigate, evaluate via Runtime.evaluate
-```
-
-## Anti-Bot Coverage
-
-Tested against 71 real protected sites. All pass.
-
-| Protection | Sites Tested | Result |
-|---|---|:---:|
-| **Cloudflare** | nowsecure.nl, chatgpt.com, discord.com, medium.com, coinbase.com, bet365.com | **6/6** |
-| **Akamai** | adidas.com, costco.com, delta.com, homedepot.com, nike.com, united.com | **6/6** |
-| **PerimeterX** | walmart.com, stockx.com, nordstrom.com, instacart.com, craigslist.org | **5/5** |
-| **Kasada** | ticketmaster.com, ticketmaster.co.uk, seatgeek.com | **3/3** |
-| **Shape/F5** | southwest.com, iherb.com, gap.com | **3/3** |
-| **DataDome** | various sites via challenge solver | **pass** |
-| **Fingerprint checks** | sannysoft, creepjs, browserleaks, pixelscan | **4/4** |
-
-## Stealth Features
-
-18 detection vectors covered (Chrome headless only covers 16):
-
-| Feature | How |
-|---|---|
-| TLS fingerprint (JA3/JA4) | Own BoringSSL stack, Chrome 130 cipher suites/curves/extensions |
-| HTTP/2 fingerprint | Chrome SETTINGS frame order, pseudo-header order, priority |
-| `navigator.webdriver` | `undefined` (Chrome leaks `true`) |
-| `window.chrome` | Full chrome object with runtime, loadTimes, csi |
-| Plugins, mimeTypes | Spoofed with correct counts |
-| WebRTC | Leak-proof RTCPeerConnection (no real IP exposure) |
-| Canvas/WebGL | Seed-based deterministic fingerprints |
-| AudioContext | Seed-based deterministic fingerprint |
-| Font enumeration | OS-specific font lists (Windows/Mac/Linux) |
-| Speech synthesis | OS-specific voice lists |
-| Permissions API | Chrome-consistent responses per permission type |
-| Battery API | Realistic BatteryManager |
-| Media codecs | Chrome-correct `isTypeSupported()` / `canPlayType()` |
-| Client Hints | Full sec-ch-ua headers matching JS APIs |
-| CDP detection | **None** — not a Chromium fork, no `Runtime.enable` leak |
-| Human-like input | Bezier mouse curves, variable typing speed |
-
-## Performance
-
-**Memory: 19x less than Chrome**
-
-```
-Browser              Idle       After 10 pages    Growth
-browser_oxide        34 MB      34 MB             +0 MB
-Chrome 146          663 MB     666 MB             +3 MB
-Lightpanda           72 MB      74 MB             +2 MB
-```
-
-At 1,000 instances on AWS: browser_oxide uses 34 GB vs Chrome's 660 GB. **~$40K/month savings.**
-
-**Speed: 7x faster JS, 1.6x faster page loading**
-
-```
-                     JS eval      Throughput (11 pages)
-browser_oxide        0.05ms/call  251ms/page
-Chrome 146           0.35ms/call  392ms/page
-Lightpanda           0.07ms/call  432ms/page
-```
-
-## Crates
+15 crates, no MPL, no AGPL, no copyleft. Full crate inventory in
+`docs/ARCHITECTURE.md`.
 
 | Crate | Description |
 |---|---|
 | `css_parser` | CSS Syntax Level 3 tokenizer + parser (with nesting) |
 | `css_selectors` | Selectors Level 4 parser + matcher |
 | `css_values` | CSS property value parsing + computed values |
-| `css_cascade` | Cascade, @layer, @media, @container, inheritance |
-| `dom` | Mutable DOM + Shadow DOM + iframe contexts |
-| `html_parser` | html5ever integration → DOM |
-| `js_runtime` | V8 (deno_core) + DOM bindings + WASM + all Web APIs |
-| `canvas` | Canvas 2D (tiny-skia) + WebGL stubs + AudioContext |
-| `layout` | Box model via taffy (getBoundingClientRect) |
-| `net` | HTTP/1+2+3 + stealth TLS (boring2/BoringSSL) + WebSocket + SSE |
+| `css_cascade` | Cascade, `@layer`, `@media`, `@container`, inheritance |
+| `dom` | Arena DOM + Shadow DOM + iframe contexts |
+| `html_parser` | `html5ever` integration → DOM |
+| `js_runtime` | V8 (`deno_core`) + DOM bindings + WASM + Web APIs |
+| `canvas` | Canvas 2D (`tiny-skia`) + WebGL stubs + AudioContext |
+| `layout` | Box model via `taffy` (`getBoundingClientRect`) |
+| `net` | HTTP/1+2+3 + stealth TLS (`boring2`/BoringSSL) + WebSocket + SSE |
 | `event_loop` | Timers, microtasks, Promises, rAF |
 | `workers` | Web Workers + Service Workers (separate V8 isolates) |
 | `stealth` | Fingerprint profiles (100+ properties), navigator spoofing |
 | `protocol` | CDP server (Puppeteer/Playwright drop-in) |
-| `browser` | Top-level Browser/Page API |
+| `browser` | Top-level `Browser`/`Page` API |
+| `akamai` | Akamai BMP sensor payload encoder |
 
-## Build & Test
+## Quick start
+
+```rust
+use browser::Page;
+
+// Built-in preset
+let profile = stealth::presets::chrome_148_macos();
+let page = Page::navigate_stealth("https://example.com", profile).await?;
+println!("{}", page.title());
+
+// Evaluate JavaScript
+let result = page.evaluate("document.querySelectorAll('a').length")?;
+```
+
+### Configurable browser identity
+
+The browser identity (UA string, Chrome version, screen, locale, TLS
+impersonation label, etc.) is a `StealthProfile`. Load one from disk:
+
+```rust
+use stealth::StealthProfile;
+
+let profile = StealthProfile::load_from_file("profiles/chrome_148_macos.yaml")?;
+profile.validate()?;
+let page = Page::navigate_stealth("https://example.com", profile).await?;
+```
+
+YAML and JSON are both supported; format is picked by extension. See
+`crates/stealth/profiles/chrome_148_macos.yaml` for the full field
+schema. The struct definition (`StealthProfile` in `crates/stealth/src/
+profile.rs`) is the source of truth — every field is documented there.
+
+### CDP server (Puppeteer/Playwright drop-in)
+
+```rust
+use protocol::CdpServer;
+
+let server = CdpServer::start_navigable(9222)?;
+// Connect with Puppeteer to ws://127.0.0.1:9222
+```
+
+## Build and test
 
 ```bash
-cargo test --workspace -- --test-threads=1   # 801 tests, V8 requires single-threaded
-cargo clippy --workspace -- -D warnings      # Lint
-cargo fmt --all -- --check                   # Format
+cargo test --workspace -- --test-threads=1    # V8 isolates are per-thread
+cargo clippy --workspace -- -D warnings
+cargo fmt --all -- --check
 
-# Browser comparison (needs Chrome + Lightpanda running)
-cargo test --release -p browser --test browser_comparison -- --ignored --test-threads=1 --nocapture
-
-# Anti-bot sites (needs internet)
-cargo test --release -p browser --test anti_bot_sites -- --ignored --test-threads=1 --nocapture
-
-# Competitor benchmarks
-cd benchmarks && node bench_puppeteer.js     # Puppeteer+Stealth
-python bench_all.py                          # Patchright, Camoufox
+# Live anti-bot sweep (needs internet, --release for fair timing)
+cargo test --release -p browser --test holistic_sweep -- --ignored --test-threads=1 --nocapture
 ```
+
+The browser-comparison harness (`crates/browser/tests/browser_comparison
+.rs`) compares against locally-installed Chrome / Lightpanda when those
+binaries are present; it is `#[ignore]` by default.
 
 ## Documentation
 
 | Doc | Description |
 |---|---|
-| [Browser Comparison](docs/BROWSER_COMPARISON.md) | Head-to-head benchmarks vs Chrome, Lightpanda, Puppeteer, Camoufox, and 6 others |
-| [Architecture](docs/ARCHITECTURE.md) | Workspace, dependency graph, external deps |
+| [Architecture](docs/ARCHITECTURE.md) | Workspace layout, dependency graph, external deps |
 | [Networking](docs/NETWORKING.md) | HTTP/1+2+3 + stealth TLS + WebSocket + SSE |
-| [Stealth](docs/STEALTH.md) | 100+ profile properties, navigator, window.chrome |
-| [CDP Protocol](docs/PROTOCOL.md) | Puppeteer/Playwright compatibility |
-| [CSS Parser](docs/CSS_PARSER.md) | Tokenizer + parser + nesting |
+| [CDP Protocol](docs/PROTOCOL.md) | Puppeteer/Playwright drop-in surface |
+| [CSS Parser](docs/CSS_PARSER.md) / [Selectors](docs/CSS_SELECTORS.md) / [Values](docs/CSS_VALUES.md) / [Cascade](docs/CSS_CASCADE.md) | The CSS engine |
 | [DOM](docs/DOM.md) | Arena DOM + Shadow DOM + iframes + Web APIs |
-| [JS Runtime](docs/JS_RUNTIME.md) | V8 + deno_core + WASM + full API surface |
-| [Canvas](docs/CANVAS.md) | Canvas 2D (tiny-skia) + WebGL stubs + AudioContext |
+| [JS Runtime](docs/JS_RUNTIME.md) | V8 + `deno_core` + WASM + API surface |
+| [Canvas](docs/CANVAS.md) | Canvas 2D + WebGL stubs + AudioContext |
+| [Layout](docs/LAYOUT.md) | Box model via `taffy` |
+| [Event Loop](docs/EVENT_LOOP.md) | Timers, microtasks, rAF, Promises |
+| [Workers](docs/WORKERS.md) | Dedicated/Shared/Service Workers |
+
+## Use, scope, what this is not for
+
+This is engine-side research. The intended use is automated browsing for
+archival, accessibility, AI agents, security research, and CTF-style
+challenges where you have legitimate authorization to access the target
+site. The repository ships an engine, not a "circumvent paywalls" recipe
+list; site-specific recipes and reverse-engineering notes are kept in a
+private companion repository.
+
+If you build a product on top of this, respect the target site's terms,
+robots policy, and rate limits. The maintainer is not responsible for
+downstream misuse.
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. Unless explicitly stated otherwise, any contribution
+intentionally submitted for inclusion shall be dual-licensed as above,
+without any additional terms or conditions.

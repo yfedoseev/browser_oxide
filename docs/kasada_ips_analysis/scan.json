@@ -1,1 +1,0 @@
-["1 EMPTY ARRAY      -> reg0","3 MULTIPLY      reg1 * 14 -> reg1","7 NUMBER      reg0 -> reg0","10 LESS THAN OR EQUAL      reg2 <= 14 -> reg1","14 PUSH WINDOW       -> reg1","16 MULTIPLY      reg1 * reg15 -> reg0","20 DELETE      reg0[7] -> reg1","24 ADD      13 + reg1-> reg0","28 SET      reg1 -> reg0","31 GET      reg1[reg1] -> reg0","35 TERM"]

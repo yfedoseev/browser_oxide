@@ -26,7 +26,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Yury Fedoseev"]
-repository = "https://github.com/nicepkg/browser_oxide"
+repository = "https://github.com/yfedoseev/browser_oxide"
 
 [workspace.dependencies]
 # Internal crates
