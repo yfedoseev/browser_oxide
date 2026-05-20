@@ -7,7 +7,7 @@
 //!
 //! See `crates/stealth/src/kasada.rs` for the PoW algorithm.
 
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -147,7 +147,7 @@ impl KasadaSessionStore {
         // (per Humphryyy/Kasada-Deobfuscated `makeId()` is called once per
         // page session, not once per request).
         let entry = store.entry(host.to_string()).or_insert_with(|| {
-            let mut rng = ChaCha20Rng::from_os_rng();
+            let mut rng = ChaCha20Rng::from_rng(&mut rand::rng());
             KasadaSession {
                 server_offset_ms: offset,
                 server_st_ms: server_ms,

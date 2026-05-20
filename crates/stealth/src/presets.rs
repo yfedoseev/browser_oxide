@@ -656,7 +656,7 @@ pub fn with_locale(
 
 /// Random desktop profile (picks randomly from presets).
 pub fn random_desktop() -> StealthProfile {
-    use rand::Rng;
+    use rand::{Rng, RngExt};
     let mut rng = rand::rng();
     let mut profile = match rng.random_range(0..3) {
         0 => chrome_148_windows(),

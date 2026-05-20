@@ -37,7 +37,7 @@
 //! ~5 ms / answer on one CPU core; Akamai's `chlg_duration` enforced
 //! wait (5–30 s) is the real time floor.
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

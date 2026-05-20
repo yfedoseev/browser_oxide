@@ -339,7 +339,7 @@ fn build_fwd() -> Vec<Value> {
 
 fn generate_per() -> String {
     // 20-digit pseudo-random number string per session.
-    use rand::Rng;
+    use rand::{Rng, RngExt};
     let mut rng = rand::rng();
     (0..20)
         .map(|_| char::from(b'0' + rng.random_range(0..10)))
@@ -347,7 +347,7 @@ fn generate_per() -> String {
 }
 
 fn rand_decimal_under_1() -> f64 {
-    use rand::Rng;
+    use rand::{Rng, RngExt};
     let mut rng = rand::rng();
     rng.random_range(0.0..1.0)
 }

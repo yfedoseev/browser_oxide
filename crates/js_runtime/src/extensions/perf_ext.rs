@@ -20,7 +20,7 @@
 use crate::state::DomState;
 use deno_core::op2;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use rand_distr::{Distribution, Exp, LogNormal};
 use std::time::Instant;
 

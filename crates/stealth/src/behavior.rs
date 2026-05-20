@@ -14,7 +14,7 @@
 //! — same seed produces same sequence so tests reproduce, but each call site
 //! folds in a salt so different `(from, to)` pairs differ.
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use rand_distr::{Distribution, LogNormal, Normal};

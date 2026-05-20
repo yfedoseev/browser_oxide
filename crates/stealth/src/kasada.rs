@@ -43,6 +43,7 @@
 //! - <https://github.com/lktop/kpsdk>
 
 use serde::Serialize;
+use rand::RngExt;
 use sha2::{Digest, Sha256};
 
 /// Kasada PoW challenge inputs.

@@ -54,7 +54,7 @@
 
 use crate::session::AkamaiSession;
 use crate::MouseEvent;
-use rand::Rng;
+use rand::{Rng, RngExt};
 use stealth::StealthProfile;
 
 /// Build the 58-element tAD array as a `,`-joined cleartext string.
@@ -154,7 +154,7 @@ pub fn build_cleartext(
     tad.push("-127".into());
     let mut g8d = String::new();
     let mut rng = rand::rng();
-    use rand::Rng;
+    use rand::{Rng, RngExt};
     for _ in 0..20 {
         g8d.push_str(&rng.random_range(0..10).to_string());
     }
