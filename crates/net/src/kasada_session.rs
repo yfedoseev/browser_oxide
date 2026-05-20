@@ -319,7 +319,8 @@ impl KasadaSessionStore {
         let store = self.inner.read().await;
         let session = store.get(host)?;
         let work_time = now_unix_ms() + session.server_offset_ms;
-        let solution: KasadaSolution = solve_default(work_time, &session.id);
+        let solution: KasadaSolution =
+            stealth::kasada::solve_default(work_time, &session.id);
         Some(solution.to_header_value())
     }
 

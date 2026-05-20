@@ -26,7 +26,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 fn fixture_canvas() -> Canvas2D {
     // Fixed scene that exercises fillRect (no text, no glyphs — those
     // depend on font rasterization which is independently variable).
-    let mut c = Canvas2D::new(100, 30, "Linux".to_string()).expect("canvas 100x30");
+    let mut c = Canvas2D::new(100, 30, "Linux".to_string(), 0).expect("canvas 100x30");
     c.set_fill_color(255, 100, 0, 1.0);
     c.fill_rect(10.0, 5.0, 80.0, 20.0);
     c.set_fill_color(0, 102, 153, 0.7);
