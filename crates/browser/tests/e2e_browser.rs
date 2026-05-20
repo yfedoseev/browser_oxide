@@ -494,7 +494,13 @@ async fn stealth_profile_wired_end_to_end() {
 
     // Navigator
     let ua = page.evaluate("navigator.userAgent").unwrap();
-    assert!(ua.contains("Chrome/147"), "UA: {}", ua);
+    // Chrome major version moves with the preset; pin to the family
+    // (Chrome NNN with a /version suffix) rather than a specific
+    // release so the test survives quarterly preset bumps.
+    assert!(
+        ua.contains("Chrome/") && ua.contains("Safari/537.36"),
+        "UA: {ua}"
+    );
     assert!(ua.contains("Windows NT 10.0"), "UA: {}", ua);
     assert_eq!(page.evaluate("navigator.platform").unwrap(), "Win32");
     assert_eq!(page.evaluate("navigator.vendor").unwrap(), "Google Inc.");

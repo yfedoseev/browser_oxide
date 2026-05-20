@@ -6076,7 +6076,21 @@
     // *constructor* exists on globalThis as a real class — but the
     // instance binding `globalThis.cookieStore` is gated on secure.
     {
+        // Real Chrome's CookieStore is [Exposed] but has no public
+        // constructor — `new CookieStore()` throws "Failed to construct
+        // 'CookieStore': Illegal constructor". We mirror that, while
+        // still being able to materialise the `globalThis.cookieStore`
+        // instance via a private symbol that's only known to this file.
+        const _internalBuild = Symbol("CookieStore.internalBuild");
         class CookieStore extends EventTarget {
+            constructor(token) {
+                super();
+                if (token !== _internalBuild) {
+                    throw new TypeError(
+                        "Failed to construct 'CookieStore': Illegal constructor"
+                    );
+                }
+            }
             get(_name) { return Promise.resolve(null); }
             getAll(_name) { return Promise.resolve([]); }
             set(_optionsOrName, _value) { return Promise.resolve(); }
@@ -6091,7 +6105,7 @@
         });
         if (_secure()) {
             Object.defineProperty(globalThis, "cookieStore", {
-                value: new CookieStore(), configurable: true, enumerable: true,
+                value: new CookieStore(_internalBuild), configurable: true, enumerable: true,
             });
         }
     }
