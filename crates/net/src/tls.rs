@@ -221,7 +221,7 @@ const CHROME_EXTENSION_PERMUTATION: &[u8] = &[
 
 /// Generate a fresh Fisher-Yates shuffle over all 16 Chrome 147 extensions.
 fn shuffled_chrome_extension_permutation() -> Vec<u8> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut permutation = CHROME_EXTENSION_PERMUTATION.to_vec();
     permutation.shuffle(&mut rng);
     permutation

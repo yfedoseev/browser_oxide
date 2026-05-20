@@ -8,8 +8,8 @@ description = "html5ever integration producing a browser_oxide DOM"
 
 [dependencies]
 dom = { path = "../dom" }
-html5ever = "0.29"
-markup5ever = "0.14"
+html5ever = "0.39"
+markup5ever = "0.39"
 
 [dev-dependencies]
 css_selectors = { path = "../css_selectors" }

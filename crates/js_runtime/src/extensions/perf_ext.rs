@@ -62,7 +62,7 @@ impl PerfState {
         let raw_us = self.origin.elapsed().as_nanos() as f64 / 1000.0;
         let q = (raw_us / 100.0).floor() * 100.0;
         let jitter = self.log_normal.sample(&mut self.rng).clamp(0.0, 35.0);
-        let spike = if self.rng.gen_bool(1.0 / 1024.0) {
+        let spike = if self.rng.random_bool(1.0 / 1024.0) {
             self.spike_exp.sample(&mut self.rng).min(1500.0)
         } else {
             0.0
@@ -189,7 +189,7 @@ mod tests {
         let mut max_jitter_us = 0.0_f64;
         for _ in 0..100_000 {
             let j = s.log_normal.sample(&mut s.rng).clamp(0.0, 35.0);
-            let spike = if s.rng.gen_bool(1.0 / 1024.0) {
+            let spike = if s.rng.random_bool(1.0 / 1024.0) {
                 s.spike_exp.sample(&mut s.rng).min(1500.0)
             } else {
                 0.0

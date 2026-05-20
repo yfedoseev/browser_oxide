@@ -81,8 +81,7 @@ impl KasadaSessionStore {
     pub async fn learn_prefix(&self, host: &str, prefix: &str) {
         let mut store = self.inner.write().await;
         let entry = store.entry(host.to_string()).or_insert_with(|| {
-            let rng = rand::thread_rng();
-            let mut id_rng = ChaCha20Rng::from_rng(rng).unwrap();
+            let mut id_rng = ChaCha20Rng::from_rng(&mut rand::rng());
             KasadaSession {
                 server_offset_ms: 0,
                 server_st_ms: 0,
@@ -148,7 +147,7 @@ impl KasadaSessionStore {
         // (per Humphryyy/Kasada-Deobfuscated `makeId()` is called once per
         // page session, not once per request).
         let entry = store.entry(host.to_string()).or_insert_with(|| {
-            let mut rng = ChaCha20Rng::from_entropy();
+            let mut rng = ChaCha20Rng::from_os_rng();
             KasadaSession {
                 server_offset_ms: offset,
                 server_st_ms: server_ms,
@@ -288,7 +287,7 @@ impl KasadaSessionStore {
     pub async fn compute_cd_header(&self, host: &str) -> Option<String> {
         let store = self.inner.read().await;
         let session = store.get(host)?;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let work_time = now_unix_ms() + session.server_offset_ms;
 
         // Generate a fresh ID for this solve (matches ips.js behavior)
@@ -301,7 +300,7 @@ impl KasadaSessionStore {
 
         // Request Start Time (rst) — should be a realistic page-relative
         // timestamp (ms), not absolute epoch. 2-8 seconds is typical.
-        let rst_ms = (rng.gen_range(2000..8000) as f64) + rng.gen_range(0.0..1.0);
+        let rst_ms = (rng.random_range(2000..8000) as f64) + rng.random_range(0.0..1.0);
         solution.rst = Some(rst_ms);
 
         solution.v = Some(1);

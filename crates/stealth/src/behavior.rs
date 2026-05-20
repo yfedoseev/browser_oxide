@@ -501,7 +501,7 @@ pub fn wheel_burst_with_rng<R: Rng>(
             let v0 = LogNormal::new((abs_dy / 8.0).ln(), 0.3)
                 .unwrap()
                 .sample(rng);
-            let decay = 0.94 + rng.gen_range(0.0_f32..0.04); // 0.94-0.98
+            let decay = 0.94 + rng.random_range(0.0_f32..0.04); // 0.94-0.98
             let mut t = 0.0_f32;
             let mut v = v0;
             let mut ticks = Vec::new();
@@ -566,7 +566,7 @@ mod tests {
         let p = BehaviorProfile::default();
         let mut a = p.rng_for(123);
         let mut b = p.rng_for(123);
-        assert_eq!(a.gen::<u64>(), b.gen::<u64>());
+        assert_eq!(a.random::<u64>(), b.random::<u64>());
     }
 
     #[test]
@@ -574,7 +574,7 @@ mod tests {
         let p = BehaviorProfile::default();
         let mut a = p.rng_for(1);
         let mut b = p.rng_for(2);
-        assert_ne!(a.gen::<u64>(), b.gen::<u64>());
+        assert_ne!(a.random::<u64>(), b.random::<u64>());
     }
 
     // ---- Mouse trajectory ----

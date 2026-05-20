@@ -153,10 +153,10 @@ pub fn build_cleartext(
     // -127 / g8D — random digit string
     tad.push("-127".into());
     let mut g8d = String::new();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     use rand::Rng;
     for _ in 0..20 {
-        g8d.push_str(&rng.gen_range(0..10).to_string());
+        g8d.push_str(&rng.random_range(0..10).to_string());
     }
     tad.push(g8d);
 
@@ -236,14 +236,14 @@ fn field_mouse_trajectory(events: &[MouseEvent]) -> String {
 /// `0,<load_t>,-1,-1,-1,-1,-1,-1,-1,-1,-1;`. Currently a static
 /// placeholder; A4 will wire the real timer.
 fn field_z8d(_s: &AkamaiSession) -> String {
-    let load_t = rand::thread_rng().gen_range(200000..500000);
+    let load_t = rand::rng().random_range(200000..500000);
     format!("0,{load_t},-1,-1,-1,-1,-1,-1,-1,-1,-1;")
 }
 
 /// Field -111 / l8D: page-load timing tuple
 /// `0,<load_t>,-1,-1,-1;`. Static placeholder pending A4.
 fn field_l8d(_s: &AkamaiSession) -> String {
-    let load_t = rand::thread_rng().gen_range(200000..500000);
+    let load_t = rand::rng().random_range(200000..500000);
     format!("0,{load_t},-1,-1,-1;")
 }
 
@@ -257,7 +257,7 @@ fn field_vrd(s: &AkamaiSession) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis();
-    let load_t = rand::thread_rng().gen_range(200000..500000);
+    let load_t = rand::rng().random_range(200000..500000);
     format!(
         "1,4016774,32,{load_t},{load_t},0,4588905,23468869,0,{now},7,18047,0,14,3007,0,0,23468870,4577207,0,{}",
         abck_echo

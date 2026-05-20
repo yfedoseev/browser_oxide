@@ -111,7 +111,7 @@ impl CdpClient {
             "method": method,
             "params": params,
         });
-        self.tx.send(Message::Text(req.to_string())).await?;
+        self.tx.send(Message::Text(req.to_string().into())).await?;
         self.wait_for_id(id).await
     }
 
@@ -132,7 +132,7 @@ impl CdpClient {
         if let Some(ref sid) = self.session_id {
             req["sessionId"] = json!(sid);
         }
-        self.tx.send(Message::Text(req.to_string())).await?;
+        self.tx.send(Message::Text(req.to_string().into())).await?;
         self.wait_for_id(id).await
     }
 

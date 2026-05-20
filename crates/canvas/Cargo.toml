@@ -15,7 +15,7 @@ webgl-render = ["glow"]
 # prebuilt binaries distributed via skia-bindings match — disabling
 # default-features forces a full source build that requires
 # `git-sync-deps` to fetch the entire Skia tree.
-skia-safe = "0.93"
+skia-safe = "0.97"
 png = "0.17"
 # zlib-rs is a pure-Rust port of zlib bit-compatible with the C library.
 # Enabling it through flate2 makes the `png` crate emit deterministic
@@ -34,11 +34,11 @@ rustfft = "6"
 # rustybuzz (MIT) is a HarfBuzz port for text shaping, swash
 # (Apache-2.0) is the glyph rasterizer. All pure Rust, all clean for
 # our MIT/Apache-2.0 policy.
-fontdb = { version = "0.18", default-features = false }
-rustybuzz = "0.18"
-swash = "0.1"
+fontdb = { version = "0.23", default-features = false }
+rustybuzz = "0.20"
+swash = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-glow = { version = "0.14", optional = true }
+glow = { version = "0.17", optional = true }
 
 [dev-dependencies]
 sha2 = "0.10"

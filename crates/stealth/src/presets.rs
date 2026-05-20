@@ -657,15 +657,15 @@ pub fn with_locale(
 /// Random desktop profile (picks randomly from presets).
 pub fn random_desktop() -> StealthProfile {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let mut profile = match rng.gen_range(0..3) {
+    let mut rng = rand::rng();
+    let mut profile = match rng.random_range(0..3) {
         0 => chrome_148_windows(),
         1 => chrome_148_macos(),
         _ => chrome_148_linux(),
     };
     // Randomize seeds
-    profile.canvas_seed = rng.gen();
-    profile.audio_seed = rng.gen();
+    profile.canvas_seed = rng.random();
+    profile.audio_seed = rng.random();
     profile
 }
 

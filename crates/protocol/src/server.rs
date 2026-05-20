@@ -365,7 +365,7 @@ async fn handle_connection(
             Message::Text(text) => {
                 // Fast path for Runtime.evaluate — avoid full JSON parse + async overhead
                 if let Some(resp) = fast_evaluate(&text, &page) {
-                    ws_stream.send(Message::Text(resp)).await?;
+                    ws_stream.send(Message::Text(resp.into())).await?;
                     continue;
                 }
 
@@ -376,7 +376,7 @@ async fn handle_connection(
                             r#"{{"error":{{"code":-32700,"message":"Parse error: {}"}}}}"#,
                             e.to_string().replace('"', "'")
                         );
-                        ws_stream.send(Message::Text(err_msg)).await?;
+                        ws_stream.send(Message::Text(err_msg.into())).await?;
                         continue;
                     }
                 };
@@ -408,10 +408,10 @@ async fn handle_connection(
 
                 // Send events first (matches Chrome behavior)
                 for event in events {
-                    ws_stream.send(Message::Text(to_json(&event))).await?;
+                    ws_stream.send(Message::Text(to_json(&event).into())).await?;
                 }
                 // Then send the response
-                ws_stream.send(Message::Text(response)).await?;
+                ws_stream.send(Message::Text(response.into())).await?;
             }
             Message::Close(_) => break,
             _ => {}
@@ -642,7 +642,7 @@ mod tests {
                 tx.send(Message::Text(format!(
                     r#"{{"id":{},"method":"Page.navigate","params":{{"url":"{}"}}}}"#,
                     id, url
-                ))).await.unwrap();
+                ).into())).await.unwrap();
                 // Read until response
                 loop {
                     let msg = rx.next().await.unwrap().unwrap();
@@ -656,7 +656,7 @@ mod tests {
                 tx.send(Message::Text(format!(
                     r#"{{"id":{},"method":"Runtime.evaluate","params":{{"expression":"document.title"}}}}"#,
                     eval_id
-                ))).await.unwrap();
+                ).into())).await.unwrap();
                 let msg = rx.next().await.unwrap().unwrap();
                 let elapsed = start.elapsed();
                 if let Message::Text(t) = msg {

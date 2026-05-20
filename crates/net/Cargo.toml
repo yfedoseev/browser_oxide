@@ -36,9 +36,9 @@ adblock = "0.12"
 tokio = { version = "1", features = ["full"] }
 foreign-types = "0.5"
 chrono = "0.4"
-rand = "0.8"
-rand_chacha = "0.3"
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+rand = "0.9"
+rand_chacha = "0.9"
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
 url = "2"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
@@ -54,7 +54,7 @@ quinn = "0.11"
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-webpki-roots = "0.26"
+webpki-roots = "1"
 http = "1"
 bytes = "1"
 

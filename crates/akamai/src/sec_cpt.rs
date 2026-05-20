@@ -129,11 +129,11 @@ pub fn solve_crypto(challenge: &SecCptChallenge, sec: &str) -> Vec<String> {
 /// `sha256(prefix + r)` produces 0 modulo `difficulty`. Tries random
 /// candidates until one satisfies; expected attempts ≈ difficulty/256.
 fn find_answer(prefix: &str, difficulty: u64) -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     loop {
         // Real Akamai uses Math.random().toString(16) → "0.<hex>".
         // Generate a hex float of similar length (~13 hex chars after the dot).
-        let frac: u64 = rng.gen::<u64>() & 0x000F_FFFF_FFFF_FFFF;
+        let frac: u64 = rng.random::<u64>() & 0x000F_FFFF_FFFF_FFFF;
         let candidate = format!("0.{:013x}", frac);
 
         let mut hasher = Sha256::new();

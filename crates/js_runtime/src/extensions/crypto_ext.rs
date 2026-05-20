@@ -38,7 +38,7 @@ pub fn op_crypto_digest(#[string] algorithm: String, #[buffer] data: &[u8]) -> V
 #[op2(fast)]
 pub fn op_crypto_random_fill(#[buffer] out: &mut [u8]) {
     use rand::RngCore;
-    rand::thread_rng().fill_bytes(out);
+    rand::rng().fill_bytes(out);
 }
 
 deno_core::extension!(
