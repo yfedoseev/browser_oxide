@@ -81,11 +81,11 @@ pub fn computed_to_taffy(style: &ComputedStyle, ctx: &ResolveContext) -> taffy::
     // Gap
     if let Some(CssValue::LengthPercentage(lp)) = style.get(&PropertyId::RowGap) {
         ts.gap.height =
-            taffy::LengthPercentage::Length(resolve_length_percentage(lp, ctx, ctx.viewport_h));
+            taffy::LengthPercentage::length(resolve_length_percentage(lp, ctx, ctx.viewport_h));
     }
     if let Some(CssValue::LengthPercentage(lp)) = style.get(&PropertyId::ColumnGap) {
         ts.gap.width =
-            taffy::LengthPercentage::Length(resolve_length_percentage(lp, ctx, ctx.viewport_w));
+            taffy::LengthPercentage::length(resolve_length_percentage(lp, ctx, ctx.viewport_w));
     }
 
     // Box sizing
@@ -109,21 +109,21 @@ fn css_to_dimension(
         Some(CssValue::LengthPercentageAuto(lpa)) => {
             use css_values::types::length::LengthPercentageAuto as CssLPA;
             match lpa {
-                CssLPA::Length(l) => taffy::Dimension::Length(resolve_length(l, ctx)),
-                CssLPA::Percentage(p) => taffy::Dimension::Percent(*p as f32 / 100.0),
-                CssLPA::Auto | CssLPA::Calc(_) => taffy::Dimension::Auto,
+                CssLPA::Length(l) => taffy::Dimension::length(resolve_length(l, ctx)),
+                CssLPA::Percentage(p) => taffy::Dimension::percent(*p as f32 / 100.0),
+                CssLPA::Auto | CssLPA::Calc(_) => taffy::Dimension::auto(),
             }
         }
         Some(CssValue::LengthPercentage(lp)) => {
             use css_values::types::length::LengthPercentage as CssLP;
             match lp {
-                CssLP::Length(l) => taffy::Dimension::Length(resolve_length(l, ctx)),
-                CssLP::Percentage(p) => taffy::Dimension::Percent(*p as f32 / 100.0),
-                CssLP::Calc(_) => taffy::Dimension::Auto,
+                CssLP::Length(l) => taffy::Dimension::length(resolve_length(l, ctx)),
+                CssLP::Percentage(p) => taffy::Dimension::percent(*p as f32 / 100.0),
+                CssLP::Calc(_) => taffy::Dimension::auto(),
             }
         }
-        Some(CssValue::Length(l)) => taffy::Dimension::Length(resolve_length(l, ctx)),
-        _ => taffy::Dimension::Auto,
+        Some(CssValue::Length(l)) => taffy::Dimension::length(resolve_length(l, ctx)),
+        _ => taffy::Dimension::auto(),
     }
 }
 
@@ -135,11 +135,11 @@ fn css_to_lpa(
     use css_values::types::length::LengthPercentageAuto as CssLPA;
     match style.get(prop) {
         Some(CssValue::LengthPercentageAuto(lpa)) => match lpa {
-            CssLPA::Length(l) => taffy::LengthPercentageAuto::Length(resolve_length(l, ctx)),
-            CssLPA::Percentage(p) => taffy::LengthPercentageAuto::Percent(*p as f32 / 100.0),
-            CssLPA::Auto | CssLPA::Calc(_) => taffy::LengthPercentageAuto::Auto,
+            CssLPA::Length(l) => taffy::LengthPercentageAuto::length(resolve_length(l, ctx)),
+            CssLPA::Percentage(p) => taffy::LengthPercentageAuto::percent(*p as f32 / 100.0),
+            CssLPA::Auto | CssLPA::Calc(_) => taffy::LengthPercentageAuto::auto(),
         },
-        _ => taffy::LengthPercentageAuto::Length(0.0),
+        _ => taffy::LengthPercentageAuto::length(0.0),
     }
 }
 
@@ -151,11 +151,11 @@ fn css_to_lp(
     use css_values::types::length::LengthPercentage as CssLP;
     match style.get(prop) {
         Some(CssValue::LengthPercentage(lp)) => match lp {
-            CssLP::Length(l) => taffy::LengthPercentage::Length(resolve_length(l, ctx)),
-            CssLP::Percentage(p) => taffy::LengthPercentage::Percent(*p as f32 / 100.0),
-            CssLP::Calc(_) => taffy::LengthPercentage::Length(0.0),
+            CssLP::Length(l) => taffy::LengthPercentage::length(resolve_length(l, ctx)),
+            CssLP::Percentage(p) => taffy::LengthPercentage::percent(*p as f32 / 100.0),
+            CssLP::Calc(_) => taffy::LengthPercentage::length(0.0),
         },
-        _ => taffy::LengthPercentage::Length(0.0),
+        _ => taffy::LengthPercentage::length(0.0),
     }
 }
 
@@ -165,8 +165,8 @@ fn css_to_border(
     ctx: &ResolveContext,
 ) -> taffy::LengthPercentage {
     match style.get(prop) {
-        Some(CssValue::Length(l)) => taffy::LengthPercentage::Length(resolve_length(l, ctx)),
-        _ => taffy::LengthPercentage::Length(0.0),
+        Some(CssValue::Length(l)) => taffy::LengthPercentage::length(resolve_length(l, ctx)),
+        _ => taffy::LengthPercentage::length(0.0),
     }
 }
 
@@ -206,11 +206,10 @@ mod tests {
         let style = ComputedStyle::resolve(&cascaded, None);
         let ctx = ResolveContext::default();
         let ts = computed_to_taffy(&style, &ctx);
-        assert!(
-            matches!(ts.size.width, taffy::Dimension::Length(v) if (v - 200.0).abs() < 0.01),
-            "got {:?}",
-            ts.size.width
-        );
+        // taffy 0.8 made Dimension a newtype struct around CompactLength;
+        // there are no pattern-matchable variants any more. Compare via
+        // equality against the canonical constructor.
+        assert_eq!(ts.size.width, taffy::Dimension::length(200.0));
     }
 
     #[test]
@@ -223,6 +222,6 @@ mod tests {
         let style = ComputedStyle::resolve(&cascaded, None);
         let ctx = ResolveContext::default();
         let ts = computed_to_taffy(&style, &ctx);
-        assert!(matches!(ts.margin.left, taffy::LengthPercentageAuto::Auto));
+        assert_eq!(ts.margin.left, taffy::LengthPercentageAuto::auto());
     }
 }

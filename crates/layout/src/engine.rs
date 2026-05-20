@@ -204,8 +204,8 @@ impl LayoutEngine {
                 let style = taffy::Style {
                     display: taffy::Display::Block,
                     size: taffy::Size {
-                        width: Dimension::Length(ctx.viewport_w),
-                        height: Dimension::Auto,
+                        width: Dimension::length(ctx.viewport_w),
+                        height: Dimension::auto(),
                     },
                     ..Default::default()
                 };
@@ -237,8 +237,8 @@ impl LayoutEngine {
                 let height = ctx.font_size * 1.2;
                 let style = taffy::Style {
                     size: taffy::Size {
-                        width: Dimension::Length(width),
-                        height: Dimension::Length(height),
+                        width: Dimension::length(width),
+                        height: Dimension::length(height),
                     },
                     ..Default::default()
                 };

@@ -11,5 +11,5 @@ dom = { path = "../dom" }
 css_parser = { path = "../css_parser" }
 css_values = { path = "../css_values" }
 css_cascade = { path = "../css_cascade" }
-taffy = "0.7"
+taffy = "0.8"
 serde = { version = "1", features = ["derive"] }
