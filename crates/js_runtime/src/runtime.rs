@@ -380,6 +380,19 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
         .execute_script("<anonymous>", include_str!("js/streams_bootstrap.js"))
         .expect("worker: streams bootstrap failed");
 
+    // event_bootstrap defines Event, MessageEvent, EventTarget, and wires
+    // addEventListener / removeEventListener / dispatchEvent onto
+    // globalThis. The worker realm needs these because
+    // worker_bootstrap.js's parent→worker message pump constructs
+    // `new MessageEvent(...)` and dispatches via `self.dispatchEvent(...)`
+    // — without event_bootstrap, both throw and the setInterval pump
+    // halts after the first incoming message, silently dropping all
+    // parent→worker traffic. (Caught by
+    // `crates/js_runtime/tests/worker.rs::worker_echo_round_trip`.)
+    runtime
+        .execute_script("<anonymous>", include_str!("js/event_bootstrap.js"))
+        .expect("worker: event bootstrap failed");
+
     // structuredClone is useful inside workers too — worker code that
     // uses `postMessage` with complex values relies on it, and the
     // impl is self-contained (it gracefully handles the absence of
