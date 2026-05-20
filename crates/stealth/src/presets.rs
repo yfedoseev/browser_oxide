@@ -35,8 +35,8 @@ fn default_media_devices(seed: &str) -> Vec<MediaDeviceInfo> {
     ]
 }
 
-/// Chrome 130 on Windows 10.
-pub fn chrome_130_windows() -> StealthProfile {
+/// Chrome 148 on Windows 10.
+pub fn chrome_148_windows() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
         user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
@@ -117,7 +117,7 @@ pub fn chrome_130_windows() -> StealthProfile {
 /// `148.0.7778.168` is ONLY exposed via sec-ch-ua-full-version-list. Sending the full
 /// version in the UA string is a 100% reliable bot signal — verified 2026-04-27 by
 /// comparing httpbin.org/headers from playwright vs our pipeline.)
-pub fn chrome_130_macos() -> StealthProfile {
+pub fn chrome_148_macos() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
         user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
@@ -195,8 +195,8 @@ pub fn chrome_130_macos() -> StealthProfile {
     }
 }
 
-/// Chrome 130 on Linux.
-pub fn chrome_130_linux() -> StealthProfile {
+/// Chrome 148 on Linux.
+pub fn chrome_148_linux() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
         user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
@@ -268,8 +268,8 @@ pub fn chrome_130_linux() -> StealthProfile {
     }
 }
 
-/// Chrome 130 on Windows — Russian locale (Moscow).
-pub fn chrome_130_ru() -> StealthProfile {
+/// Chrome 148 on Windows — Russian locale (Moscow).
+pub fn chrome_148_ru() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
         user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
@@ -315,8 +315,8 @@ pub fn chrome_130_ru() -> StealthProfile {
     }
 }
 
-/// Chrome 130 on Windows — Chinese locale (Shanghai).
-pub fn chrome_130_cn() -> StealthProfile {
+/// Chrome 148 on Windows — Chinese locale (Shanghai).
+pub fn chrome_148_cn() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
         user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36".into(),
@@ -362,9 +362,9 @@ pub fn chrome_130_cn() -> StealthProfile {
     }
 }
 
-/// Chrome 130 on Windows — German locale (Berlin).
-pub fn chrome_130_de() -> StealthProfile {
-    let mut p = chrome_130_windows();
+/// Chrome 148 on Windows — German locale (Berlin).
+pub fn chrome_148_de() -> StealthProfile {
+    let mut p = chrome_148_windows();
     p.language = "de-DE".into();
     p.languages = vec!["de-DE".into(), "de".into(), "en-US".into(), "en".into()];
     p.timezone = "Europe/Berlin".into();
@@ -373,9 +373,9 @@ pub fn chrome_130_de() -> StealthProfile {
     p
 }
 
-/// Chrome 130 on Windows — Japanese locale (Tokyo).
-pub fn chrome_130_jp() -> StealthProfile {
-    let mut p = chrome_130_windows();
+/// Chrome 148 on Windows — Japanese locale (Tokyo).
+pub fn chrome_148_jp() -> StealthProfile {
+    let mut p = chrome_148_windows();
     p.language = "ja-JP".into();
     p.languages = vec!["ja".into(), "en-US".into(), "en".into()];
     p.timezone = "Asia/Tokyo".into();
@@ -659,9 +659,9 @@ pub fn random_desktop() -> StealthProfile {
     use rand::Rng;
     let mut rng = rand::thread_rng();
     let mut profile = match rng.gen_range(0..3) {
-        0 => chrome_130_windows(),
-        1 => chrome_130_macos(),
-        _ => chrome_130_linux(),
+        0 => chrome_148_windows(),
+        1 => chrome_148_macos(),
+        _ => chrome_148_linux(),
     };
     // Randomize seeds
     profile.canvas_seed = rng.gen();
@@ -874,13 +874,37 @@ pub fn iphone_15_pro_safari_18() -> StealthProfile {
     }
 }
 
+// ===== Back-compat aliases =====
+//
+// These functions were originally named `chrome_130_*` when the engine
+// shipped against Chrome 130. The UA payload was bumped to Chrome 148 on
+// 2026-04-29 (see `browser_version: "148.0.7778.168"` above) but the
+// function names were not renamed at the time. The canonical names are now
+// the `chrome_148_*` set above; the aliases below stay in place so existing
+// downstream callers don't break. New code should call `chrome_148_*`.
+
+#[inline]
+pub fn chrome_130_windows() -> StealthProfile { chrome_148_windows() }
+#[inline]
+pub fn chrome_130_macos() -> StealthProfile { chrome_148_macos() }
+#[inline]
+pub fn chrome_130_linux() -> StealthProfile { chrome_148_linux() }
+#[inline]
+pub fn chrome_130_ru() -> StealthProfile { chrome_148_ru() }
+#[inline]
+pub fn chrome_130_cn() -> StealthProfile { chrome_148_cn() }
+#[inline]
+pub fn chrome_130_de() -> StealthProfile { chrome_148_de() }
+#[inline]
+pub fn chrome_130_jp() -> StealthProfile { chrome_148_jp() }
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn chrome_130_windows_validates() {
-        let profile = chrome_130_windows();
+    fn chrome_148_windows_validates() {
+        let profile = chrome_148_windows();
         assert!(profile.validate().is_ok(), "{:?}", profile.validate());
     }
 
@@ -891,13 +915,13 @@ mod tests {
         // shipped presets must default allow_http3 to false until we
         // vendor-fork quinn with a Chrome-fixed-order patch.
         for profile in [
-            chrome_130_windows(),
-            chrome_130_macos(),
-            chrome_130_linux(),
-            chrome_130_ru(),
-            chrome_130_cn(),
-            chrome_130_de(),
-            chrome_130_jp(),
+            chrome_148_windows(),
+            chrome_148_macos(),
+            chrome_148_linux(),
+            chrome_148_ru(),
+            chrome_148_cn(),
+            chrome_148_de(),
+            chrome_148_jp(),
             firefox_135_macos(),
             firefox_135_windows(),
             firefox_135_linux(),
@@ -911,14 +935,14 @@ mod tests {
     }
 
     #[test]
-    fn chrome_130_macos_validates() {
-        let profile = chrome_130_macos();
+    fn chrome_148_macos_validates() {
+        let profile = chrome_148_macos();
         assert!(profile.validate().is_ok(), "{:?}", profile.validate());
     }
 
     #[test]
-    fn chrome_130_linux_validates() {
-        let profile = chrome_130_linux();
+    fn chrome_148_linux_validates() {
+        let profile = chrome_148_linux();
         assert!(profile.validate().is_ok(), "{:?}", profile.validate());
     }
 
@@ -975,14 +999,14 @@ mod tests {
 
     #[test]
     fn invalid_profile_detected() {
-        let mut profile = chrome_130_windows();
+        let mut profile = chrome_148_windows();
         profile.platform = "MacIntel".into(); // Mismatch: Windows + MacIntel
         assert!(profile.validate().is_err());
     }
 
     #[test]
     fn invalid_gpu_os_mismatch() {
-        let mut profile = chrome_130_windows();
+        let mut profile = chrome_148_windows();
         profile.webgl_renderer =
             "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)".into();
         profile.webgl_vendor = "Google Inc. (Apple)".into();
@@ -992,14 +1016,14 @@ mod tests {
     #[test]
     fn webdriver_not_in_profile() {
         // StealthProfile has no webdriver field — it's undefined by design
-        let profile = chrome_130_windows();
+        let profile = chrome_148_windows();
         // Just verify the profile doesn't accidentally contain "webdriver"
         assert!(!profile.user_agent.contains("webdriver"));
     }
 
     #[test]
     fn ua_contains_version() {
-        let profile = chrome_130_windows();
+        let profile = chrome_148_windows();
         // Chrome UA-reduction freezes minor versions to 0; only major is in the UA string.
         // Full version lives in browser_version for sec-ch-ua-full-version-list.
         assert!(profile.user_agent.contains("148.0.0.0"));
@@ -1008,7 +1032,7 @@ mod tests {
 
     #[test]
     fn serialization_roundtrip() {
-        let profile = chrome_130_windows();
+        let profile = chrome_148_windows();
         let json = serde_json::to_string(&profile).unwrap();
         let deserialized: StealthProfile = serde_json::from_str(&json).unwrap();
         assert_eq!(profile.user_agent, deserialized.user_agent);

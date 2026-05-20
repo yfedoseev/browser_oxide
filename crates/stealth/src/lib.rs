@@ -6,6 +6,7 @@
 pub mod aliyun;
 pub mod behavior;
 pub mod cloudflare;
+pub mod config;
 pub mod douyin;
 pub mod gpu;
 pub mod kasada;
@@ -15,6 +16,7 @@ pub mod profile;
 pub mod qrator;
 
 pub use behavior::{BehaviorProfile, Handedness, MousePoint, ScrollStyle, WheelTick};
+pub use config::{ConfigError, ConfigFormat};
 pub use gpu::GpuProfile;
 pub use presets::*;
 pub use profile::{DeviceClass, StealthProfile};

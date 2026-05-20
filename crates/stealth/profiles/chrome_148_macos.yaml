@@ -1,0 +1,85 @@
+# Chrome 148 on macOS 15 (Apple Silicon) — example StealthProfile.
+#
+# Load with:
+#   let profile = StealthProfile::load_from_file("profiles/chrome_148_macos.yaml")?;
+#   profile.validate()?;
+#
+# This is the editable counterpart of `stealth::presets::chrome_148_macos()`
+# — the same profile, expressed as data so it can be shipped, tweaked, and
+# reloaded without recompiling. See `crates/stealth/src/profile.rs` for the
+# full field list and `validate()` rules.
+#
+# Fields not listed here (gpu_profile, media_devices, device_class,
+# allow_http3, etc.) fall back to their serde defaults — see profile.rs.
+
+# ---- Identity ----
+user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+browser_name: "Chrome"
+browser_version: "148.0.7778.168"
+os_name: "macOS"
+os_version: "15.2"
+platform: "MacIntel"
+vendor: "Google Inc."
+vendor_sub: ""
+product_sub: "20030107"
+app_version: "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+
+# ---- Hardware ----
+screen_width: 1512
+screen_height: 982
+screen_avail_width: 1512
+screen_avail_height: 949
+screen_avail_top: 33
+screen_color_depth: 30
+device_pixel_ratio: 2.0
+cpu_cores: 8
+device_memory: 8
+max_touch_points: 0
+
+# ---- GPU ----
+webgl_vendor: "Google Inc. (Apple)"
+webgl_renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)"
+
+# ---- Locale ----
+language: "en-US"
+languages: ["en-US", "en"]
+timezone: "America/Los_Angeles"
+
+# ---- Client Hints (high-entropy) ----
+cpu_architecture: "arm"
+cpu_bitness: "64"
+platform_version: "15.2.0"
+
+# ---- Network ----
+tls_impersonate: "chrome_147"
+connection_effective_type: "4g"
+connection_rtt: 50
+connection_downlink: 10.0
+
+# ---- Plugins ----
+pdf_viewer_enabled: true
+plugins_count: 5
+mime_types_count: 2
+
+# ---- Fingerprint seeds (deterministic) ----
+# Hex 0xabcdef1234567890 / 0x0987654321fedcba — YAML 1.2 doesn't parse 0x,
+# so write the decimal form. Change these to randomize the canvas/audio
+# fingerprint while keeping it stable across page loads.
+canvas_seed: 12379813812177893520
+audio_seed: 686413622842519738
+
+# ---- WebAuthn / FedCM probe shape ----
+has_platform_authenticator: true
+conditional_mediation: true
+
+# ---- Media features ----
+prefers_color_scheme: "light"
+color_gamut: "p3"
+pointer_type: "fine"
+hover_capability: "hover"
+
+# ---- Window dimensions ----
+inner_width: 1512
+inner_height: 871
+outer_width: 1512
+outer_height: 982
