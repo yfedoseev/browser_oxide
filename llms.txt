@@ -1,0 +1,76 @@
+# browser_oxide — Rust headless browser engine (V8 + own CSS / DOM / TLS)
+
+> A from-scratch browser engine in Rust. V8 JavaScript (via deno_core),
+> own CSS engine (Syntax L3, Selectors L4, cascade), arena DOM, Canvas 2D
+> via tiny-skia, own stealth HTTP/TLS stack (boring2/BoringSSL),
+> CDP-compatible debugging surface. MIT / Apache-2.0. Not a Chromium
+> fork, not a Firefox fork. Intended for archival, accessibility, AI
+> agents, security research, and CTF — see SCOPE.md.
+
+- Documentation: https://github.com/yfedoseev/browser_oxide
+- License: MIT OR Apache-2.0 (no MPL / AGPL transitive deps)
+- Language: Rust (workspace of 15 crates)
+- Maturity: pre-1.0, API surfaces not yet stable
+
+## Getting started
+
+- [Quick start (README)](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/README.md): install, the `Page` API, profile loading
+- [Architecture overview](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/ARCHITECTURE.md): the 15 crates, dependency graph, external deps
+- [CONTRIBUTING.md](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/CONTRIBUTING.md): how to set up, the V8 single-thread constraint, the lint/test gates
+- [SCOPE.md](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/SCOPE.md): what the project is for and what it isn't for
+- [SECURITY.md](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/SECURITY.md): how to report a vulnerability
+
+## Engine subsystems
+
+- [CSS Parser](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/CSS_PARSER.md): Syntax Level 3 tokenizer + parser with nesting
+- [CSS Selectors](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/CSS_SELECTORS.md): Selectors Level 4 parser + matcher
+- [CSS Values](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/CSS_VALUES.md): property value parsing, computed values
+- [CSS Cascade](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/CSS_CASCADE.md): cascade, `@layer`, `@media`, `@container`, inheritance
+- [DOM](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/DOM.md): arena DOM with `NodeId` (Copy, u32) handles, Shadow DOM, iframe contexts
+- [JS Runtime](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/JS_RUNTIME.md): V8 via deno_core, DOM bindings, WASM, Web API surface
+- [Canvas](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/CANVAS.md): Canvas 2D (tiny-skia), WebGL stubs, AudioContext
+- [Layout](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/LAYOUT.md): box model via taffy, `getBoundingClientRect` with font metrics
+- [Networking](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/NETWORKING.md): HTTP/1+2+3 + stealth TLS (boring2/BoringSSL) + WebSocket + SSE
+- [Event Loop](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/EVENT_LOOP.md): timers, microtasks, Promises, requestAnimationFrame
+- [Workers](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/WORKERS.md): dedicated / shared / service workers (separate V8 isolates)
+- [CDP Protocol](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/PROTOCOL.md): Puppeteer / Playwright drop-in debugging surface
+
+## Top-level API surface
+
+- `browser::Page::navigate_stealth(url, profile)` — load a URL with a `StealthProfile`.
+- `browser::Page::from_html(html, profile)` — load a literal HTML string.
+- `browser::Page::evaluate(script)` — run a JavaScript snippet, return the result.
+- `browser::Page::title()`, `body_text()`, `inner_html()` — extract rendered content.
+- `browser::Page::human_click(selector)`, `human_type(selector, text)` — Bezier-curve mouse, variable-speed typing.
+
+## Stealth / fingerprint profile
+
+- `stealth::StealthProfile` — 40+ fields describing the browser identity (UA, screen, locale, GPU, TLS impersonation label, plugins, fingerprint seeds, WebAuthn shape, etc.).
+- `stealth::StealthProfile::load_from_file(path)` — load a profile from YAML or JSON (auto-detected by extension); calls `validate()`.
+- `stealth::StealthProfile::from_yaml_str(s)` / `from_json_str(s)` — parse from an in-memory string.
+- `stealth::StealthProfile::to_yaml_string()` — serialise for round-trip / dump.
+- Built-in presets: `chrome_148_macos`, `chrome_148_windows`, `chrome_148_linux`, `chrome_148_ru`, `chrome_148_cn`, `chrome_148_de`, `chrome_148_jp`, `firefox_135_macos`, `firefox_135_windows`, `firefox_135_linux`, `pixel_9_pro_chrome_148`, `iphone_15_pro_safari_18`.
+- Back-compat aliases: `chrome_130_*` names delegate to `chrome_148_*` (the data was bumped to Chrome 148 in 2026-04-29; the old names stay so existing call sites keep compiling).
+- Example YAML: `crates/stealth/profiles/chrome_148_macos.yaml`.
+
+## Build and test
+
+```bash
+cargo build --workspace
+cargo test --workspace -- --test-threads=1    # V8 isolates are per-thread
+cargo clippy --workspace -- -D warnings
+cargo fmt --all -- --check
+```
+
+## Crate inventory
+
+- `css_parser`, `css_selectors`, `css_values`, `css_cascade` — the CSS engine (our own, not Servo's MPL crates).
+- `dom`, `html_parser` — arena DOM + html5ever integration.
+- `js_runtime` — V8 (via deno_core 0.311), DOM bindings, WASM, Web APIs.
+- `canvas`, `layout` — Canvas 2D rendering and box-model layout.
+- `net` — HTTP/1+2+3 + stealth TLS (boring2/BoringSSL) + WebSocket + SSE.
+- `event_loop`, `workers` — timers, microtasks, dedicated/shared/service workers.
+- `stealth` — fingerprint profiles + navigator spoofing.
+- `protocol` — CDP server (Puppeteer/Playwright drop-in).
+- `browser` — top-level `Browser` / `Page` API.
+- `akamai` — Akamai BMP sensor payload encoder.

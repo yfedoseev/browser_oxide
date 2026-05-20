@@ -1,0 +1,108 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in the engine
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. browser_oxide is a
+        from-scratch engine — bugs are often cross-cutting (parser /
+        runtime / stealth interaction). The more reproducible signal you
+        give us, the faster we can root-cause.
+
+        If your report is about an anti-bot site failing to render,
+        please instead use the "Site failing to render" template — those
+        reports have a different triage path.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of what's wrong.
+      placeholder: Describe what happens vs. what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: |
+        Minimal Rust snippet, HTML/CSS/JS fragment, or `curl` command
+        that reproduces. The smaller the repro, the better.
+      render: rust
+      placeholder: |
+        use browser::Page;
+
+        let profile = stealth::presets::chrome_148_macos();
+        let page = Page::from_html("<html>…</html>", Some(profile)).await?;
+        // …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Git SHA or `cargo pkgid` output
+      placeholder: "e.g. 01365fb or browser_oxide 0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which crate(s) does this touch?
+      multiple: true
+      options:
+        - css_parser / css_selectors / css_values / css_cascade
+        - dom
+        - html_parser
+        - js_runtime (V8 / deno_core)
+        - canvas
+        - layout
+        - net / TLS / HTTP
+        - event_loop
+        - workers
+        - stealth (profile / fingerprint)
+        - protocol (CDP)
+        - browser (top-level Page API)
+        - build / workspace / CI
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Linux
+        - macOS
+        - Windows (untested)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / panic / backtrace
+      description: |
+        `RUST_BACKTRACE=1 cargo test …` output, panic text, or the
+        relevant `tracing` log lines.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I tested against the latest commit on `main`.
+          required: false
