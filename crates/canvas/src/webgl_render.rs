@@ -2,6 +2,36 @@
 //!
 //! Provides software OpenGL rendering for WebGL operations,
 //! enabling real shader compilation, draw calls, and pixel readback.
+//!
+//! # Safety
+//!
+//! This module wraps two `unsafe` APIs and re-exposes them through a
+//! single-threaded, owned context (`WebGLContext`):
+//!
+//! 1. **OSMesa FFI** (`crate::osmesa_ffi`). C entry points that take
+//!    raw pointers (context handles, framebuffer buffers, name
+//!    strings). Each `unsafe` call in this file invokes one of these
+//!    with arguments whose validity is enforced by the surrounding
+//!    Rust types: framebuffer is a live `Vec<u8>` owned by the same
+//!    struct as the context; CStrings are constructed inline and live
+//!    for the duration of the call.
+//! 2. **`glow::Context`**. Every GL call is `unsafe` in `glow` because
+//!    OpenGL state can be set inconsistently from safe Rust (e.g.
+//!    binding a deleted buffer). We hold a single `glow::Context` per
+//!    `WebGLContext` and an `Rc`-style invariant: methods take
+//!    `&mut self` so concurrent or interleaved access from other code
+//!    is statically prevented.
+//!
+//! The OSMesa context is made current exactly once in
+//! `WebGLContext::new` (line ~53). Subsequent GL calls assume that
+//! current context — they MUST execute on the same thread that made
+//! it current. `WebGLContext` is `!Send` and `!Sync` (via the raw
+//! pointer field) so the type system enforces this.
+//!
+//! Per-call `// SAFETY:` annotations would be noise; the invariant is
+//! file-wide. The three foundational `unsafe` blocks (context
+//! creation, MakeCurrent, glow loader) carry full SAFETY comments
+//! because they establish the file-wide invariant.
 
 use crate::osmesa_ffi;
 use glow::HasContext;
@@ -36,6 +66,10 @@ impl WebGLContext {
     pub fn new(width: u32, height: u32, seed: u64) -> Option<Self> {
         let mut framebuffer = vec![0u8; (width * height * 4) as usize];
 
+        // SAFETY: `OSMesaCreateContextExt` takes plain enum values plus
+        // a null sharelist (no context sharing). It returns either a
+        // valid opaque context pointer or null; we check for null
+        // immediately. No pre-existing OSMesa state is required.
         let osmesa_ctx = unsafe {
             osmesa_ffi::OSMesaCreateContextExt(
                 osmesa_ffi::OSMESA_RGBA,
@@ -50,6 +84,13 @@ impl WebGLContext {
             return None;
         }
 
+        // SAFETY: `osmesa_ctx` is the non-null context we just created.
+        // `framebuffer` is a contiguous `Vec<u8>` sized to
+        // `width*height*4` (RGBA, 8 bits per channel). It lives for as
+        // long as this `WebGLContext` does (we move it into `self`
+        // below as `_framebuffer`), so the pointer remains valid for
+        // every subsequent GL operation. `GL_UNSIGNED_BYTE` matches the
+        // RGBA layout; width/height match the buffer size.
         let ok = unsafe {
             osmesa_ffi::OSMesaMakeCurrent(
                 osmesa_ctx,
@@ -61,11 +102,21 @@ impl WebGLContext {
         };
 
         if ok == 0 {
+            // SAFETY: MakeCurrent failed but the context is still a
+            // valid handle from the successful create above; destroy
+            // it to avoid leaking.
             unsafe { osmesa_ffi::OSMesaDestroyContext(osmesa_ctx) };
             return None;
         }
 
-        // Load GL functions via OSMesaGetProcAddress
+        // SAFETY: `glow::Context::from_loader_function` requires that
+        // the loader resolves OpenGL entry points by name and that
+        // an OpenGL context is current on this thread. Both hold:
+        // the closure delegates to `OSMesaGetProcAddress` (which is
+        // the documented OSMesa loader), and we made the context
+        // current above. The loader is invoked synchronously here;
+        // the CString is owned by the closure scope and outlives the
+        // single FFI call it's passed to.
         let gl = unsafe {
             glow::Context::from_loader_function(|name| {
                 let c_name = CString::new(name).unwrap();
@@ -73,7 +124,9 @@ impl WebGLContext {
             })
         };
 
-        // Set initial viewport
+        // SAFETY: GL context is current on this thread (established
+        // by OSMesaMakeCurrent above); setting initial viewport is a
+        // state-only call that mutates no buffers.
         unsafe { gl.viewport(0, 0, width as i32, height as i32) };
 
         Some(Self {

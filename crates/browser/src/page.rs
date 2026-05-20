@@ -3367,7 +3367,14 @@ impl Page {
         self.children.clear();
         // Use ManuallyDrop to prevent the Drop impl from running
         let mut page = std::mem::ManuallyDrop::new(self);
-        // Safe: we manually cleared children above, now take event_loop
+        // SAFETY: `page` is `ManuallyDrop`, so its destructor will not
+        // run and won't double-drop the bytes we read out of it.
+        // `event_loop` is read by value exactly once via `ptr::read`,
+        // and nothing else touches it after this — the surrounding
+        // `ManuallyDrop` ensures the original location is never used
+        // again (no aliasing, no double-free). The `children` field
+        // that the event loop depends on was already cleared above
+        // per V8's reverse-drop-order requirement.
         unsafe {
             let event_loop = std::ptr::read(&page.event_loop);
             event_loop.take_dom()

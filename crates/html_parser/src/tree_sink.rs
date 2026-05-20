@@ -13,6 +13,21 @@ use std::collections::HashMap;
 ///
 /// Uses `UnsafeCell` because html5ever's `TreeSink` trait takes `&self`
 /// but tree building inherently requires mutation.
+///
+/// # Safety invariant
+///
+/// `DomTreeSink` is **not `Sync`**. It is owned by a single parsing
+/// thread for the lifetime of the parse. html5ever calls `TreeSink`
+/// methods serially from that thread — never concurrently, never
+/// reentrantly — and the references handed out by `dom()` / `dom_mut()`
+/// / `names()` / `names_mut()` are never aliased across an html5ever
+/// callback boundary (each callback grabs a fresh borrow, uses it,
+/// drops it before returning). So even though we hand out `&mut` from
+/// `&self`, no two live references to the inner data ever overlap.
+///
+/// `UnsafeCell` is *not* `Sync`, so the type system already prevents
+/// cross-thread use. The remaining obligation is single-threaded
+/// non-aliasing, which the parser driver guarantees.
 pub struct DomTreeSink {
     dom: UnsafeCell<Dom>,
     quirks_mode: UnsafeCell<QuirksMode>,
@@ -37,18 +52,24 @@ impl DomTreeSink {
     }
 
     fn dom(&self) -> &Dom {
+        // SAFETY: see `DomTreeSink` doc comment. Single-threaded
+        // parser, no concurrent or reentrant access; the returned
+        // reference is dropped before the next callback runs.
         unsafe { &*self.dom.get() }
     }
 
     fn dom_mut(&self) -> &mut Dom {
+        // SAFETY: see `DomTreeSink` doc comment.
         unsafe { &mut *self.dom.get() }
     }
 
     fn names(&self) -> &HashMap<NodeId, H5QualName> {
+        // SAFETY: see `DomTreeSink` doc comment.
         unsafe { &*self.names.get() }
     }
 
     fn names_mut(&self) -> &mut HashMap<NodeId, H5QualName> {
+        // SAFETY: see `DomTreeSink` doc comment.
         unsafe { &mut *self.names.get() }
     }
 }
@@ -210,6 +231,9 @@ impl TreeSink for DomTreeSink {
     }
 
     fn set_quirks_mode(&self, mode: QuirksMode) {
+        // SAFETY: see `DomTreeSink` doc comment. Single-threaded
+        // parser, no concurrent access; write completes before the
+        // next TreeSink callback fires.
         unsafe {
             *self.quirks_mode.get() = mode;
         }

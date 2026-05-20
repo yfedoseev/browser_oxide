@@ -337,6 +337,15 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
     } else {
         shuffled_chrome_extension_permutation()
     };
+    // SAFETY: BoringSSL's `SSL_CTX_set_extension_permutation` reads
+    // `len` consecutive `uint8_t` from `ptr` and copies them into the
+    // SSL_CTX. `permutation` is a contiguous `Vec<u8>` that lives
+    // for the duration of this call; `permutation.as_ptr()` and
+    // `permutation.len()` are an exact, in-bounds, non-null
+    // pair. `connector.context()` is a live `SslContext` we just
+    // built — its `as_ptr()` returns a non-null pointer valid for
+    // the call. No aliasing concern: BoringSSL only reads the
+    // permutation buffer.
     unsafe {
         boring_sys2::SSL_CTX_set_extension_permutation(
             connector.context().as_ptr(),
@@ -613,6 +622,14 @@ pub fn configure_connection(
             0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
 
+        // SAFETY: BoringSSL's `SSL_add_application_settings` reads the
+        // ALPN name (`b"h2"`, length 2) and the ALPS payload buffer
+        // (`alps_payload` — a contiguous static slice we built above);
+        // both are valid, contiguous, non-null, and live for the
+        // entire call. `config.as_ptr()` returns a non-null pointer
+        // to the live `SslContext` we own here. BoringSSL only reads
+        // these buffers; it copies the data into the SSL_CTX, no
+        // ownership transfer.
         unsafe {
             if boring_sys2::SSL_add_application_settings(
                 config.as_ptr(),
