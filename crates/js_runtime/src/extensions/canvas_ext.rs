@@ -1,6 +1,5 @@
 use canvas::Canvas2D;
 use deno_core::op2;
-use serde::Serialize;
 use std::collections::HashMap;
 
 /// Decoded image data stored for drawImage.

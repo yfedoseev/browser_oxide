@@ -1086,9 +1086,9 @@ impl Canvas2D {
         if !pixels.is_empty() {
             // PCG32-style PRNG seeded by the profile
             let mut state = self.seed.wrapping_add(0x9E3779B97F4A7C15);
-            let mut inc = (self.seed >> 32) | 1;
+            let inc = (self.seed >> 32) | 1;
 
-            let mut next_u32 = |s: &mut u64| {
+            let next_u32 = |s: &mut u64| {
                 let old_state = *s;
                 *s = old_state
                     .wrapping_mul(6364136223846793005)

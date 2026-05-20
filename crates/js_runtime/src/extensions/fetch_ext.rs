@@ -363,7 +363,7 @@ pub async fn op_fetch(
     let ok = resp.ok();
     let body_text = resp.text();
 
-    let mut final_resp = FetchResponse {
+    let final_resp = FetchResponse {
         status: resp.status,
         status_text: resp.status_text.clone(),
         headers: resp.headers.clone(),

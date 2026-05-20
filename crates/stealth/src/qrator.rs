@@ -14,7 +14,6 @@
 //! `dns-shop.ru/product/microdata/<uuid>/` that bypasses QRATOR entirely
 //! (per `docs/universal_engine/site_debugging/dns_shop_qrator.md`).
 
-use sha2::Digest;
 
 /// QRATOR challenge inputs (parsed from the qauth.js page or computed
 /// from response headers).

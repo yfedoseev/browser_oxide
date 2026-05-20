@@ -12,9 +12,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
-use stealth::kasada::{
-    generate_session_id, solve_default, solve_with_realistic_duration, KasadaSolution,
-};
+use stealth::kasada::{generate_session_id, solve_with_realistic_duration, KasadaSolution};
 use tokio::sync::RwLock;
 
 /// One Kasada session per origin host. We carry the server-time offset

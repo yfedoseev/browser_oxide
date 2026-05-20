@@ -255,7 +255,11 @@ impl CdpSession {
                 Ok(serde_json::json!({}))
             }
             "DOM.getDocument" => {
-                let depth = req
+                // `depth` parameter is honored by real Chrome to bound the
+                // returned subtree; we currently return a minimal fixed-
+                // depth document, so the value is read for spec
+                // compatibility but not yet acted on.
+                let _depth = req
                     .params
                     .get("depth")
                     .and_then(|v| v.as_i64())
