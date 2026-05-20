@@ -29,7 +29,10 @@ async fn duolingo_capability_predicates() {
             "supportsAbortController",
             r#"("AbortController" in window && "Request" in window && Object.hasOwnProperty.call(Request.prototype,"signal"))"#,
         ),
-        ("supportsElementAnimate", r#"("animate" in Element.prototype)"#),
+        (
+            "supportsElementAnimate",
+            r#"("animate" in Element.prototype)"#,
+        ),
         (
             "supportsEs2019",
             r#"("flat" in Array.prototype && "flatMap" in Array.prototype && "fromEntries" in Object && "trimStart" in String.prototype && "trimEnd" in String.prototype && "description" in Symbol.prototype)"#,
@@ -58,7 +61,11 @@ async fn duolingo_capability_predicates() {
             "[duo-cap] {:<28} = {}{}",
             name,
             r.trim_matches('"'),
-            if ok { "" } else { "   <-- FAILS (triggers not-supported redirect)" }
+            if ok {
+                ""
+            } else {
+                "   <-- FAILS (triggers not-supported redirect)"
+            }
         );
     }
     assert!(

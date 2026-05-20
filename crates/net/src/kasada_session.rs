@@ -101,12 +101,7 @@ impl KasadaSessionStore {
         }
     }
 
-    pub async fn learn(
-        &self,
-        host: &str,
-        headers: &HashMap<String, String>,
-        tl_url: Option<&str>,
-    ) {
+    pub async fn learn(&self, host: &str, headers: &HashMap<String, String>, tl_url: Option<&str>) {
         // Header lookup is case-insensitive in HTTP; our Response headers
         // are stored lower-cased per the existing convention.
         let server_st = headers
@@ -179,7 +174,11 @@ impl KasadaSessionStore {
             entry.r_token = Some(r.clone());
         }
         if let Some(fc) = headers.get("x-kpsdk-fc") {
-            eprintln!("[kasada] LEARNED x-kpsdk-fc for {} (len={})", host, fc.len());
+            eprintln!(
+                "[kasada] LEARNED x-kpsdk-fc for {} (len={})",
+                host,
+                fc.len()
+            );
             entry.fc_token = Some(fc.clone());
         }
 
@@ -196,7 +195,10 @@ impl KasadaSessionStore {
             eprintln!(
                 "[kasada] no x-kpsdk-ct in response from {} (header keys: {:?})",
                 host,
-                headers.keys().filter(|k| k.starts_with("x-kp")).collect::<Vec<_>>()
+                headers
+                    .keys()
+                    .filter(|k| k.starts_with("x-kp"))
+                    .collect::<Vec<_>>()
             );
         }
     }
@@ -294,8 +296,7 @@ impl KasadaSessionStore {
         let id = generate_session_id(&mut rng);
 
         // Use realistic duration to match human solve times (~1500ms).
-        let mut solution: KasadaSolution =
-            solve_with_realistic_duration(work_time, &id, &mut rng);
+        let mut solution: KasadaSolution = solve_with_realistic_duration(work_time, &id, &mut rng);
         solution.st = Some(session.server_st_ms);
 
         // Request Start Time (rst) — should be a realistic page-relative
@@ -318,8 +319,7 @@ impl KasadaSessionStore {
         let store = self.inner.read().await;
         let session = store.get(host)?;
         let work_time = now_unix_ms() + session.server_offset_ms;
-        let solution: KasadaSolution =
-            stealth::kasada::solve_default(work_time, &session.id);
+        let solution: KasadaSolution = stealth::kasada::solve_default(work_time, &session.id);
         Some(solution.to_header_value())
     }
 
@@ -432,10 +432,7 @@ mod tests {
     #[tokio::test]
     async fn ignores_response_without_cr_true() {
         let store = KasadaSessionStore::new();
-        let headers = h(&[
-            ("x-kpsdk-cr", "false"),
-            ("x-kpsdk-st", "1777000000000"),
-        ]);
+        let headers = h(&[("x-kpsdk-cr", "false"), ("x-kpsdk-st", "1777000000000")]);
         store.learn("example.com", &headers, None).await;
         assert!(!store.has_session("example.com").await);
     }
@@ -482,9 +479,15 @@ mod tests {
             ("x-kpsdk-st", &server_ms.to_string()),
         ]);
         store.learn("a.com", &headers, None).await;
-        let cd1 = store.compute_cd_header_deterministic("a.com").await.unwrap();
+        let cd1 = store
+            .compute_cd_header_deterministic("a.com")
+            .await
+            .unwrap();
         store.learn("a.com", &headers, None).await; // re-learn shouldn't change id
-        let cd2 = store.compute_cd_header_deterministic("a.com").await.unwrap();
+        let cd2 = store
+            .compute_cd_header_deterministic("a.com")
+            .await
+            .unwrap();
 
         let p1: serde_json::Value = serde_json::from_str(&cd1).unwrap();
         let p2: serde_json::Value = serde_json::from_str(&cd2).unwrap();
@@ -507,7 +510,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&cd).unwrap();
         // Duration is real wall-clock solve time. For difficulty=10 on a
         // modern laptop it's typically 0-5 ms; we just assert it's present.
-        assert!(parsed["duration"].is_u64(), "duration field must be present");
+        assert!(
+            parsed["duration"].is_u64(),
+            "duration field must be present"
+        );
     }
 
     #[tokio::test]

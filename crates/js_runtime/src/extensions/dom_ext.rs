@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use crate::native_fns::{install_native_fp_tostring, IframeRealmStore};
 use crate::state::DomState;
 use crate::utils::tokens_to_string;
@@ -9,6 +8,7 @@ use deno_core::v8;
 use deno_core::JsRuntime;
 use dom::node::NodeId;
 use dom::DomElement;
+use std::collections::HashMap;
 
 /// Build a `CalcContext` from the current DOM state's stealth profile.
 /// Provides viewport + font-size + container dimensions so calc()
@@ -120,10 +120,7 @@ pub fn op_dom_has_attribute(
 /// Used by Proxy ownKeys traps for `element.attributes` and `element.dataset`.
 #[op2]
 #[serde]
-pub fn op_dom_get_attribute_names(
-    #[state] state: &DomState,
-    #[smi] node_id: i32,
-) -> Vec<String> {
+pub fn op_dom_get_attribute_names(#[state] state: &DomState, #[smi] node_id: i32) -> Vec<String> {
     let id = NodeId::from_raw(node_id as u32);
     state
         .dom
@@ -1259,7 +1256,9 @@ pub fn op_create_child_realm<'s>(
     {
         let mut op_state = op_state_rc.borrow_mut();
         if let Some(store) = op_state.try_borrow_mut::<IframeRealmStore>() {
-            store.contexts.insert(rid, v8::Global::new(scope, child_ctx));
+            store
+                .contexts
+                .insert(rid, v8::Global::new(scope, child_ctx));
             store.globals.insert(rid, child_global_g);
         }
     }
@@ -1379,9 +1378,7 @@ pub fn op_eval_in_child_realm<'s>(
             .map(|s| s.to_rust_string_lossy(tc))
             .unwrap_or_else(|| "<no exception object>".to_string());
         let snippet: String = code.chars().take(160).collect();
-        eprintln!(
-            "[child-realm:{rid}] eval error: {msg} | code[..160]={snippet:?}"
-        );
+        eprintln!("[child-realm:{rid}] eval error: {msg} | code[..160]={snippet:?}");
     }
     None
 }

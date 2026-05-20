@@ -26,12 +26,12 @@ pub mod tcp;
 pub mod tls;
 
 use alt_svc::AltSvcCache;
-use kasada_session::KasadaSessionStore;
 use boring2::ssl::SslConnector;
 use bytes::Bytes;
 use cookies::CookieJar;
 use error::NetError;
 use http2::client::SendRequest;
+use kasada_session::KasadaSessionStore;
 use pool::ConnectionPool;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -183,7 +183,11 @@ impl HttpClient {
     }
 
     /// Connect TCP and apply profile-specific TCP fingerprinting (TTL).
-    pub(crate) async fn connect_tcp(&self, host: &str, port: u16) -> Result<tokio::net::TcpStream, NetError> {
+    pub(crate) async fn connect_tcp(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Result<tokio::net::TcpStream, NetError> {
         let tcp_stream = tcp::connect_via_proxy(
             host,
             port,
@@ -248,11 +252,14 @@ impl HttpClient {
             proxy: match proxy::ProxyConfig::resolve(profile.proxy.as_deref()) {
                 Ok(p) => {
                     if let Some(ref pc) = p {
-                        eprintln!("[proxy] active: scheme={}", match pc {
-                            proxy::ProxyConfig::Http { tls: true, .. } => "https",
-                            proxy::ProxyConfig::Http { tls: false, .. } => "http",
-                            proxy::ProxyConfig::Socks5 { .. } => "socks5",
-                        });
+                        eprintln!(
+                            "[proxy] active: scheme={}",
+                            match pc {
+                                proxy::ProxyConfig::Http { tls: true, .. } => "https",
+                                proxy::ProxyConfig::Http { tls: false, .. } => "http",
+                                proxy::ProxyConfig::Socks5 { .. } => "socks5",
+                            }
+                        );
                     }
                     p
                 }
@@ -322,9 +329,7 @@ impl HttpClient {
                     .collect::<Vec<_>>()
             );
         }
-        self.kasada_sessions
-            .learn(host, headers, request_url)
-            .await;
+        self.kasada_sessions.learn(host, headers, request_url).await;
     }
 
     /// Record that `host` has advertised `Accept-CH` so subsequent requests
@@ -352,7 +357,9 @@ impl HttpClient {
     /// (Cloudflare Managed Challenge serves the captcha; DataDome
     /// returns 403; Akamai BMP downgrades).
     fn needs_critical_ch_retry(headers: &HashMap<String, String>) -> bool {
-        headers.keys().any(|k| k.eq_ignore_ascii_case("critical-ch"))
+        headers
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case("critical-ch"))
     }
 
     /// Learn Akamai web `_abck` state from response Set-Cookies. T3A.
@@ -410,12 +417,7 @@ impl HttpClient {
                 s.scroll_count = drained.scroll_count;
                 s.accel_count = drained.accel_count;
                 s.sensor_counter = s.sensor_counter.saturating_add(1);
-                let sensor = akamai::build_sensor_data(
-                    &self.profile,
-                    s,
-                    request_url,
-                    tenant_seed,
-                );
+                let sensor = akamai::build_sensor_data(&self.profile, s, request_url, tenant_seed);
                 format!("{{\"sensor_data\":\"{}\"}}", sensor)
             })
             .await;
@@ -430,7 +432,10 @@ impl HttpClient {
         headers.push(("referer".into(), request_url.to_string()));
         let resp = self.post_with_headers(&url, &body, &headers).await?;
         if resp.status == 429 {
-            eprintln!("[akamai] sensor_data POST 429 body: {}", String::from_utf8_lossy(&resp.body));
+            eprintln!(
+                "[akamai] sensor_data POST 429 body: {}",
+                String::from_utf8_lossy(&resp.body)
+            );
         }
         // Re-learn _abck from the response.
         self.learn_abck(host, &resp.set_cookies).await;
@@ -595,7 +600,8 @@ impl HttpClient {
     async fn connect_h2(&self, host: &str, port: u16) -> Result<SendRequest<Bytes>, NetError> {
         let tcp_stream = self.connect_tcp(host, port).await?;
 
-        let tls_stream = tls::connect_tls(&self.tls_connector, &self.profile, host, tcp_stream).await?;
+        let tls_stream =
+            tls::connect_tls(&self.tls_connector, &self.profile, host, tcp_stream).await?;
 
         // Check ALPN
         let alpn = tls::negotiated_alpn(&tls_stream);
@@ -726,7 +732,11 @@ impl HttpClient {
         // x-kpsdk-cd PoW. Verified 2026-04-27 on hyatt.com.
         if !has_header(&hdrs, "x-kpsdk-ct") {
             if let Some((k, v)) = self.kasada_sessions.ct_header(host).await {
-                eprintln!("[kasada] INJECTING x-kpsdk-ct on GET {} (len={})", host, v.len());
+                eprintln!(
+                    "[kasada] INJECTING x-kpsdk-ct on GET {} (len={})",
+                    host,
+                    v.len()
+                );
                 insert_before_priority(&mut hdrs, k, v);
             } else {
                 eprintln!("[kasada] no ct_token to inject for {}", host);
@@ -769,7 +779,11 @@ impl HttpClient {
                     }
                 };
                 let uri = parsed.as_str();
-                if uri.contains("/mfc") || uri.contains("/akam/13") || uri.contains("/tl") || uri.contains("/r") {
+                if uri.contains("/mfc")
+                    || uri.contains("/akam/13")
+                    || uri.contains("/tl")
+                    || uri.contains("/r")
+                {
                     eprintln!("[net] sending request to {} with headers: {:?}", uri, hdrs);
                 }
                 match h2_client::send_get(&mut sender, uri, host, &hdrs).await {
@@ -804,8 +818,15 @@ impl HttpClient {
                 } else {
                     parsed.path().to_string()
                 };
-                if url.contains("/mfc") || url.contains("/akam/13") || url.contains("/tl") || url.contains("/r") {
-                    eprintln!("[net] sending H1 request to {} with headers: {:?}", url, hdrs);
+                if url.contains("/mfc")
+                    || url.contains("/akam/13")
+                    || url.contains("/tl")
+                    || url.contains("/r")
+                {
+                    eprintln!(
+                        "[net] sending H1 request to {} with headers: {:?}",
+                        url, hdrs
+                    );
                 }
                 let raw = h1_client::send_get(&mut tls_stream, host, &path, &hdrs).await?;
                 self.build_response_from_raw(raw, url).await?
@@ -901,7 +922,11 @@ impl HttpClient {
                     }
                 };
                 let uri = parsed.as_str();
-                if uri.contains("/mfc") || uri.contains("/akam/13") || uri.contains("/tl") || uri.contains("/r") {
+                if uri.contains("/mfc")
+                    || uri.contains("/akam/13")
+                    || uri.contains("/tl")
+                    || uri.contains("/r")
+                {
                     eprintln!("[net] sending request to {} with headers: {:?}", uri, hdrs);
                 }
                 match h2_client::send_get(&mut sender, uri, host, &hdrs).await {
@@ -939,8 +964,15 @@ impl HttpClient {
                 } else {
                     parsed.path().to_string()
                 };
-                if url.contains("/mfc") || url.contains("/akam/13") || url.contains("/tl") || url.contains("/r") {
-                    eprintln!("[net] sending H1 request to {} with headers: {:?}", url, hdrs);
+                if url.contains("/mfc")
+                    || url.contains("/akam/13")
+                    || url.contains("/tl")
+                    || url.contains("/r")
+                {
+                    eprintln!(
+                        "[net] sending H1 request to {} with headers: {:?}",
+                        url, hdrs
+                    );
                 }
                 let raw = h1_client::send_get(&mut tls_stream, host, &path, &hdrs).await?;
                 self.build_response_from_raw(raw, url).await?
@@ -1029,7 +1061,10 @@ impl HttpClient {
             return Ok(resp);
         }
         if debug {
-            eprintln!("[redirect] hit max_redirects={}, final GET {}", max_redirects, current_url);
+            eprintln!(
+                "[redirect] hit max_redirects={}, final GET {}",
+                max_redirects, current_url
+            );
         }
         self.get(&current_url).await
     }
@@ -1282,8 +1317,15 @@ impl HttpClient {
                     }
                 };
                 let uri = parsed.as_str();
-                if uri.contains("/mfc") || uri.contains("/akam/13") || uri.contains("/tl") || uri.contains("/r") {
-                    eprintln!("[net] sending H2 request to {} with headers: {:?}", uri, hdrs);
+                if uri.contains("/mfc")
+                    || uri.contains("/akam/13")
+                    || uri.contains("/tl")
+                    || uri.contains("/r")
+                {
+                    eprintln!(
+                        "[net] sending H2 request to {} with headers: {:?}",
+                        uri, hdrs
+                    );
                 }
                 match h2_client::send_post(&mut sender, uri, host, &hdrs, body).await {
                     Ok((parts, resp_body)) => {
@@ -1314,14 +1356,22 @@ impl HttpClient {
                 )
                 .await?;
                 let connector = tls::chrome_connector(&self.profile)?;
-                let mut tls_stream = tls::connect_tls(&connector, &self.profile, host, tcp_stream).await?;
+                let mut tls_stream =
+                    tls::connect_tls(&connector, &self.profile, host, tcp_stream).await?;
                 let path = if parsed.query().is_some() {
                     format!("{}?{}", parsed.path(), parsed.query().unwrap())
                 } else {
                     parsed.path().to_string()
                 };
-                if url.contains("/mfc") || url.contains("/akam/13") || url.contains("/tl") || url.contains("/r") {
-                    eprintln!("[net] sending H1 request to {} with headers: {:?}", url, hdrs);
+                if url.contains("/mfc")
+                    || url.contains("/akam/13")
+                    || url.contains("/tl")
+                    || url.contains("/r")
+                {
+                    eprintln!(
+                        "[net] sending H1 request to {} with headers: {:?}",
+                        url, hdrs
+                    );
                 }
                 let raw = h1_client::send_post(&mut tls_stream, host, &path, &hdrs, body).await?;
                 self.build_response_from_raw(raw, url).await?
@@ -1648,9 +1698,11 @@ fn resolve_redirect(current_url: &str, location: &str) -> Result<String, NetErro
     // which then failed downstream "no host in URL" — caught on iphey.com
     // (holistic sweep 2026-05-10, FAILURE_ROOT_CAUSES.md bucket A).
     let base = Url::parse(current_url).map_err(|e| NetError::Request(e.to_string()))?;
-    let resolved = base
-        .join(location)
-        .map_err(|e| NetError::Request(format!("redirect resolve: {e} (base={current_url}, loc={location})")))?;
+    let resolved = base.join(location).map_err(|e| {
+        NetError::Request(format!(
+            "redirect resolve: {e} (base={current_url}, loc={location})"
+        ))
+    })?;
     Ok(resolved.to_string())
 }
 
@@ -1688,7 +1740,11 @@ mod tests {
 
         // Session exists ⇒ compute_cd_header itself yields Some …
         assert!(
-            client.kasada_sessions().compute_cd_header(host).await.is_some(),
+            client
+                .kasada_sessions()
+                .compute_cd_header(host)
+                .await
+                .is_some(),
             "precondition: a learned session must be cd-capable"
         );
         // … but K1 defers to ips.js: no parallel Rust cd by default.

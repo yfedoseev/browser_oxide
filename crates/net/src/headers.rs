@@ -287,7 +287,12 @@ fn chrome_headers_impl(
         // it for Chrome 147+ is correct.
         headers.push((
             "sec-ch-ua-form-factors".to_string(),
-            if is_mobile { "\"Mobile\"" } else { "\"Desktop\"" }.to_string(),
+            if is_mobile {
+                "\"Mobile\""
+            } else {
+                "\"Desktop\""
+            }
+            .to_string(),
         ));
         // sec-ch-device-memory — DataDome's accept-ch demands it
         // (yelp/leboncoin/etsy/wsj). Chrome 147 reports a quantized
@@ -621,10 +626,7 @@ pub fn safari_headers_fetch(
     headers
 }
 
-fn safari_headers_impl(
-    profile: &StealthProfile,
-    referer: Option<&str>,
-) -> Vec<(String, String)> {
+fn safari_headers_impl(profile: &StealthProfile, referer: Option<&str>) -> Vec<(String, String)> {
     // Canonical Safari iOS 18.4 header order per
     // curl-impersonate `tests/signatures/safari_18.4_iOS.yaml`:
     //   1. sec-fetch-dest: document
@@ -648,7 +650,11 @@ fn safari_headers_impl(
         // Safari's specific Accept ordering — no avif/webp/apng, no signed-exchange.
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".to_string(),
     ));
-    let site = if referer.is_some() { "same-origin" } else { "none" };
+    let site = if referer.is_some() {
+        "same-origin"
+    } else {
+        "none"
+    };
     headers.push(("sec-fetch-site".to_string(), site.to_string()));
     headers.push(("sec-fetch-mode".to_string(), "navigate".to_string()));
     headers.push((
@@ -905,10 +911,7 @@ mod tests {
             Some("\"Desktop\"")
         );
         // Model is empty on desktop (it's "" in the profile)
-        assert_eq!(
-            h.get("sec-ch-ua-model").map(String::as_str),
-            Some("\"\"")
-        );
+        assert_eq!(h.get("sec-ch-ua-model").map(String::as_str), Some("\"\""));
     }
 
     #[test]

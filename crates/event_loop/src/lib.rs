@@ -168,23 +168,35 @@ fn dump_profile(label: &str, rows: &[TickRow], total: Duration, reason: IdleReas
     if n >= 8 {
         let q = n / 4;
         let avg_ops = |slice: &[TickRow]| -> f64 {
-            slice.iter().map(|r| r.pending_async_ops as u64).sum::<u64>() as f64
+            slice
+                .iter()
+                .map(|r| r.pending_async_ops as u64)
+                .sum::<u64>() as f64
                 / slice.len() as f64
         };
         let avg_t = |slice: &[TickRow]| -> f64 {
-            slice.iter().map(|r| r.pending_timers as u64).sum::<u64>() as f64
-                / slice.len() as f64
+            slice.iter().map(|r| r.pending_timers as u64).sum::<u64>() as f64 / slice.len() as f64
         };
         let q1_ops = avg_ops(&rows[..q]);
         let q4_ops = avg_ops(&rows[n - q..]);
         let q1_t = avg_t(&rows[..q]);
         let q4_t = avg_t(&rows[n - q..]);
         let _ = writeln!(w, "\n--- growth detector (quartile averages) ---");
-        let _ = writeln!(w, "  ops    Q1={:.1}  Q4={:.1}  ratio={:.2}x", q1_ops, q4_ops, if q1_ops > 0.0 { q4_ops / q1_ops } else { 0.0 });
-        let _ = writeln!(w, "  timers Q1={:.1}  Q4={:.1}  ratio={:.2}x", q1_t, q4_t, if q1_t > 0.0 { q4_t / q1_t } else { 0.0 });
-        if (q1_ops > 0.0 && q4_ops / q1_ops > 4.0)
-            || (q1_t > 0.0 && q4_t / q1_t > 4.0)
-        {
+        let _ = writeln!(
+            w,
+            "  ops    Q1={:.1}  Q4={:.1}  ratio={:.2}x",
+            q1_ops,
+            q4_ops,
+            if q1_ops > 0.0 { q4_ops / q1_ops } else { 0.0 }
+        );
+        let _ = writeln!(
+            w,
+            "  timers Q1={:.1}  Q4={:.1}  ratio={:.2}x",
+            q1_t,
+            q4_t,
+            if q1_t > 0.0 { q4_t / q1_t } else { 0.0 }
+        );
+        if (q1_ops > 0.0 && q4_ops / q1_ops > 4.0) || (q1_t > 0.0 && q4_t / q1_t > 4.0) {
             let _ = writeln!(
                 w,
                 "  WARNING: pending-task count > 4x growth Q1→Q4 — likely runaway scheduler"
@@ -201,7 +213,10 @@ fn dump_profile(label: &str, rows: &[TickRow], total: Duration, reason: IdleReas
         if !m.is_empty() {
             let mut v: Vec<(&&'static str, &u64)> = m.iter().collect();
             v.sort_unstable_by_key(|(_, c)| std::cmp::Reverse(**c));
-            let _ = writeln!(w, "\n--- pending-op name breakdown (sum of per-tick pending counts) ---");
+            let _ = writeln!(
+                w,
+                "\n--- pending-op name breakdown (sum of per-tick pending counts) ---"
+            );
             for (name, count) in v.iter().take(15) {
                 let _ = writeln!(w, "  {:>8}  {}", count, name);
             }
@@ -209,7 +224,10 @@ fn dump_profile(label: &str, rows: &[TickRow], total: Duration, reason: IdleReas
     });
 
     // CSV tail for offline crunching (paste into a spreadsheet / Pandas).
-    let _ = writeln!(w, "\n--- per-tick CSV (tick,wall_us,ops,timers,intervals,res,timed_out) ---");
+    let _ = writeln!(
+        w,
+        "\n--- per-tick CSV (tick,wall_us,ops,timers,intervals,res,timed_out) ---"
+    );
     for r in rows.iter() {
         let _ = writeln!(
             w,
@@ -280,7 +298,11 @@ impl BrowserEventLoop {
         if profiling {
             OP_NAME_TOTALS.with(|m| m.borrow_mut().clear());
         }
-        let profile_start = if profiling { Some(Instant::now()) } else { None };
+        let profile_start = if profiling {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let mut rows: Vec<TickRow> = if profiling {
             Vec::with_capacity(2048)
         } else {
@@ -311,7 +333,11 @@ impl BrowserEventLoop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             let tick_timeout = remaining.min(Duration::from_millis(100));
 
-            let tick_t0 = if profiling { Some(Instant::now()) } else { None };
+            let tick_t0 = if profiling {
+                Some(Instant::now())
+            } else {
+                None
+            };
             let result = tokio::time::timeout(tick_timeout, self.runtime.run_event_loop()).await;
 
             // Capture pending-task snapshot AFTER the tick (so the row
@@ -348,9 +374,7 @@ impl BrowserEventLoop {
         };
 
         if profiling {
-            let total = profile_start
-                .map(|s| s.elapsed())
-                .unwrap_or_default();
+            let total = profile_start.map(|s| s.elapsed()).unwrap_or_default();
             let label = std::env::var("BOXIDE_EVENT_LOOP_PROFILE_LABEL")
                 .unwrap_or_else(|_| "run_until_idle".to_string());
             let reason = match &outcome {
@@ -417,7 +441,9 @@ impl BrowserEventLoop {
     }
 
     /// Snapshot current localStorage/sessionStorage for carrying across navigations.
-    pub fn get_storage(&mut self) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+    pub fn get_storage(
+        &mut self,
+    ) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
         self.runtime.get_storage()
     }
 }

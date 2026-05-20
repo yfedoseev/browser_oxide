@@ -186,7 +186,9 @@ impl ChallengeVerdict {
 /// only count stub-sized, etc.) lives there as the single source of
 /// truth; this wrapper keeps the four navigate-loop call sites stable.
 fn body_has_challenge_marker(body: &str) -> bool {
-    crate::classify::engine_classify(body).verdict.is_challenge()
+    crate::classify::engine_classify(body)
+        .verdict
+        .is_challenge()
 }
 
 /// A browser page. Owns a DOM, JS runtime, and event loop.
@@ -957,9 +959,7 @@ impl Page {
                 continue; // already a real child context — not script-new
             }
             if let Some(srcdoc) = &info.srcdoc {
-                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, profile)
-                    .await
-                {
+                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, profile).await {
                     Ok(child) => {
                         self.children.push(child);
                         materialized += 1;
@@ -1499,8 +1499,7 @@ impl Page {
         // keeps the challenge-resolution path active for the DataDome
         // nav specifically; it is false for every non-DataDome site, so
         // it cannot regress any other flow / the §4 gate.
-        let started_as_dd_challenge =
-            crate::datadome_handler::is_datadome_challenge_doc(&html);
+        let started_as_dd_challenge = crate::datadome_handler::is_datadome_challenge_doc(&html);
         // Akamai sec-cpt analog (master plan §4 Phase 3 / §8.5): homedepot
         // serves the rotating-obfuscated-bundle sec-cpt variant
         // (`<div id="sec-if-cpt-container">` + `<script src="/Wjv3…">`).
@@ -1525,8 +1524,7 @@ impl Page {
         // *initial* response `html` (pre-mutation), mirroring the
         // existing detector at `handle_cloudflare_flow`. Narrow ⇒ false
         // for every non-CF site ⇒ §4 gate unaffected.
-        let started_as_cf_challenge =
-            crate::classify::is_cf_challenge_doc(&html);
+        let started_as_cf_challenge = crate::classify::is_cf_challenge_doc(&html);
         let mut current_html = html;
         let mut current_url = resp_url;
         let mut current_storage: Option<
@@ -1872,17 +1870,13 @@ impl Page {
                     // URL (instead of burning the full 90 s deadline).
                     if started_as_dd_challenge {
                         if let Some(p) = parsed_current.as_ref() {
-                            let now =
-                                client.cookies_for_url(p).await.unwrap_or_default();
+                            let now = client.cookies_for_url(p).await.unwrap_or_default();
                             // FP-D3: a `datadome=` cookie is set on every
                             // nav incl. the failing 403 — break only on a
                             // genuine solve (cookie present AND the body
                             // is no longer a DD challenge document), not
                             // on a bare/gained cookie (false success).
-                            if crate::datadome_handler::datadome_solved(
-                                &now,
-                                &page.content(),
-                            ) {
+                            if crate::datadome_handler::datadome_solved(&now, &page.content()) {
                                 break;
                             }
                         }
@@ -1901,8 +1895,7 @@ impl Page {
                     // non-sec-cpt site ⇒ zero §4 regression.
                     if started_as_seccpt_challenge {
                         if let Some(p) = parsed_current.as_ref() {
-                            let now =
-                                client.cookies_for_url(p).await.unwrap_or_default();
+                            let now = client.cookies_for_url(p).await.unwrap_or_default();
                             if akamai::sec_cpt::sec_cpt_solved(&now) {
                                 if debug_nav {
                                     eprintln!(
@@ -2043,9 +2036,7 @@ impl Page {
                                 "(function(){try{return /sec_cpt=/.test(document.cookie)?'sec_cpt-present':'no-sec_cpt'}catch(e){return 'err'}})()",
                             )
                             .unwrap_or_default();
-                        eprintln!(
-                            "[seccpt-trace] post-bundle cookie={secck} __fetchLog={fl}"
-                        );
+                        eprintln!("[seccpt-trace] post-bundle cookie={secck} __fetchLog={fl}");
                     }
 
                     let mut should_retry = (cookies_after != cookies_before
@@ -2386,8 +2377,7 @@ impl Page {
                 // is_datadome_challenge_doc(initial html)`) is pinned by
                 // `datadome_handler::tests::etsy_rt_i_body_enters_dd_self_solve_path`.
                 if started_as_dd_challenge {
-                    let dd_deadline =
-                        std::time::Instant::now() + Duration::from_secs(45);
+                    let dd_deadline = std::time::Instant::now() + Duration::from_secs(45);
                     let parsed_cur = url::Url::parse(&current_url).ok();
                     while std::time::Instant::now() < dd_deadline {
                         let _ = page
@@ -2395,19 +2385,13 @@ impl Page {
                             .run_until_idle(Duration::from_millis(250))
                             .await;
                         if let Some(p) = parsed_cur.as_ref() {
-                            let now = client
-                                .cookies_for_url(p)
-                                .await
-                                .unwrap_or_default();
+                            let now = client.cookies_for_url(p).await.unwrap_or_default();
                             // FP-D3: require a genuine solve (cookie +
                             // body no longer a DD challenge doc) — the
                             // bare `datadome=` cookie is set on the 403
                             // fail too, so the old check broke the
                             // self-solve window on a false success.
-                            if crate::datadome_handler::datadome_solved(
-                                &now,
-                                &page.content(),
-                            ) {
+                            if crate::datadome_handler::datadome_solved(&now, &page.content()) {
                                 if debug_nav {
                                     eprintln!(
                                         "[datadome] self-solve window: datadome cookie + non-challenge body — solved, proceeding to reload"
@@ -2725,7 +2709,7 @@ impl Page {
                     hdrs.push(("sec-fetch-dest".to_string(), "script".to_string()));
                     hdrs.push(("sec-fetch-mode".to_string(), "no-cors".to_string()));
                     hdrs.push(("sec-fetch-site".to_string(), "cross-site".to_string()));
-                    
+
                     // Phase 5 instrumentation (doc 05 §2d follow-up):
                     // trace the DataDome i.js external-script fetch so the
                     // next increment has hard evidence of whether the

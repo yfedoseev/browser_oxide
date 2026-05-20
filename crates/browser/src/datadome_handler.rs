@@ -305,8 +305,14 @@ mod tests {
         assert_eq!(plan.renav_url, "https://www.etsy.com/");
         // Loader + verification hosts must both be reachable for the
         // i.js round-trip (doc 05 §2d).
-        assert!(plan.challenge_hosts.iter().any(|h| h == "ct.captcha-delivery.com"));
-        assert!(plan.challenge_hosts.iter().any(|h| h == "geo.captcha-delivery.com"));
+        assert!(plan
+            .challenge_hosts
+            .iter()
+            .any(|h| h == "ct.captcha-delivery.com"));
+        assert!(plan
+            .challenge_hosts
+            .iter()
+            .any(|h| h == "geo.captcha-delivery.com"));
         // The parsed `host` (geo.captcha-delivery.com here) is already in
         // the fixed set — no duplicate appended.
         assert_eq!(
@@ -406,8 +412,10 @@ mod tests {
 
     #[test]
     fn appends_unrecognized_challenge_host() {
-        let body = REUTERS_BODY
-            .replace("'host':'geo.captcha-delivery.com'", "'host':'c.example-dd.net'");
+        let body = REUTERS_BODY.replace(
+            "'host':'geo.captcha-delivery.com'",
+            "'host':'c.example-dd.net'",
+        );
         let dd = detect_datadome_interstitial(&body).expect("parsed");
         let plan = plan_datadome_solve(&dd, "https://x/").expect("rt:'i'");
         assert!(plan.challenge_hosts.iter().any(|h| h == "c.example-dd.net"));

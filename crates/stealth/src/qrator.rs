@@ -13,7 +13,6 @@
 //! For dns-shop.ru specifically there's a JSON-microdata shortcut at
 //! `dns-shop.ru/product/microdata/<uuid>/` that bypasses QRATOR entirely.
 
-
 /// QRATOR challenge inputs (parsed from the qauth.js page or computed
 /// from response headers).
 #[derive(Debug, Clone)]

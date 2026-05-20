@@ -42,8 +42,8 @@
 //! - <https://docs.antibot.to/reference/kasada/x-kpsdk-cd>
 //! - <https://github.com/lktop/kpsdk>
 
-use serde::Serialize;
 use rand::RngExt;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 /// Kasada PoW challenge inputs.

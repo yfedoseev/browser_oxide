@@ -160,7 +160,9 @@ const INTERACTIVE_CAPTCHA_COSIGNAL: &[&str] = &[
 fn small_body_row_qualifies(needle: &str, lower: &str) -> bool {
     match needle {
         "akam/13" => AKAMAI_CHALLENGE_COSIGNAL.iter().any(|c| lower.contains(c)),
-        "captcha" => INTERACTIVE_CAPTCHA_COSIGNAL.iter().any(|c| lower.contains(c)),
+        "captcha" => INTERACTIVE_CAPTCHA_COSIGNAL
+            .iter()
+            .any(|c| lower.contains(c)),
         _ => true,
     }
 }
@@ -184,9 +186,7 @@ fn verdict_for(tag: &str, len: usize) -> ChallengeVerdict {
         // replaced with real content, so the sensor did not "score us
         // bot"; mislabeling it SensorFail misdirects work to fingerprint
         // tuning). A small CF stub stays EdgeBlock (classic edge deny).
-        "Cloudflare-CHL" if len >= SENSOR_SPLIT_BYTES => {
-            ChallengeVerdict::ChallengeIncomplete
-        }
+        "Cloudflare-CHL" if len >= SENSOR_SPLIT_BYTES => ChallengeVerdict::ChallengeIncomplete,
         _ if len < SENSOR_SPLIT_BYTES => ChallengeVerdict::EdgeBlock,
         _ => ChallengeVerdict::SensorFail,
     }
@@ -283,20 +283,60 @@ mod tests {
             h
         };
         let cases = vec![
-            Case { name: "empty", body: "<html></html>".into(), tag: "THIN-BODY", challenge: false },
-            Case { name: "cf small", body: "<html><body>Just a moment...</body></html>".into(), tag: "Cloudflare-CHL", challenge: true },
-            Case { name: "dd small", body: r#"<script src="https://geo.captcha-delivery.com/c"></script>"#.into(), tag: "DataDome-CHL", challenge: true },
-            Case { name: "akam small", body: r#"<script src="/akam/13/abc"></script><form id="bm-verify"></form>"#.into(), tag: "Akamai-CHL", challenge: true },
+            Case {
+                name: "empty",
+                body: "<html></html>".into(),
+                tag: "THIN-BODY",
+                challenge: false,
+            },
+            Case {
+                name: "cf small",
+                body: "<html><body>Just a moment...</body></html>".into(),
+                tag: "Cloudflare-CHL",
+                challenge: true,
+            },
+            Case {
+                name: "dd small",
+                body: r#"<script src="https://geo.captcha-delivery.com/c"></script>"#.into(),
+                tag: "DataDome-CHL",
+                challenge: true,
+            },
+            Case {
+                name: "akam small",
+                body: r#"<script src="/akam/13/abc"></script><form id="bm-verify"></form>"#.into(),
+                tag: "Akamai-CHL",
+                challenge: true,
+            },
             // FP-B2 target (still over-matches here, fixed in B2): an
             // unambiguous literal in a >100 KB rendered page.
-            Case { name: "pxhd large benign", body: big(r#"<script>window._pxhd="sdk"</script>"#), tag: "L3-RENDERED", challenge: false },
-            Case { name: "just-a-moment large benign", body: big("<p>give us just a moment to load</p>"), tag: "L3-RENDERED", challenge: false },
-            Case { name: "grecaptcha config large", body: big(r#"<script>window.C={"googleRecaptcha":1}</script>"#), tag: "L3-RENDERED", challenge: false },
+            Case {
+                name: "pxhd large benign",
+                body: big(r#"<script>window._pxhd="sdk"</script>"#),
+                tag: "L3-RENDERED",
+                challenge: false,
+            },
+            Case {
+                name: "just-a-moment large benign",
+                body: big("<p>give us just a moment to load</p>"),
+                tag: "L3-RENDERED",
+                challenge: false,
+            },
+            Case {
+                name: "grecaptcha config large",
+                body: big(r#"<script>window.C={"googleRecaptcha":1}</script>"#),
+                tag: "L3-RENDERED",
+                challenge: false,
+            },
         ];
         for c in cases {
             let ec = engine_classify(&c.body);
             assert_eq!(ec.tag, c.tag, "tag mismatch [{}]", c.name);
-            assert_eq!(holistic_tag(&c.body), c.tag, "holistic disagrees [{}]", c.name);
+            assert_eq!(
+                holistic_tag(&c.body),
+                c.tag,
+                "holistic disagrees [{}]",
+                c.name
+            );
             assert_eq!(
                 page_is_challenge(&c.body),
                 c.challenge,
@@ -325,7 +365,9 @@ mod tests {
             h
         };
         // wayfair shape: px-captcha only in a cookie-consent manifest.
-        let wf = big(r#"<script>window.__CONSENT={"_px3":"NECESSARY","px-captcha":"NECESSARY"};</script>"#);
+        let wf = big(
+            r#"<script>window.__CONSENT={"_px3":"NECESSARY","px-captcha":"NECESSARY"};</script>"#,
+        );
         assert_eq!(engine_classify(&wf).tag, "L3-RENDERED");
         assert_eq!(engine_classify(&wf).verdict, ChallengeVerdict::Pass);
         // captcha-delivery.com literal in a large rendered page.
@@ -371,10 +413,14 @@ mod tests {
         assert_eq!(ec.verdict, ChallengeVerdict::ChallengeIncomplete);
         assert_ne!(ec.verdict, ChallengeVerdict::SensorFail);
         assert_ne!(ec.verdict, ChallengeVerdict::Pass);
-        assert!(ec.verdict.is_challenge(), "incomplete CF is still an unsolved challenge");
+        assert!(
+            ec.verdict.is_challenge(),
+            "incomplete CF is still an unsolved challenge"
+        );
 
         // Small CF stub ⇒ EdgeBlock (unchanged classic edge deny).
-        let stub = "<html><body><script>window._cf_chl_opt={}</script>Just a moment...</body></html>";
+        let stub =
+            "<html><body><script>window._cf_chl_opt={}</script>Just a moment...</body></html>";
         assert_eq!(engine_classify(stub).verdict, ChallengeVerdict::EdgeBlock);
 
         // Passed CF page: real content + the always-on JSD URL but NO
@@ -424,9 +470,7 @@ mod tests {
             shell.push_str("<div>spa hydration placeholder</div>");
         }
         shell.push_str("</body></html>");
-        assert!(
-            shell.len() > THIN_BODY_MAX_BYTES && shell.len() < THIN_SHELL_MAX_BYTES
-        );
+        assert!(shell.len() > THIN_BODY_MAX_BYTES && shell.len() < THIN_SHELL_MAX_BYTES);
         let ec = engine_classify(&shell);
         assert_eq!(ec.tag, "L3-RENDERED", "ledger tag unchanged");
         assert_eq!(ec.verdict, ChallengeVerdict::ThinShell);
@@ -457,7 +501,8 @@ mod tests {
     #[test]
     fn fp_d2_cf_unsolved_never_passes() {
         // Small CF stub.
-        let stub = "<html><body>Just a moment...<script>window._cf_chl_opt={}</script></body></html>";
+        let stub =
+            "<html><body>Just a moment...<script>window._cf_chl_opt={}</script></body></html>";
         let s = engine_classify(stub);
         assert!(s.verdict.is_challenge());
         assert_ne!(s.verdict, ChallengeVerdict::Pass);
@@ -481,9 +526,12 @@ mod tests {
     #[test]
     fn fp_t1_invisible_recaptcha_and_akam13_cosignal() {
         // spotify shape: ~9.6 KB shell, only invisible v3 plumbing.
-        let mut spotify = String::from(r#"<html><head><style>.grecaptcha-badge { display: none !important }</style></head><body><textarea id="g-recaptcha-response-100000" name="g-recaptcha-response"></textarea><script src="https://www.gstatic.com/recaptcha/releases/abc/recaptcha__en.js"></script>"#);
+        let mut spotify = String::from(
+            r#"<html><head><style>.grecaptcha-badge { display: none !important }</style></head><body><textarea id="g-recaptcha-response-100000" name="g-recaptcha-response"></textarea><script src="https://www.gstatic.com/recaptcha/releases/abc/recaptcha__en.js"></script>"#,
+        );
         for _ in 0..120 {
-            spotify.push_str("<div class=\"sp-shell\">spotify web player hydration placeholder</div>");
+            spotify
+                .push_str("<div class=\"sp-shell\">spotify web player hydration placeholder</div>");
         }
         spotify.push_str("</body></html>");
         assert!(spotify.len() > THIN_BODY_MAX_BYTES && spotify.len() < THIN_SHELL_MAX_BYTES);
@@ -499,9 +547,13 @@ mod tests {
 
         // bestbuy shape: ~7.9 KB, only the akam/13 bootstrap, no
         // challenge co-signal ⇒ NOT Akamai-CHL (the i18n splash).
-        let mut bestbuy = String::from(r#"<html><head><script type="text/javascript" src="https://www.bestbuy.com/akam/13/62321f80" defer=""></script></head><body><h1>Choose a country</h1>"#);
+        let mut bestbuy = String::from(
+            r#"<html><head><script type="text/javascript" src="https://www.bestbuy.com/akam/13/62321f80" defer=""></script></head><body><h1>Choose a country</h1>"#,
+        );
         for _ in 0..100 {
-            bestbuy.push_str("<a class=\"country\" href=\"/intl\">United States / Canada region selector</a>");
+            bestbuy.push_str(
+                "<a class=\"country\" href=\"/intl\">United States / Canada region selector</a>",
+            );
         }
         bestbuy.push_str("</body></html>");
         assert!(bestbuy.len() > THIN_BODY_MAX_BYTES && bestbuy.len() < THIN_SHELL_MAX_BYTES);
@@ -517,7 +569,10 @@ mod tests {
 
     #[test]
     fn verdict_mapping_is_consistent() {
-        assert_eq!(engine_classify("<html></html>").verdict, ChallengeVerdict::RenderIncomplete);
+        assert_eq!(
+            engine_classify("<html></html>").verdict,
+            ChallengeVerdict::RenderIncomplete
+        );
         assert_eq!(
             engine_classify("<html><body>Just a moment...</body></html>").verdict,
             ChallengeVerdict::EdgeBlock

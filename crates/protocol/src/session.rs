@@ -398,13 +398,33 @@ impl CdpSession {
             // humanized input call multiple Input.dispatchMouseEvent
             // moves between actions; CDP itself stays event-faithful.
             "Input.dispatchMouseEvent" => {
-                let event_type = req.params.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                let event_type = req
+                    .params
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let x = req.params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                 let y = req.params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                let button = req.params.get("button").and_then(|v| v.as_str()).unwrap_or("none");
-                let buttons = req.params.get("buttons").and_then(|v| v.as_i64()).unwrap_or(0);
-                let click_count = req.params.get("clickCount").and_then(|v| v.as_i64()).unwrap_or(1);
-                let modifiers = req.params.get("modifiers").and_then(|v| v.as_i64()).unwrap_or(0);
+                let button = req
+                    .params
+                    .get("button")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("none");
+                let buttons = req
+                    .params
+                    .get("buttons")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let click_count = req
+                    .params
+                    .get("clickCount")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(1);
+                let modifiers = req
+                    .params
+                    .get("modifiers")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
 
                 let js_event = match event_type {
                     "mousePressed" => "mousedown",
@@ -566,13 +586,20 @@ impl CdpSession {
             }
             "Input.dispatchTouchEvent" => Ok(serde_json::json!({})),
             "Input.insertText" => {
-                let text = req.params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let text = req
+                    .params
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if !text.is_empty() {
                     let timings = stealth::behavior::keystroke_timings(text, &self.behavior);
                     for (i, t) in timings.iter().enumerate() {
                         // Flight time (delay before this key)
                         if i > 0 {
-                            tokio::time::sleep(std::time::Duration::from_millis(t.flight_ms as u64)).await;
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                t.flight_ms as u64,
+                            ))
+                            .await;
                         }
 
                         // Fire keydown
@@ -588,7 +615,8 @@ impl CdpSession {
                         let _ = page.evaluate(&kd_script);
 
                         // Dwell time (delay while key is down)
-                        tokio::time::sleep(std::time::Duration::from_millis(t.dwell_ms as u64)).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(t.dwell_ms as u64))
+                            .await;
 
                         // Insert character + fire 'input'
                         let script = format!(

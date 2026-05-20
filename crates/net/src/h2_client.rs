@@ -40,13 +40,13 @@ const HEADER_TABLE_SIZE: u32 = 65_536; // SETTINGS 1
 const ENABLE_PUSH: bool = false; // SETTINGS 2 = 0
 const INITIAL_STREAM_WINDOW_SIZE: u32 = 6_291_456; // SETTINGS 4 = 6 MB
 const MAX_HEADER_LIST_SIZE: u32 = 262_144; // SETTINGS 6 = 256 KB
-// `initial_connection_window_size` is the lib's CONFIGURED target — the
-// http2 lib sends a WINDOW_UPDATE of (target - 65535) on the wire to
-// raise the connection window from the protocol default (65535) up to
-// the configured value. So 15_728_640 here → 15_663_105 on the wire,
-// which is what real Chrome 147 emits. Verified against wreq-util's
-// chrome profile (the gold-standard Rust impl,
-// `0x676e67/wreq-util/src/emulate/profile/chrome/http2.rs`).
+                                           // `initial_connection_window_size` is the lib's CONFIGURED target — the
+                                           // http2 lib sends a WINDOW_UPDATE of (target - 65535) on the wire to
+                                           // raise the connection window from the protocol default (65535) up to
+                                           // the configured value. So 15_728_640 here → 15_663_105 on the wire,
+                                           // which is what real Chrome 147 emits. Verified against wreq-util's
+                                           // chrome profile (the gold-standard Rust impl,
+                                           // `0x676e67/wreq-util/src/emulate/profile/chrome/http2.rs`).
 const INITIAL_CONNECTION_WINDOW_SIZE: u32 = 15_728_640; // → wire 15_663_105 = Chrome match
 
 // =============================================================================

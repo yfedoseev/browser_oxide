@@ -271,12 +271,11 @@ mod tests {
         // mail.ru/?afterReload should receive the cookie.
         let mut jar = CookieJar::new();
         let set_url = Url::parse("https://e.mail.ru/login").unwrap();
-        jar.set_cookies(
-            &set_url,
-            &["t=hash; Domain=.mail.ru; Path=/".to_string()],
-        );
+        jar.set_cookies(&set_url, &["t=hash; Domain=.mail.ru; Path=/".to_string()]);
         let parent = Url::parse("https://mail.ru/?afterReload").unwrap();
-        let got = jar.cookies_for(&parent).expect("cookie should be visible on parent domain");
+        let got = jar
+            .cookies_for(&parent)
+            .expect("cookie should be visible on parent domain");
         assert_eq!(got, "t=hash");
     }
 
@@ -285,10 +284,7 @@ mod tests {
         // e.mail.ru sets Domain=.mail.ru → also visible on m.mail.ru.
         let mut jar = CookieJar::new();
         let set_url = Url::parse("https://e.mail.ru/").unwrap();
-        jar.set_cookies(
-            &set_url,
-            &["t=v; Domain=mail.ru".to_string()],
-        );
+        jar.set_cookies(&set_url, &["t=v; Domain=mail.ru".to_string()]);
         let sibling = Url::parse("https://m.mail.ru/").unwrap();
         assert_eq!(jar.cookies_for(&sibling), Some("t=v".to_string()));
     }
@@ -299,12 +295,12 @@ mod tests {
         // suffix of the request URL is rejected entirely.
         let mut jar = CookieJar::new();
         let set_url = Url::parse("https://e.mail.ru/").unwrap();
-        jar.set_cookies(
-            &set_url,
-            &["evil=1; Domain=evil.com".to_string()],
-        );
+        jar.set_cookies(&set_url, &["evil=1; Domain=evil.com".to_string()]);
         let evil = Url::parse("https://evil.com/").unwrap();
-        assert!(jar.cookies_for(&evil).is_none(), "cross-origin Domain= must be rejected");
+        assert!(
+            jar.cookies_for(&evil).is_none(),
+            "cross-origin Domain= must be rejected"
+        );
         // Also not stored under e.mail.ru as a fallback — the cookie is
         // dropped entirely per spec.
         assert!(jar.cookies_for(&set_url).is_none());
@@ -318,7 +314,10 @@ mod tests {
         let set_url = Url::parse("https://e.mail.ru/").unwrap();
         jar.set_cookies(&set_url, &["s=1".to_string()]);
         let parent = Url::parse("https://mail.ru/").unwrap();
-        assert!(jar.cookies_for(&parent).is_none(), "host-only cookie must not leak to parent");
+        assert!(
+            jar.cookies_for(&parent).is_none(),
+            "host-only cookie must not leak to parent"
+        );
         // But it IS visible on the exact host that set it.
         assert_eq!(jar.cookies_for(&set_url), Some("s=1".to_string()));
     }

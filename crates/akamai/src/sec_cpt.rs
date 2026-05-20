@@ -166,7 +166,7 @@ mod tests {
         assert!(!sec_cpt_solved("sec_cpt=abc~2~xyz"));
         assert!(!sec_cpt_solved("")); // no cookie
         assert!(!sec_cpt_solved("notsec_cpt=abc~3~")); // wrong cookie name
-        // Solved: state advanced to 3 by the in-V8 bundle.
+                                                       // Solved: state advanced to 3 by the in-V8 bundle.
         assert!(sec_cpt_solved("foo=1; sec_cpt=abc~3~deadbeef; bar=2"));
         assert!(sec_cpt_solved("sec_cpt=longprefix~3~tail"));
     }

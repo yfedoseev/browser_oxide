@@ -36,7 +36,10 @@ impl std::fmt::Display for ConfigError {
             ConfigError::Yaml(e) => write!(f, "yaml parse error: {e}"),
             ConfigError::Json(e) => write!(f, "json parse error: {e}"),
             ConfigError::UnknownFormat(ext) => {
-                write!(f, "unknown config format '{ext}' (expected .yaml/.yml/.json)")
+                write!(
+                    f,
+                    "unknown config format '{ext}' (expected .yaml/.yml/.json)"
+                )
             }
             ConfigError::Invalid(errs) => {
                 write!(f, "profile failed validation: {}", errs.join("; "))

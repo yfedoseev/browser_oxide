@@ -409,11 +409,7 @@ pub async fn op_worker_await_message(#[smi] worker_id: i32) -> String {
                 // Try to drain a message synchronously first — if one is
                 // already buffered we don't even need to await.
                 let already = slot.from_worker.try_recv().ok();
-                (
-                    slot.notify_parent.clone(),
-                    slot.terminate.clone(),
-                    already,
-                )
+                (slot.notify_parent.clone(), slot.terminate.clone(), already)
             }
             None => return String::new(), // worker is gone
         }

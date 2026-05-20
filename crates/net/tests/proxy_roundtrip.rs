@@ -93,10 +93,7 @@ async fn spawn_http_connect_proxy(expect_auth: Option<String>) -> u16 {
 
         // Open upstream tcp.
         let upstream = tokio::net::TcpStream::connect(target).await.unwrap();
-        client
-            .write_all(b"HTTP/1.1 200 OK\r\n\r\n")
-            .await
-            .unwrap();
+        client.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
 
         // Bidir-pipe.
         let (mut cr, mut cw) = client.into_split();

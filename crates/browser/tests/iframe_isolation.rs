@@ -167,7 +167,10 @@ async fn fp_e1_post_js_injected_iframe_is_materialized() {
     assert_eq!(n, 1, "post-JS-injected iframe must be materialized");
     assert_eq!(page.child_iframe_count(), 1);
     assert_eq!(
-        page.child_iframe(0).unwrap().evaluate("__childRan").unwrap(),
+        page.child_iframe(0)
+            .unwrap()
+            .evaluate("__childRan")
+            .unwrap(),
         "yes",
         "the materialized child must really execute its document's script"
     );

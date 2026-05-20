@@ -80,16 +80,16 @@ fn active_csp_lock() -> &'static std::sync::RwLock<Option<ActiveCsp>> {
 /// previous document are no longer relevant once a new navigation
 /// installs its own policy. Real Chrome resets the violation list per
 /// top-level navigation; this matches that behaviour.
-pub fn set_csp_policy(
-    policy: std::sync::Arc<net::csp::PolicySet>,
-    origin: Url,
-    enforce: bool,
-) {
+pub fn set_csp_policy(policy: std::sync::Arc<net::csp::PolicySet>, origin: Url, enforce: bool) {
     if let Ok(mut q) = violations_lock().lock() {
         q.clear();
     }
     let mut w = active_csp_lock().write().expect("CSP lock poisoned");
-    *w = Some(ActiveCsp { policy, origin, enforce });
+    *w = Some(ActiveCsp {
+        policy,
+        origin,
+        enforce,
+    });
 }
 
 /// Clear any active CSP. Called between top-level navigations so a
@@ -247,9 +247,7 @@ pub async fn op_fetch(
     // `try { await fetch(...) } catch (e) { ... }` path fires the same
     // way it would in Chrome.
     if let Ok(parsed) = Url::parse(&url) {
-        if let Err(violated) =
-            check_csp(net::csp::Directive::ConnectSrc, &parsed, None, false)
-        {
+        if let Err(violated) = check_csp(net::csp::Directive::ConnectSrc, &parsed, None, false) {
             eprintln!(
                 "[csp] Refused to connect to '{}' because it violates the following Content Security Policy directive: \"{}\".",
                 url, violated
@@ -268,8 +266,10 @@ pub async fn op_fetch(
     // Resource blocker — short-circuit ad/tracker requests before TLS+JS.
     // Empty source_url is OK; the JS layer doesn't currently pass the page
     // origin here, but adblock's first-party rules degrade gracefully.
-    let request_type =
-        net::blocker::classify_request_type(&url, headers.get("x-boxide-request-type").map(|s| s.as_str()));
+    let request_type = net::blocker::classify_request_type(
+        &url,
+        headers.get("x-boxide-request-type").map(|s| s.as_str()),
+    );
     if net::blocker::should_block(&url, "", request_type) {
         return Ok(FetchResponse {
             status: 200,
@@ -377,7 +377,7 @@ pub async fn op_fetch(
     // In deno_core 0.311, op2(async) can't easily borrow &mut OpState from its future.
     // Instead, we use the process-global DomState if accessible, or we'll just return it.
     // For now, let's keep it simple: we need to find where the OpState is for this isolate.
-    
+
     Ok(final_resp)
 }
 
@@ -418,9 +418,7 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
     // dynamically-inserted script (we don't track them today), under
     // strict-dynamic this fetch will block.
     if let Ok(parsed) = Url::parse(&url) {
-        if let Err(violated) =
-            check_csp(net::csp::Directive::ScriptSrcElem, &parsed, None, false)
-        {
+        if let Err(violated) = check_csp(net::csp::Directive::ScriptSrcElem, &parsed, None, false) {
             eprintln!(
                 "[csp] Refused to load the script '{}' (sync-fetch) — violates: \"{}\".",
                 url, violated
@@ -433,7 +431,11 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
     // doing any HTTP work. Tracker JS that loads via <script src=…>
     // (gtm.js, gpt.js, doubleclick) is the dominant time sink on
     // news/store sites; blocking these saves 1-3 s per site on average.
-    if net::blocker::should_block(&url, &referer, net::blocker::classify_request_type(&url, Some("script"))) {
+    if net::blocker::should_block(
+        &url,
+        &referer,
+        net::blocker::classify_request_type(&url, Some("script")),
+    ) {
         return String::new();
     }
 

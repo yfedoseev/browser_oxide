@@ -184,7 +184,8 @@ impl Dom {
     /// Insert `child` before `reference` (which must be a child of `parent`).
     /// Same cycle-protection semantics as `append_child`: log and no-op.
     pub fn insert_before(&mut self, parent: NodeId, child: NodeId, reference: NodeId) {
-        if self.get(parent).is_none() || self.get(child).is_none() || self.get(reference).is_none() {
+        if self.get(parent).is_none() || self.get(child).is_none() || self.get(reference).is_none()
+        {
             return;
         }
         if self.is_ancestor_or_self(child, parent) {

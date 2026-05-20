@@ -244,8 +244,16 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
         DeviceClass::MobileIOS => CURVES_SAFARI_IOS,
         DeviceClass::Desktop => CURVES_DESKTOP,
     };
-    let cipher_list: &str = if is_safari_ios { CIPHER_LIST_SAFARI_IOS } else { CIPHER_LIST };
-    let sigalgs_list: &str = if is_safari_ios { SIGALGS_LIST_SAFARI_IOS } else { SIGALGS_LIST };
+    let cipher_list: &str = if is_safari_ios {
+        CIPHER_LIST_SAFARI_IOS
+    } else {
+        CIPHER_LIST
+    };
+    let sigalgs_list: &str = if is_safari_ios {
+        SIGALGS_LIST_SAFARI_IOS
+    } else {
+        SIGALGS_LIST
+    };
     let mut builder =
         SslConnector::builder(SslMethod::tls()).map_err(|e| NetError::Tls(e.to_string()))?;
 
@@ -274,7 +282,11 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
     // visible as a length-difference on the extension. Servers still
     // negotiate 1.3 because no real server speaks 1.0/1.1 anymore, but the
     // ClientHello must advertise all four to fingerprint as Safari.
-    let min_version = if is_safari_ios { SslVersion::TLS1 } else { SslVersion::TLS1_2 };
+    let min_version = if is_safari_ios {
+        SslVersion::TLS1
+    } else {
+        SslVersion::TLS1_2
+    };
     builder
         .set_min_proto_version(Some(min_version))
         .map_err(|e| NetError::Tls(e.to_string()))?;
@@ -609,14 +621,10 @@ pub fn configure_connection(
         // Safari has no ALPS extension at all — skip entirely on iOS.
         let alps_payload: &[u8] = &[
             // SETTINGS frame (Length 24, Type 4, Flags 0, Stream 0)
-            0x00, 0x00, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
-            // ID 1: 65536
-            0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-            // ID 2: 0
-            0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
-            // ID 4: 6291456
-            0x00, 0x04, 0x00, 0x60, 0x00, 0x00,
-            // ID 6: 262144
+            0x00, 0x00, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, // ID 1: 65536
+            0x00, 0x01, 0x00, 0x01, 0x00, 0x00, // ID 2: 0
+            0x00, 0x02, 0x00, 0x00, 0x00, 0x00, // ID 4: 6291456
+            0x00, 0x04, 0x00, 0x60, 0x00, 0x00, // ID 6: 262144
             0x00, 0x06, 0x00, 0x04, 0x00, 0x00,
             // Empty ACCEPT_CH frame (Length 0, Type 0x89, Flags 0, Stream 0)
             0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00, 0x00, 0x00,

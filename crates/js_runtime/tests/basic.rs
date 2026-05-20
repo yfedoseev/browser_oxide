@@ -307,7 +307,10 @@ fn get_computed_style_basic() {
 fn get_computed_style_instanceof() {
     let mut rt = create_test_runtime();
     let result = rt
-        .execute_script("getComputedStyle(document.body) instanceof CSSStyleDeclaration", None)
+        .execute_script(
+            "getComputedStyle(document.body) instanceof CSSStyleDeclaration",
+            None,
+        )
         .unwrap();
     assert_eq!(result, "true");
 }

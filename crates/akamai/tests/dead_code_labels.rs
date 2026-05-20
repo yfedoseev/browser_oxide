@@ -26,9 +26,21 @@ fn workspace_root() -> PathBuf {
 
 /// (symbol, defining file relative to crates/, human note)
 const DEAD_SYMBOLS: &[(&str, &str, &str)] = &[
-    ("solve_crypto", "akamai/src/sec_cpt.rs", "sec-cpt PoW solver"),
-    ("DdEncryptor", "akamai/src/datadome_crypto.rs", "DataDome interstitial encryptor"),
-    ("BotScoreVector", "akamai/src/lib.rs", "ak_p server-timing bot score"),
+    (
+        "solve_crypto",
+        "akamai/src/sec_cpt.rs",
+        "sec-cpt PoW solver",
+    ),
+    (
+        "DdEncryptor",
+        "akamai/src/datadome_crypto.rs",
+        "DataDome interstitial encryptor",
+    ),
+    (
+        "BotScoreVector",
+        "akamai/src/lib.rs",
+        "ak_p server-timing bot score",
+    ),
 ];
 
 #[test]

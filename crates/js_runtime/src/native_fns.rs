@@ -347,7 +347,9 @@ mod tests {
             proxy.set_prototype(cs, window_proto_val); // mimic op_create_child_realm
 
             // Now get inner global via get_prototype (must still be inner global, not window_proto)
-            let proto_after = proxy.get_prototype(cs).expect("proxy must have a prototype");
+            let proto_after = proxy
+                .get_prototype(cs)
+                .expect("proxy must have a prototype");
             let inner = v8::Local::<v8::Object>::try_from(proto_after)
                 .expect("prototype after set_prototype must still be an Object (inner global)");
 
@@ -355,7 +357,10 @@ mod tests {
             // (set_prototype sets inner_global's [[Prototype]], not the proxy's)
             let inner_hash = inner.get_identity_hash();
             let proxy_hash = proxy.get_identity_hash();
-            assert_ne!(inner_hash, proxy_hash, "inner global must differ from proxy");
+            assert_ne!(
+                inner_hash, proxy_hash,
+                "inner global must differ from proxy"
+            );
 
             let key = v8::String::new(cs, "__testProp__").unwrap();
             let val = v8::Integer::new(cs, 42);
@@ -391,8 +396,7 @@ mod tests {
                 .get_identity_hash()
         };
 
-        let (ctx_g, _glob_g) =
-            create_child_realm(scope).expect("child realm created");
+        let (ctx_g, _glob_g) = create_child_realm(scope).expect("child realm created");
 
         let ctx = v8::Local::new(scope, &ctx_g);
         let cs = &mut v8::ContextScope::new(scope, ctx);

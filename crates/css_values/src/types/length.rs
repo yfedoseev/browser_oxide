@@ -264,7 +264,11 @@ impl CalcExpr {
                 .iter()
                 .map(|e| e.evaluate(ctx))
                 .fold(f64::NEG_INFINITY, f64::max),
-            Self::Clamp { min, preferred, max } => {
+            Self::Clamp {
+                min,
+                preferred,
+                max,
+            } => {
                 let lo = min.evaluate(ctx);
                 let hi = max.evaluate(ctx);
                 preferred.evaluate(ctx).clamp(lo, hi)
@@ -309,10 +313,13 @@ impl CalcExpr {
             Self::Hypot(args) => {
                 // Compute as sqrt(sum(xi²)). f64::hypot is 2-arg only;
                 // fold via squared sum to match Chrome's blink/Length.cpp.
-                let sum_sq: f64 = args.iter().map(|e| {
-                    let v = e.evaluate(ctx);
-                    v * v
-                }).sum();
+                let sum_sq: f64 = args
+                    .iter()
+                    .map(|e| {
+                        let v = e.evaluate(ctx);
+                        v * v
+                    })
+                    .sum();
                 sum_sq.sqrt()
             }
             Self::Log { value, base } => {

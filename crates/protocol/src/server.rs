@@ -408,7 +408,9 @@ async fn handle_connection(
 
                 // Send events first (matches Chrome behavior)
                 for event in events {
-                    ws_stream.send(Message::Text(to_json(&event).into())).await?;
+                    ws_stream
+                        .send(Message::Text(to_json(&event).into()))
+                        .await?;
                 }
                 // Then send the response
                 ws_stream.send(Message::Text(response.into())).await?;

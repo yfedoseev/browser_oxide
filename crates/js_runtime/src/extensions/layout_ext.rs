@@ -40,14 +40,20 @@ pub fn op_layout_get_bounding_rect(
 #[smi]
 pub fn op_layout_get_offset_width(#[state] state: &mut DomState, #[smi] node_id: i32) -> i32 {
     let nid = NodeId::from_raw(node_id as u32);
-    state.layout_engine.get_offset_width(&state.dom, nid).round() as i32
+    state
+        .layout_engine
+        .get_offset_width(&state.dom, nid)
+        .round() as i32
 }
 
 #[op2(fast)]
 #[smi]
 pub fn op_layout_get_offset_height(#[state] state: &mut DomState, #[smi] node_id: i32) -> i32 {
     let nid = NodeId::from_raw(node_id as u32);
-    state.layout_engine.get_offset_height(&state.dom, nid).round() as i32
+    state
+        .layout_engine
+        .get_offset_height(&state.dom, nid)
+        .round() as i32
 }
 
 #[op2(fast)]

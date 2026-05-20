@@ -964,12 +964,10 @@ fn try_length_percentage(cv: &ComponentValue<'_>) -> Option<LengthPercentage> {
         // even when the math depends on layout context (vw/em/etc.) —
         // and getComputedStyle output stays correct under the Kasada
         // calc-fingerprint probe.
-        ComponentValue::Function(f) => {
-            match crate::calc::parse_math_function(f) {
-                Ok(Some(expr)) => Some(LengthPercentage::Calc(Box::new(expr))),
-                _ => None,
-            }
-        }
+        ComponentValue::Function(f) => match crate::calc::parse_math_function(f) {
+            Ok(Some(expr)) => Some(LengthPercentage::Calc(Box::new(expr))),
+            _ => None,
+        },
         _ => None,
     }
 }

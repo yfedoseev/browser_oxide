@@ -193,7 +193,7 @@ pub struct HostSource {
 pub enum HostPattern {
     /// `*.example.com` — match any subdomain (NOT example.com itself).
     Wildcard(String), // suffix without leading dot, e.g. "example.com"
-    Exact(String),    // ASCII-lowered host
+    Exact(String), // ASCII-lowered host
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,7 +291,11 @@ impl Policy {
             // (eg `script-src ;`) means "no source matches" — equivalent
             // to `'none'`. Preserve as empty list; matcher treats empty
             // as block.
-            policy.directives.entry(directive).or_default().extend(sources);
+            policy
+                .directives
+                .entry(directive)
+                .or_default()
+                .extend(sources);
         }
         policy
     }
@@ -345,7 +349,11 @@ impl Source {
         }
         // Scheme-only: ends with ':' and contains no '/'.
         if let Some(scheme) = token.strip_suffix(':') {
-            if !scheme.contains('/') && scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.') {
+            if !scheme.contains('/')
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+            {
                 return Some(Source::Scheme(scheme.to_ascii_lowercase()));
             }
         }
@@ -366,7 +374,10 @@ fn parse_host_source(token: &str) -> Option<HostSource> {
     let mut scheme = None;
     if let Some(idx) = rest.find("://") {
         let s = rest[..idx].to_ascii_lowercase();
-        if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.') && !s.is_empty() {
+        if s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+            && !s.is_empty()
+        {
             scheme = Some(s);
             rest = &rest[idx + 3..];
         }
@@ -406,13 +417,20 @@ fn parse_host_source(token: &str) -> Option<HostSource> {
     } else {
         if host_part.is_empty()
             || host_part.contains('*')
-            || !host_part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+            || !host_part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
         {
             return None;
         }
         HostPattern::Exact(host_part.to_ascii_lowercase())
     };
-    Some(HostSource { scheme, host, port, path })
+    Some(HostSource {
+        scheme,
+        host,
+        port,
+        path,
+    })
 }
 
 // ---------------------------------------------------------------------
@@ -596,14 +614,13 @@ fn is_script_directive(d: Directive) -> bool {
 }
 
 fn is_network_scheme(scheme: &str) -> bool {
-    matches!(
-        scheme,
-        "http" | "https" | "ws" | "wss" | "ftp" | "ftps"
-    )
+    matches!(scheme, "http" | "https" | "ws" | "wss" | "ftp" | "ftps")
 }
 
 fn is_same_origin(a: &Url, b: &Url) -> bool {
-    a.scheme() == b.scheme() && a.host_str() == b.host_str() && a.port_or_known_default() == b.port_or_known_default()
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
 }
 
 fn host_source_matches(src: &HostSource, url: &Url) -> bool {
@@ -630,10 +647,7 @@ fn host_source_matches(src: &HostSource, url: &Url) -> bool {
             // `example.com` itself (CSP3 §6.6.2.4).
             url_host.ends_with(suffix)
                 && url_host.len() > suffix.len()
-                && url_host
-                    .chars()
-                    .nth(url_host.len() - suffix.len() - 1)
-                    == Some('.')
+                && url_host.chars().nth(url_host.len() - suffix.len() - 1) == Some('.')
         }
     };
     if !host_ok {
@@ -703,7 +717,9 @@ mod tests {
         let set = Policy::parse_meta_content(WALMART_CSP);
         let script_src = &set.policies[0].directives[&Directive::ScriptSrc];
         assert!(
-            script_src.iter().any(|s| matches!(s, Source::StrictDynamic)),
+            script_src
+                .iter()
+                .any(|s| matches!(s, Source::StrictDynamic)),
             "must parse 'strict-dynamic' keyword"
         );
         assert!(
@@ -723,7 +739,9 @@ mod tests {
         let set = Policy::parse_meta_content("connect-src *.example.com:8443");
         let cs = &set.policies[0].directives[&Directive::ConnectSrc];
         assert_eq!(cs.len(), 1);
-        let Source::Host(h) = &cs[0] else { panic!("expected host source") };
+        let Source::Host(h) = &cs[0] else {
+            panic!("expected host source")
+        };
         assert_eq!(h.host, HostPattern::Wildcard("example.com".to_string()));
         assert_eq!(h.port, Some(PortPattern::Exact(8443)));
     }
@@ -733,16 +751,21 @@ mod tests {
         let set = Policy::parse_meta_content("img-src data: blob: https:");
         let img = &set.policies[0].directives[&Directive::ImgSrc];
         assert_eq!(img.len(), 3);
-        assert!(img.iter().any(|s| matches!(s, Source::Scheme(x) if x == "data")));
-        assert!(img.iter().any(|s| matches!(s, Source::Scheme(x) if x == "blob")));
-        assert!(img.iter().any(|s| matches!(s, Source::Scheme(x) if x == "https")));
+        assert!(img
+            .iter()
+            .any(|s| matches!(s, Source::Scheme(x) if x == "data")));
+        assert!(img
+            .iter()
+            .any(|s| matches!(s, Source::Scheme(x) if x == "blob")));
+        assert!(img
+            .iter()
+            .any(|s| matches!(s, Source::Scheme(x) if x == "https")));
     }
 
     #[test]
     fn parses_hash_sources() {
-        let set = Policy::parse_meta_content(
-            "script-src 'sha256-abc123==' 'sha384-XYZ' 'sha512-q+w'",
-        );
+        let set =
+            Policy::parse_meta_content("script-src 'sha256-abc123==' 'sha384-XYZ' 'sha512-q+w'");
         let ss = &set.policies[0].directives[&Directive::ScriptSrc];
         assert_eq!(ss.len(), 3);
         assert!(matches!(&ss[0], Source::Hash(HashAlgo::Sha256, h) if h == "abc123=="));
@@ -781,13 +804,27 @@ mod tests {
     #[test]
     fn fallback_chain_for_script_src_elem_includes_default() {
         let chain = Directive::ScriptSrcElem.fallback_chain();
-        assert_eq!(chain, &[Directive::ScriptSrcElem, Directive::ScriptSrc, Directive::DefaultSrc]);
+        assert_eq!(
+            chain,
+            &[
+                Directive::ScriptSrcElem,
+                Directive::ScriptSrc,
+                Directive::DefaultSrc
+            ]
+        );
     }
 
     #[test]
     fn fallback_chain_for_frame_src_includes_child_then_default() {
         let chain = Directive::FrameSrc.fallback_chain();
-        assert_eq!(chain, &[Directive::FrameSrc, Directive::ChildSrc, Directive::DefaultSrc]);
+        assert_eq!(
+            chain,
+            &[
+                Directive::FrameSrc,
+                Directive::ChildSrc,
+                Directive::DefaultSrc
+            ]
+        );
     }
 
     #[test]
@@ -818,7 +855,13 @@ mod tests {
         nonce: Option<&'a str>,
         parser_inserted: bool,
     ) -> CheckCtx<'a> {
-        CheckCtx { directive, url: u, page_origin: origin, nonce, parser_inserted }
+        CheckCtx {
+            directive,
+            url: u,
+            page_origin: origin,
+            nonce,
+            parser_inserted,
+        }
     }
 
     #[test]
@@ -836,8 +879,14 @@ mod tests {
         let origin = url("https://example.com/");
         let same = url("https://example.com/app.js");
         let other = url("https://other.com/x.js");
-        assert!(set.allows(&ctx(Directive::ScriptSrcElem, &same, &origin, None, true)).allowed);
-        assert!(!set.allows(&ctx(Directive::ScriptSrcElem, &other, &origin, None, true)).allowed);
+        assert!(
+            set.allows(&ctx(Directive::ScriptSrcElem, &same, &origin, None, true))
+                .allowed
+        );
+        assert!(
+            !set.allows(&ctx(Directive::ScriptSrcElem, &other, &origin, None, true))
+                .allowed
+        );
     }
 
     #[test]
@@ -846,9 +895,15 @@ mod tests {
         let origin = url("https://example.com/");
         let sub = url("https://images.example.com/a.png");
         let bare = url("https://example.com/a.png");
-        assert!(set.allows(&ctx(Directive::ImgSrc, &sub, &origin, None, false)).allowed);
+        assert!(
+            set.allows(&ctx(Directive::ImgSrc, &sub, &origin, None, false))
+                .allowed
+        );
         // Bare host does NOT match `*.example.com` per CSP3.
-        assert!(!set.allows(&ctx(Directive::ImgSrc, &bare, &origin, None, false)).allowed);
+        assert!(
+            !set.allows(&ctx(Directive::ImgSrc, &bare, &origin, None, false))
+                .allowed
+        );
     }
 
     #[test]
@@ -858,9 +913,18 @@ mod tests {
         let data = url("data:image/png;base64,iVBORw0K");
         let any_https = url("https://random.cdn.net/x.png");
         let http = url("http://random.cdn.net/x.png");
-        assert!(set.allows(&ctx(Directive::ImgSrc, &data, &origin, None, false)).allowed);
-        assert!(set.allows(&ctx(Directive::ImgSrc, &any_https, &origin, None, false)).allowed);
-        assert!(!set.allows(&ctx(Directive::ImgSrc, &http, &origin, None, false)).allowed);
+        assert!(
+            set.allows(&ctx(Directive::ImgSrc, &data, &origin, None, false))
+                .allowed
+        );
+        assert!(
+            set.allows(&ctx(Directive::ImgSrc, &any_https, &origin, None, false))
+                .allowed
+        );
+        assert!(
+            !set.allows(&ctx(Directive::ImgSrc, &http, &origin, None, false))
+                .allowed
+        );
     }
 
     #[test]
@@ -868,7 +932,10 @@ mod tests {
         let set = Policy::parse_meta_content("object-src 'none'");
         let origin = url("https://example.com/");
         let any = url("https://example.com/x.swf");
-        assert!(!set.allows(&ctx(Directive::ObjectSrc, &any, &origin, None, false)).allowed);
+        assert!(
+            !set.allows(&ctx(Directive::ObjectSrc, &any, &origin, None, false))
+                .allowed
+        );
     }
 
     #[test]
@@ -877,8 +944,14 @@ mod tests {
         let origin = url("https://example.com/");
         let self_url = url("https://example.com/x.png");
         let other = url("https://other.com/x.png");
-        assert!(set.allows(&ctx(Directive::ImgSrc, &self_url, &origin, None, false)).allowed);
-        assert!(!set.allows(&ctx(Directive::ImgSrc, &other, &origin, None, false)).allowed);
+        assert!(
+            set.allows(&ctx(Directive::ImgSrc, &self_url, &origin, None, false))
+                .allowed
+        );
+        assert!(
+            !set.allows(&ctx(Directive::ImgSrc, &other, &origin, None, false))
+                .allowed
+        );
     }
 
     #[test]
@@ -887,12 +960,29 @@ mod tests {
         let origin = url("https://example.com/");
         let any = url("https://cdn.elsewhere.com/app.js");
         assert!(
-            set.allows(&ctx(Directive::ScriptSrcElem, &any, &origin, Some("abc123"), true)).allowed
+            set.allows(&ctx(
+                Directive::ScriptSrcElem,
+                &any,
+                &origin,
+                Some("abc123"),
+                true
+            ))
+            .allowed
         );
         assert!(
-            !set.allows(&ctx(Directive::ScriptSrcElem, &any, &origin, Some("WRONG"), true)).allowed
+            !set.allows(&ctx(
+                Directive::ScriptSrcElem,
+                &any,
+                &origin,
+                Some("WRONG"),
+                true
+            ))
+            .allowed
         );
-        assert!(!set.allows(&ctx(Directive::ScriptSrcElem, &any, &origin, None, true)).allowed);
+        assert!(
+            !set.allows(&ctx(Directive::ScriptSrcElem, &any, &origin, None, true))
+                .allowed
+        );
     }
 
     /// **The load-bearing case**: Walmart's CSP. Akamai's parser-injected
@@ -909,7 +999,10 @@ mod tests {
 
         // Parser-injected with no nonce: BLOCKED (the live Walmart bug we hit).
         let d = set.allows(&ctx(Directive::ScriptSrcElem, &akamai, &origin, None, true));
-        assert!(!d.allowed, "Akamai parser-injected script must be blocked under strict-dynamic");
+        assert!(
+            !d.allowed,
+            "Akamai parser-injected script must be blocked under strict-dynamic"
+        );
         assert_eq!(d.matched_directive, Directive::ScriptSrc);
 
         // Parser-injected WITH the page's nonce: allowed (this is how
@@ -933,19 +1026,21 @@ mod tests {
         let origin = url("https://www.walmart.com/");
         let images = url("https://i5.walmartimages.com/foo.js");
         // Without nonce: blocked despite host being in allowlist.
-        assert!(!set
-            .allows(&ctx(Directive::ScriptSrcElem, &images, &origin, None, true))
-            .allowed);
+        assert!(
+            !set.allows(&ctx(Directive::ScriptSrcElem, &images, &origin, None, true))
+                .allowed
+        );
         // With nonce: allowed.
-        assert!(set
-            .allows(&ctx(
+        assert!(
+            set.allows(&ctx(
                 Directive::ScriptSrcElem,
                 &images,
                 &origin,
                 Some("MRjHHgrLk9lNoNBv"),
                 true,
             ))
-            .allowed);
+            .allowed
+        );
     }
 
     #[test]
@@ -956,7 +1051,10 @@ mod tests {
         let set = Policy::parse_meta_content(WALMART_CSP);
         let origin = url("https://www.walmart.com/");
         let img = url("https://i5.walmartimages.com/foo.png");
-        assert!(set.allows(&ctx(Directive::ImgSrc, &img, &origin, None, false)).allowed);
+        assert!(
+            set.allows(&ctx(Directive::ImgSrc, &img, &origin, None, false))
+                .allowed
+        );
     }
 
     #[test]
@@ -965,8 +1063,14 @@ mod tests {
         let origin = url("https://other.com/");
         let p443 = url("https://example.com/x");
         let p8443 = url("https://example.com:8443/x");
-        assert!(set.allows(&ctx(Directive::ConnectSrc, &p443, &origin, None, false)).allowed);
-        assert!(set.allows(&ctx(Directive::ConnectSrc, &p8443, &origin, None, false)).allowed);
+        assert!(
+            set.allows(&ctx(Directive::ConnectSrc, &p443, &origin, None, false))
+                .allowed
+        );
+        assert!(
+            set.allows(&ctx(Directive::ConnectSrc, &p8443, &origin, None, false))
+                .allowed
+        );
     }
 
     #[test]
@@ -975,8 +1079,14 @@ mod tests {
         let origin = url("https://other.com/");
         let p443 = url("https://example.com/x"); // default https port
         let p8443 = url("https://example.com:8443/x"); // non-default → block
-        assert!(set.allows(&ctx(Directive::ConnectSrc, &p443, &origin, None, false)).allowed);
-        assert!(!set.allows(&ctx(Directive::ConnectSrc, &p8443, &origin, None, false)).allowed);
+        assert!(
+            set.allows(&ctx(Directive::ConnectSrc, &p443, &origin, None, false))
+                .allowed
+        );
+        assert!(
+            !set.allows(&ctx(Directive::ConnectSrc, &p8443, &origin, None, false))
+                .allowed
+        );
     }
 
     #[test]
@@ -987,7 +1097,10 @@ mod tests {
         let any = url("https://example.com/x.js");
         // Even with 'none', report_only=true means the overall decision
         // is allow.
-        assert!(set.allows(&ctx(Directive::ScriptSrcElem, &any, &origin, None, true)).allowed);
+        assert!(
+            set.allows(&ctx(Directive::ScriptSrcElem, &any, &origin, None, true))
+                .allowed
+        );
     }
 
     #[test]
@@ -999,8 +1112,20 @@ mod tests {
         let cdn = url("https://cdn.com/x.js");
         let self_url = url("https://example.com/x.js");
         // First policy allows cdn, second doesn't → blocked.
-        assert!(!set.allows(&ctx(Directive::ScriptSrcElem, &cdn, &origin, None, true)).allowed);
+        assert!(
+            !set.allows(&ctx(Directive::ScriptSrcElem, &cdn, &origin, None, true))
+                .allowed
+        );
         // Both allow self → allowed.
-        assert!(set.allows(&ctx(Directive::ScriptSrcElem, &self_url, &origin, None, true)).allowed);
+        assert!(
+            set.allows(&ctx(
+                Directive::ScriptSrcElem,
+                &self_url,
+                &origin,
+                None,
+                true
+            ))
+            .allowed
+        );
     }
 }

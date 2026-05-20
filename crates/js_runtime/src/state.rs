@@ -88,9 +88,13 @@ impl DomState {
                     }
                     let mut declarations = HashMap::new();
                     for d in &qr.declarations {
-                        declarations.insert(d.name.to_string(), tokens_to_string(&d.value).trim().to_string());
+                        declarations.insert(
+                            d.name.to_string(),
+                            tokens_to_string(&d.value).trim().to_string(),
+                        );
                     }
-                    let selectors = css_selectors::parse_selector_list(&selector_str).unwrap_or_default();
+                    let selectors =
+                        css_selectors::parse_selector_list(&selector_str).unwrap_or_default();
                     self.cached_rules.push(CachedRule {
                         selector_str,
                         selectors,

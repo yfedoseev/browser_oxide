@@ -30,7 +30,11 @@ pub enum CalcParseError {
     Empty,
     UnexpectedToken(String),
     UnknownFunction(String),
-    WrongArity { name: String, expected: &'static str, got: usize },
+    WrongArity {
+        name: String,
+        expected: &'static str,
+        got: usize,
+    },
     InvalidUnit(String),
 }
 
@@ -40,7 +44,11 @@ impl std::fmt::Display for CalcParseError {
             Self::Empty => write!(f, "empty calc() arguments"),
             Self::UnexpectedToken(s) => write!(f, "unexpected token: {s}"),
             Self::UnknownFunction(s) => write!(f, "unknown math function: {s}"),
-            Self::WrongArity { name, expected, got } => {
+            Self::WrongArity {
+                name,
+                expected,
+                got,
+            } => {
                 write!(f, "{name}() arity: expected {expected}, got {got}")
             }
             Self::InvalidUnit(s) => write!(f, "unknown unit: {s}"),
@@ -157,7 +165,11 @@ pub fn parse_math_function(f: &CssFunction<'_>) -> Result<Option<CalcExpr>, Calc
             let (strategy, value_idx) = if let Some(first) = parts.first() {
                 let toks = filter_ws(first);
                 if toks.len() == 1 {
-                    if let ComponentValue::Token(Token { kind: TokenKind::Ident(id), .. }) = &toks[0] {
+                    if let ComponentValue::Token(Token {
+                        kind: TokenKind::Ident(id),
+                        ..
+                    }) = &toks[0]
+                    {
                         match id.to_ascii_lowercase().as_str() {
                             "nearest" => (RoundStrategy::Nearest, 1),
                             "up" => (RoundStrategy::Up, 1),
@@ -215,9 +227,7 @@ fn filter_ws<'a>(tokens: &'a [ComponentValue<'a>]) -> Vec<&'a ComponentValue<'a>
         .collect()
 }
 
-fn split_top_level_commas<'a>(
-    tokens: &'a [ComponentValue<'a>],
-) -> Vec<&'a [ComponentValue<'a>]> {
+fn split_top_level_commas<'a>(tokens: &'a [ComponentValue<'a>]) -> Vec<&'a [ComponentValue<'a>]> {
     let mut out = Vec::new();
     let mut start = 0usize;
     for (i, cv) in tokens.iter().enumerate() {
@@ -235,7 +245,15 @@ fn split_top_level_commas<'a>(
     if start <= tokens.len() {
         let tail = &tokens[start..];
         // Skip a trailing-only-whitespace tail (no real argument).
-        if !tail.iter().all(|cv| matches!(cv, ComponentValue::Token(Token { kind: TokenKind::Whitespace, .. }))) {
+        if !tail.iter().all(|cv| {
+            matches!(
+                cv,
+                ComponentValue::Token(Token {
+                    kind: TokenKind::Whitespace,
+                    ..
+                })
+            )
+        }) {
             out.push(tail);
         }
     }
@@ -250,12 +268,18 @@ fn parse_sum<'a>(tokens: &[&'a ComponentValue<'a>]) -> Result<CalcExpr, CalcPars
     let mut left = parse_product(tokens, &mut pos)?;
     while pos < tokens.len() {
         match tokens[pos] {
-            ComponentValue::Token(Token { kind: TokenKind::Delim('+'), .. }) => {
+            ComponentValue::Token(Token {
+                kind: TokenKind::Delim('+'),
+                ..
+            }) => {
                 pos += 1;
                 let right = parse_product(tokens, &mut pos)?;
                 left = CalcExpr::Add(Box::new(left), Box::new(right));
             }
-            ComponentValue::Token(Token { kind: TokenKind::Delim('-'), .. }) => {
+            ComponentValue::Token(Token {
+                kind: TokenKind::Delim('-'),
+                ..
+            }) => {
                 pos += 1;
                 let right = parse_product(tokens, &mut pos)?;
                 left = CalcExpr::Sub(Box::new(left), Box::new(right));
@@ -275,12 +299,18 @@ fn parse_product<'a>(
     let mut left = parse_unary(tokens, pos)?;
     while *pos < tokens.len() {
         match tokens[*pos] {
-            ComponentValue::Token(Token { kind: TokenKind::Delim('*'), .. }) => {
+            ComponentValue::Token(Token {
+                kind: TokenKind::Delim('*'),
+                ..
+            }) => {
                 *pos += 1;
                 let right = parse_unary(tokens, pos)?;
                 left = CalcExpr::Mul(Box::new(left), Box::new(right));
             }
-            ComponentValue::Token(Token { kind: TokenKind::Delim('/'), .. }) => {
+            ComponentValue::Token(Token {
+                kind: TokenKind::Delim('/'),
+                ..
+            }) => {
                 *pos += 1;
                 let right = parse_unary(tokens, pos)?;
                 left = CalcExpr::Div(Box::new(left), Box::new(right));
@@ -298,12 +328,20 @@ fn parse_unary<'a>(
     if *pos >= tokens.len() {
         return Err(CalcParseError::Empty);
     }
-    if let ComponentValue::Token(Token { kind: TokenKind::Delim('-'), .. }) = tokens[*pos] {
+    if let ComponentValue::Token(Token {
+        kind: TokenKind::Delim('-'),
+        ..
+    }) = tokens[*pos]
+    {
         *pos += 1;
         let inner = parse_unary(tokens, pos)?;
         return Ok(CalcExpr::Negate(Box::new(inner)));
     }
-    if let ComponentValue::Token(Token { kind: TokenKind::Delim('+'), .. }) = tokens[*pos] {
+    if let ComponentValue::Token(Token {
+        kind: TokenKind::Delim('+'),
+        ..
+    }) = tokens[*pos]
+    {
         *pos += 1;
         return parse_unary(tokens, pos);
     }
@@ -334,7 +372,9 @@ fn parse_atom<'a>(
             TokenKind::Ident(id) => match id.to_ascii_lowercase().as_str() {
                 "pi" => Ok(CalcExpr::Value(CalcValue::Constant(NumericConstant::Pi))),
                 "e" => Ok(CalcExpr::Value(CalcValue::Constant(NumericConstant::E))),
-                "infinity" => Ok(CalcExpr::Value(CalcValue::Constant(NumericConstant::Infinity))),
+                "infinity" => Ok(CalcExpr::Value(CalcValue::Constant(
+                    NumericConstant::Infinity,
+                ))),
                 "-infinity" => Ok(CalcExpr::Value(CalcValue::Constant(
                     NumericConstant::NegInfinity,
                 ))),
@@ -449,7 +489,10 @@ mod tests {
         approx(parse_calc("tan(0)").evaluate(&ctx), 0.0);
         approx(parse_calc("sin(pi)").evaluate(&ctx), 0.0); // within tolerance
         approx(parse_calc("cos(pi)").evaluate(&ctx), -1.0);
-        approx(parse_calc("atan2(1, 1)").evaluate(&ctx), std::f64::consts::FRAC_PI_4);
+        approx(
+            parse_calc("atan2(1, 1)").evaluate(&ctx),
+            std::f64::consts::FRAC_PI_4,
+        );
     }
 
     #[test]
@@ -566,9 +609,9 @@ fn looks_like_math_function(s: &str) -> bool {
     // math-function names followed by `(`. Avoids paying the parser
     // cost on the 99% of values that are plain dimensions.
     const NAMES: &[&str] = &[
-        "calc(", "min(", "max(", "clamp(", "round(", "mod(", "rem(",
-        "sin(", "cos(", "tan(", "asin(", "acos(", "atan(", "atan2(",
-        "pow(", "sqrt(", "hypot(", "log(", "exp(", "abs(", "sign(",
+        "calc(", "min(", "max(", "clamp(", "round(", "mod(", "rem(", "sin(", "cos(", "tan(",
+        "asin(", "acos(", "atan(", "atan2(", "pow(", "sqrt(", "hypot(", "log(", "exp(", "abs(",
+        "sign(",
     ];
     let lower = s.to_ascii_lowercase();
     NAMES.iter().any(|n| lower.starts_with(n))
@@ -601,11 +644,16 @@ fn guess_output_unit(original: &str) -> &'static str {
     // for a Dimension token; if any present, output is px.
     let css = format!("__:{};", original);
     let (decls, _) = css_parser::parse_declaration_list(&css);
-    let Some(decl) = decls.first() else { return ""; };
+    let Some(decl) = decls.first() else {
+        return "";
+    };
     fn has_dim(values: &[ComponentValue<'_>]) -> bool {
         for cv in values {
             match cv {
-                ComponentValue::Token(Token { kind: TokenKind::Dimension { .. }, .. }) => {
+                ComponentValue::Token(Token {
+                    kind: TokenKind::Dimension { .. },
+                    ..
+                }) => {
                     return true;
                 }
                 ComponentValue::Function(f) => {
@@ -623,7 +671,11 @@ fn guess_output_unit(original: &str) -> &'static str {
         }
         false
     }
-    if has_dim(&decl.value) { "px" } else { "" }
+    if has_dim(&decl.value) {
+        "px"
+    } else {
+        ""
+    }
 }
 
 #[cfg(test)]
@@ -658,10 +710,7 @@ mod resolve_tests {
     #[test]
     fn resolves_kasada_style_nested() {
         // The shape Kasada injects: calc(1px * (...))
-        let v = resolve_computed_value(
-            "calc(1px * (2.71828 * 0.5 + sin(pi / 2)))",
-            &ctx(),
-        );
+        let v = resolve_computed_value("calc(1px * (2.71828 * 0.5 + sin(pi / 2)))", &ctx());
         // 2.71828 * 0.5 + 1 = 2.35914
         // Format with up to 6 decimals, trailing-zeros stripped.
         assert_eq!(v, "2.35914px");

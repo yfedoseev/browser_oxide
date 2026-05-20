@@ -134,7 +134,9 @@ async fn kasada_frame_index_probe() {
     .unwrap();
     // Mirrors Kasada's actual probe: access child iframe via window[0] / frames[0],
     // NOT via iframe.contentWindow. If window[0] is undefined, all ifw/spd/dpi probes fail.
-    let r = page.evaluate(r#"(function(){
+    let r = page
+        .evaluate(
+            r#"(function(){
   try {
     var f = document.createElement('iframe');
     f.style.display = 'none';
@@ -155,7 +157,9 @@ async fn kasada_frame_index_probe() {
       win0_self_eq: (cw0 && cw0.self === cw0),
     });
   } catch(e) { return JSON.stringify({PROBE_ERR: String(e), stack: e.stack}); }
-})()"#).unwrap_or_else(|e| format!("EVAL_ERR: {e}"));
+})()"#,
+        )
+        .unwrap_or_else(|e| format!("EVAL_ERR: {e}"));
     println!("KASADA-FRAME-INDEX-PROBE: {r}");
 }
 
@@ -226,7 +230,9 @@ async fn kasada_spd_probe() {
     .await
     .unwrap();
     // Mirrors Kasada's spd probe: reads screen/viewport props from child iframe window.
-    let r = page.evaluate(r#"(function(){
+    let r = page
+        .evaluate(
+            r#"(function(){
   try {
     var f = document.createElement('iframe');
     f.style.display = 'none';
@@ -246,6 +252,8 @@ async fn kasada_spd_probe() {
       dpr: cw.devicePixelRatio !== undefined ? cw.devicePixelRatio : 'n/a',
     });
   } catch(e) { return JSON.stringify({PROBE_ERR: String(e)}); }
-})()"#).unwrap_or_else(|e| format!("EVAL_ERR: {e}"));
+})()"#,
+        )
+        .unwrap_or_else(|e| format!("EVAL_ERR: {e}"));
     println!("KASADA-SPD-PROBE: {r}");
 }

@@ -138,7 +138,6 @@ deno_core::extension!(
     ops = [op_perf_now_humanized, op_perf_get_resource_timings],
 );
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

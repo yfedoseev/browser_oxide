@@ -57,7 +57,7 @@ where
     let mut request = format!("{method} {path} HTTP/1.1\r\n");
     request.push_str(&format!("Host: {host}\r\n"));
     request.push_str("Connection: keep-alive\r\n");
-    
+
     if let Some(body) = body {
         request.push_str(&format!("Content-Length: {}\r\n", body.len()));
     }

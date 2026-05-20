@@ -99,10 +99,7 @@ impl ProxyConfig {
 
         let auth = match (url.username(), url.password()) {
             ("", _) => ProxyAuth::None,
-            (u, Some(p)) => ProxyAuth::UserPass(
-                percent_decode(u)?,
-                percent_decode(p)?,
-            ),
+            (u, Some(p)) => ProxyAuth::UserPass(percent_decode(u)?, percent_decode(p)?),
             (u, None) => ProxyAuth::UserPass(percent_decode(u)?, String::new()),
         };
 
@@ -255,8 +252,8 @@ async fn socks5_handshake(
     // === Phase 1: greeting ===
     // VER=5, NMETHODS, METHODS...
     let methods: &[u8] = match auth {
-        ProxyAuth::None => &[0x00],            // NO AUTH
-        ProxyAuth::UserPass(_, _) => &[0x02],  // USER/PASS
+        ProxyAuth::None => &[0x00],           // NO AUTH
+        ProxyAuth::UserPass(_, _) => &[0x02], // USER/PASS
     };
     let mut greet = vec![0x05, methods.len() as u8];
     greet.extend_from_slice(methods);
@@ -357,8 +354,8 @@ async fn socks5_handshake(
     // Drain BND.ADDR + BND.PORT so the stream is positioned at the start
     // of the tunneled bytes.
     let bnd_len = match head[3] {
-        0x01 => 4,                        // IPv4
-        0x04 => 16,                       // IPv6
+        0x01 => 4,  // IPv4
+        0x04 => 16, // IPv6
         0x03 => {
             let mut len_buf = [0u8; 1];
             stream
@@ -499,7 +496,9 @@ mod tests {
             let host_len = head[4] as usize;
             let mut host_buf = vec![0u8; host_len + 2];
             sock.read_exact(&mut host_buf).await.unwrap();
-            let host_str = std::str::from_utf8(&host_buf[..host_len]).unwrap().to_string();
+            let host_str = std::str::from_utf8(&host_buf[..host_len])
+                .unwrap()
+                .to_string();
             assert_eq!(host_str, "target.example.com");
             // Reply: VER=5, REP=0 (SUCCESS), RSV=0, ATYP=1, BND.ADDR=0.0.0.0, BND.PORT=0
             sock.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])

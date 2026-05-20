@@ -37,7 +37,12 @@ pub fn op_canvas_create(
 ) -> i32 {
     let id = state.next_id;
     state.next_id += 1;
-    if let Some(canvas) = Canvas2D::new(width.max(1) as u32, height.max(1) as u32, os_name, canvas_seed) {
+    if let Some(canvas) = Canvas2D::new(
+        width.max(1) as u32,
+        height.max(1) as u32,
+        os_name,
+        canvas_seed,
+    ) {
         state.canvases.insert(id, canvas);
         id
     } else {

@@ -68,9 +68,10 @@ impl WebWorker {
 
     /// Collect messages posted by the worker via postMessage().
     pub fn collect_messages(&mut self) -> Result<Vec<Value>, deno_core::error::AnyError> {
-        let result = self
-            .runtime
-            .execute_script(r#"JSON.stringify(globalThis._workerMessages.splice(0))"#, None)?;
+        let result = self.runtime.execute_script(
+            r#"JSON.stringify(globalThis._workerMessages.splice(0))"#,
+            None,
+        )?;
         let messages: Vec<String> = serde_json::from_str(&result).unwrap_or_default();
         Ok(messages
             .into_iter()

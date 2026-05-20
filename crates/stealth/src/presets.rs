@@ -884,19 +884,33 @@ pub fn iphone_15_pro_safari_18() -> StealthProfile {
 // downstream callers don't break. New code should call `chrome_148_*`.
 
 #[inline]
-pub fn chrome_130_windows() -> StealthProfile { chrome_148_windows() }
+pub fn chrome_130_windows() -> StealthProfile {
+    chrome_148_windows()
+}
 #[inline]
-pub fn chrome_130_macos() -> StealthProfile { chrome_148_macos() }
+pub fn chrome_130_macos() -> StealthProfile {
+    chrome_148_macos()
+}
 #[inline]
-pub fn chrome_130_linux() -> StealthProfile { chrome_148_linux() }
+pub fn chrome_130_linux() -> StealthProfile {
+    chrome_148_linux()
+}
 #[inline]
-pub fn chrome_130_ru() -> StealthProfile { chrome_148_ru() }
+pub fn chrome_130_ru() -> StealthProfile {
+    chrome_148_ru()
+}
 #[inline]
-pub fn chrome_130_cn() -> StealthProfile { chrome_148_cn() }
+pub fn chrome_130_cn() -> StealthProfile {
+    chrome_148_cn()
+}
 #[inline]
-pub fn chrome_130_de() -> StealthProfile { chrome_148_de() }
+pub fn chrome_130_de() -> StealthProfile {
+    chrome_148_de()
+}
 #[inline]
-pub fn chrome_130_jp() -> StealthProfile { chrome_148_jp() }
+pub fn chrome_130_jp() -> StealthProfile {
+    chrome_148_jp()
+}
 
 #[cfg(test)]
 mod tests {
