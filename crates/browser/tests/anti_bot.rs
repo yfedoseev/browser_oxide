@@ -501,6 +501,12 @@ async fn navigator_get_battery_returns_promise() {
 #[tokio::test]
 async fn navigator_get_battery_resolves() {
     // getBattery is [SecureContext] — page must use https://
+    //
+    // BatteryManager values are deliberately randomized per-session by
+    // window_bootstrap.js (commit cab06c4, W2.6) to defeat the CreepJS
+    // "level:1, charging:true, chargingTime:0, dischargingTime:Infinity"
+    // headless fingerprint. We assert on the *shape* the spec mandates,
+    // not the now-defeated default values.
     let mut page = Page::from_html_with_url(
         &html(""),
         "https://example.com/",
@@ -514,10 +520,39 @@ async fn navigator_get_battery_resolves() {
     page.evaluate_async("void 0", Duration::from_millis(100))
         .await
         .ok();
-    let charging = page.evaluate("globalThis._bat.charging").unwrap();
-    assert_eq!(charging, "true");
-    let level = page.evaluate("globalThis._bat.level").unwrap();
-    assert_eq!(level, "1");
+    // charging is a boolean.
+    let charging = page.evaluate("typeof globalThis._bat.charging").unwrap();
+    assert_eq!(charging, "boolean", "battery.charging should be boolean");
+    // level is a number in [0, 1].
+    let level_ok = page
+        .evaluate(
+            "(() => { const l = globalThis._bat.level; \
+                return typeof l === 'number' && l >= 0 && l <= 1; })()",
+        )
+        .unwrap();
+    assert_eq!(level_ok, "true", "battery.level should be a number in [0,1]");
+    // chargingTime is number-or-Infinity (>= 0).
+    let ct_ok = page
+        .evaluate(
+            "(() => { const t = globalThis._bat.chargingTime; \
+                return typeof t === 'number' && t >= 0; })()",
+        )
+        .unwrap();
+    assert_eq!(
+        ct_ok, "true",
+        "battery.chargingTime should be a non-negative number"
+    );
+    // dischargingTime is number-or-Infinity (>= 0).
+    let dt_ok = page
+        .evaluate(
+            "(() => { const t = globalThis._bat.dischargingTime; \
+                return typeof t === 'number' && t >= 0; })()",
+        )
+        .unwrap();
+    assert_eq!(
+        dt_ok, "true",
+        "battery.dischargingTime should be a non-negative number"
+    );
 }
 
 #[tokio::test]
