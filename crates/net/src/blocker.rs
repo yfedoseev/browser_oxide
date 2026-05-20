@@ -18,9 +18,9 @@
 
 #[cfg(feature = "blocker")]
 mod engine {
-    use adblock::Engine;
     use adblock::lists::{FilterFormat, FilterSet, ParseOptions};
     use adblock::request::Request;
+    use adblock::Engine;
     use std::cell::OnceCell;
 
     /// Top tracker / ad-network domains that show up in the holistic-sweep
