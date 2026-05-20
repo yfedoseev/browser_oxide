@@ -22,10 +22,10 @@ downloaded_files/
 
 # Reverse-engineering scratch (preserved under docs/*/scratch/, ignored at root)
 docs/**/scratch/
-/kasada_*
-/decode_*
-/decoded_*
-/chunk_*
+kasada_*
+decode_*
+decoded_*
+chunk_*
 /head.js
 /full_table.txt
 /print_indices.js
@@ -36,6 +36,7 @@ docs/**/scratch/
 /diagnostic*.log
 /cg_run*.log
 /adidas-network.json
+probe_raw.json
 
 # Test-generated capture blobs (test wrote them to crate cwd)
 crates/*/kasada_error_*.b64
