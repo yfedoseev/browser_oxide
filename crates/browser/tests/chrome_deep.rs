@@ -272,7 +272,10 @@ async fn test_user_agent_data_highentropy() {
         assert_eq!(sorted.len(), 3);
         assert!(sorted.contains(&"Chromium"));
         assert!(sorted.contains(&"Google Chrome"));
-        let third = sorted.iter().find(|b| **b != "Chromium" && **b != "Google Chrome").unwrap();
+        let third = sorted
+            .iter()
+            .find(|b| **b != "Chromium" && **b != "Google Chrome")
+            .unwrap();
         assert!(
             third.starts_with("Not") && third.contains("Brand"),
             "third brand should be a GREASE 'Not...Brand', got: {third}"
