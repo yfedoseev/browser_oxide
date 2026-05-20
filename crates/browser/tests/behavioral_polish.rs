@@ -15,6 +15,20 @@ async fn evaluate(js: &str) -> String {
     page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
 }
 
+/// Same as `evaluate` but the page is a secure context (https://). The
+/// `navigator.deviceMemory` API is [SecureContext]-gated and returns
+/// undefined on http:/about:blank.
+async fn evaluate_secure(js: &str) -> String {
+    let mut page = Page::from_html_with_url(
+        "<!DOCTYPE html><html><body></body></html>",
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
+}
+
 // ================================================================
 // performance.memory.jsHeapSizeLimit — Chrome desktop = 4294705152 (4GB).
 // 2172649472 (2GB) is the headless flag.
@@ -69,7 +83,8 @@ async fn hardware_concurrency_is_typical() {
 // ================================================================
 #[tokio::test]
 async fn device_memory_is_quantized() {
-    let r = evaluate("navigator.deviceMemory").await;
+    // deviceMemory is [SecureContext] — undefined on http:/about:blank.
+    let r = evaluate_secure("navigator.deviceMemory").await;
     let allowed = ["0.25", "0.5", "1", "2", "4", "8"];
     assert!(
         allowed.contains(&r.as_str()),

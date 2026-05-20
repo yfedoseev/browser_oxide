@@ -21,6 +21,20 @@ async fn evaluate(js: &str) -> String {
     page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
 }
 
+/// Same as `evaluate` but the page is loaded with an https:// URL so
+/// SecureContext-only Web Platform APIs (Notification.permission,
+/// userAgentData, deviceMemory, permissions, ...) behave per Chrome.
+async fn evaluate_secure(js: &str) -> String {
+    let mut page = Page::from_html_with_url(
+        "<!DOCTYPE html><html><body></body></html>",
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
+}
+
 // ================================================================
 // V8 / engine identifiers — exact match to Chrome 147
 // ================================================================
@@ -316,8 +330,9 @@ async fn parity_chrome_app_running_state_dict() {
 // ================================================================
 #[tokio::test]
 async fn parity_notification_permission() {
-    // Real Chrome 147 default profile: 'default'
-    let r = evaluate("Notification.permission").await;
+    // Real Chrome 147 default profile on a secure page: 'default'.
+    // (On http:// real Chrome reports 'denied' — see anti_bot.rs.)
+    let r = evaluate_secure("Notification.permission").await;
     assert_eq!(r, "default");
 }
 

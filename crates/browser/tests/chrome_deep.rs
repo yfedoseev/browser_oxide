@@ -199,7 +199,8 @@ async fn test_user_agent_data_highentropy() {
         .next()
         .unwrap_or_default()
         .to_string();
-    let page = Page::with_profile("", "about:blank", profile)
+    // userAgentData is [SecureContext]; about:blank would return undefined.
+    let page = Page::with_profile("", "https://example.com/", profile)
         .await
         .unwrap();
 
@@ -263,7 +264,19 @@ async fn test_user_agent_data_highentropy() {
             .iter()
             .map(|v| v.as_str().unwrap())
             .collect();
-        assert_eq!(sorted, vec!["Chromium", "Google Chrome", "Not-A.Brand"]);
+        // Chrome's third GREASE brand is randomized per release ("Not.A/Brand",
+        // "Not-A.Brand", "Not_A Brand", "Not(A:Brand", ...); current engine
+        // ships "Not.A/Brand" matching Chrome 147. Match either common form
+        // — the test point is that exactly one non-Chromium/non-Google brand
+        // is present.
+        assert_eq!(sorted.len(), 3);
+        assert!(sorted.contains(&"Chromium"));
+        assert!(sorted.contains(&"Google Chrome"));
+        let third = sorted.iter().find(|b| **b != "Chromium" && **b != "Google Chrome").unwrap();
+        assert!(
+            third.starts_with("Not") && third.contains("Brand"),
+            "third brand should be a GREASE 'Not...Brand', got: {third}"
+        );
         assert_eq!(obj["nonArrayRejection"], "TypeError");
         let invalid = &obj["invalidHintIgnored"];
         assert!(!invalid.is_null());
@@ -324,13 +337,19 @@ async fn test_chrome_api_surface() {
 
 #[tokio::test]
 async fn permissions_query_returns_prompt() {
-    // Chrome returns { state: "prompt" } for notifications permission
+    // Chrome returns { state: "prompt" } for notifications permission on
+    // a secure context; on http://about:blank Notification.permission is
+    // "denied" and the Permissions query mirrors that to "denied" too.
     assert_eq!(check(r#"
         navigator.permissions.query({ name: 'notifications' }).then(r => globalThis._permState = r.state)
     "#).await, "[object Promise]");
-    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
-        .await
-        .unwrap();
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
     page.evaluate("navigator.permissions.query({ name: 'notifications' }).then(r => globalThis._ps = r.state)").unwrap();
     page.evaluate_async("void 0", std::time::Duration::from_millis(50))
         .await

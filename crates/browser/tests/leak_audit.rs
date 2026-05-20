@@ -121,7 +121,10 @@ async fn audit_function_to_string_leaks() {
 #[tokio::test]
 async fn test_permissions_query_defaults() {
     let profile = presets::chrome_130_windows();
-    let mut page: Page = Page::with_profile("", "about:blank", profile)
+    // Notifications/clipboard/etc. are [SecureContext]-gated; about:blank
+    // would return "denied" uniformly. Real Chrome 133's per-name map
+    // (the reference here) was captured on a secure context.
+    let mut page: Page = Page::with_profile("", "https://example.com/", profile)
         .await
         .unwrap();
 

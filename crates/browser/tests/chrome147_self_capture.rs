@@ -84,8 +84,14 @@ const CAPTURE_PROBE: &str = r##"
 
 #[tokio::test]
 async fn engine_self_capture_succeeds() {
-    let mut page = Page::from_html(
+    // Use an https:// URL so the page is a secure context: the
+    // captured Chrome 147 values for Notification.permission and
+    // userAgentData were recorded on a secure page, and a few of the
+    // expected values below (notification_permission == "default")
+    // only hold on a secure context.
+    let mut page = Page::from_html_with_url(
         "<!DOCTYPE html><html><body></body></html>",
+        "https://example.com/",
         None::<stealth::StealthProfile>,
     )
     .await
