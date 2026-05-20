@@ -2,6 +2,7 @@ use browser::Page;
 use std::time::Duration;
 
 #[tokio::test]
+#[ignore = "network: live HTTP against canadagoose.com (Kasada-protected)"]
 async fn verify_canadagoose_pass() {
     let profile = stealth::chrome_130_windows();
     let res = tokio::time::timeout(
@@ -30,6 +31,7 @@ async fn verify_canadagoose_pass() {
 }
 
 #[tokio::test]
+#[ignore = "network: live HTTP against hyatt.com (Kasada-protected)"]
 async fn verify_hyatt_pass() {
     let profile = stealth::chrome_130_windows();
     let res = tokio::time::timeout(
@@ -56,6 +58,7 @@ async fn verify_hyatt_pass() {
 }
 
 #[tokio::test]
+#[ignore = "network: live HTTP against realtor.com (Kasada-protected)"]
 async fn verify_realtor_pass() {
     let profile = stealth::chrome_130_windows();
     let res = tokio::time::timeout(

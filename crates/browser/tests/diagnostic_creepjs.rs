@@ -4,6 +4,7 @@ mod tests {
     use stealth;
 
     #[tokio::test]
+    #[ignore = "network: live HTTP against abrahamjuliot.github.io/creepjs"]
     async fn test_creepjs_oxide() {
         let profile = stealth::presets::chrome_130_macos();
         let mut page = Page::navigate("https://abrahamjuliot.github.io/creepjs/", profile, 5)

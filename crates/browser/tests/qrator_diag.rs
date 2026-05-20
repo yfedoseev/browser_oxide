@@ -3,6 +3,7 @@ use std::time::Duration;
 use stealth::presets::chrome_130_ru;
 
 #[tokio::test]
+#[ignore = "network: live HTTP against dns-shop.ru (Qrator-protected)"]
 async fn debug_qrator_dns_shop() {
     let profile = chrome_130_ru();
     let url = "https://www.dns-shop.ru";

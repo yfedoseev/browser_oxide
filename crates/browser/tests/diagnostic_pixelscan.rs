@@ -4,6 +4,7 @@ mod tests {
     use stealth;
 
     #[tokio::test]
+    #[ignore = "network: live HTTP against pixelscan.net"]
     async fn test_pixelscan_oxide() {
         let profile = stealth::presets::chrome_130_macos();
         let mut page = Page::navigate("https://pixelscan.net/", profile, 5)
@@ -18,6 +19,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "network: live HTTP against pixelscan.net"]
     async fn test_pixelscan_check_oxide() {
         let profile = stealth::presets::chrome_130_macos();
         let mut page = Page::navigate("https://pixelscan.net/fingerprint-check", profile, 5)

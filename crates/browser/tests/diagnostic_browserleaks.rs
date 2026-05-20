@@ -4,6 +4,7 @@ mod tests {
     use stealth;
 
     #[tokio::test]
+    #[ignore = "network: live HTTP against browserleaks.com"]
     async fn audit_browserleaks_oxide() {
         let profile = stealth::presets::chrome_130_linux();
         let mut page = Page::navigate("https://browserleaks.com/javascript", profile, 5)

@@ -4,6 +4,7 @@ mod tests {
     use stealth;
 
     #[tokio::test]
+    #[ignore = "network: live HTTP against sinceyouarrived.world"]
     async fn audit_sinceyouarrived_oxide() {
         let profile = stealth::presets::chrome_130_macos();
         let mut page = Page::navigate("https://sinceyouarrived.world/taken", profile, 5)

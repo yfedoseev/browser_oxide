@@ -171,11 +171,11 @@ async fn run_probe(_url_label: &str) -> HashMap<String, String> {
 async fn phase7_ab_probe_capture_oxide() {
     let result = run_probe("oxide").await;
     let json = serde_json::to_string_pretty(&result).unwrap();
-    let out_dir = "/Users/yfedoseev/Projects/browser_oxide/.playwright-mcp/captures";
-    std::fs::create_dir_all(out_dir).unwrap();
-    let path = format!("{out_dir}/probe_oxide.json");
+    let out_dir = std::env::temp_dir().join("browser_oxide_captures");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let path = out_dir.join("probe_oxide.json");
     std::fs::write(&path, &json).unwrap();
-    eprintln!("wrote {} keys to {path}", result.len());
+    eprintln!("wrote {} keys to {}", result.len(), path.display());
 }
 
 /// Dump oxide's window.ownPropertyNames so we can diff against
@@ -194,9 +194,9 @@ async fn diag_dump_own_property_names() {
     let names = p
         .evaluate("JSON.stringify(Object.getOwnPropertyNames(globalThis))")
         .unwrap();
-    let path = "/Users/yfedoseev/Projects/browser_oxide/probe_oxide_global_names.json";
+    let path = std::env::temp_dir().join("probe_oxide_global_names.json");
     let cleaned = names.trim_matches('"').replace("\\\"", "\"");
-    std::fs::write(path, &cleaned).unwrap();
+    std::fs::write(&path, &cleaned).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
     eprintln!("oxide globals: {}", parsed.as_array().unwrap().len());
 }

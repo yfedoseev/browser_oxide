@@ -4,6 +4,7 @@ mod tests {
     use stealth;
 
     #[tokio::test]
+    #[ignore = "network: live HTTP against example.com"]
     async fn audit_screen_keys() {
         let profile = stealth::presets::chrome_130_macos();
         let mut page = Page::navigate("https://example.com/", profile, 1)
