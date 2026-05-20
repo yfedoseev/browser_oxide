@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Arena-allocated DOM tree with Shadow DOM support"
+publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [dependencies]
 css_selectors = { workspace = true }

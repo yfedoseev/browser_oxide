@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "V8 JavaScript runtime with DOM bindings for browser_oxide"
+publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [features]
 default = []

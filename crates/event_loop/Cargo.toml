@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Browser event loop: timers, microtasks, requestAnimationFrame, idle detection"
+publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [dependencies]
 js_runtime = { workspace = true }

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "CSS Selectors Level 4 parser and matching engine"
+publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [dependencies]
 css_parser = { workspace = true }

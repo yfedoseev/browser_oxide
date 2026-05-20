@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "html5ever integration producing a browser_oxide DOM"
+publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [dependencies]
 dom = { workspace = true }

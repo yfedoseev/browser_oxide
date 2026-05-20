@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Stealth HTTP client with Chrome TLS/HTTP2 fingerprint impersonation (boring2/BoringSSL)"
+publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [dependencies]
 stealth = { workspace = true }

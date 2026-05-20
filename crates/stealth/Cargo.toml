@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Stealth fingerprint profiles for browser_oxide — consistent browser identities"
+publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

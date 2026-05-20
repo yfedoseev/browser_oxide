@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Top-level headless browser API: Page, script execution, content extraction"
+publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [features]
 default = []
