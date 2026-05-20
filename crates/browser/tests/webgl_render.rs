@@ -1,5 +1,15 @@
-//! WebGL rendering tests — verify clearColor/clear/readPixels produce real pixels
-//! via the Canvas2D backend.
+//! WebGL rendering tests — verify clearColor/clear/readPixels produce
+//! real pixels.
+//!
+//! These tests require the `webgl-render` Cargo feature (off by default)
+//! which links OSMesa + glow for software GL rendering. With the feature
+//! off, getContext('webgl') returns the property-shape stub and these
+//! assertions correctly fail. Gated rather than `#[ignore]`'d because
+//! the *whole file* depends on the feature — gating at the file level
+//! keeps default `cargo test --workspace` green and lets
+//! `cargo test --features webgl-render` exercise the real path.
+
+#![cfg(feature = "webgl-render")]
 
 use browser::Page;
 use stealth;
