@@ -19,12 +19,10 @@ use tokio_boring2::SslStream;
 use crate::error::NetError;
 
 /// The Chrome major version whose **verified-real** ClientHello / H2
-/// fingerprint these constants reproduce, byte-exact, per
-/// `docs/CHROME_147_TLS_REFERENCE_2026_04_29.json`.
+/// fingerprint these constants reproduce, byte-exact.
 ///
 /// **Why this is 147 while every desktop preset's UA advertises Chrome
-/// 148 — and why that is NOT an incoherent skew (master plan §4 Phase 1
-/// G7):**
+/// 148 — and why that is NOT an incoherent skew:**
 ///
 /// 1. Chrome's TLS ClientHello is **version-stable across majors**. It
 ///    only changes on a deliberate TLS-stack change; the last such change
@@ -39,14 +37,13 @@ use crate::error::NetError;
 ///    the JA4 corresponds to *a Chrome* consistent with the UA *family*
 ///    — it cannot, even in principle, detect a 147-vs-148 minor/major
 ///    label difference.
-/// 3. UA=148 is a **deliberate, A/B-tested, primary-source-grounded**
-///    decision: real Chrome stable IS 148 (chromiumdash; shipped early
-///    May 2026), and `docs/CHROME_148_SWEEP_RESULTS_2026_05_13.md`
-///    measured the 147→148 UA bump *recovering* homedepot/hotels/
-///    leboncoin. Rolling the UA back to 147 would re-introduce those
-///    regressions and advertise an outdated browser (its own soft-deny
-///    signal). So the coherent state is UA=148 + these (wire-identical)
-///    147-reference bytes.
+/// 3. UA=148 is a **deliberate, A/B-tested** decision: real Chrome
+///    stable IS 148 (chromiumdash; shipped early May 2026), and the
+///    147→148 UA bump *recovered* several previously-blocked sites in
+///    our measurement. Rolling the UA back to 147 would re-introduce
+///    those regressions and advertise an outdated browser (its own
+///    soft-deny signal). So the coherent state is UA=148 + these
+///    (wire-identical) 147-reference bytes.
 ///
 /// This constant exists so the coherence is **machine-checked** (see the
 /// `tls_fingerprint_vectors_no_silent_drift` test) and the rationale is
@@ -191,8 +188,7 @@ const ALPN_PROTOS: &[u8] = b"\x02h2\x08http/1.1";
 use rand::prelude::SliceRandom;
 
 /// Chrome 147 extension permutation (indices into BoringSSL kExtensions table).
-/// 16 extensions matching the verified Chrome 147 macOS arm64 reference at
-/// `docs/CHROME_147_TLS_REFERENCE_2026_04_29.json`.
+/// 16 extensions matching a verified Chrome 147 macOS arm64 reference capture.
 ///
 /// **Real Chrome shuffling behavior** (per Fastly TLS Fingerprinting blog
 /// + Chromestatus 5124606246518784 + BoringSSL `ssl_setup_extension_permutation`
@@ -203,8 +199,7 @@ use rand::prelude::SliceRandom;
 /// public RE work; it reduced shuffle entropy by ~720,000× and put
 /// signature_algorithms always at position 16 — a deterministic positional
 /// tell that per-handshake classifiers (Akamai, Kasada) can detect as a
-/// soft-deny signal. Fix per
-/// `docs/RESEARCH_TLS_FINGERPRINT_FIX_2026_05_10.md` §4.1.
+/// soft-deny signal.
 const CHROME_EXTENSION_PERMUTATION: &[u8] = &[
     14, // key_share (51)
     1,  // encrypted_client_hello (65037)
@@ -234,8 +229,7 @@ fn shuffled_chrome_extension_permutation() -> Vec<u8> {
 
 /// Build an `SslConnector` configured with the TLS fingerprint matching
 /// `profile.device_class`. Currently all variants share Chrome 147 desktop
-/// configuration; Phase 2 (per `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md`)
-/// branches here for Android (~0.5 days) and iOS Safari (~2-3 days).
+/// configuration; Phase 2 branches here for Android and iOS Safari.
 pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetError> {
     // Phase 2/3 (2026-05-12): per-device_class branching.
     //  - Desktop / Android: shared Chrome 147 cipher/sigalg/extension config.
@@ -332,12 +326,12 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
 
     // Extension order:
     //  - Chrome: per-handshake Fisher-Yates shuffle of all 16 desktop extensions
-    //  - Safari iOS: FIXED order (same every handshake) — Phase D upgrade
-    //    (2026-05-12). Set Safari's specific 13-extension order via the same
+    //  - Safari iOS: FIXED order (same every handshake) — Phase D
+    //    upgrade. Set Safari's specific 13-extension order via the same
     //    permutation API. PADDING positional ordering still requires raw
-    //    extension injection (deferred — see SWEEP_3PROFILE_2026_05_12.md
-    //    Option D); BoringSSL auto-emits PADDING when ClientHello length
-    //    crosses ~512 bytes, which our Safari profile typically does.
+    //    extension injection (deferred); BoringSSL auto-emits PADDING when
+    //    ClientHello length crosses ~512 bytes, which our Safari profile
+    //    typically does.
     let permutation = if is_safari_ios {
         SAFARI_IOS_EXTENSION_PERMUTATION.to_vec()
     } else {
@@ -363,8 +357,8 @@ mod tests {
     ///
     /// Pins every JA4 input (cipher list, sigalg list, supported-groups
     /// order, extension count) byte-/element-exact to the verified-real
-    /// Chrome reference (`docs/CHROME_147_TLS_REFERENCE_2026_04_29.json`)
-    /// so the fingerprint can never silently drift again (any edit to
+    /// Chrome reference so the fingerprint can never silently drift
+    /// again (any edit to
     /// the constants fails this test loudly), and machine-checks that
     /// the deliberate UA=148 / TLS-ref=147 split is the documented,
     /// wire-coherent one (see [`TLS_CHROME_MAJOR`] docs).

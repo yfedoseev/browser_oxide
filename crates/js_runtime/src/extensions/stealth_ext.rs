@@ -139,7 +139,6 @@ pub fn op_cross_origin_isolated(#[state] state: &StealthState) -> bool {
 /// Returns whether the document is in a secure context. Drives
 /// `self.isSecureContext` and gates the ~18 secure-context-only
 /// Web Platform APIs per the IDL `[SecureContext]` extended attribute.
-/// Phase 7 fix — see `docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md`.
 #[op2(fast)]
 pub fn op_is_secure_context(#[state] state: &StealthState) -> bool {
     state.is_secure_context

@@ -41,7 +41,6 @@
 //! - <https://github.com/Humphryyy/Kasada-Deobfuscated>
 //! - <https://docs.antibot.to/reference/kasada/x-kpsdk-cd>
 //! - <https://github.com/lktop/kpsdk>
-//! - `docs/TIER0_KASADA_RESULTS.md` §3.5
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};

@@ -36,8 +36,6 @@
 //! `generateSecCptAnswers`. Typical cost at difficulty=15000 is
 //! ~5 ms / answer on one CPU core; Akamai's `chlg_duration` enforced
 //! wait (5–30 s) is the real time floor.
-//!
-//! Per docs/research_2026_05_14/02_AKAMAI.md §5.
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};

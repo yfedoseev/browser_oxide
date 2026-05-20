@@ -1,7 +1,5 @@
 //! Akamai BMP v3 cleartext payload — JSON object schema.
 //!
-//! Per `docs/research_2026_05_14/10_AKAMAI_V3_ENVELOPE_DEEP_2026_05_14.md`:
-//!
 //! Our existing `build_cleartext` produces the v2 DalphanDev 58-element
 //! CSV (`-100,-105,...`). Akamai's v3 edge expects a JSON object with
 //! ~30 named keys. The edge decrypts the envelope body, runs
@@ -17,8 +15,7 @@
 //! depends on the per-field `wsl` canaries (the 10 plugin / heap /
 //! voice probes Akamai uses for "is this a real browser?").
 //!
-//! See `10_AKAMAI_V3_ENVELOPE_DEEP_2026_05_14.md` §2 for the full
-//! schema; §2.3 for `wsl` slot semantics (highest scoring vector).
+//! See `wsl` slot semantics below — the highest scoring vector.
 
 use crate::AkamaiSession;
 use serde::{Deserialize, Serialize};
@@ -406,8 +403,7 @@ mod tests {
         let wsl = v["wsl"].as_str().unwrap();
         let parts: Vec<&str> = wsl.split(',').collect();
         // Real-Chrome shape: 20 comma-separated slots with specific canaries
-        // at positions 5-9. Per 10_AKAMAI_V3_ENVELOPE_DEEP_2026_05_14.md §2.3
-        // these are the bot-detection canaries — must be exactly:
+        // at positions 5-9 — the bot-detection canaries — must be exactly:
         //   wsl[5..=7] = 1 (plugin probes pass)
         //   wsl[8]     = 0 (File.prototype.path absent — Electron-only)
         //   wsl[9]     = 1 (SharedArrayBuffer present)

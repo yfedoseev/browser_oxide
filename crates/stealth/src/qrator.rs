@@ -11,8 +11,7 @@
 //! `MD5(nonce + n)` has a target prefix; n is the PoW answer.
 //!
 //! For dns-shop.ru specifically there's a JSON-microdata shortcut at
-//! `dns-shop.ru/product/microdata/<uuid>/` that bypasses QRATOR entirely
-//! (per `docs/universal_engine/site_debugging/dns_shop_qrator.md`).
+//! `dns-shop.ru/product/microdata/<uuid>/` that bypasses QRATOR entirely.
 
 
 /// QRATOR challenge inputs (parsed from the qauth.js page or computed

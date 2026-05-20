@@ -858,9 +858,7 @@ fn sites_list() -> Vec<(&'static str, &'static str, &'static str)> {
 /// History: a "strong markers" rule that fired on `akam/13` /
 /// `_abck` / `_pxhd` regardless of body size used to incorrectly
 /// flag walmart, costco, disneyplus, hulu, uniqlo, weather, etc. as
-/// Akamai-CHL even when the page rendered with multi-MB content. See
-/// `docs/PHASE3_AUDIT_2026_04_29.md` for the per-site contexts that
-/// proved the false-positive pattern.
+/// Akamai-CHL even when the page rendered with multi-MB content.
 /// FP-B1: thin wrapper over the single canonical classifier
 /// `browser::classify::engine_classify`. The marker tables and size
 /// gates that used to live inline here are now the shared source of

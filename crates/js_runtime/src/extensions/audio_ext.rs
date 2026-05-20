@@ -14,8 +14,6 @@
 //! - `op_audio_biquad_response` (P2.2b) computes the closed-form
 //!   magnitude+phase response of a BiquadFilter for a given frequency
 //!   array. Wired from `canvas_bootstrap.js BiquadFilterNode.getFrequencyResponse`.
-//!
-//! See docs/SOTA_ROADMAP_2026.md §2.2.
 
 use canvas::{AudioFingerprint, AudioParams, WaveType};
 use deno_core::op2;

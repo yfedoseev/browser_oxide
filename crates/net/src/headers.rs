@@ -727,7 +727,7 @@ fn build_accept_language(languages: &[String]) -> String {
 //   COOP: same-origin
 //   COEP: require-corp | credentialless
 //
-// See web.dev/articles/coop-coep and gap #30 in docs/GAPS.md.
+// See web.dev/articles/coop-coep.
 // ================================================================
 
 use std::collections::HashMap;

@@ -16,8 +16,6 @@
 //!   jitter  ~ LogNormal(μ = ln 8 µs, σ = 0.4)        // clamped [0, 35] µs
 //!   spike   = with prob 1/1024, sample Exp(λ=1/200 µs) clamped ≤ 1500 µs
 //!   result  = (q + jitter + spike) ms
-//!
-//! See docs/SOTA_ROADMAP_2026.md §1.3 and docs/GAPS.md §31a.
 
 use crate::state::DomState;
 use deno_core::op2;

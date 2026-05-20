@@ -1,6 +1,6 @@
-//! Live CHL site validation — the 7 sites from research_2026.md that
-//! Playwright MCP succeeds against from this same machine but
-//! browser_oxide previously failed. All `#[ignore]` (network-dependent).
+//! Live CHL site validation — a 7-site target set that Playwright
+//! succeeds against from this same machine but browser_oxide previously
+//! failed. All `#[ignore]` (network-dependent).
 //!
 //! Run with: cargo test -p browser --test chl_sites -- --ignored --test-threads=1 --nocapture
 //!
@@ -72,7 +72,7 @@ async fn fetch_and_classify(url: &str) -> String {
 }
 
 // ================================================================
-// The 7 CHL sites from research_2026.md
+// The 7 CHL sites in the target set.
 // ================================================================
 
 #[tokio::test]
@@ -125,7 +125,7 @@ async fn chl_douyin() {
 }
 
 // ================================================================
-// Public anti-bot test pages (also from research_2026.md)
+// Public anti-bot test pages.
 // ================================================================
 
 #[tokio::test]

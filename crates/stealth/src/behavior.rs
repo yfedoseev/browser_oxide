@@ -13,8 +13,6 @@
 //! Per-session determinism via `ChaCha20Rng` seeded from `BehaviorProfile.seed`
 //! — same seed produces same sequence so tests reproduce, but each call site
 //! folds in a salt so different `(from, to)` pairs differ.
-//!
-//! See docs/SOTA_ROADMAP_2026.md §3 for the underlying research.
 
 use rand::Rng;
 use rand_chacha::rand_core::SeedableRng;

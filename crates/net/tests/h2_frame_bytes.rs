@@ -8,9 +8,9 @@
 //! Bypasses TLS by feeding `handshake()` a raw `TcpStream` so we can read
 //! the wire bytes directly on the listener side.
 //!
-//! See docs/SOTA_ROADMAP_2026.md §1.4. The HEADERS frame body is HPACK-
-//! Huffman encoded — that frame's *order* is asserted via the per-profile
-//! JA4H test (`ja4h::tests::ja4h_*`), not byte-compared here.
+//! The HEADERS frame body is HPACK-Huffman encoded — that frame's
+//! *order* is asserted via the per-profile JA4H test
+//! (`ja4h::tests::ja4h_*`), not byte-compared here.
 
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

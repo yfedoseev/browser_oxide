@@ -1,11 +1,9 @@
 //! W4.5 — Classic Wheeler/Needham TEA in CBC mode + Kasada key-derivation
 //! scaffolding for the `__:` noise-key candidate A hypothesis.
 //!
-//! Per docs/research_2026_05_14/01_KASADA.md §2.1, the Kasada ips.js
-//! VM ships a TEA-CBC cipher (classic 32-round Wheeler/Needham 1994
-//! TEA, NOT the 1998 XXTEA). The 128-bit key is derived per-session
-//! from the `__:` noise-key blob field (candidate A — highest
-//! probability per §2.2).
+//! The Kasada ips.js VM ships a TEA-CBC cipher (classic 32-round
+//! Wheeler/Needham 1994 TEA, NOT the 1998 XXTEA). The 128-bit key is
+//! derived per-session from the `__:` noise-key blob field.
 //!
 //! Algorithm reference: Wheeler & Needham (1994). "TEA, a Tiny
 //! Encryption Algorithm." Cambridge Computer Lab.

@@ -1,8 +1,7 @@
 //! DataDome client-side payload encryption — W3.8 solver primitives.
 //!
 //! Faithful Rust port of `glizzykingdreko/datadome-encryption`
-//! `src/encryption.js` (clean-room Node reference). Full algorithm +
-//! validation vectors: `docs/research_2026_05_14/18_DATADOME_ENCRYPTION_REFERENCE_2026_05_15.md`.
+//! `src/encryption.js` (clean-room Node reference).
 //!
 //! This module currently implements the deterministic, independently
 //! unit-testable primitives (steps 2 of the port plan). The PRNG

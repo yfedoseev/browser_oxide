@@ -244,10 +244,9 @@ pub fn op_worker_spawn(
     }
 
     // 64 MB stack: V8's default stack guard isn't large enough for some
-    // anti-bot probes that recurse deeply through wrapped natives. Per
-    // docs/HANDOFF_2026_04_28.md item V8 #60. Chrome's renderer threads
-    // also run with ~16 MB stacks; we go larger because our shim adds
-    // more JS frames per native call.
+    // anti-bot probes that recurse deeply through wrapped natives.
+    // Chrome's renderer threads also run with ~16 MB stacks; we go larger
+    // because our shim adds more JS frames per native call.
     let thread_result = std::thread::Builder::new()
         .name(format!("worker-{worker_id}"))
         .stack_size(64 * 1024 * 1024)

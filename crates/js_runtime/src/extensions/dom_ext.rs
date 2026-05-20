@@ -797,9 +797,8 @@ pub fn op_dom_get_all_computed_styles(
     // Resolve calc() and CSS Values 4 math functions to their used
     // pixel value before returning — Chrome's getComputedStyle does
     // this. Otherwise antibot probes that compute via calc(... sin(pi)
-    // ...) and read the result back (e.g. Kasada's CSS calc precision
-    // probe — see docs/CANADA_GOOSE_DIAGNOSIS_2026_05_10.md) catch us
-    // returning the unresolved expression text.
+    // ...) and read the result back catch us returning the unresolved
+    // expression text.
     let ctx = calc_context_from(state);
     let res: HashMap<String, String> = declarations
         .into_iter()

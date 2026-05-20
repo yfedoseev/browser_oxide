@@ -1,5 +1,5 @@
-//! Tests for the generic navigation primitives introduced by the zero-per-engine
-//! refactor (docs/universal_engine/plans/refactor_generic_navigation.md).
+//! Tests for the generic navigation primitives introduced by the
+//! zero-per-engine refactor.
 //!
 //! Each primitive (`location.reload()`, `location.href = ...`,
 //! `location.replace()`, `<meta http-equiv="refresh">`) must set

@@ -133,7 +133,7 @@ pub struct HttpClient {
     /// Per-origin Kasada session state. Populated when a response includes
     /// `x-kpsdk-cr: true` + `x-kpsdk-st`; consumed by attaching `x-kpsdk-cd`
     /// to subsequent requests to the same host. Solver lives in
-    /// `stealth::kasada`. See `docs/TIER0_KASADA_RESULTS.md`.
+    /// `stealth::kasada`.
     kasada_sessions: KasadaSessionStore,
     /// Origins that have sent `Accept-CH` in a response. When an origin is
     /// present, subsequent requests to it use `chrome_headers_with_accept_ch()`

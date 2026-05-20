@@ -3,13 +3,10 @@
 //! Runs browser_oxide against a curated panel of fingerprinting test
 //! pages and captures (a) the rendered HTML, (b) a per-site extracted
 //! JSON state blob, and (c) a PASS / PARTIAL / FAIL / ERROR
-//! classification. Results are written under
-//! `docs/FINGERPRINT_SUITE_2026_05_10/`.
+//! classification. Output goes to `${BOXIDE_FP_OUTDIR:-fp_suite_out}/`.
 //!
-//! This is the verification gate for "SOTA stealth" claims — every
-//! site here is a known, public, modern detector and the verdicts are
-//! captured straight from the page's own DOM/globals (no string
-//! pattern hand-waving where a real signal exists).
+//! Every site here is a known, public, modern fingerprint detector and
+//! the verdicts are captured straight from the page's own DOM/globals.
 //!
 //! Run with:
 //!
@@ -20,9 +17,9 @@
 //! ```
 //!
 //! Per-site outputs:
-//!   docs/FINGERPRINT_SUITE_2026_05_10/<site>.html   — rendered HTML
-//!   docs/FINGERPRINT_SUITE_2026_05_10/<site>.json   — extracted state
-//!   docs/FINGERPRINT_SUITE_2026_05_10/SUMMARY.md    — verdict table
+//!   <outdir>/<site>.html   — rendered HTML
+//!   <outdir>/<site>.json   — extracted state
+//!   <outdir>/SUMMARY.md    — verdict table
 
 use browser::Page;
 use serde_json::{json, Value};
@@ -58,12 +55,17 @@ struct SiteResult {
 }
 
 fn out_dir() -> PathBuf {
+    // Overridable via BOXIDE_FP_OUTDIR; otherwise writes under the
+    // current working directory so the suite doesn't pollute `docs/`
+    // on a fresh checkout.
+    if let Ok(custom) = std::env::var("BOXIDE_FP_OUTDIR") {
+        return PathBuf::from(custom);
+    }
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // crates/browser → repo root
     p.pop();
     p.pop();
-    p.push("docs");
-    p.push("FINGERPRINT_SUITE_2026_05_10");
+    p.push("fp_suite_out");
     p
 }
 

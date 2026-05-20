@@ -13,9 +13,8 @@ use std::time::{Duration, Instant};
 // deno_core RuntimeActivity snapshot (pending async ops, timers, intervals,
 // resources) and dumps a histogram + per-tick CSV to stderr at exit.
 //
-// Used by docs/W5b_SPA_HYDRATION_PROFILE_2026_05_10.md to root-cause SPA
-// hydration timeouts (twitter.com / x.com) where body=69 bytes after the
-// 90s nav budget.
+// Used to root-cause SPA hydration timeouts where the page body remains
+// near-empty after the nav budget elapses.
 
 #[derive(Clone, Copy, Default, Debug)]
 struct TickRow {

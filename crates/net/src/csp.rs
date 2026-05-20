@@ -21,8 +21,6 @@
 //! Out of scope (deferred): `frame-ancestors`, `form-action`,
 //! `base-uri`, `report-uri`/`report-to`, `require-trusted-types-for`,
 //! upgrade-insecure-requests.
-//!
-//! Reference: [`docs/CSP_ENFORCEMENT_DESIGN_2026_04_29.md`](../../../../docs/CSP_ENFORCEMENT_DESIGN_2026_04_29.md).
 
 use std::collections::HashMap;
 

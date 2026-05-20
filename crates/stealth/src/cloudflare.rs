@@ -5,7 +5,7 @@
 //! script reads. Mirrors the layout of `kasada.rs`: detection +
 //! per-host context only, no V8 dependency.
 //!
-//! V1 scope (per `docs/RESEARCH_CLOUDFLARE_BYPASS_2026_05_10.md` §0/§9):
+//! V1 scope:
 //! - Detect `cf-mitigated: challenge` header and the body-level
 //!   `window._cf_chl_opt = { ... }` blob.
 //! - Extract `cType`, `cRay`, `cZone`, `cN` (CSP nonce), the orchestrator
@@ -251,9 +251,9 @@ fn extract_orchestrator_url(body: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// Synthetic body modelled on the udemy.com 2026-05-10 capture in
-    /// `docs/RESEARCH_CLOUDFLARE_BYPASS_2026_05_10.md` §6. We elide the
-    /// long opaque base64 fields but keep the structure intact.
+    /// Synthetic body modelled on a real Cloudflare managed-challenge
+    /// response capture. Long opaque base64 fields are elided but the
+    /// structure is intact.
     const UDEMY_BODY: &str = r#"
 <html><head><title>Just a moment...</title></head><body>
 <script>

@@ -1,8 +1,7 @@
 //! W3.8 — DataDome interstitial detector + solver scaffolding.
 //!
 //! When DataDome scoring fails the silent path, the response body looks
-//! like the canonical 1.4 KB shape (per docs/research_2026_05_14/03_DATADOME.md
-//! §2):
+//! like the canonical 1.4 KB shape:
 //!
 //! ```html
 //! <html lang="en"><head><title><site></title>...</head>

@@ -5,8 +5,7 @@
 //! to that host, the client computes a fresh `x-kpsdk-cd` PoW header from
 //! the cached state and the current wall clock.
 //!
-//! See `crates/stealth/src/kasada.rs` for the PoW algorithm and
-//! `docs/TIER0_KASADA_RESULTS.md` for the diagnostic that motivated this.
+//! See `crates/stealth/src/kasada.rs` for the PoW algorithm.
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;

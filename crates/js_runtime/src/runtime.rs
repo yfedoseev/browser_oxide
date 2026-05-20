@@ -39,8 +39,8 @@ pub struct BrowserRuntimeOptions {
     /// Whether the document satisfies cross-origin isolation requirements
     /// (COOP=same-origin AND COEP=require-corp|credentialless). Drives
     /// `self.crossOriginIsolated` and gates SAB postMessage transfer to
-    /// workers — see `crates/net/src/headers.rs::is_cross_origin_isolated`
-    /// and gap #30 in docs/GAPS.md. Default false (most pages are not COI).
+    /// workers — see `crates/net/src/headers.rs::is_cross_origin_isolated`.
+    /// Default false (most pages are not COI).
     pub cross_origin_isolated: bool,
     /// Whether the document URL is a secure context per WICG/secure-contexts
     /// (https/wss/file or http://localhost). Drives `self.isSecureContext`
@@ -230,10 +230,9 @@ pub fn create_runtime_with_signals(
             .expect("bootstrap failed");
     }
 
-    // W2.7 — all bootstrap scripts run with name "<anonymous>" so V8
-    // stack frames don't leak browser_oxide-specific tags. Castle.io
-    // documented Kasada/DataDome inspecting Error.stack literal format
-    // (09_KASADA_DEEP_2026_05_14.md §9).
+    // All bootstrap scripts run with name "<anonymous>" so V8 stack
+    // frames don't leak browser_oxide-specific tags. Castle.io
+    // documented Kasada/DataDome inspecting Error.stack literal format.
     // Always run cleanup to hide internals, even when restoring from snapshot.
     runtime
         .execute_script("<anonymous>", include_str!("js/cleanup_bootstrap.js"))
@@ -292,9 +291,9 @@ pub fn create_runtime_with_signals(
     // Script name is `<anonymous>` (V8's eval-default tag) to avoid
     // leaking browser_oxide identifiers in Error.stack frames if a
     // site script overrides Error.prepareStackTrace and bypasses our
-    // filter. Our VM_TRACE_FINDINGS_2026_05_12.md previously captured
-    // `at h (<init_script_0>:51:34)` — Kasada literally saw the index.
-    // Both index and the `init_script` tag are now scrubbed.
+    // filter. A prior VM trace previously captured
+    // `at h (<init_script_0>:51:34)` — anti-bot probes literally saw
+    // the index. Both index and the `init_script` tag are now scrubbed.
     for (_i, code) in options.init_scripts.iter().enumerate() {
         if let Err(e) = runtime.execute_script("<anonymous>", code.clone()) {
             tracing::warn!(error = %e, "init script failed");

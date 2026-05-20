@@ -669,8 +669,8 @@ pub fn random_desktop() -> StealthProfile {
     profile
 }
 
-/// Chrome 148 on Pixel 9 Pro (Android 15). Phase 2 mobile profile per
-/// `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md`. TLS deltas vs desktop:
+/// Chrome 148 on Pixel 9 Pro (Android 15). Phase 2 mobile profile.
+/// TLS deltas vs desktop:
 ///   - elliptic curves: X25519_KYBER768_DRAFT00 instead of MLKEM768
 ///     (Android Chrome lags desktop on PQ rollout; verify against fresh
 ///     M147 Pixel capture if a recent rollout is suspected)
@@ -771,11 +771,11 @@ pub fn pixel_9_pro_chrome_147() -> StealthProfile {
     }
 }
 
-/// Mobile Safari 18 on iPhone 15 Pro (iOS 18.0). Phase 3 mobile profile per
-/// `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md`. Requires Phase 3 TLS work
-/// (separate cipher list / sigalgs / no ECH-ALPS / zlib cert) — without it
-/// the profile produces a Chrome-flavored ClientHello + Safari UA, which is
-/// the #1 instant flag on every anti-bot stack. Use only after Phase 3 lands.
+/// Mobile Safari 18 on iPhone 15 Pro (iOS 18.0). Phase 3 mobile profile.
+/// Requires Phase 3 TLS work (separate cipher list / sigalgs / no ECH-ALPS
+/// / zlib cert) — without it the profile produces a Chrome-flavored
+/// ClientHello + Safari UA, which is the #1 instant flag on every
+/// anti-bot stack. Use only after Phase 3 lands.
 ///
 /// JS surface deltas (per the audit + Apple's "16 declined APIs" list):
 ///   - UA: `Mozilla/5.0 (iPhone; CPU iPhone OS 18_0_1 ...) Version/18.0.1 Mobile/15E148 Safari/604.1`

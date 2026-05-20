@@ -15,8 +15,7 @@
 //!
 //! ## Format (Akamai web v2, what bestbuy uses)
 //!
-//! Verified 2026-04-29 against a real Chrome 147 capture from
-//! Playwright MCP — see `docs/akamai_sensor_reference_2026_04_29.txt`.
+//! Verified against a real Chrome 147 capture from Playwright MCP.
 //!
 //! ```text
 //! sensor_data := "3" ";" "0" ";" "1" ";" "0" ";"
@@ -43,7 +42,6 @@
 //!
 //! - Public algorithm: <https://github.com/xiaoweigege/akamai2.0-sensor_data> (akamai2.0.js — v2 path)
 //! - Signal taxonomy: <https://github.com/Edioff/akamai-analysis>
-//! - Research summary: `docs/RESEARCH_AKAMAI_BMP_BYPASS_2026_04_29.md`
 //!
 //! ## Status
 //!
@@ -155,8 +153,7 @@ impl BotScoreVector {
 /// Parse Akamai's `bm_sz` cookie into the per-session cookieHash seed
 /// for the v3 sensor_data envelope.
 ///
-/// Format per 02_AKAMAI.md §1.2 + glizzykingdreko's v3 deep-dive
-/// (`docs/research_2026_05_14/10_AKAMAI_V3_ENVELOPE_DEEP_2026_05_14.md`):
+/// Format per glizzykingdreko's v3 deep-dive:
 ///
 /// ```text
 /// bm_sz = <hex>~<base64>~<cookieHash>~<metadata>[~more]
@@ -456,8 +453,8 @@ pub fn get_tenant_settings(host: &str) -> Option<TenantSettings> {
             post_path: "/iBo5C/hYh/7w3a/LoSr/yK3l/muuXcz9SiLaEkpiw1u/QRgwWis/cgtYQ/RktbE8B",
         })
     } else if host.contains("homedepot.com") {
-        // Captured 2026-05-10 via Playwright MCP (W17 in PLAN_2026_05_10).
-        // Real Chrome 147 from a residential macOS profile navigates
+        // Captured via Playwright MCP against a real Chrome 147 from a
+        // residential macOS profile that navigates
         // homedepot.com → Akamai sensor_data POST goes to the obfuscated
         // path below with `{"sensor_data":"3;0;1;0;3420213;..."}` body.
         // Tenant seed (field 5) = 3_420_213. Verified across 2 captured

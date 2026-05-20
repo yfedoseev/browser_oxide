@@ -5,8 +5,6 @@
 //! decomposition. We use `stealth::behavior::mouse_trajectory` (Plamondon
 //! 1995) which produces 2-7 lognormal velocity strokes — same generator
 //! BeCAPTCHA-Mouse benchmarks against.
-//!
-//! See docs/SOTA_ROADMAP_2026.md §3.1.
 
 use deno_core::op2;
 use serde::Serialize;

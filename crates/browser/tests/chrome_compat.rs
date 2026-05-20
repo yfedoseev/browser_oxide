@@ -1213,7 +1213,7 @@ async fn canvas_drawing_produces_nonblank_data_url() {
 }
 
 // ================================================================
-// WebGL fingerprint catalog (stealth::gpu) — GAPS.md §P0 item 7 fix
+// WebGL fingerprint catalog (stealth::gpu) — profile-driven WebGL fix.
 // These assert the profile-driven WebGL fingerprint is exposed with
 // realistic per-GPU values, not the old hardcoded single-profile stubs.
 // ================================================================
@@ -2627,7 +2627,6 @@ async fn performance_get_entries_is_native() {
 //   navigator.credentials.create({publicKey:...}) rejects NotAllowedError after ~120ms
 //   navigator.credentials.get({identity:...}) rejects NotAllowedError after ~200ms
 //   _maskAsNative purity on all spoofed methods
-// See docs/SOTA_ROADMAP_2026.md §1.1.
 // ================================================================
 
 // Promise helper: kicks off a Promise-returning expression and pumps timers
@@ -2894,7 +2893,6 @@ async fn fedcm_identity_provider_get_user_info_rejects() {
 //   getExtension('WEBGL_debug_renderer_info') — non-null, exposes UNMASKED_*
 //   getContextAttributes() — Chrome defaults (alpha=true, antialias=true, etc.)
 // All values come from the active StealthProfile.gpu_profile (stealth/src/gpu.rs).
-// See docs/SOTA_ROADMAP_2026.md §2.1 for the deferred wgpu render path.
 // ================================================================
 
 async fn webgl_check(js: &str) -> String {
@@ -3634,9 +3632,9 @@ const FN_TRACE_INIT: &str = r#"
 "#;
 
 /// Helper for live-network smoke tests against anti-bot-protected sites.
-/// Reports the outcome instead of asserting — anti-bot success depends on
-/// the IP we're calling from, which `docs/TIER0_KASADA_RESULTS.md` proves
-/// dominates fingerprint quality for first-touch on Kasada/Cloudflare.
+/// Reports the outcome instead of asserting — anti-bot success depends
+/// heavily on the IP we're calling from, which often dominates
+/// fingerprint quality for first-touch on Kasada/Cloudflare.
 async fn antibot_smoke(label: &str, url: &str, profile: stealth::StealthProfile) {
     println!("\n=== {label}: {url} ===");
     let t0 = std::time::Instant::now();
@@ -5615,8 +5613,8 @@ async fn akamai_homedepot_clean_production() {
 #[ignore = "network: 2 alt-Kasada targets to isolate IP-gate vs fingerprint"]
 async fn kasada_alt_targets() {
     let profile = stealth::presets::chrome_130_macos();
-    // hyatt.com + ticketmaster.com per docs/NEXT_STEPS.md as alternate Kasada
-    // sites. If one passes where canadagoose doesn't, that argues for
+    // hyatt.com + ticketmaster.com as alternate Kasada sites. If one
+    // passes where canadagoose doesn't, that argues for
     // canadagoose-specific IP-blocklisting (per commit 6307749 "prove IP is
     // the gate"). If both also return ~700-byte challenge pages, that argues
     // for a fingerprint/PoW gap rather than IP.
@@ -5650,7 +5648,7 @@ async fn akamai_homedepot_seccpt_diag() {
 #[ignore = "network: 3-site anti-bot smoke (Cloudflare/Kasada/Akamai)"]
 async fn antibot_smoke_tier05() {
     let profile = stealth::presets::chrome_130_macos();
-    // Tier 0.5 structural-advantage targets per docs/NEXT_STEPS.md §4.5
+    // Tier 0.5 structural-advantage targets.
     antibot_smoke(
         "CLOUDFLARE-baseline",
         "https://nowsecure.nl/",
@@ -5796,8 +5794,7 @@ async fn fingerprint_probe_vs_chrome() {
 }
 
 /// W6 — DataDome diagnostic capture. Mirror of kasada_error_blob_capture
-/// for DataDome-protected sites. DataDome's flow per
-/// docs/RESEARCH_DATADOME_BYPASS_2026_05_10.md:
+/// for DataDome-protected sites. DataDome's flow:
 ///   1. Page loads `<script src="//js.datadome.co/tags.js?...">` (the
 ///      bootstrap with the obfuscated probe code).
 ///   2. Bootstrap collects fingerprint+behavioural data, encrypts via
@@ -7194,7 +7191,7 @@ async fn diag_thin_body_sites() {
     thin_body_diagnose("https://www.primevideo.com/", "prime-video").await;
 }
 
-/// PaymentRequest API surface — Tier 1.1 from RESEARCH_2026_05_12.
+/// PaymentRequest API surface — must exist on Chrome profiles.
 /// Must exist on secure-context Chrome profiles. canMakePayment for
 /// Google Pay payment method must resolve true (matches a real Chrome
 /// with the handler registered, no card enrolled). hasEnrolledInstrument
@@ -7599,8 +7596,7 @@ async fn check_audio_fingerprint_per_profile() {
 }
 
 /// Tier 4 — function-identity preservation sniff tests.
-/// Per docs/kasada_ips_analysis/UNJZOMUY_INVESTIGATION_2026_05_12.md, the
-/// Kasada `unjzomuybtbyyhwwkdpkxomylnab` sentinel-property throws (5
+/// The Kasada `unjzomuybtbyyhwwkdpkxomylnab` sentinel-property throws (5
 /// engine-divergence TypeErrors per the trace) most likely arise from one
 /// of three sites where the same function reference returns a DIFFERENT
 /// object on subsequent access. If any sniff test fails, that's the
@@ -7897,7 +7893,7 @@ async fn check_ios_safari_surface() {
 // fails to preserve Kasada's `unjzomuybtbyyhwwkdpkxomylnab` sentinel
 // property across two reads of the same conceptual identity.
 //
-// Per docs/research_2026_05_14/01_KASADA.md §1.5, three probes:
+// Three probes:
 //   T1 — WebIDL method identity via prototype lookup
 //        (`navigator.mediaDevices.enumerateDevices`).
 //   T2 — iframe Function descriptor identity via
@@ -8074,8 +8070,7 @@ async fn kasada_smc_isTypeSupported_must_be_true_for_mp4() {
     );
 }
 
-// Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
-// Hypothesis 3 (HIGH 25%): AudioContext fingerprint divergence.
+// Diagnostic — Hypothesis 3 (HIGH 25%): AudioContext fingerprint divergence.
 // CreepJS / FingerprintJS / Kasada all hash the output buffer of a
 // known-input OfflineAudioContext rendering. Real Chrome produces
 // hash ≈ 124.04 (M-series Mac) or 124.03 (Intel Mac). Our engine ships
@@ -8166,11 +8161,10 @@ async fn kasada_wasm_audit() {
     assert!(result.contains("\"moduleType\":\"function\""));
 }
 
-// Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
-// Hypothesis 7 (MEDIUM): Error.stack must never expose our internal
-// bootstrap script names (`<init_script_0>`, `<cleanup>`, etc.). Our
-// own VM trace at VM_TRACE_FINDINGS_2026_05_12.md captured the
-// `<init_script_0>` filename — Kasada literally sees browser_oxide's
+// Diagnostic — Hypothesis 7 (MEDIUM): Error.stack must never expose our
+// internal bootstrap script names (`<init_script_0>`, `<cleanup>`, etc.).
+// A captured VM trace showed the `<init_script_0>` filename leaking —
+// Kasada literally sees browser_oxide's
 // wrapper. The fix in window_bootstrap.js's prepareStackTrace filter
 // drops all `<…>`-tagged frames except <anonymous>.
 #[tokio::test]
@@ -8227,9 +8221,9 @@ async fn kasada_error_stack_must_not_leak_internal_script_names() {
     }
 }
 
-// Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
-// Hypothesis 1 (40% HIGH): Function.prototype.toString signature
-// catalogue. Per Asad Ikram's 2026 guide, Kasada catalogues toString
+// Diagnostic — Hypothesis 1 (40% HIGH): Function.prototype.toString
+// signature catalogue. Per Asad Ikram's 2026 guide, Kasada catalogues
+// toString
 // output of ~30 commonly-patched native methods. Any byte-different
 // output from Chrome's reference = catalogue hit = bot.
 #[tokio::test]
@@ -8348,8 +8342,8 @@ async fn kasada_function_toString_audit() {
     );
 }
 
-// Diagnostic per docs/research_2026_05_14/09_KASADA_DEEP_2026_05_14.md
-// Hypothesis 2: iframe Proxy handler leak via .self.get.toString().
+// Diagnostic — Hypothesis 2: iframe Proxy handler leak via
+// .self.get.toString().
 // DataDome's 2024 paper says puppeteer-extra-stealth has exactly this
 // bug — `this` inside the Proxy `get` trap points to the handler obj
 // not the target window, so `w.self.get.toString()` returns the trap
@@ -8558,9 +8552,8 @@ async fn kasada_smc_in_child_realm_eval() {
 }
 
 // Diagnostic: does our PluginArray.prototype.namedItem leak source?
-// Per the captured Kasada fingerprint blob (Group F in
-// docs/research_2026_05_14/12_KASADA_FINGERPRINT_ERROR_AUDIT_2026_05_14.md),
-// the May-10 capture showed our PluginArray.namedItem leaking the full
+// A captured Kasada fingerprint blob (Group F) showed our
+// PluginArray.namedItem leaking the full
 // inner source `function namedItem(n) { const len = _pluginsLen(); ... }`.
 // Today's toString patch re-enable should mask it — this test confirms.
 #[tokio::test]
@@ -8735,11 +8728,9 @@ async fn iframe_postmessage_round_trip_via_proxy() {
 // `at Object.apply` / `at Reflect.apply` / `at newHandler.<computed>`
 // frames. Our engine mirrors iframe.contentWindow via Proxy, so if
 // Kasada reads new Error().stack at the moment one of our traps fires,
-// the proxy frame names could leak.
-//
-// Per docs/research_2026_05_14/01_KASADA.md W2.7. Captures the actual
-// stack a detector sees inside our trap so we know whether to ship a
-// stack sanitizer.
+// the proxy frame names could leak. This captures the actual stack a
+// detector sees inside our trap so we know whether to ship a stack
+// sanitizer.
 #[tokio::test]
 async fn kasada_proxy_stack_leak_probe() {
     let mut page = Page::from_html_with_url(

@@ -14,8 +14,7 @@ use tracing;
 /// Whether a URL is a "secure context" per WICG/secure-contexts §3.2.
 /// Secure: https, wss, file, plus http://localhost / http://127.0.0.1 /
 /// http://[::1] / *.localhost loopback exceptions. Drives `isSecureContext`
-/// and gates the ~18 secure-context-only Web Platform APIs (Phase 7 fix —
-/// see `docs/PHASE7_AB_PROBE_FINDINGS_2026_04_29.md`).
+/// and gates the ~18 secure-context-only Web Platform APIs.
 pub(crate) fn is_secure_url(url: &str) -> bool {
     let parsed = match url::Url::parse(url) {
         Ok(u) => u,
@@ -291,9 +290,9 @@ impl Page {
     ///      if the orchestrator is still listening for it.
     ///
     /// V1 explicitly does **not** attempt to deobfuscate or hand-solve the
-    /// PoW/Turnstile payload. Per `docs/RESEARCH_CLOUDFLARE_BYPASS_2026_05_10.md`
-    /// §0/§9, the recommended approach is to run the orchestrator JS to
-    /// completion in our V8 + DOM and let it negotiate clearance natively.
+    /// PoW/Turnstile payload. The approach is to run the orchestrator JS
+    /// to completion in our V8 + DOM and let it negotiate clearance
+    /// natively.
     /// Returns `Some(ctx)` with the parsed challenge context iff a CF
     /// challenge was detected (regardless of solve outcome).
     pub async fn handle_cloudflare_flow(
@@ -920,10 +919,9 @@ impl Page {
     /// cloudflare.com` (Cloudflare Turnstile) *after* build, the
     /// `dom_bootstrap.js` hook only fabricates a synthetic
     /// `contentWindow` — the challenge document is **never fetched or
-    /// executed**, which structurally blocks DataDome
-    /// etsy/tripadvisor and every modern CF Managed Challenge
-    /// (`docs/research/engines/99_CODE_FALSE_POSITIVES.md` FP-E1, the
-    /// single highest-leverage gap).
+    /// executed**, which structurally blocks DataDome challenge iframes
+    /// and modern CF Managed Challenge. This is currently the single
+    /// highest-leverage rendering gap.
     ///
     /// This rescans the *current* (post-JS) DOM and, for every iframe
     /// whose `node_id` is not already materialized in `self.children`,
@@ -1326,8 +1324,8 @@ impl Page {
         // and frame-src correctly refuses geo.captcha-delivery.com).
         // Detection is wired here (log-only, no flow change yet —
         // matches the vendor-detect convention above); the solver needs
-        // Chrome-correct audio+canvas FP (see docs/research_2026_05_14/
-        // 16_AUDIO_BLINK_PARITY) before it can round-trip the cookie.
+        // Chrome-correct audio+canvas FP before it can round-trip the
+        // cookie.
         if let Some(dd) = crate::datadome_handler::detect_datadome_interstitial(&html) {
             // Phase 5 (doc 05 §2d): replace the old log-only telemetry
             // with the typed in-engine self-solve plan. The behavioral
@@ -1558,8 +1556,7 @@ impl Page {
         //   - SPA shells (twitter, x.com, hulu, yandex.ru, h&m,
         //     khanacademy): main bundle is 1-5MB; React/Vue hydration
         //     in our V8 takes 60-90s vs ~5s on headed Chrome. Without
-        //     the bump, body=0/69 bytes after deadline. Per W5 Tier A
-        //     in PLAN_2026_05_10_UPDATE.md.
+        //     the bump, body=0/69 bytes after deadline.
         let host_budget_default_ms = match url::Url::parse(&current_url)
             .ok()
             .and_then(|u| u.host_str().map(str::to_string))
@@ -3104,10 +3101,10 @@ impl Page {
             let name = if let Some(src) = &script.src {
                 src.clone()
             } else {
-                // W2.7 — real Chrome inline <script> stack frames report
-                // the document URL, not a synthetic <script_N> tag. The
+                // Real Chrome inline <script> stack frames report the
+                // document URL, not a synthetic <script_N> tag. The
                 // latter would leak the index/wrapper layer to Kasada /
-                // DataDome (research 09_KASADA_DEEP_2026_05_14.md §9).
+                // DataDome.
                 url.to_string()
             };
             if let Err(e) = event_loop.execute_script_with_name(&code, &name) {

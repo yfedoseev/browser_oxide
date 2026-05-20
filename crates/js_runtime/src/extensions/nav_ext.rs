@@ -12,9 +12,6 @@
 //! event loop checks the flag each tick and exits early (after a brief
 //! microtask tail to let in-flight `fetch().then(setCookie)` land in the
 //! jar before the retry).
-//!
-//! See `docs/SOTA_ROADMAP_2026.md` and `docs/TIER0_KASADA_RESULTS.md` for
-//! the timing-window context.
 
 use deno_core::op2;
 use std::sync::atomic::{AtomicBool, Ordering};

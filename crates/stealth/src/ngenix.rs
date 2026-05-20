@@ -22,8 +22,6 @@
 //! This module computes the plaintext natively, skipping the JS execution.
 //! The cookie value is opaque to NGENIX's verification — they re-decrypt
 //! server-side and check it matches.
-//!
-//! See `docs/ANTIBOT_RESEARCH_2026.md` for the broader vendor landscape.
 
 // ============================================================================
 // AES-128 inline implementation (no new dependencies).

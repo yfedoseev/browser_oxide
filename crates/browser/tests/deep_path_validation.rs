@@ -2,10 +2,10 @@
 //! the 48 sites that land at L3 to test whether the landing pass translates
 //! to real scraping capability, or if it was just a landing-page grace period.
 //!
-//! The research in `docs/ANTIBOT_RESEARCH_2026.md` notes that engines like
-//! DataDome build trust profiles over the first 5-10 requests before scoring.
-//! A single GET doesn't exercise that. This suite makes N=2 requests per
-//! site (landing then a deep path) to see if the trust profile holds.
+//! Engines like DataDome build trust profiles over the first 5-10
+//! requests before scoring. A single GET doesn't exercise that. This
+//! suite makes N=2 requests per site (landing then a deep path) to see
+//! if the trust profile holds.
 //!
 //! Run: cargo test -p browser --test deep_path_validation \
 //!          -- --ignored --test-threads=1 --nocapture

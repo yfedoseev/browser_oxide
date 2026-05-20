@@ -19,7 +19,7 @@
 //!
 //! A separate `live_proxy_chain` test (gated by `BOXIDE_TEST_PROXY` env
 //! var) hits a real `https://api.ipify.org` through whatever proxy the
-//! operator wires up. See `docs/RESIDENTIAL_PROXY_SETUP.md`.
+//! operator wires up.
 
 use std::time::Duration;
 
@@ -229,7 +229,7 @@ async fn http_connect_propagates_407_denied() {
 #[ignore = "requires BOXIDE_TEST_PROXY env var pointing at a real proxy"]
 async fn live_proxy_chain() {
     let proxy_url = std::env::var("BOXIDE_TEST_PROXY")
-        .expect("BOXIDE_TEST_PROXY must be set; see docs/RESIDENTIAL_PROXY_SETUP.md");
+        .expect("BOXIDE_TEST_PROXY must be set to a real proxy URL");
 
     // Build two clients that share nothing: one direct, one with proxy.
     // Use a minimal preset profile (we only care about the IP differing).

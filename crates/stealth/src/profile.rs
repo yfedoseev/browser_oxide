@@ -4,9 +4,6 @@ use serde::{Deserialize, Serialize};
 /// Device class for a stealth profile. Drives TLS curve selection (Android
 /// uses older Kyber768Draft00 vs desktop's MLKEM768), Sec-CH-UA-Mobile flag,
 /// Sec-CH-UA-Form-Factors header, and JS-side `navigator.userAgentData.mobile`.
-///
-/// See `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md` for the per-class
-/// implementation deltas.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DeviceClass {
     #[default]
@@ -133,12 +130,11 @@ pub struct StealthProfile {
 
     // === HTTP/3 / QUIC ===
     //
-    // Disabled by default (gap #33). `quinn-proto 0.11` emits transport
-    // parameters in a *random* shuffled order with a *random* GREASE TP
-    // per handshake — distinguishable from Chrome's deterministic ordering.
-    // Until we vendor-fork quinn-proto with a Chrome-fixed-order patch
-    // (deferred per docs/SOTA_ROADMAP_2026.md §1 / GAPS.md §33),
-    // advertising `h3` is a *worse* fingerprint than not speaking it at all.
+    // Disabled by default. `quinn-proto 0.11` emits transport parameters
+    // in a *random* shuffled order with a *random* GREASE TP per handshake
+    // — distinguishable from Chrome's deterministic ordering. Until we
+    // vendor-fork quinn-proto with a Chrome-fixed-order patch, advertising
+    // `h3` is a *worse* fingerprint than not speaking it at all.
     //
     // Set to `true` only on profiles where you have a working Chrome-
     // matched QUIC stack (e.g., a forked quinn-proto). Default `false`.
@@ -149,11 +145,10 @@ pub struct StealthProfile {
     pub prefers_color_scheme: String,
     pub pointer_type: String,
     pub hover_capability: String,
-    /// `color-gamut` media-query value. Per
-    /// `docs/research_2026_05_14/11_DETECTION_SIGNAL_CATALOG_2026_05_14.md`
-    /// T2.6: real Chrome on macOS / iPhone reports `"p3"` (wide gamut);
-    /// Windows / Linux / Android typically report `"srgb"`. Mismatch
-    /// against UA is a FingerprintJS inconsistency-class probe.
+    /// `color-gamut` media-query value. Real Chrome on macOS / iPhone
+    /// reports `"p3"` (wide gamut); Windows / Linux / Android typically
+    /// report `"srgb"`. Mismatch against UA is a FingerprintJS
+    /// inconsistency-class probe.
     /// Default `"srgb"` to preserve back-compat for profiles that
     /// don't yet set this explicitly.
     #[serde(default = "default_color_gamut")]

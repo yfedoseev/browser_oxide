@@ -53,8 +53,7 @@ const INITIAL_CONNECTION_WINDOW_SIZE: u32 = 15_728_640; // → wire 15_663_105 =
 // Safari iOS 18.4 HTTP/2 SETTINGS — Phase B2-B4 (2026-05-12)
 // =============================================================================
 //
-// Per `docs/RQUEST_MOBILE_TLS_AUDIT_2026_05_12.md` + lexiforest's
-// `safari_18.4_iOS.yaml`. iOS 18.4 sends 4 SETTINGS:
+// Per lexiforest's `safari_18.4_iOS.yaml`. iOS 18.4 sends 4 SETTINGS:
 //   2 ENABLE_PUSH = 0
 //   3 MAX_CONCURRENT_STREAMS = 100
 //   4 INITIAL_WINDOW_SIZE = 2097152 (2 MB, vs Chrome's 6 MB)
