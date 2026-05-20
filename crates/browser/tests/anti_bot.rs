@@ -530,7 +530,10 @@ async fn navigator_get_battery_resolves() {
                 return typeof l === 'number' && l >= 0 && l <= 1; })()",
         )
         .unwrap();
-    assert_eq!(level_ok, "true", "battery.level should be a number in [0,1]");
+    assert_eq!(
+        level_ok, "true",
+        "battery.level should be a number in [0,1]"
+    );
     // chargingTime is number-or-Infinity (>= 0).
     let ct_ok = page
         .evaluate(
