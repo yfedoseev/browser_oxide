@@ -1302,6 +1302,18 @@
     // crates/js_runtime/src/extensions/nav_ext.rs.
     const _signalNav = () => { try { ops.op_set_pending_nav(); } catch (_) {} };
 
+    // Mirror `_boxide.__pendingNavigation` onto `globalThis.__pendingNavigation`
+    // — JS-side consumers (and the navigation_primitives tests) read it
+    // off globalThis per the documented contract at the top of this
+    // section. We keep _boxide as the underlying store so the existing
+    // Rust event-loop driver and per-call assignments keep working.
+    Object.defineProperty(globalThis, '__pendingNavigation', {
+        get: () => _boxide.__pendingNavigation,
+        set: (v) => { _boxide.__pendingNavigation = v; },
+        configurable: true,
+        enumerable: false,
+    });
+
     _defLoc('href', () => _locationData.href, (v) => {
         try { Deno.core.print('[BOOTSTRAP] SETTING LOCATION HREF TO ' + v + '\n'); } catch(e) {}
         _parseLocationUrl(v);
