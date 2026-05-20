@@ -1,0 +1,100 @@
+# cargo-deny configuration for browser_oxide.
+#
+# Run locally:    cargo deny check
+# Run all rules:  cargo deny check all
+# Update DB:      cargo deny check advisories
+#
+# CI enforces this via the `deny` job in .github/workflows/ci.yml.
+#
+# Policy summary:
+#   - Licenses: permissive only (MIT, Apache-2.0, BSD-3, ISC, Zlib, Unicode,
+#     CDLA-Permissive-2.0). NO MPL, NO AGPL, NO GPL/LGPL. The "no copyleft"
+#     pledge in the README is mechanically enforced here.
+#   - Sources: crates.io only. Reject git/path/registry alternatives.
+#   - Advisories: fail on any known security vulnerability.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+# ============================================================================
+# Advisories
+# ============================================================================
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "warn"
+# Explicit ignores. Each MUST cite the reason and an expiry-or-reason note.
+ignore = [
+    # No active advisory ignores at this time. Add entries like:
+    # { id = "RUSTSEC-XXXX-XXXX", reason = "…", expiration = "2026-12-31" },
+]
+
+# ============================================================================
+# Licenses
+# ============================================================================
+
+[licenses]
+# Threshold for license-text matching confidence. 0.93 catches near-duplicates
+# of the canonical text while still flagging genuinely unusual variants.
+confidence-threshold = 0.93
+
+# Allow-list. NO MPL, NO AGPL, NO copyleft. Permissive only.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",   # webpki-roots ships Mozilla cert data under this
+    "0BSD",
+    "BSL-1.0",
+    "MIT-0",
+    "CC0-1.0",
+]
+
+# Per-crate exceptions go here ONLY when a transitive dep ships under an
+# otherwise-deny-listed license but the *usage* is non-distributive
+# (build script only, etc.). None at present.
+exceptions = []
+
+# Explicit clarifications for crates whose license metadata is ambiguous
+# but the actual licensing is clear from upstream.
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 },
+]
+
+# ============================================================================
+# Bans
+# ============================================================================
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+# Hard-deny copyleft and AGPL even if they sneak in via a clarification.
+deny = [
+    # Add named crates here if they appear with copyleft-only licensing.
+]
+skip = []
+skip-tree = []
+
+# ============================================================================
+# Sources
+# ============================================================================
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

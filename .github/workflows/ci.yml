@@ -110,3 +110,14 @@ jobs:
           toolchain: "1.83"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo build --workspace
+
+  deny:
+    name: cargo-deny (licenses + advisories + sources)
+    runs-on: ubuntu-latest
+    # Mechanical enforcement of the workspace policy at deny.toml:
+    # MIT/Apache-only licenses, crates.io-only sources, fail on advisories.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: EmbarkStudios/cargo-deny-action@34899fc7ba81ca6268d5947a7a16b4649013fea1 # v2
+        with:
+          command: check all
