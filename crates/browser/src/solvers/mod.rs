@@ -13,5 +13,11 @@
 //! plugin crate.
 
 pub mod akamai;
+pub mod cloudflare;
+pub mod datadome;
+pub mod kasada;
 
 pub use akamai::AkamaiSolver;
+pub use cloudflare::CloudflareSolver;
+pub use datadome::DataDomeSolver;
+pub use kasada::KasadaSolver;
