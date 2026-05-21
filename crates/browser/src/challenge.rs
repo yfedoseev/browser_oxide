@@ -199,7 +199,6 @@ mod tests {
     fn solver_object_safety() {
         // Trait must be object-safe so Page/HttpClient can hold
         // `Arc<dyn ChallengeSolver>` for runtime polymorphism.
-        let _v: Vec<std::sync::Arc<dyn ChallengeSolver>> =
-            vec![std::sync::Arc::new(PassiveSolver)];
+        let _v: Vec<std::sync::Arc<dyn ChallengeSolver>> = vec![std::sync::Arc::new(PassiveSolver)];
     }
 }

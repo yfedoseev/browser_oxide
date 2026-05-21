@@ -1462,6 +1462,13 @@ impl Page {
         csp_headers_ro: Vec<String>,
         accept_ch_upgrade: bool,
     ) -> Result<Self, deno_core::error::AnyError> {
+        // Stage 2 E2: build the per-navigation [`crate::ChallengeSolver`]
+        // list once at the top of the loop. Default to the four built-in
+        // vendor wrappers (Akamai BMP, Kasada, DataDome, Cloudflare); the
+        // wrappers delegate to the same `handle_akamai_flow` /
+        // `handle_cloudflare_flow` / `datadome_handler::*` pieces the
+        // pre-refactor inline calls used, so behaviour is preserved.
+        let solvers = Self::default_solvers();
         // Install CSP for this navigation. Headers + meta-tag sources
         // both contribute. The fetch_ext layer reads from a per-process
         // RwLock so async ops can enforce without borrowing OpState.
@@ -1919,7 +1926,14 @@ impl Page {
                             // genuine solve (cookie present AND the body
                             // is no longer a DD challenge document), not
                             // on a bare/gained cookie (false success).
-                            if crate::datadome_handler::datadome_solved(&now, &page.content()) {
+                            // E2 trait dispatch: any registered solver
+                            // reporting solved on this (cookies, body) pair
+                            // breaks the poll. Replaces the direct
+                            // `datadome_handler::datadome_solved` call;
+                            // DataDomeSolver.solved_signal internally calls
+                            // the same fn so behaviour is preserved.
+                            let body = page.content();
+                            if solvers.iter().any(|s| s.solved_signal(&now, &body)) {
                                 break;
                             }
                         }
@@ -1939,10 +1953,13 @@ impl Page {
                     if started_as_seccpt_challenge {
                         if let Some(p) = parsed_current.as_ref() {
                             let now = client.cookies_for_url(p).await.unwrap_or_default();
-                            if akamai::sec_cpt::sec_cpt_solved(&now) {
+                            // E2 trait dispatch: AkamaiSolver.solved_signal
+                            // delegates to sec_cpt::sec_cpt_solved.
+                            let body = page.content();
+                            if solvers.iter().any(|s| s.solved_signal(&now, &body)) {
                                 if debug_nav {
                                     eprintln!(
-                                        "[seccpt] sec_cpt cookie reached ~3~ (solved) — breaking poll for the post-solve reload"
+                                        "[solver] solved_signal fired (likely sec-cpt ~3~) — breaking poll"
                                     );
                                 }
                                 break;
@@ -1981,34 +1998,53 @@ impl Page {
                 }
             }
 
-            // Phase A.5 — Akamai sensor_data POST.
-            // Phase 5 homedepot fix (measured doc-20 anti-pattern):
-            // `handle_akamai_flow`'s sec-cpt guard checks `self.content()`
-            // (the *mutable current DOM*). After the `/Wjv3…` sec-cpt
-            // bundle runs and mutates the DOM, `sec-if-cpt-container` is
-            // gone, so the guard misses and the engine fires the WRONG
-            // BMP `sensor_data` POST to the sec-cpt verify endpoint —
-            // Akamai 201s `NeedsSensor` forever (`_abck=…~-1~` never
-            // clears) AND, per doc 20, that conflicting traffic actively
-            // prevents the bundle's own self-solve flow. Use the
-            // persistent "this nav started as sec-cpt" signal so the BMP
-            // path is suppressed for the WHOLE nav, letting the bundle be
-            // the sole actor. Narrowly gated (false for every non-sec-cpt
-            // site incl. the entire §4 gate) ⇒ zero regression; the 10
-            // passing plain-BMP Akamai sites never serve sec-if-cpt.
-            let akamai_state = if started_as_seccpt_challenge {
-                akamai::AbckState::NeedsSecCpt
+            // E2 trait dispatch: iterate registered solvers and let each
+            // try to clear its vendor's challenge. The four built-in
+            // wrappers (AkamaiSolver, KasadaSolver, DataDomeSolver,
+            // CloudflareSolver) internally bail out on non-matching
+            // bodies / cookies, so unconditional iteration is
+            // equivalent to the pre-refactor unconditional inline calls.
+            //
+            // We track whether *any* solver reported Solved this
+            // iteration so the cookie-delta retry below can suppress
+            // the retry-on-cookie-change for the previously
+            // `akamai_state == Favorable` special case.
+            //
+            // sec-cpt guard preserved: when this nav started as
+            // sec-cpt, the Akamai BMP POST path is wrong (per doc-20
+            // anti-pattern). AkamaiSolver's `solve` already short-
+            // circuits on the "sec-cpt" sub_kind, returning
+            // InProgress, so the unconditional iter is safe.
+            let mut any_solved = false;
+            for s in solvers.iter() {
+                // Pre-iteration sec-cpt guard mirrors the old explicit
+                // gate (`started_as_seccpt_challenge ⇒ NeedsSecCpt`):
+                // tell AkamaiSolver via the sub_kind so its solve()
+                // returns InProgress instead of POSTing sensor_data.
+                let sub = if s.name() == "akamai-bmp" && started_as_seccpt_challenge {
+                    "sec-cpt"
+                } else {
+                    ""
+                };
+                let kind = crate::challenge::ChallengeKind::new(s.name(), sub);
+                if matches!(
+                    s.solve(&mut page, &client, kind).await,
+                    crate::challenge::SolveOutcome::Solved
+                ) {
+                    any_solved = true;
+                }
+            }
+            // Backward-compat shim: keep the `akamai_state == Favorable`
+            // gate below working until we wire the cookie-delta retry
+            // straight through `any_solved` (incremental migration).
+            let akamai_state = if any_solved {
+                akamai::AbckState::Favorable
             } else {
-                page.handle_akamai_flow(&client)
-                    .await
-                    .unwrap_or(akamai::AbckState::Unknown)
+                akamai::AbckState::Unknown
             };
-
-            // W7 / Cloudflare V1 — orchestrator runner. Detect Managed/JS
-            // Challenge from the rendered body and drive the event loop until
-            // cf_clearance is issued (or the 10 s budget expires). The outer
-            // cookie-delta retry path picks up cf_clearance and re-fetches.
-            let _cf_ctx = page.handle_cloudflare_flow(&client).await;
+            // W7 / Cloudflare V1 — orchestrator runner ran inside the
+            // CloudflareSolver iteration above; cookie-delta retry
+            // picks up `cf_clearance` on the next pass.
 
             if pending_info.is_empty() {
                 // Post-settle cookie-delta retry: if the cookie jar gained new
@@ -2434,11 +2470,12 @@ impl Page {
                             // bare `datadome=` cookie is set on the 403
                             // fail too, so the old check broke the
                             // self-solve window on a false success.
-                            if crate::datadome_handler::datadome_solved(&now, &page.content()) {
+                            // E2 trait dispatch: DataDomeSolver.solved_signal
+                            // delegates to datadome_handler::datadome_solved.
+                            let body = page.content();
+                            if solvers.iter().any(|s| s.solved_signal(&now, &body)) {
                                 if debug_nav {
-                                    eprintln!(
-                                        "[datadome] self-solve window: datadome cookie + non-challenge body — solved, proceeding to reload"
-                                    );
+                                    eprintln!("[solver] self-solve signal — proceeding to reload");
                                 }
                                 break;
                             }
