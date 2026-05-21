@@ -24,6 +24,7 @@ css_selectors = { workspace = true }
 net = { workspace = true }
 stealth = { workspace = true }
 akamai = { workspace = true }
+async-trait = "0.1"
 deno_core = "0.311"
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
