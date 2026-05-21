@@ -75,21 +75,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "akamai"
-version = "0.1.0"
-dependencies = [
- "base64",
- "hex",
- "rand 0.10.1",
- "serde",
- "serde_json",
- "sha2",
- "stealth",
- "tokio",
- "url",
-]
-
-[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -353,7 +338,6 @@ dependencies = [
 name = "browser"
 version = "0.1.0"
 dependencies = [
- "akamai",
  "async-trait",
  "criterion",
  "css_selectors",
@@ -1851,7 +1835,6 @@ name = "net"
 version = "0.1.0"
 dependencies = [
  "adblock",
- "akamai",
  "base64",
  "boring-sys2",
  "boring2",

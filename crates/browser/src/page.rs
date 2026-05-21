@@ -1,7 +1,6 @@
 use crate::iframe;
 use crate::script_runner;
 use crate::stylesheet_collector;
-use akamai;
 use dom::Dom;
 use event_loop::{BrowserEventLoop, IdleReason};
 use js_runtime::{runtime::BrowserRuntimeOptions, BrowserJsRuntime};
@@ -287,326 +286,13 @@ impl Page {
         crate::classify::engine_classify(&self.content()).verdict
     }
 
-    /// W7 / Cloudflare V1 — orchestrator-runner scaffolding.
-    ///
-    /// On the post-build page, detect a Cloudflare Managed/JS Challenge from
-    /// the response body (the `_cf_chl_opt` inline blob). When detected:
-    ///   1. Log a one-line telemetry summary (kind, ray, zone, orchestrator URL).
-    ///   2. Drive the event loop forward in 200 ms ticks for up to ~10 s,
-    ///      polling for a `cf_clearance` cookie or for the orchestrator
-    ///      script to set a `__pendingNavigation` (the orchestrator typically
-    ///      either 302s or assigns `location.href` after issuing clearance).
-    ///   3. Inject low-rate behavioural noise (mousemove/scroll) so the
-    ///      Phase-1 "25 events" gate in the legacy IUAM path is satisfied
-    ///      if the orchestrator is still listening for it.
-    ///
-    /// V1 explicitly does **not** attempt to deobfuscate or hand-solve the
-    /// PoW/Turnstile payload. The approach is to run the orchestrator JS
-    /// to completion in our V8 + DOM and let it negotiate clearance
-    /// natively.
-    /// Returns `Some(ctx)` with the parsed challenge context iff a CF
-    /// challenge was detected (regardless of solve outcome).
-    pub async fn handle_cloudflare_flow(
-        &mut self,
-        client: &net::HttpClient,
-    ) -> Option<stealth::cloudflare::CfChallengeContext> {
-        let body = self.content();
-        // Build a minimal headers map from what we have on the live page.
-        // The body+server signal alone is enough for our detector when the
-        // orchestrator's inline blob is present (most common case).
-        let mut hdrs: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        // We don't have the response headers here, but the body marker is
-        // a strong enough signal — synthesize `server: cloudflare` so our
-        // body-fallback path fires. Safe: detect_challenge requires either
-        // the canonical header OR (body marker AND server: cloudflare).
-        if body.contains("_cf_chl_opt") || body.contains("/cdn-cgi/challenge-platform/") {
-            hdrs.insert("server".into(), "cloudflare".into());
-        }
+    // Vendor-specific challenge resolution (Cloudflare orchestrator
+    // runner, Akamai BMP sensor_data flow) is NOT part of the
+    // open-source engine. It lives in the private `vendor_solvers`
+    // crate as `ChallengeSolver` implementations. The engine's
+    // navigate loop dispatches through whatever solvers are
+    // registered (empty by default); see `crate::challenge`.
 
-        let ctx = stealth::cloudflare::detect_challenge(&hdrs, &body)?;
-        eprintln!("[cloudflare] {}", ctx.summary());
-        tracing::info!(
-            kind = ?ctx.kind,
-            ray = %ctx.ray,
-            zone = %ctx.zone,
-            orchestrator = %ctx.orchestrator_url,
-            "cloudflare challenge detected"
-        );
-
-        // Fast-fail interactive Turnstile — V1 cannot solve it without a
-        // captcha service plug-in.
-        if !ctx.kind.v1_solvable() {
-            eprintln!(
-                "[cloudflare] kind {:?} is not V1-solvable — skipping orchestrator runner",
-                ctx.kind
-            );
-            return Some(ctx);
-        }
-
-        // FP-D2 (dead-path truth-in-labeling): the `cf_clearance=`
-        // success branches below are STRUCTURALLY UNREACHABLE under the
-        // current engine — nothing fetches `/orchestrate/`, POSTs the
-        // CF flow, or runs the cross-origin Turnstile iframe, so no
-        // `cf_clearance` is ever produced (it only ever appears if an
-        // *external* orchestrator pre-seeded the jar). They are kept
-        // (not deleted) as the correct shape for when FP-E1's
-        // createElement/.src iframe-interception lands; until then a
-        // CF challenge resolves to `ChallengeVerdict::ChallengeIncomplete`
-        // (FP-B4), never `Pass` — the verdict invariant that documents
-        // this dead path is pinned by
-        // `classify::tests::fp_d2_cf_unsolved_never_passes`.
-        //
-        // Check the cookie jar for a pre-existing cf_clearance — if present
-        // this navigation already had clearance attached and we're done.
-        let host = url::Url::parse(&self.url)
-            .ok()
-            .and_then(|u| u.host_str().map(str::to_string))
-            .unwrap_or_default();
-        let parsed = url::Url::parse(&self.url).ok();
-        if let Some(p) = parsed.as_ref() {
-            if let Some(cookies) = client.cookies_for_url(p).await {
-                if cookies.contains("cf_clearance=") {
-                    eprintln!(
-                        "[cloudflare] cf_clearance already in jar for {} — orchestrator likely succeeded",
-                        host
-                    );
-                    return Some(ctx);
-                }
-            }
-        }
-
-        // Inject minimal behavioural noise. Real Chrome typically fires 5-25
-        // mousemove/scroll/keyup events in the few seconds the orchestrator
-        // is alive; the exact distribution doesn't matter for V1 — what
-        // matters is `event.isTrusted === false` doesn't get used to grade
-        // us (CF reportedly ignores untrusted events but the *count* may
-        // still be probed by the legacy phase-1 collector).
-        let noise_js = r#"
-            (function() {
-                try {
-                    let i = 0;
-                    const fire = () => {
-                        if (i++ > 30) return;
-                        try {
-                            window.dispatchEvent(new MouseEvent('mousemove', {
-                                clientX: 100 + (i * 7) % 400,
-                                clientY: 100 + (i * 11) % 300,
-                                bubbles: true,
-                            }));
-                            if (i % 5 === 0) {
-                                window.dispatchEvent(new Event('scroll', { bubbles: true }));
-                            }
-                            if (i % 7 === 0) {
-                                window.dispatchEvent(new KeyboardEvent('keyup', {
-                                    key: 'Tab', bubbles: true,
-                                }));
-                            }
-                        } catch (_) {}
-                        setTimeout(fire, 80 + (i * 13) % 60);
-                    };
-                    setTimeout(fire, 50);
-                } catch (_) {}
-            })();
-        "#;
-        let _ = self.event_loop.execute_script(noise_js);
-
-        // Drive the event loop in short bursts and check for clearance.
-        // 10 s budget total — Managed Challenge typically completes in 2-6 s
-        // for a fingerprint-correct browser.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let mut cleared = false;
-        while std::time::Instant::now() < deadline {
-            let _ = self
-                .event_loop
-                .run_until_idle(std::time::Duration::from_millis(250))
-                .await;
-            if let Some(p) = parsed.as_ref() {
-                if let Some(cookies) = client.cookies_for_url(p).await {
-                    if cookies.contains("cf_clearance=") {
-                        cleared = true;
-                        break;
-                    }
-                }
-            }
-            // Also short-circuit if the orchestrator queued a navigation —
-            // the outer loop will pick it up on its own.
-            let pending = self
-                .event_loop
-                .execute_script(
-                    "globalThis._boxide && globalThis._boxide.__pendingNavigation ? '1' : ''",
-                )
-                .unwrap_or_default();
-            if pending.trim() == "1" {
-                eprintln!(
-                    "[cloudflare] orchestrator queued __pendingNavigation — yielding to outer loop"
-                );
-                break;
-            }
-        }
-        if cleared {
-            eprintln!("[cloudflare] cf_clearance issued — outer loop will retry");
-        } else {
-            eprintln!("[cloudflare] orchestrator did not produce cf_clearance within budget — V2 work needed");
-        }
-
-        Some(ctx)
-    }
-
-    /// T3A-A5: Autonomous Akamai bypass. Detects `_abck` challenge state,
-    /// drains behavioural events (mouse/key) from JS, and POSTs sensor_data
-    /// via the provided client. Returns the new trust state.
-    pub async fn handle_akamai_flow(
-        &mut self,
-        client: &net::HttpClient,
-    ) -> Result<akamai::AbckState, deno_core::error::AnyError> {
-        let host = match url::Url::parse(&self.url) {
-            Ok(u) => u.host_str().unwrap_or("").to_string(),
-            Err(_) => return Ok(akamai::AbckState::Unknown),
-        };
-
-        // sec-cpt guard (evidence-backed, homedepot nav-trace
-        // 2026-05-15, doc 20): when the page is an Akamai sec-cpt PoW
-        // interstitial (the `<div id="sec-if-cpt-container">` bundle),
-        // the BMP `sensor_data` flow below POSTs the WRONG payload type
-        // to the sec-cpt verify endpoint — Akamai 201s but never clears
-        // `_abck`, looping forever. The sec-cpt bundle runs its own
-        // challenge JS; our BMP POST only adds rejected, conflicting
-        // traffic. Skip the BMP sensor path here and let the bundle's
-        // own flow be the sole actor. Plain BMP pages (no sec-cpt
-        // container) are unaffected — bestbuy still flips Favorable.
-        {
-            let body = self.content();
-            if body.contains("sec-if-cpt-container") || body.contains("sec-cpt-if") {
-                eprintln!(
-                    "[akamai] sec-cpt interstitial detected for {host} — skipping BMP sensor_data POST (wrong payload for sec-cpt verify endpoint; bundle self-solves)"
-                );
-                return Ok(akamai::AbckState::NeedsSecCpt);
-            }
-        }
-
-        // 1. Detect tenant config. Try static registry first (fast path
-        //    for known bestbuy / homedepot), then fall back to parsing
-        //    the rendered HTML via akamai::parse_tenant_from_html (W2.2)
-        //    so we can auto-discover new Akamai tenants (macys, hotels,
-        //    etc.) without code changes.
-        //
-        //    A host with neither registry hit nor HTML-parsed tenant is
-        //    treated as not-Bot-Manager-protected — return Unknown so
-        //    we don't spuriously POST to /akam/13/sensor_data 404 (the
-        //    failure mode that burned the aborted mid-sweep run).
-        let static_settings = akamai::get_tenant_settings(&host);
-        let parsed_owned;
-        let settings_ref: &akamai::TenantSettings = match static_settings.as_ref() {
-            Some(s) => s,
-            None => {
-                let html = self.content();
-                match akamai::parse_tenant_from_html(&html) {
-                    Some(pt) => {
-                        eprintln!(
-                            "[akamai] discovered tenant for {host}: seed={} sensor_path={}",
-                            pt.tenant_seed, pt.sensor_post_path
-                        );
-                        parsed_owned = akamai::TenantSettings {
-                            tenant_seed: pt.tenant_seed,
-                            // Box::leak the dynamic path so the
-                            // existing &'static str API is preserved
-                            // without a broader refactor; the leak is
-                            // per-host (small, bounded by sites we hit)
-                            // and the leaked memory is alive for the
-                            // process lifetime anyway since the static
-                            // registry strings are already &'static.
-                            post_path: Box::leak(pt.sensor_post_path.into_boxed_str()),
-                        };
-                        &parsed_owned
-                    }
-                    None => return Ok(akamai::AbckState::Unknown),
-                }
-            }
-        };
-        // Re-borrow as owned for downstream usage.
-        let settings = akamai::TenantSettings {
-            tenant_seed: settings_ref.tenant_seed,
-            post_path: settings_ref.post_path,
-        };
-
-        // 2. Check if we actually NEED to send sensor_data.
-        // Only POST when Akamai EXPLICITLY signals NeedsSensor (the
-        // ~0~-1~ suffix). Defaulting to NeedsSensor on Unknown caused
-        // spurious POSTs on Kasada-only sites where Kasada's edge sets
-        // _abck without the standard Akamai trust suffix — the POST then
-        // got Kasada-intercepted and returned 429 + interstitial HTML,
-        // which we mis-attributed to Akamai bot scoring. NeedsSecCpt and
-        // NeedsPixel are also "out of scope" per AbckState docs and
-        // shouldn't trigger a sensor_data POST either.
-        let current_state = client
-            .akamai_sessions
-            .abck_state(&host)
-            .await
-            .unwrap_or(akamai::AbckState::Unknown);
-
-        if current_state != akamai::AbckState::NeedsSensor {
-            return Ok(current_state);
-        }
-
-        // W2.3 landed: build_sensor_data now routes through build_v3 with
-        // session.bm_sz-derived shuffle/substitute seeds.
-        //
-        // POST count tuning history (all measurements within ±8 union
-        // variance noise floor per W4.3 characterization):
-        //   N=1 (1st run): 121 union (115/116/117/113)
-        //   N=8 retry:     120 union (117/116/117/112)
-        //   N=1 (2nd run): 119 union (114/116/113/112)
-        //
-        // Across runs the union variance is ±1 around 120. N=1 keeps
-        // network traffic per Akamai site to a single POST (clean
-        // single-shot behavior, lower detection volume) and lands on
-        // the upper edge of the variance band more often than N=8 in
-        // sample-of-three. Defaulting N=1.
-        //
-        // Keep the loop structure intact so MAX_POSTS becomes a single-
-        // line toggle if a future envelope improvement makes multi-POST
-        // credible again (e.g., per-attempt bm_sz refresh, dynamic key
-        // count accumulation between iterations).
-        const MAX_POSTS: u32 = 1;
-        const POST_GAP_MS: u64 = 500;
-        let mut last_state = akamai::AbckState::NeedsSensor;
-        for attempt in 0..MAX_POSTS {
-            // Drain behavioural events from the page (fresh per attempt).
-            let events_json = self
-                .event_loop
-                .execute_script(akamai::DRAIN_JS)
-                .unwrap_or_default();
-            let drained = akamai::parse_drained(&events_json);
-
-            let new_state = client
-                .send_akamai_sensor_data(
-                    &host,
-                    &self.url,
-                    settings.post_path,
-                    settings.tenant_seed,
-                    drained,
-                )
-                .await
-                .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
-            last_state = new_state;
-
-            eprintln!(
-                "[akamai] {host} POST attempt {}/{MAX_POSTS} → {new_state:?}",
-                attempt + 1
-            );
-
-            match new_state {
-                akamai::AbckState::Favorable | akamai::AbckState::Invalidated => break,
-                akamai::AbckState::NeedsSensor => {
-                    if attempt + 1 < MAX_POSTS {
-                        tokio::time::sleep(std::time::Duration::from_millis(POST_GAP_MS)).await;
-                    }
-                }
-                _ => break,
-            }
-        }
-        Ok(last_state)
-    }
     /// Create a page from an HTML string. Parses HTML, executes inline scripts,
     /// and runs the event loop until idle (or 30s timeout).
     pub async fn from_html(
@@ -1140,18 +826,17 @@ impl Page {
         &self.solvers
     }
 
-    /// Default set of solvers wired by `Page::navigate` so existing
-    /// callers see the same behaviour as before the refactor. Returns
-    /// a fresh allocation per call so each navigation gets independent
-    /// session state (each solver internally manages its own store).
+    /// Default solver set wired by `Page::navigate`. The open-source
+    /// engine ships NO per-vendor solvers — the measured 126-corpus
+    /// pass rate comes entirely from the from-scratch TLS + fingerprint
+    /// + V8 engine, not from active challenge-solving (verified: empty
+    /// vs full solvers both render the same sites). Per-vendor solver
+    /// implementations (Akamai BMP sensor_data, Kasada PoW, DataDome
+    /// i.js, Cloudflare orchestrator) live in the private companion
+    /// `vendor_solvers` crate; embedders that want them register via
+    /// `Page::with_solvers(vendor_solvers::default_solvers())`.
     pub fn default_solvers() -> std::sync::Arc<[std::sync::Arc<dyn crate::ChallengeSolver>]> {
-        std::sync::Arc::from(vec![
-            std::sync::Arc::new(crate::AkamaiSolver::new())
-                as std::sync::Arc<dyn crate::ChallengeSolver>,
-            std::sync::Arc::new(crate::KasadaSolver::new()),
-            std::sync::Arc::new(crate::DataDomeSolver::new()),
-            std::sync::Arc::new(crate::CloudflareSolver::new()),
-        ])
+        std::sync::Arc::from(Vec::<std::sync::Arc<dyn crate::ChallengeSolver>>::new())
     }
 
     /// Get the event loop (for advanced control).
@@ -1335,14 +1020,6 @@ impl Page {
         if resp.headers.contains_key("x-wbaas-token") {
             eprintln!("[vendor-detect] wbaas on {}", resp.url);
         }
-        // Akamai BMP marker: _abck cookie set. Use header parse.
-        if resp
-            .headers
-            .iter()
-            .any(|(k, v)| k.eq_ignore_ascii_case("set-cookie") && v.starts_with("_abck="))
-        {
-            eprintln!("[vendor-detect] akamai-bmp _abck set on {}", resp.url);
-        }
         // Collect response-header CSP value(s) before consuming `resp`.
         // CSP3 §3.2 allows the header to repeat (multiple Policy values
         // applied conjunctively); we keep each instance separate so the
@@ -1360,39 +1037,6 @@ impl Page {
             .map(|(_, v)| v.clone())
             .collect();
         let html = resp.text();
-        // W3.8 — surface DataDome interstitials as a structured signal.
-        // The `var dd={…}` 403 body (etsy/tripadvisor/wsj/reuters) was
-        // previously only visible as a downstream CSP-refusal symptom
-        // (we mis-route the document-level challenge as a child iframe
-        // and frame-src correctly refuses geo.captcha-delivery.com).
-        // Detection is wired here (log-only, no flow change yet —
-        // matches the vendor-detect convention above); the solver needs
-        // Chrome-correct audio+canvas FP before it can round-trip the
-        // cookie.
-        if let Some(dd) = crate::datadome_handler::detect_datadome_interstitial(&html) {
-            // Phase 5 (doc 05 §2d): replace the old log-only telemetry
-            // with the typed in-engine self-solve plan. The behavioral
-            // round-trip is performed by the existing pieces — i.js runs
-            // in our V8, the shared cookie jar captures the resulting
-            // `datadome=` Set-Cookie, and the cookie-diff retry below
-            // re-issues the original URL. What was missing (and is fixed
-            // at the CSP-install site in navigate_loop_internal) is that
-            // the origin's restrictive 403 CSP must NOT be enforced on
-            // the DataDome challenge document, or i.js cannot reach
-            // geo.captcha-delivery.com (doc 05 §2c symptom).
-            match crate::datadome_handler::plan_datadome_solve(&dd, &resp.url) {
-                Some(plan) => eprintln!(
-                    "[datadome] interstitial rt={} cid={} — in-engine self-solve planned: \
-                     challenge_hosts={:?} renav={} (cookie-diff retry re-issues)",
-                    plan.rt, dd.cid, plan.challenge_hosts, plan.renav_url
-                ),
-                None => eprintln!(
-                    "[datadome] interstitial rt={} cid={} on {} — not auto-solvable \
-                     (human slider / out of stealth scope)",
-                    dd.rt, dd.cid, resp.url
-                ),
-            }
-        }
         let resp_url = resp.url.clone();
         let timings = resp.timings.clone();
         let mut page = Self::navigate_loop_internal(
@@ -1467,7 +1111,11 @@ impl Page {
         // vendor wrappers (Akamai BMP, Kasada, DataDome, Cloudflare); the
         // wrappers delegate to the same `handle_akamai_flow` /
         // `handle_cloudflare_flow` / `datadome_handler::*` pieces the
-        // pre-refactor inline calls used, so behaviour is preserved.
+        // pre-refactor inline calls used. The open-source engine
+        // defaults to an empty solver list (the per-vendor solvers
+        // live in the private `vendor_solvers` crate); the dispatch
+        // loop below iterates over whatever is registered, so an empty
+        // list is a clean no-op.
         let solvers = Self::default_solvers();
         // Install CSP for this navigation. Headers + meta-tag sources
         // both contribute. The fetch_ext layer reads from a per-process
@@ -1496,15 +1144,14 @@ impl Page {
             // cannot affect normal pages or the 10 passing Akamai sites
             // (their bodies don't match). The cookie-diff retry then
             // re-issues the original URL once i.js lands `datadome=`.
-            let dd_challenge_doc = crate::datadome_handler::is_datadome_challenge_doc(&html);
-            let enforce = profile.enforce_csp && !env_bypass && !dd_challenge_doc;
-            if dd_challenge_doc {
-                if debug_nav {
-                    eprintln!(
-                        "[datadome] challenge document — origin CSP not enforced \
-                         (i.js round-trip to captcha-delivery.com permitted)"
-                    );
-                }
+            // A registered solver may request the origin CSP be
+            // suspended for this nav (DataDomeSolver does this for
+            // `rt:'i'` interstitials so i.js can reach
+            // captcha-delivery.com). Empty solver list ⇒ never relaxed.
+            let relax_csp = solvers.iter().any(|s| s.relax_response_csp(&html));
+            let enforce = profile.enforce_csp && !env_bypass && !relax_csp;
+            if relax_csp && debug_nav {
+                eprintln!("[solver] origin CSP not enforced for this challenge document");
             }
             if let Ok(origin) = url::Url::parse(&resp_url) {
                 if !policy_set.is_empty() {
@@ -1537,19 +1184,14 @@ impl Page {
                 return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
             })()";
 
-        // Phase 5 (doc 05 §2d) — did THIS navigation start as a DataDome
-        // `rt:'i'` interstitial? Computed once from the original response
-        // body, *before* the loop mutates `current_html`. Load-bearing:
-        // i.js mutates the live DOM (removes its own inline `var dd` +
-        // `<script src=i.js>`), so the post-i.js `self.content()` no
-        // longer trips `body_has_challenge_marker` → `is_anti_bot_
-        // challenge()` flips false → the engine wrongly skips BOTH the
-        // pending-nav poll AND the cookie-diff retry, bailing before
-        // i.js's round-trip can land the `datadome=` cookie. This flag
-        // keeps the challenge-resolution path active for the DataDome
-        // nav specifically; it is false for every non-DataDome site, so
-        // it cannot regress any other flow / the §4 gate.
-        let started_as_dd_challenge = crate::datadome_handler::is_datadome_challenge_doc(&html);
+        // Did this nav start as a challenge document that a registered
+        // solver wants to keep the resolution path active for? (DataDome
+        // `rt:'i'` interstitials mutate the DOM via i.js, dropping the
+        // body marker; without this pre-mutation flag the engine would
+        // skip the pending-nav poll + cookie-diff retry before i.js
+        // lands `datadome=`.) Reuses `relax_response_csp` as the
+        // "is this my challenge doc" signal. Empty solver list ⇒ false.
+        let started_as_dd_challenge = solvers.iter().any(|s| s.relax_response_csp(&html));
         // Akamai sec-cpt analog (master plan §4 Phase 3 / §8.5): homedepot
         // serves the rotating-obfuscated-bundle sec-cpt variant
         // (`<div id="sec-if-cpt-container">` + `<script src="/Wjv3…">`).
@@ -2017,10 +1659,10 @@ impl Page {
             // InProgress, so the unconditional iter is safe.
             let mut any_solved = false;
             for s in solvers.iter() {
-                // Pre-iteration sec-cpt guard mirrors the old explicit
-                // gate (`started_as_seccpt_challenge ⇒ NeedsSecCpt`):
-                // tell AkamaiSolver via the sub_kind so its solve()
-                // returns InProgress instead of POSTing sensor_data.
+                // Pre-iteration sec-cpt guard: when this nav started as
+                // sec-cpt, the Akamai BMP sensor_data POST is the wrong
+                // payload for the verify endpoint (doc-20 anti-pattern),
+                // so signal the solver via sub_kind to short-circuit.
                 let sub = if s.name() == "akamai-bmp" && started_as_seccpt_challenge {
                     "sec-cpt"
                 } else {
@@ -2034,17 +1676,6 @@ impl Page {
                     any_solved = true;
                 }
             }
-            // Backward-compat shim: keep the `akamai_state == Favorable`
-            // gate below working until we wire the cookie-delta retry
-            // straight through `any_solved` (incremental migration).
-            let akamai_state = if any_solved {
-                akamai::AbckState::Favorable
-            } else {
-                akamai::AbckState::Unknown
-            };
-            // W7 / Cloudflare V1 — orchestrator runner ran inside the
-            // CloudflareSolver iteration above; cookie-delta retry
-            // picks up `cf_clearance` on the next pass.
 
             if pending_info.is_empty() {
                 // Post-settle cookie-delta retry: if the cookie jar gained new
@@ -2077,27 +1708,6 @@ impl Page {
                     // did not complete (the next increment's target);
                     // `true` ⇒ the existing retry already re-issues.
                     // debug_nav-gated ⇒ zero §4-gate impact.
-                    if debug_nav && started_as_dd_challenge {
-                        eprintln!(
-                            "{}",
-                            crate::datadome_handler::dd_flow_summary(
-                                page.is_anti_bot_challenge(),
-                                crate::datadome_handler::cookies_have_datadome(&cookies_before),
-                                crate::datadome_handler::cookies_have_datadome(&cookies_after),
-                            )
-                        );
-                        // What did i.js actually do? Dump its post-exec
-                        // fetch log so the next increment sees whether the
-                        // 15 KB loader fired its verification POST to
-                        // geo.captcha-delivery.com and what came back.
-                        let fl = page
-                            .event_loop()
-                            .execute_script(
-                                "JSON.stringify((globalThis._boxide&&globalThis._boxide.__fetchLog)||[])",
-                            )
-                            .unwrap_or_default();
-                        eprintln!("[datadome-trace] i.js __fetchLog={fl}");
-                    }
                     // Phase 5 (homedepot): same diagnostic for the
                     // sec-cpt bundle — did `/Wjv3…` actually run and fire
                     // its PoW-answer verify POST? debug_nav-gated ⇒ zero
@@ -2122,11 +1732,10 @@ impl Page {
                         && !cookies_after.is_empty())
                         || (last_accept_ch_upgrade && !accept_ch_retry_done);
 
-                    // Special case for Akamai: if we are already favorable, DON'T retry
-                    // just because the cookie value changed (it always does).
-                    if akamai_state == akamai::AbckState::Favorable
-                        && !(last_accept_ch_upgrade && !accept_ch_retry_done)
-                    {
+                    // If a solver already reported the challenge solved
+                    // this iteration, DON'T retry just because a cookie
+                    // value changed (challenge cookies always rotate).
+                    if any_solved && !(last_accept_ch_upgrade && !accept_ch_retry_done) {
                         should_retry = false;
                     }
 
@@ -3228,53 +2837,7 @@ impl Page {
 
             // Flush logs for this script
             {
-                if let Some(src) = &script.src {
-                    if src.contains("akam") || src.contains("ips.js") || src.contains("kpsdk") {
-                        eprintln!("[JS LOG] script found: {}", src);
-
-                        // Extract Kasada tenant prefix and im token
-                        if src.contains("/ips.js") {
-                            let parts: Vec<&str> = src.split("/ips.js").collect();
-                            if !parts[0].is_empty() {
-                                if let Ok(u) = url::Url::parse(url) {
-                                    if let Some(host) = u.host_str() {
-                                        // Parse x-kpsdk-im from the script URL if present
-                                        let im = if let Some(query) = src.split('?').nth(1) {
-                                            query
-                                                .split('&')
-                                                .find(|p| p.starts_with("x-kpsdk-im="))
-                                                .map(|p| p[11..].to_string())
-                                        } else {
-                                            None
-                                        };
-
-                                        let client_clone = client.clone();
-                                        let host_str = host.to_string();
-                                        let prefix_str = parts[0].to_string();
-                                        tokio::spawn(async move {
-                                            client_clone
-                                                .learn_kasada_prefix(&host_str, &prefix_str)
-                                                .await;
-                                            if let Some(im_val) = im {
-                                                client_clone
-                                                    .kasada_sessions()
-                                                    .store_im(&host_str, im_val)
-                                                    .await;
-                                            }
-                                            // Realistic DT token (captured from real browser)
-                                            client_clone.kasada_sessions().store_dt(&host_str, "11qox8sw33mzd5rx62nvw43pjz99vza39w0a3lycjlwbby5126x2thw75s".to_string()).await;
-
-                                            // Trigger /mfc fetch if needed
-                                            client_clone
-                                                .fetch_kasada_mfc_if_needed(&host_str)
-                                                .await;
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                let _ = &script.src;
                 let logs = {
                     let runtime = event_loop.runtime_mut().inner();
                     let state = runtime.op_state();

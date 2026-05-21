@@ -13,12 +13,9 @@ members = [
     "crates/canvas",
     "crates/layout",
     "crates/net",
-    # "crates/event_loop",
     "crates/workers",
     "crates/stealth",
     "crates/protocol",
-    "crates/akamai",
-    # "crates/browser",
 ]
 
 [workspace.package]
@@ -46,44 +43,14 @@ event_loop = { version = "0.1.0", path = "crates/event_loop" }
 workers = { version = "0.1.0", path = "crates/workers" }
 stealth = { version = "0.1.0", path = "crates/stealth" }
 protocol = { version = "0.1.0", path = "crates/protocol" }
-akamai = { version = "0.1.0", path = "crates/akamai" }
 browser = { version = "0.1.0", path = "crates/browser" }
 
-# JS Engine (V8)
-# rusty_v8 = "129"
-# deno_core = "0.311"
-
-# Rendering
-# tiny-skia = "0.11"
-# cosmic-text = "0.12"
-# ab_glyph = "0.2"
-# fontdb = "0.22"
-# rustybuzz = "0.18"
-
-# Networking
-# rquest = { version = "5.1", features = ["cookies", "gzip", "brotli", "deflate", "json"] }
-# quinn = "0.11"
-# h3 = "0.0.6"
-# h3-quinn = "0.0.7"
-
-# HTML Parsing
-# html5ever = "0.29"
-
-# Layout
-# taffy = "0.6"
-
-# Async Runtime
+# Async runtime + common derive deps shared by multiple crates.
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tracing = "0.1"
-
-# WebSocket
-# tokio-tungstenite = "0.24"
-
-# Cookies
-# cookie_store = "0.21"
 
 [profile.release]
 opt-level = 3

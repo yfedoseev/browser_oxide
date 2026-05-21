@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Stealth HTTP client with Chrome TLS/HTTP2 fingerprint impersonation (boring2/BoringSSL)"
-publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
+publish = false  # 9 of 15 crate names collide on crates.io; flip per-crate when renamed
 
 [features]
 default = []
@@ -17,7 +17,6 @@ blocker = ["dep:adblock"]
 
 [dependencies]
 stealth = { workspace = true }
-akamai = { workspace = true }
 
 # TLS (BoringSSL)
 # boring2 5.0-alpha removed the Chrome-impersonation APIs we rely on:

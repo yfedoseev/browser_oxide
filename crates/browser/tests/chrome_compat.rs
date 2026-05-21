@@ -3821,16 +3821,8 @@ async fn antibot_smoke(label: &str, url: &str, profile: stealth::StealthProfile)
 #[tokio::test]
 #[ignore = "network: kasada-only diagnostic with Function trace"]
 async fn kasada_canadagoose_diagnostic() {
-    let url = "https://www.canadagoose.com/";
-    // Clear any existing Kasada session for this host to avoid stale 304 responses
-    if let Some(client) = js_runtime::extensions::fetch_ext::fetch_client() {
-        if let Ok(u) = url::Url::parse(url) {
-            if let Some(host) = u.host_str() {
-                client.evict_kasada_session(host).await;
-                println!("  [KASADA] Evicted session for {}", host);
-            }
-        }
-    }
+    // Vendor Kasada session-eviction lives in the private vendor_solvers
+    // crate now; this diagnostic just exercises the generic navigate path.
     let profile = stealth::presets::chrome_130_macos();
     antibot_smoke(
         "KASADA-canadagoose-DIAG",

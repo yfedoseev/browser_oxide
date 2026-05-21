@@ -143,9 +143,9 @@ pub trait ChallengeSolver: Send + Sync {
     /// Should the origin's response CSP be SUSPENDED for this nav?
     /// Used by DataDome `rt:'i'` interstitials whose JS reaches
     /// `geo.captcha-delivery.com` (refused by the origin's 403 CSP).
-    /// Default: false. Pure body inspection — no I/O.
+    /// Decision is body-based. Default: false. Pure inspection — no I/O.
     #[allow(unused_variables)]
-    fn relax_response_csp(&self, resp: &net::Response, html: &str) -> bool {
+    fn relax_response_csp(&self, html: &str) -> bool {
         false
     }
 

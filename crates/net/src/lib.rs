@@ -18,7 +18,6 @@ pub mod headers;
 // "internal testing/evaluation" carve-out. See ja4h.rs and LICENSE-NOTE.md.
 #[cfg(test)]
 pub(crate) mod ja4h;
-pub mod kasada_session;
 pub mod pool;
 pub mod proxy;
 pub mod quic;
@@ -31,7 +30,6 @@ use bytes::Bytes;
 use cookies::CookieJar;
 use error::NetError;
 use http2::client::SendRequest;
-use kasada_session::KasadaSessionStore;
 use pool::ConnectionPool;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -130,11 +128,6 @@ pub struct HttpClient {
     dns_cache: tcp::DnsCache,
     quic_client: Option<quic::QuicClient>,
     alt_svc_cache: AltSvcCache,
-    /// Per-origin Kasada session state. Populated when a response includes
-    /// `x-kpsdk-cr: true` + `x-kpsdk-st`; consumed by attaching `x-kpsdk-cd`
-    /// to subsequent requests to the same host. Solver lives in
-    /// `stealth::kasada`.
-    kasada_sessions: KasadaSessionStore,
     /// Origins that have sent `Accept-CH` in a response. When an origin is
     /// present, subsequent requests to it use `chrome_headers_with_accept_ch()`
     /// which adds the full set of high-entropy Client Hints. Mirrors Chrome's
@@ -143,9 +136,6 @@ pub struct HttpClient {
     /// Resolved proxy config. `BOXIDE_PROXY` env var overrides
     /// `profile.proxy`. None = direct connect (the existing path). T1C.
     proxy: Option<proxy::ProxyConfig>,
-    /// Per-host Akamai web sensor_data session state. Populated when
-    /// a response sets `_abck=`; consumed by `send_sensor_data`. T3A.
-    pub akamai_sessions: akamai::AkamaiSessionStore,
 }
 
 impl HttpClient {
@@ -160,14 +150,6 @@ impl HttpClient {
 
     pub fn cookies(&self) -> Arc<Mutex<CookieJar>> {
         self.cookies.clone()
-    }
-
-    pub fn kasada_sessions(&self) -> KasadaSessionStore {
-        self.kasada_sessions.clone()
-    }
-
-    pub fn akamai_sessions(&self) -> akamai::AkamaiSessionStore {
-        self.akamai_sessions.clone()
     }
 
     pub fn accept_ch_origins(&self) -> Arc<Mutex<HashSet<String>>> {
@@ -215,7 +197,7 @@ impl HttpClient {
         // Create QUIC client for HTTP/3 (non-fatal if it fails)
         let quic_client = quic::QuicClient::new().ok();
 
-        // Optionally load a persisted cookie jar so Kasada/Akamai trust
+        // Optionally load a persisted cookie jar so per-origin trust
         // accumulates across runs. Set BOXIDE_COOKIE_JAR to the desired
         // file path. Without this env var, behavior is the same as before
         // (fresh in-memory jar each run).
@@ -244,8 +226,6 @@ impl HttpClient {
             dns_cache: tcp::DnsCache::new(),
             quic_client,
             alt_svc_cache: AltSvcCache::new(),
-            kasada_sessions: KasadaSessionStore::new(),
-            akamai_sessions: akamai::AkamaiSessionStore::new(),
             accept_ch_origins: Arc::new(Mutex::new(HashSet::new())),
             // Resolve proxy: BOXIDE_PROXY env override, then profile.proxy.
             // Bad proxy URLs are non-fatal — log and continue without proxy.
@@ -271,14 +251,12 @@ impl HttpClient {
         })
     }
 
-    /// Create a new client that shares session state (cookies, Kasada/Akamai
-    /// tokens, DNS/H3 caches) with an existing one, but has its own
+    /// Create a new client that shares session state (cookies, DNS/H3
+    /// caches, Accept-CH origins) with an existing one, but has its own
     /// connection pool to avoid deadlocks in synchronous contexts.
     pub fn new_with_shared_state(
         profile: &StealthProfile,
         cookies: Arc<Mutex<CookieJar>>,
-        kasada: KasadaSessionStore,
-        akamai: akamai::AkamaiSessionStore,
         accept_ch: Arc<Mutex<HashSet<String>>>,
         dns: tcp::DnsCache,
         alt_svc: AltSvcCache,
@@ -295,41 +273,12 @@ impl HttpClient {
             dns_cache: dns,
             quic_client,
             alt_svc_cache: alt_svc,
-            kasada_sessions: kasada,
-            akamai_sessions: akamai,
             accept_ch_origins: accept_ch,
             proxy: match proxy::ProxyConfig::resolve(profile.proxy.as_deref()) {
                 Ok(p) => p,
                 Err(_) => None,
             },
         })
-    }
-
-    pub async fn learn_kasada_prefix(&self, host: &str, prefix: &str) {
-        self.kasada_sessions.learn_prefix(host, prefix).await;
-    }
-
-    /// Learn a Kasada session from response headers (called from response
-    /// post-processing). If the response includes `x-kpsdk-cr: true` and
-    /// `x-kpsdk-st`, we cache the server-time offset + a session id so
-    /// subsequent requests to this host can attach a valid `x-kpsdk-cd`.
-    async fn learn_kasada(
-        &self,
-        host: &str,
-        headers: &HashMap<String, String>,
-        request_url: Option<&str>,
-    ) {
-        if headers.contains_key("x-kpsdk-ct") || headers.contains_key("x-kpsdk-st") {
-            eprintln!(
-                "[kasada] learning from headers for {}: {:?}",
-                host,
-                headers
-                    .keys()
-                    .filter(|k| k.starts_with("x-kp"))
-                    .collect::<Vec<_>>()
-            );
-        }
-        self.kasada_sessions.learn(host, headers, request_url).await;
     }
 
     /// Record that `host` has advertised `Accept-CH` so subsequent requests
@@ -362,95 +311,6 @@ impl HttpClient {
             .any(|k| k.eq_ignore_ascii_case("critical-ch"))
     }
 
-    /// Learn Akamai web `_abck` state from response Set-Cookies. T3A.
-    /// The trust-state (Favorable / NeedsSensor / NeedsSecCpt /
-    /// NeedsPixel) is extracted from the cookie suffix; the consumer
-    /// (Page::navigate scheduler) decides whether to POST sensor_data.
-    async fn learn_abck(&self, host: &str, set_cookies: &[String]) {
-        for v in set_cookies {
-            let trimmed = v.trim_start();
-            if let Some(rest) = trimmed.strip_prefix("_abck=") {
-                let value = rest.split(';').next().unwrap_or("").trim();
-                eprintln!("[akamai] learn_abck: _abck={}", value);
-                if !value.is_empty() {
-                    self.akamai_sessions
-                        .with_session(host, |s| s.observe_abck(value))
-                        .await;
-                }
-            } else if let Some(rest) = trimmed.strip_prefix("bm_sz=") {
-                let value = rest.split(';').next().unwrap_or("").trim();
-                eprintln!("[akamai] learn_abck: bm_sz={}", value);
-                if !value.is_empty() {
-                    self.akamai_sessions
-                        .with_session(host, |s| s.bm_sz = Some(value.to_string()))
-                        .await;
-                }
-            }
-        }
-    }
-
-    /// Build and POST a sensor_data body to upgrade `_abck` for `host`.
-    /// `drained_events` is the parsed output of `akamai::DRAIN_JS`
-    /// from the page (mouse / key trajectory captured by humanize.js).
-    /// `request_url` is the page URL the sensor_data is "for".
-    /// `tenant_seed` is the seed observed in the challenge JS for this
-    /// tenant (e.g. 3_224_113 for bestbuy); pass 0 if unknown.
-    /// Returns Ok(new_abck_state) on success.
-    pub async fn send_akamai_sensor_data(
-        &self,
-        host: &str,
-        request_url: &str,
-        post_path: &str,
-        tenant_seed: i64,
-        drained: akamai::Drained,
-    ) -> Result<akamai::AbckState, NetError> {
-        // Snapshot the session and build the body.
-        let body = self
-            .akamai_sessions
-            .with_session(host, |s| {
-                s.mouse_buf = drained.mouse;
-                s.key_buf = drained.key;
-                s.touch_buf = drained.touch;
-                s.key_count = drained.key_count;
-                s.mouse_count = drained.mouse_count;
-                s.touch_count = drained.touch_count;
-                s.scroll_count = drained.scroll_count;
-                s.accel_count = drained.accel_count;
-                s.sensor_counter = s.sensor_counter.saturating_add(1);
-                let sensor = akamai::build_sensor_data(&self.profile, s, request_url, tenant_seed);
-                format!("{{\"sensor_data\":\"{}\"}}", sensor)
-            })
-            .await;
-
-        // POST with the same Chrome 147 header set we use for any
-        // other request, plus content-type: text/plain (per the A0
-        // capture).
-        let url = format!("https://{host}{post_path}");
-        let mut headers = headers::chrome_headers(&self.profile);
-        headers.push(("content-type".into(), "text/plain;charset=UTF-8".into()));
-        headers.push(("origin".into(), format!("https://{host}")));
-        headers.push(("referer".into(), request_url.to_string()));
-        let resp = self.post_with_headers(&url, &body, &headers).await?;
-        if resp.status == 429 {
-            eprintln!(
-                "[akamai] sensor_data POST 429 body: {}",
-                String::from_utf8_lossy(&resp.body)
-            );
-        }
-        // Re-learn _abck from the response.
-        self.learn_abck(host, &resp.set_cookies).await;
-        let new_state = self
-            .akamai_sessions
-            .abck_state(host)
-            .await
-            .unwrap_or(akamai::AbckState::Unknown);
-        eprintln!(
-            "[akamai] sensor_data POST {url} → status={} new_abck={new_state:?}",
-            resp.status
-        );
-        Ok(new_state)
-    }
-
     /// Return `true` if `host` has previously sent `Accept-CH`.
     pub async fn has_accept_ch(&self, host: &str) -> bool {
         self.accept_ch_origins.lock().await.contains(host)
@@ -469,46 +329,6 @@ impl HttpClient {
     /// headers via window.fetch(), and our `learn_from_headers` already
     /// extracts `x-kpsdk-fc` from any response that carries it. So the right
     /// behaviour is to do nothing here — let the page run.
-    pub async fn fetch_kasada_mfc_if_needed(&self, _host: &str) {
-        // Intentionally a no-op. See doc comment.
-    }
-
-    pub async fn evict_kasada_session(&self, host: &str) {
-        self.kasada_sessions.evict(host).await;
-    }
-
-    /// Compute (and possibly inject) a Kasada `x-kpsdk-cd` header for an
-    /// outgoing request to `host`. Returns the header pair if we have a
-    /// session for that host; caller appends to its header list.
-    ///
-    /// **K1 (FP / nocdp-parity, 2026-05-17): deferred to the page's
-    /// ips.js by default.** Same lesson as `fetch_kasada_mfc_if_needed`
-    /// (made a deliberate no-op above): the correct session-derived
-    /// `x-kpsdk-cd` is computed *inside the ips.js VM* and emitted by
-    /// the page via `window.fetch()`; our `learn_from_headers` already
-    /// captures the resulting session. A Rust-side PoW computed *in
-    /// parallel* to ips.js produces a second, single-use `x-kpsdk-cd`
-    /// the page's own ips.js did not author — a self-inflicted bot
-    /// signature (a real Chrome emits exactly one ips.js-authored cd,
-    /// never a parallel native one). nocdp real Chrome — which has NO
-    /// such Rust path — passes canadagoose/hyatt/realtor from this IP,
-    /// so deferring here makes us *more* real-browser-faithful, not
-    /// less. The PoW impl is retained (not deleted) and can be
-    /// re-enabled for the page-less/no-V8 client path via
-    /// `BOXIDE_KASADA_RUST_CD=1`. Removes the K2-DIFF confound: the
-    /// `/tl` differential must compare ips.js's authored payload, not a
-    /// Rust/ips.js race. The call sites still `!has_header` so an
-    /// ips.js-set cd is always preserved.
-    pub async fn kasada_cd_header(&self, host: &str) -> Option<(String, String)> {
-        if std::env::var("BOXIDE_KASADA_RUST_CD").as_deref() != Ok("1") {
-            return None; // let the page's ips.js own x-kpsdk-cd
-        }
-        self.kasada_sessions
-            .compute_cd_header(host)
-            .await
-            .map(|cd| ("x-kpsdk-cd".to_string(), cd))
-    }
-
     /// Try HTTP/3 for an HTTPS URL. Returns Ok if successful, Err to fall back.
     async fn try_h3_request(
         &self,
@@ -715,59 +535,6 @@ impl HttpClient {
             }
         }
 
-        // Inject Kasada x-kpsdk-cd if we have a session for this host (gap #Kasada).
-        if !has_header(&hdrs, "x-kpsdk-cd") {
-            if let Some((k, v)) = self.kasada_cd_header(host).await {
-                insert_before_priority(&mut hdrs, k, v);
-            }
-        }
-        // Inject Kasada x-kpsdk-fc on stricter tenants (Hyper-Solutions Flow 2).
-        if !has_header(&hdrs, "x-kpsdk-fc") {
-            if let Some((k, v)) = self.kasada_sessions.fc_header(host).await {
-                insert_before_priority(&mut hdrs, k, v);
-            }
-        }
-        // Inject Kasada x-kpsdk-ct (session token from /tl response). Without
-        // this the server returns the same Kasada init page even with a valid
-        // x-kpsdk-cd PoW. Verified 2026-04-27 on hyatt.com.
-        if !has_header(&hdrs, "x-kpsdk-ct") {
-            if let Some((k, v)) = self.kasada_sessions.ct_header(host).await {
-                eprintln!(
-                    "[kasada] INJECTING x-kpsdk-ct on GET {} (len={})",
-                    host,
-                    v.len()
-                );
-                insert_before_priority(&mut hdrs, k, v);
-            } else {
-                eprintln!("[kasada] no ct_token to inject for {}", host);
-            }
-        }
-        if !has_header(&hdrs, "x-kpsdk-h") {
-            if let Some((k, v)) = self.kasada_sessions.h_header(host).await {
-                insert_before_priority(&mut hdrs, k, v);
-            }
-        }
-        if !has_header(&hdrs, "x-kpsdk-v") {
-            if let Some((k, v)) = self.kasada_sessions.v_header(host).await {
-                insert_before_priority(&mut hdrs, k, v);
-            }
-        }
-        if !has_header(&hdrs, "x-kpsdk-im") {
-            if let Some(v) = self.kasada_sessions.im_token(host).await {
-                insert_before_priority(&mut hdrs, "x-kpsdk-im".to_string(), v);
-            }
-        }
-        if !has_header(&hdrs, "x-kpsdk-dt") {
-            if let Some(v) = self.kasada_sessions.dt_token(host).await {
-                insert_before_priority(&mut hdrs, "x-kpsdk-dt".to_string(), v);
-            }
-        }
-        if !has_header(&hdrs, "x-kpsdk-r") {
-            if let Some((k, v)) = self.kasada_sessions.r_header(host).await {
-                insert_before_priority(&mut hdrs, k, v);
-            }
-        }
-
         let response = 'h2: {
             for attempt in 0..2 {
                 let sender_res = self.get_sender(host, port).await;
@@ -833,8 +600,6 @@ impl HttpClient {
             }
         };
         self.learn_alt_svc(url, &response.headers).await;
-        self.learn_kasada(host, &response.headers, Some(url)).await;
-        self.learn_abck(host, &response.set_cookies).await;
         let upgrade = self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
 
@@ -894,17 +659,6 @@ impl HttpClient {
             let jar = self.cookies.lock().await;
             if let Some(cookie_str) = jar.cookies_for(&parsed) {
                 insert_before_priority(&mut hdrs, "cookie".to_string(), cookie_str);
-            }
-        }
-
-        // Inject Kasada `x-kpsdk-cd` PoW header if we have a session for
-        // this host (gap #Kasada). The session is populated when a prior
-        // response from this host included `x-kpsdk-cr: true` + `x-kpsdk-st`.
-        // See `crates/stealth/src/kasada.rs` for the SHA-256 PoW algorithm
-        // and `crates/net/src/kasada_session.rs` for the per-origin store.
-        if !has_header(&hdrs, "x-kpsdk-cd") {
-            if let Some((k, v)) = self.kasada_cd_header(host).await {
-                insert_before_priority(&mut hdrs, k, v);
             }
         }
 
@@ -983,8 +737,6 @@ impl HttpClient {
         self.learn_alt_svc(url, &response.headers).await;
 
         // Learn Kasada session from response (look for x-kpsdk-cr + x-kpsdk-st).
-        self.learn_kasada(host, &response.headers, Some(url)).await;
-        self.learn_abck(host, &response.set_cookies).await;
         let upgrade = self.learn_accept_ch(host, &response.headers).await;
 
         // Store Set-Cookie from response into jar
@@ -1227,49 +979,6 @@ impl HttpClient {
             }
         }
 
-        // Add Kasada headers
-        if let Some(ct) = self.kasada_sessions.ct_token(host).await {
-            if !has_header(&hdrs, "x-kpsdk-ct") {
-                hdrs.push(("x-kpsdk-ct".to_string(), ct));
-            }
-        }
-        if let Some(fc) = self.kasada_sessions.fc_token(host).await {
-            if !has_header(&hdrs, "x-kpsdk-fc") {
-                hdrs.push(("x-kpsdk-fc".to_string(), fc));
-            }
-        }
-        if let Some(im) = self.kasada_sessions.im_token(host).await {
-            if !has_header(&hdrs, "x-kpsdk-im") {
-                hdrs.push(("x-kpsdk-im".to_string(), im));
-            }
-        }
-        if let Some(dt) = self.kasada_sessions.dt_token(host).await {
-            if !has_header(&hdrs, "x-kpsdk-dt") {
-                hdrs.push(("x-kpsdk-dt".to_string(), dt));
-            }
-        }
-        if !has_header(&hdrs, "x-kpsdk-h") {
-            if let Some((k, v)) = self.kasada_sessions.h_header(host).await {
-                hdrs.push((k, v));
-            }
-        }
-        if !has_header(&hdrs, "x-kpsdk-v") {
-            if let Some((k, v)) = self.kasada_sessions.v_header(host).await {
-                hdrs.push((k, v));
-            }
-        }
-        if !has_header(&hdrs, "x-kpsdk-r") {
-            if let Some((k, v)) = self.kasada_sessions.r_header(host).await {
-                insert_before_priority(&mut hdrs, k, v);
-            }
-        }
-        // Inject Kasada x-kpsdk-cd if we have a session for this host (gap #Kasada).
-        if !has_header(&hdrs, "x-kpsdk-cd") {
-            if let Some((k, v)) = self.kasada_cd_header(host).await {
-                hdrs.push((k, v));
-            }
-        }
-
         // Env-gated POST body dump
         if let Ok(dir) = std::env::var("BOXIDE_DUMP_POST_DIR") {
             use std::io::Write;
@@ -1378,26 +1087,18 @@ impl HttpClient {
             }
         };
 
-        self.learn_kasada(host, &response.headers, Some(url)).await;
-        self.learn_abck(host, &response.set_cookies).await;
         let upgrade = self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
 
         let mut final_response = response;
         final_response.accept_ch_upgrade = upgrade;
 
-        // If this was a successful /tl, we might need to kick off /mfc
-        if url.contains("/tl") || url.contains("/r") {
-            self.fetch_kasada_mfc_if_needed(host).await;
-        }
-
         Ok(final_response)
     }
 
-    /// POST with a raw byte body and caller-provided headers. This is the
-    /// binary-safe path — Kasada's challenge solver sends
-    /// `application/octet-stream` with a raw byte payload that must not be
-    /// mangled by UTF-8 coercion.
+    /// POST with a raw byte body and caller-provided headers. The binary-
+    /// safe variant of `post_with_headers` — preserves the byte payload
+    /// exactly instead of treating it as UTF-8.
     pub async fn post_bytes_with_headers(
         &self,
         url: &str,
@@ -1469,16 +1170,6 @@ impl HttpClient {
             }
         }
 
-        // Inject Kasada x-kpsdk-cd if we have a session for this host.
-        // The /tl POST itself doesn't need x-kpsdk-cd (it's the path that
-        // *issues* the session), but POSTs after the initial token exchange
-        // do — and we don't differentiate at this layer.
-        if !has_header(&hdrs, "x-kpsdk-cd") {
-            if let Some((k, v)) = self.kasada_cd_header(host).await {
-                insert_before_priority(&mut hdrs, k, v);
-            }
-        }
-
         // Same stale-connection recovery as GET.
         let response = 'h2: {
             for attempt in 0..2 {
@@ -1531,8 +1222,6 @@ impl HttpClient {
         // Store Set-Cookie from POST response — WBAAS sets x_wbaas_token here,
         // Kasada sets KP_UIDz / akm_bmfp_b2 session cookies here.
         // Also learn Kasada session: the /tl POST returns x-kpsdk-cr/st here.
-        self.learn_kasada(host, &response.headers, Some(url)).await;
-        self.learn_abck(host, &response.set_cookies).await;
         let upgrade = self.learn_accept_ch(host, &response.headers).await;
         self.store_set_cookies(&parsed, &response.set_cookies).await;
 
@@ -1715,52 +1404,6 @@ mod tests {
         let profile = stealth::chrome_130_linux();
         let client = HttpClient::new(&profile);
         assert!(client.is_ok());
-    }
-
-    // K1 regression: with a live Kasada session present (compute_cd_header
-    // WOULD return Some), kasada_cd_header still returns None by default
-    // — the Rust PoW is deferred to the page's ips.js (nocdp-parity:
-    // a real Chrome emits no parallel native cd). Opt-in env restores
-    // the retained impl for the page-less client path.
-    #[tokio::test]
-    async fn k1_kasada_cd_deferred_to_ips_js_by_default() {
-        let profile = stealth::chrome_130_linux();
-        let client = HttpClient::new(&profile).expect("client");
-        let host = "k1-test.example";
-        let future_ms = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64
-            + 1000)
-            .to_string();
-        let mut hm = std::collections::HashMap::new();
-        hm.insert("x-kpsdk-cr".to_string(), "true".to_string());
-        hm.insert("x-kpsdk-st".to_string(), future_ms);
-        client.kasada_sessions().learn(host, &hm, None).await;
-
-        // Session exists ⇒ compute_cd_header itself yields Some …
-        assert!(
-            client
-                .kasada_sessions()
-                .compute_cd_header(host)
-                .await
-                .is_some(),
-            "precondition: a learned session must be cd-capable"
-        );
-        // … but K1 defers to ips.js: no parallel Rust cd by default.
-        std::env::remove_var("BOXIDE_KASADA_RUST_CD");
-        assert_eq!(
-            client.kasada_cd_header(host).await,
-            None,
-            "K1: Rust x-kpsdk-cd must be deferred to the page's ips.js"
-        );
-        // Retained impl still reachable for the page-less path.
-        std::env::set_var("BOXIDE_KASADA_RUST_CD", "1");
-        assert!(
-            client.kasada_cd_header(host).await.is_some(),
-            "opt-in env must restore the retained Rust PoW path"
-        );
-        std::env::remove_var("BOXIDE_KASADA_RUST_CD");
     }
 
     #[test]

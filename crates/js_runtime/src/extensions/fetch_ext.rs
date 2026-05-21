@@ -469,8 +469,6 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
             net::HttpClient::new_with_shared_state(
                 main.profile(),
                 main.cookies(),
-                main.kasada_sessions(),
-                main.akamai_sessions(),
                 main.accept_ch_origins(),
                 main.dns_cache(),
                 main.alt_svc_cache(),
@@ -614,8 +612,6 @@ pub fn op_net_xhr_sync(
                     net::HttpClient::new_with_shared_state(
                         main.profile(),
                         main.cookies(),
-                        main.kasada_sessions(),
-                        main.akamai_sessions(),
                         main.accept_ch_origins(),
                         main.dns_cache(),
                         main.alt_svc_cache(),
