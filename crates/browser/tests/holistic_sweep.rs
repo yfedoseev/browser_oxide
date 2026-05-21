@@ -56,6 +56,22 @@ async fn fetch_one(url: &str) -> (String, usize, u64, u64) {
         let html = page.content();
         let lower = html.to_lowercase();
         let len = html.len();
+        // FP-Classify: detect challenges by *current URL* before falling
+        // through to body markers. Some vendors redirect to a thin generic
+        // SPA shell (skyscanner.com → /sttc/px/captcha-v2/) that contains
+        // no body marker — the URL is the only signal. Must run BEFORE
+        // the THIN-BODY check below (709-byte challenge page would
+        // otherwise be tagged THIN-BODY).
+        let current_url = page.url().to_lowercase();
+        let url_outcome: Option<&'static str> = if current_url.contains("/sttc/px/captcha-v2/")
+            || current_url.contains("/_pxcaptcha")
+        {
+            Some("PerimeterX-CHL")
+        } else if current_url.contains("captcha-delivery.com") {
+            Some("DataDome-CHL")
+        } else {
+            None
+        };
 
         // Vendor-specific markers — high-confidence detections. If any of
         // these substrings appears, the response is definitely a challenge
@@ -85,33 +101,41 @@ async fn fetch_one(url: &str) -> (String, usize, u64, u64) {
             ("blocked", "BLOCKED"),
         ];
         let outcome = {
-            // 1. Strong markers — always trust.
-            let mut o = "L3-RENDERED".to_string();
-            for (needle, tag) in strong_markers {
-                if lower.contains(needle) {
-                    o = tag.to_string();
-                    break;
-                }
-            }
-            // 2. Weak markers — only when body is small (<100 KB). A site
-            // returning 100 KB+ of HTML almost certainly rendered the real
-            // homepage; the substring "captcha" is footer / cookie-banner
-            // text, not a challenge. (github.com 581 KB, bbc.com 537 KB,
-            // washingtonpost.com 3.1 MB all hit this false-positive in the
-            // Phase A baseline sweep — DEEP_NEXT_STEPS Part 2 §C.)
-            if o == "L3-RENDERED" && len < 100 * 1024 {
-                for (needle, tag) in weak_markers {
+            // 0. URL-based challenge detection (vendor redirected us to a
+            // generic SPA challenge page with no body markers).
+            // Must run BEFORE everything else — the thin shell would
+            // otherwise be tagged THIN-BODY or L3-RENDERED.
+            if let Some(tag) = url_outcome {
+                tag.to_string()
+            } else {
+                // 1. Strong markers — always trust.
+                let mut o = "L3-RENDERED".to_string();
+                for (needle, tag) in strong_markers {
                     if lower.contains(needle) {
                         o = tag.to_string();
                         break;
                     }
                 }
+                // 2. Weak markers — only when body is small (<100 KB). A site
+                // returning 100 KB+ of HTML almost certainly rendered the real
+                // homepage; the substring "captcha" is footer / cookie-banner
+                // text, not a challenge. (github.com 581 KB, bbc.com 537 KB,
+                // washingtonpost.com 3.1 MB all hit this false-positive in the
+                // Phase A baseline sweep — DEEP_NEXT_STEPS Part 2 §C.)
+                if o == "L3-RENDERED" && len < 100 * 1024 {
+                    for (needle, tag) in weak_markers {
+                        if lower.contains(needle) {
+                            o = tag.to_string();
+                            break;
+                        }
+                    }
+                }
+                // 3. Stub bodies — definitely not a real render.
+                if o == "L3-RENDERED" && len < 1000 {
+                    o = "THIN-BODY".to_string();
+                }
+                o
             }
-            // 3. Stub bodies — definitely not a real render.
-            if o == "L3-RENDERED" && len < 1000 {
-                o = "THIN-BODY".to_string();
-            }
-            o
         };
         // Capture drop start before page goes out of scope; the actual drop
         // happens here at end-of-block.
@@ -992,10 +1016,15 @@ mod classifier_tests {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore]
 async fn holistic_sweep_parallel() {
+    // Default 2 workers (was 4). 4-way contention reproducibly flakes
+    // small-page sites (iphey ~29 KB renders as THIN-BODY 901 B under
+    // load; passes 29 KB in isolation). 2 keeps most of the speedup
+    // (~2x vs single-threaded) without the flake. Override with
+    // BOXIDE_PARALLEL_WORKERS env when the box can take more.
     let n_workers: usize = std::env::var("BOXIDE_PARALLEL_WORKERS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(4);
+        .unwrap_or(2);
     let sites = sites_list();
     let total = sites.len();
     eprintln!("\n=== PARALLEL SWEEP — {total} sites × {n_workers} workers ===\n");

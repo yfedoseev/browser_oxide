@@ -2585,15 +2585,66 @@ impl Page {
     /// Build a page with external script fetching.
     /// Resolve a potentially-relative URL against a base URL.
     fn resolve_url(base: &str, relative: &str) -> Option<String> {
+        // Defence against the iphey.com regression: a JS-side
+        // `location.href = 'about:blank'` (or `'data:...'`, `'javascript:'`,
+        // etc.) can reach Rust as the literal `https://host/about:blank` if
+        // the JS URL polyfill mis-joined a special-scheme URL against the
+        // current http(s) base. Treat any path that begins with a known
+        // special-scheme literal as a no-op pending navigation (return None
+        // and let the caller keep the current page).
+        if let Some(idx) = relative.find('/') {
+            let tail = &relative[idx + 1..];
+            for sch in &[
+                "about:",
+                "data:",
+                "javascript:",
+                "blob:",
+                "mailto:",
+                "tel:",
+                "view-source:",
+            ] {
+                if tail.starts_with(sch) {
+                    return None;
+                }
+            }
+        }
+        for sch in &[
+            "about:",
+            "data:",
+            "javascript:",
+            "blob:",
+            "mailto:",
+            "tel:",
+            "view-source:",
+        ] {
+            if relative.starts_with(sch) {
+                return None;
+            }
+        }
         let base_url = url::Url::parse(base).ok()?;
         let joined = base_url.join(relative).ok()?;
+        // Reject any joined URL whose path begins with a special-scheme
+        // literal (catches the rare case where the input was a clean
+        // relative path but contained an embedded `about:blank` segment).
+        if let Some(path) = joined.path().strip_prefix('/') {
+            for sch in &[
+                "about:",
+                "data:",
+                "javascript:",
+                "blob:",
+                "mailto:",
+                "tel:",
+                "view-source:",
+            ] {
+                if path.starts_with(sch) {
+                    return None;
+                }
+            }
+        }
         // We can only fetch http/https. about:blank, data:, blob:,
         // javascript:, chrome-extension:, etc. either have no host
         // (Url::host_str() returns None, causing "no host in URL"
-        // downstream) or aren't network-addressable. Filter here so
-        // every caller (scripts, iframes, stylesheets, fetches)
-        // skips them uniformly. Caught on iphey.com 2026-05-10:
-        // about:blank surfaced from a programmatic iframe src.
+        // downstream) or aren't network-addressable.
         match joined.scheme() {
             "http" | "https" => Some(joined.to_string()),
             _ => None,
@@ -3369,6 +3420,48 @@ impl Page {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: a JS-side `location.href = 'about:blank'` (or any
+    /// other special-scheme URL) must NOT cause the navigate loop to
+    /// fetch `https://host/about:blank`. Caught on iphey.com where the
+    /// URL polyfill mis-joined the special scheme and broke same-page
+    /// rendering (THIN-BODY 901b instead of L3-RENDERED 29 KB).
+    #[test]
+    fn resolve_url_rejects_special_scheme_relative() {
+        // Bare special-scheme strings → no-op
+        assert_eq!(Page::resolve_url("https://iphey.com/", "about:blank"), None);
+        assert_eq!(
+            Page::resolve_url("https://iphey.com/", "data:text/html,<p>x</p>"),
+            None
+        );
+        assert_eq!(
+            Page::resolve_url("https://iphey.com/", "javascript:void(0)"),
+            None
+        );
+        assert_eq!(
+            Page::resolve_url("https://iphey.com/", "blob:https://x/y"),
+            None
+        );
+        // Path-encoded special schemes (the iphey symptom — pending URL
+        // arrives as the literal "https://iphey.com/about:blank") → no-op
+        assert_eq!(
+            Page::resolve_url("https://iphey.com/", "https://iphey.com/about:blank"),
+            None
+        );
+        assert_eq!(
+            Page::resolve_url("https://iphey.com/", "/about:blank"),
+            None
+        );
+        // Normal navigations are unaffected
+        assert_eq!(
+            Page::resolve_url("https://iphey.com/", "/page2"),
+            Some("https://iphey.com/page2".to_string())
+        );
+        assert_eq!(
+            Page::resolve_url("https://iphey.com/", "https://other.example/foo"),
+            Some("https://other.example/foo".to_string())
+        );
+    }
 
     #[tokio::test]
     async fn page_from_html_basic() {

@@ -1264,8 +1264,32 @@
     };
 
     function _parseLocationUrl(url) {
+        const s = String(url);
+        // Special-scheme URLs (about:, data:, javascript:, blob:, mailto:,
+        // tel:, chrome:, chrome-extension:, view-source:) are absolute — they
+        // replace the current location entirely, they don't join against the
+        // base. Our embedded URL constructor was joining `about:blank`
+        // against an http(s) base and producing `https://host/about:blank`
+        // (a path with a colon), which the navigate loop then tried to fetch.
+        // Detect special schemes and short-circuit the join. Pinned by the
+        // iphey.com regression where JS sets `location.href = 'about:blank'`
+        // during a fingerprint check and broke same-page rendering.
+        if (/^(about|data|javascript|blob|mailto|tel|chrome|chrome-extension|view-source):/i.test(s)) {
+            _locationData.href = s;
+            // Clear sub-fields so a downstream consumer doesn't see stale
+            // pieces of the previous URL.
+            _locationData.protocol = (s.split(':', 1)[0] || '') + ':';
+            _locationData.host = '';
+            _locationData.hostname = '';
+            _locationData.port = '';
+            _locationData.pathname = '';
+            _locationData.search = '';
+            _locationData.hash = '';
+            _locationData.origin = 'null';
+            return;
+        }
         try {
-            const u = new URL(url, _locationData.href !== "about:blank" ? _locationData.href : undefined);
+            const u = new URL(s, _locationData.href !== "about:blank" ? _locationData.href : undefined);
             _locationData.href = u.href;
             _locationData.protocol = u.protocol;
             _locationData.host = u.host;
@@ -1276,7 +1300,7 @@
             _locationData.hash = u.hash;
             _locationData.origin = u.origin;
         } catch {
-            _locationData.href = String(url);
+            _locationData.href = s;
         }
     }
 
@@ -1315,10 +1339,8 @@
     });
 
     _defLoc('href', () => _locationData.href, (v) => {
-        try { Deno.core.print('[BOOTSTRAP] SETTING LOCATION HREF TO ' + v + '\n'); } catch(e) {}
         _parseLocationUrl(v);
-        _boxide.__pendingNavigation = 
- { url: _locationData.href, kind: "assign" };
+        _boxide.__pendingNavigation = { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defLoc('origin', () => _locationData.origin);
