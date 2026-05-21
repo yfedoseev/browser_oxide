@@ -938,7 +938,29 @@ impl Page {
         // deterministic snapshot tests where synthetic input would skew
         // results.
         let humanize = include_str!("js/humanize.js").to_string();
-        Self::navigate_with_init(url, profile, max_iterations, vec![humanize]).await
+        Self::navigate_with_init(
+            url,
+            profile,
+            max_iterations,
+            vec![humanize],
+            Self::default_solvers(),
+        )
+        .await
+    }
+
+    /// Like [`Page::navigate`] but with a caller-supplied
+    /// [`crate::ChallengeSolver`] list. The open-source engine ships no
+    /// solvers (`default_solvers()` is empty); embedders that have the
+    /// private `vendor_solvers` crate register them here:
+    /// `Page::navigate_with_solvers(url, profile, n, vendor_solvers::default_solvers())`.
+    pub async fn navigate_with_solvers(
+        url: &str,
+        profile: stealth::StealthProfile,
+        max_iterations: u8,
+        solvers: std::sync::Arc<[std::sync::Arc<dyn crate::ChallengeSolver>]>,
+    ) -> Result<Self, deno_core::error::AnyError> {
+        let humanize = include_str!("js/humanize.js").to_string();
+        Self::navigate_with_init(url, profile, max_iterations, vec![humanize], solvers).await
     }
 
     /// Pure navigation — no humanization, no synthetic events. Use for
@@ -950,7 +972,14 @@ impl Page {
         profile: stealth::StealthProfile,
         max_iterations: u8,
     ) -> Result<Self, deno_core::error::AnyError> {
-        Self::navigate_with_init(url, profile, max_iterations, Vec::new()).await
+        Self::navigate_with_init(
+            url,
+            profile,
+            max_iterations,
+            Vec::new(),
+            Self::default_solvers(),
+        )
+        .await
     }
 
     /// Alias of [`Page::navigate`] preserved for backward compatibility.
@@ -978,6 +1007,7 @@ impl Page {
         profile: stealth::StealthProfile,
         max_iterations: u8,
         init_scripts: Vec<String>,
+        solvers: std::sync::Arc<[std::sync::Arc<dyn crate::ChallengeSolver>]>,
     ) -> Result<Self, deno_core::error::AnyError> {
         let client = net::HttpClient::new(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
@@ -1051,6 +1081,7 @@ impl Page {
             csp_headers,
             csp_headers_ro,
             resp.accept_ch_upgrade,
+            solvers,
         )
         .await?;
 
@@ -1089,6 +1120,7 @@ impl Page {
             Vec::new(),
             Vec::new(),
             false,
+            Self::default_solvers(),
         )
         .await
     }
@@ -1105,18 +1137,13 @@ impl Page {
         csp_headers: Vec<String>,
         csp_headers_ro: Vec<String>,
         accept_ch_upgrade: bool,
+        solvers: std::sync::Arc<[std::sync::Arc<dyn crate::ChallengeSolver>]>,
     ) -> Result<Self, deno_core::error::AnyError> {
-        // Stage 2 E2: build the per-navigation [`crate::ChallengeSolver`]
-        // list once at the top of the loop. Default to the four built-in
-        // vendor wrappers (Akamai BMP, Kasada, DataDome, Cloudflare); the
-        // wrappers delegate to the same `handle_akamai_flow` /
-        // `handle_cloudflare_flow` / `datadome_handler::*` pieces the
-        // pre-refactor inline calls used. The open-source engine
-        // defaults to an empty solver list (the per-vendor solvers
-        // live in the private `vendor_solvers` crate); the dispatch
-        // loop below iterates over whatever is registered, so an empty
-        // list is a clean no-op.
-        let solvers = Self::default_solvers();
+        // The challenge-solver dispatch below iterates over `solvers`.
+        // The open-source engine passes an empty list (per-vendor solvers
+        // live in the private `vendor_solvers` crate); embedders register
+        // their own via `Page::navigate_with_solvers`. An empty list makes
+        // the dispatch a clean no-op.
         // Install CSP for this navigation. Headers + meta-tag sources
         // both contribute. The fetch_ext layer reads from a per-process
         // RwLock so async ops can enforce without borrowing OpState.
