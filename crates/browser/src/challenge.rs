@@ -99,7 +99,7 @@ pub enum SolveOutcome {
 /// has to implement what it cares about (e.g. a passive sniffer that
 /// only observes responses can leave `solve` defaulted to
 /// `SolveOutcome::NotApplicable`).
-#[async_trait]
+#[async_trait(?Send)]
 pub trait ChallengeSolver: Send + Sync {
     /// Short telemetry name — same string as [`ChallengeKind::vendor`].
     /// Stable; used in log lines and not user-visible.
@@ -167,7 +167,7 @@ mod tests {
     /// Default-impl smoke: a solver that overrides only `name()` should
     /// compile and have safe no-op defaults for every other method.
     struct PassiveSolver;
-    #[async_trait]
+    #[async_trait(?Send)]
     impl ChallengeSolver for PassiveSolver {
         fn name(&self) -> &'static str {
             "passive"

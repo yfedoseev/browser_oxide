@@ -11,6 +11,7 @@ mod page;
 pub mod parallel;
 pub mod pool;
 mod script_runner;
+pub mod solvers;
 pub mod stylesheet_collector;
 
 pub use challenge::{ChallengeKind, ChallengeSolver, SolveOutcome};
@@ -18,3 +19,4 @@ pub use classify::{engine_classify, EngineClass};
 pub use page::{ChallengeVerdict, Page};
 pub use parallel::{NavigateResult, ParallelPager};
 pub use pool::PagePool;
+pub use solvers::AkamaiSolver;
