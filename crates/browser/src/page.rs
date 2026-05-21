@@ -203,6 +203,15 @@ pub struct Page {
     children: Vec<iframe::ChildIframe>,
     event_loop: BrowserEventLoop,
     url: String,
+    /// Registered [`crate::ChallengeSolver`]s. Populated by
+    /// `Page::navigate` with the four default vendor solvers
+    /// (AkamaiSolver, KasadaSolver, DataDomeSolver, CloudflareSolver)
+    /// so existing call paths see the same behaviour they did
+    /// pre-refactor. `Page::from_html` / direct construction leave
+    /// this empty (those paths don't run the challenge loop). Stage 2
+    /// only consults this list inside the navigate iteration; Stage 3
+    /// moves the underlying vendor impls to an internal crate.
+    solvers: std::sync::Arc<[std::sync::Arc<dyn crate::ChallengeSolver>]>,
 }
 
 impl Drop for Page {
@@ -663,6 +672,7 @@ impl Page {
             event_loop,
             url: url.to_string(),
             children: Vec::new(),
+            solvers: std::sync::Arc::from(Vec::<std::sync::Arc<dyn crate::ChallengeSolver>>::new()),
         })
     }
 
@@ -898,6 +908,7 @@ impl Page {
             event_loop,
             url: url.to_string(),
             children,
+            solvers: std::sync::Arc::from(Vec::<std::sync::Arc<dyn crate::ChallengeSolver>>::new()),
         })
     }
 
@@ -1109,6 +1120,38 @@ impl Page {
     /// Get the page URL.
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// Replace this page's [`crate::ChallengeSolver`] list. Returns the
+    /// modified `Self` so it can be used builder-style. Default (set by
+    /// `Page::navigate`) is the four built-in vendor solvers; embedders
+    /// who want a vanilla engine can call `page.with_solvers(&[])` or
+    /// build their own list of trait objects.
+    pub fn with_solvers(
+        mut self,
+        solvers: impl Into<std::sync::Arc<[std::sync::Arc<dyn crate::ChallengeSolver>]>>,
+    ) -> Self {
+        self.solvers = solvers.into();
+        self
+    }
+
+    /// Read-only view of the currently-registered solvers.
+    pub fn solvers(&self) -> &[std::sync::Arc<dyn crate::ChallengeSolver>] {
+        &self.solvers
+    }
+
+    /// Default set of solvers wired by `Page::navigate` so existing
+    /// callers see the same behaviour as before the refactor. Returns
+    /// a fresh allocation per call so each navigation gets independent
+    /// session state (each solver internally manages its own store).
+    pub fn default_solvers() -> std::sync::Arc<[std::sync::Arc<dyn crate::ChallengeSolver>]> {
+        std::sync::Arc::from(vec![
+            std::sync::Arc::new(crate::AkamaiSolver::new())
+                as std::sync::Arc<dyn crate::ChallengeSolver>,
+            std::sync::Arc::new(crate::KasadaSolver::new()),
+            std::sync::Arc::new(crate::DataDomeSolver::new()),
+            std::sync::Arc::new(crate::CloudflareSolver::new()),
+        ])
     }
 
     /// Get the event loop (for advanced control).
@@ -3393,6 +3436,7 @@ impl Page {
             event_loop,
             url: url.to_string(),
             children,
+            solvers: std::sync::Arc::from(Vec::<std::sync::Arc<dyn crate::ChallengeSolver>>::new()),
         })
     }
 
