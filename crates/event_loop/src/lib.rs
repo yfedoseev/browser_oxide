@@ -354,7 +354,7 @@ impl BrowserEventLoop {
                     pending_timers: timers,
                     pending_intervals: intervals,
                     pending_resources: resources,
-                    timed_out: matches!(result, Err(_)),
+                    timed_out: result.is_err(),
                 });
                 tick_idx = tick_idx.wrapping_add(1);
             }

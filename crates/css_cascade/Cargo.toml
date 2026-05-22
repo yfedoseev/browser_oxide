@@ -12,3 +12,6 @@ css_parser = { workspace = true }
 css_selectors = { workspace = true }
 css_values = { workspace = true }
 thiserror = "2"
+
+[lints]
+workspace = true

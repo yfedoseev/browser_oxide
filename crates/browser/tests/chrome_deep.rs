@@ -3,7 +3,6 @@
 //! whether we match.
 
 use browser::Page;
-use stealth;
 
 fn html(body: &str) -> String {
     format!(

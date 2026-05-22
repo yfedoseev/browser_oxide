@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use browser::Page;
-    use stealth;
 
     #[tokio::test]
     async fn dump_window_props() {

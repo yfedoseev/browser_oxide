@@ -5,7 +5,6 @@
 
 use browser::Page;
 use std::time::Duration;
-use stealth;
 
 fn html(body: &str) -> String {
     format!("<html><head></head><body>{}</body></html>", body)

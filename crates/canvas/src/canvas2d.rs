@@ -15,10 +15,14 @@
 
 use crate::path::Path2D;
 use crate::text::{self, ParsedFont, TextMetrics};
+// gradient_shader is deprecated in newer skia-safe; the replacement
+// `gradient` module isn't in our pinned version. See Gradient::to_shader.
+#[allow(deprecated)]
+use skia_safe::gradient_shader;
 use skia_safe::{
-    gradient_shader, image_filters, surfaces, AlphaType, BlendMode, Canvas as SkCanvas, Color4f,
-    ColorFilter, ColorType, Font, FontHinting, FontMgr, ImageInfo, Matrix, Paint, PaintStyle,
-    Point, Rect as SkRect, TileMode,
+    image_filters, surfaces, AlphaType, BlendMode, Canvas as SkCanvas, Color4f, ColorFilter,
+    ColorType, Font, FontHinting, FontMgr, ImageInfo, Matrix, Paint, PaintStyle, Point,
+    Rect as SkRect, TileMode,
 };
 
 /// Simple 0-255 RGBA color. This is the public color type exposed to
@@ -106,6 +110,11 @@ pub enum Gradient {
 }
 
 impl Gradient {
+    // skia-safe deprecated the free `gradient_shader::*` fns in favour of
+    // the `gradient` module; the replacements aren't available in our
+    // pinned skia-safe version, so we keep the deprecated path until the
+    // dep is bumped.
+    #[allow(deprecated)]
     fn to_shader(&self) -> Option<skia_safe::Shader> {
         match self {
             Gradient::Linear {

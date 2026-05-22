@@ -20,6 +20,12 @@ pub struct WebGLState {
     available: bool,
 }
 
+impl Default for WebGLState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebGLState {
     pub fn new() -> Self {
         Self {
@@ -213,10 +219,10 @@ pub fn op_webgl_draw_arrays(
 pub fn op_webgl_clear_color(
     #[state] _state: &WebGLState,
     #[smi] _ctx_id: i32,
-    r: f64,
-    g: f64,
-    b: f64,
-    a: f64,
+    _r: f64,
+    _g: f64,
+    _b: f64,
+    _a: f64,
 ) {
     #[cfg(feature = "webgl-render")]
     if let Some(ctx) = _state.contexts.get(&_ctx_id) {

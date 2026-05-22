@@ -1,13 +1,12 @@
 #[cfg(test)]
 mod tests {
     use browser::Page;
-    use stealth;
 
     #[tokio::test]
     #[ignore = "network: live HTTP against pixelscan.net"]
     async fn test_pixelscan_oxide() {
         let profile = stealth::presets::chrome_148_macos();
-        let mut page = Page::navigate("https://pixelscan.net/", profile, 5)
+        let _page = Page::navigate("https://pixelscan.net/", profile, 5)
             .await
             .unwrap();
 

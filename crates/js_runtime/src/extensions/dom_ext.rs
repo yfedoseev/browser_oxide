@@ -109,7 +109,7 @@ pub fn op_dom_has_attribute(
         .dom
         .get(id)
         .and_then(|n| n.as_element())
-        .map_or(false, |e| {
+        .is_some_and(|e| {
             e.attrs
                 .iter()
                 .any(|a| a.name.local.eq_ignore_ascii_case(name))
@@ -739,6 +739,10 @@ pub fn op_dom_class_list_remove(
 /// Uses selector matching for style block rules. Higher specificity wins.
 #[op2]
 #[serde]
+// explicit_counter_loop: `source_order` is a manual CSS source-order
+// counter used inside the nested selector-match loop; .enumerate()
+// would force a usize↔u32 cast against the stored specificity tuple.
+#[allow(clippy::explicit_counter_loop)]
 pub fn op_dom_get_all_computed_styles(
     #[state] state: &mut DomState,
     #[smi] node_id: i32,
@@ -908,6 +912,7 @@ fn get_inline_style_value(dom: &dom::Dom, id: NodeId, property: &str) -> Option<
 
 /// Search <style> block rules for a matching declaration.
 /// Returns the value from the highest-specificity matching rule.
+#[allow(clippy::explicit_counter_loop)] // CSS source-order counter; see above
 fn get_stylesheet_value(state: &DomState, id: NodeId, property: &str) -> Option<String> {
     let dom_el = DomElement::new(&state.dom, id)?;
 

@@ -68,7 +68,7 @@ impl<'a> Element for DomElement<'a> {
             .attrs
             .iter()
             .find(|a| a.name.local == "class")
-            .map_or(false, |a| a.value.split_whitespace().any(|c| c == name))
+            .is_some_and(|a| a.value.split_whitespace().any(|c| c == name))
     }
 
     fn has_attribute(&self, name: &str) -> bool {
@@ -162,7 +162,7 @@ impl<'a> Element for DomElement<'a> {
             Some(parent_id) => self
                 .dom
                 .get(parent_id)
-                .map_or(false, |n| matches!(n.data, NodeData::Document)),
+                .is_some_and(|n| matches!(n.data, NodeData::Document)),
             None => false,
         }
     }
@@ -232,8 +232,8 @@ mod tests {
     #[test]
     fn element_local_name() {
         let dom = build_test_dom();
-        let div_id = dom.child_elements(dom.children(NodeId::DOCUMENT)[0])[0]; // body's first child
-        let body_id = dom.child_elements(NodeId::DOCUMENT)[0]; // html
+        let _div_id = dom.child_elements(dom.children(NodeId::DOCUMENT)[0])[0]; // body's first child
+        let _body_id = dom.child_elements(NodeId::DOCUMENT)[0]; // html
         let html_el = DomElement::new(&dom, dom.children(NodeId::DOCUMENT)[0]).unwrap();
         assert_eq!(html_el.local_name(), "html");
     }

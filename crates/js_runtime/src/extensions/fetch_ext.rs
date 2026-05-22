@@ -629,7 +629,7 @@ pub fn op_net_xhr_sync(
                 }
                 _ => {
                     let hdrs = net::headers::chrome_headers_fetch(
-                        &client.profile(),
+                        client.profile(),
                         &url_clone,
                         origin_str.as_deref(),
                     );

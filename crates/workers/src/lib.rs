@@ -7,9 +7,13 @@ use tokio::sync::mpsc;
 /// A dedicated Web Worker running in its own V8 isolate.
 pub struct WebWorker {
     runtime: BrowserJsRuntime,
-    /// Channel for receiving messages from the worker
+    // rx/tx hold the worker message-channel endpoints alive for the
+    // worker's lifetime. The receive side isn't surfaced on the public
+    // API yet, so they read as dead — keep them (dropping would close
+    // the channel) until the postMessage receive path is wired up.
+    #[allow(dead_code)]
     rx: mpsc::Receiver<Value>,
-    /// Channel sender stored in OpState for the worker to post messages
+    #[allow(dead_code)]
     tx: mpsc::Sender<Value>,
     terminated: bool,
 }

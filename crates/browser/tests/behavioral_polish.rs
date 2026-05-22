@@ -3,7 +3,6 @@
 //! quantization, and assorted other surfaces that have been trip-wires.
 
 use browser::Page;
-use stealth;
 
 async fn evaluate(js: &str) -> String {
     let mut page = Page::from_html(
@@ -75,7 +74,7 @@ async fn hardware_concurrency_is_typical() {
     let r = evaluate("navigator.hardwareConcurrency").await;
     let n: u32 = r.parse().unwrap_or(0);
     // Chrome 147 desktop typically 4–32. CreepJS flags 1, 0, or > 64.
-    assert!(n >= 2 && n <= 32, "hardwareConcurrency suspicious: {n}");
+    assert!((2..=32).contains(&n), "hardwareConcurrency suspicious: {n}");
 }
 
 // ================================================================

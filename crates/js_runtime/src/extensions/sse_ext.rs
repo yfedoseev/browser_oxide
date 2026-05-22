@@ -30,6 +30,12 @@ impl SseStore {
 /// SSE connection state (empty — connections stored globally).
 pub struct SseState;
 
+impl Default for SseState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SseState {
     pub fn new() -> Self {
         Self

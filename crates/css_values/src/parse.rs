@@ -411,12 +411,10 @@ fn parse_font_family(value: &[ComponentValue<'_>]) -> Result<CssValue, ValueErro
             ComponentValue::Token(Token {
                 kind: TokenKind::Comma,
                 ..
-            }) => {
-                if !current_name_parts.is_empty() {
-                    let name = current_name_parts.join(" ");
-                    families.push(match_generic_or_named(&name));
-                    current_name_parts.clear();
-                }
+            }) if !current_name_parts.is_empty() => {
+                let name = current_name_parts.join(" ");
+                families.push(match_generic_or_named(&name));
+                current_name_parts.clear();
             }
             ComponentValue::Token(Token {
                 kind: TokenKind::Ident(name),
@@ -900,7 +898,7 @@ fn trim_whitespace<'a, 'b>(value: &'a [ComponentValue<'b>]) -> &'a [ComponentVal
     }
 }
 
-fn expect_single_ident<'a>(value: &'a [ComponentValue<'_>]) -> Result<String, ValueError> {
+fn expect_single_ident(value: &[ComponentValue<'_>]) -> Result<String, ValueError> {
     if value.len() == 1 {
         if let Some(ident) = try_ident(&value[0]) {
             return Ok(ident);

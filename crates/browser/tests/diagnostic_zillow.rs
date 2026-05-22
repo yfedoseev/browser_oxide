@@ -2,7 +2,7 @@
 #[ignore]
 async fn diagnostic_zillow() {
     use browser::Page;
-    use std::time::Duration;
+
     let profile = stealth::presets::chrome_148_macos();
     let url = "https://www.zillow.com/";
     println!("\n=== ZILLOW-DIAG: {} ===", url);

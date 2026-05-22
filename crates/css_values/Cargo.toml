@@ -10,3 +10,6 @@ publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when
 [dependencies]
 css_parser = { workspace = true }
 thiserror = "2"
+
+[lints]
+workspace = true

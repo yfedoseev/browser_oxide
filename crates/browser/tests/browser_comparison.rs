@@ -231,9 +231,6 @@ fn extract_value(resp: &Value) -> String {
 // Browser endpoints
 // ============================================================
 
-/// browser_oxide CDP server port (started per-test).
-const BROWSER_OXIDE_PORT: u16 = 0; // ephemeral
-
 /// Chrome headless default CDP port.
 const CHROME_PORT: u16 = 9222;
 
@@ -364,10 +361,7 @@ fn print_comparison(results: &[BenchResult]) {
     let sep = "=".repeat(80);
     let dash = "-".repeat(80);
     println!("\n{}", sep);
-    println!(
-        "{:<20} {:<30} {:>10} {}",
-        "Browser", "Test", "Time", "Result"
-    );
+    println!("{:<20} {:<30} {:>10} Result", "Browser", "Test", "Time");
     println!("{}", dash);
     for r in results {
         let status = if r.success { "PASS" } else { "FAIL" };
@@ -869,6 +863,7 @@ async fn browser_oxide_cdp_roundtrip() {
 struct SiteEntry {
     url: &'static str,
     protection: &'static str,
+    #[allow(dead_code)] // documents the site's protection category in the table
     category: &'static str,
 }
 
@@ -895,7 +890,7 @@ async fn cdp_probe(ws_url: &str, browser_name: &str, site: &SiteEntry) -> BenchR
 
     // Navigate and wait for load event
     client.navigate_and_wait(site.url, 10_000).await;
-    let elapsed_nav = start.elapsed();
+    let _elapsed_nav = start.elapsed();
 
     // Check what we got
     let title = client
@@ -1175,7 +1170,7 @@ fn print_scorecard(results: &[BenchResult], browser_name: &str) {
         browser_name,
         passed,
         total,
-        if total > 0 { passed * 100 / total } else { 0 },
+        (passed * 100).checked_div(total).unwrap_or(0),
         avg_ms,
     );
 }
@@ -1225,7 +1220,7 @@ fn print_side_by_side(all: &[(String, Vec<BenchResult>)]) {
 
     // Summary per browser
     print!("{:<50}", "TOTAL");
-    for (name, results) in all {
+    for (_name, results) in all {
         let passed = results.iter().filter(|r| r.success).count();
         let total = results.len();
         print!(" {:>20}", format!("{}/{}", passed, total));
@@ -1260,9 +1255,9 @@ fn print_side_by_side(all: &[(String, Vec<BenchResult>)]) {
     for (cat, cat_name) in categories.iter().zip(category_names.iter()) {
         print!("{:<50}", cat_name);
         for (_, results) in all {
-            let cat_results: Vec<_> = results
+            let _cat_results: Vec<_> = results
                 .iter()
-                .filter(|r| {
+                .filter(|_r| {
                     // Match by category in the site entry — we encode it in the test name
                     // The test name is "protection|url", match by protection prefix
                     true // We'll use a different approach below
@@ -1611,8 +1606,8 @@ async fn compare_content_extraction() {
     println!(" CONTENT EXTRACTION ACCURACY");
     println!("{}", sep);
     println!(
-        "{:<45} {:<20} {:>10} {:>8} {}",
-        "URL", "Browser", "Text len", "Time", "Match"
+        "{:<45} {:<20} {:>10} {:>8} Match",
+        "URL", "Browser", "Text len", "Time"
     );
     println!("{}", dash);
 
@@ -1752,8 +1747,8 @@ async fn compare_js_rendering() {
     println!(" JS-HEAVY SPA RENDERING");
     println!("{}", sep);
     println!(
-        "{:<35} {:<15} {:>10} {:>8} {}",
-        "Site", "Browser", "Body len", "Time", "JS content?"
+        "{:<35} {:<15} {:>10} {:>8} JS content?",
+        "Site", "Browser", "Body len", "Time"
     );
     println!("{}", dash);
 
@@ -2015,11 +2010,8 @@ async fn compare_throughput() {
                 .await
                 .map(|v| extract_value(&v))
                 .unwrap_or_default();
-            if title.len() > 0 {
-                ok += 1;
-            } else {
-                ok += 1;
-            } // count as success if we got a response
+            let _ = title;
+            ok += 1; // count as success if we got a response at all
             c.close().await;
         }
         let total = t.elapsed();
@@ -2054,11 +2046,8 @@ async fn compare_throughput() {
                 .await
                 .map(|v| extract_value(&v))
                 .unwrap_or_default();
-            if title.len() > 0 {
-                ok += 1;
-            } else {
-                ok += 1;
-            }
+            let _ = title;
+            ok += 1;
             c.close().await;
         }
         let total = t.elapsed();
@@ -2380,10 +2369,7 @@ async fn compare_quic_support() {
     println!("\n{}", sep);
     println!(" QUIC / HTTP/3 SUPPORT");
     println!("{}", sep);
-    println!(
-        "{:<20} {:<40} {:>10} {}",
-        "Browser", "Test", "Time", "Result"
-    );
+    println!("{:<20} {:<40} {:>10} Result", "Browser", "Test", "Time");
     println!("{}", dash);
 
     // browser_oxide — test QUIC via net crate directly
@@ -2496,10 +2482,7 @@ async fn compare_eventsource_support() {
     println!("\n{}", sep);
     println!(" EVENTSOURCE (SSE) SUPPORT");
     println!("{}", sep);
-    println!(
-        "{:<20} {:<40} {:>10} {}",
-        "Browser", "Check", "Time", "Result"
-    );
+    println!("{:<20} {:<40} {:>10} Result", "Browser", "Check", "Time");
     println!("{}", dash);
 
     let checks = vec![
@@ -2606,10 +2589,7 @@ async fn compare_websocket_support() {
     println!("\n{}", sep);
     println!(" WEBSOCKET SUPPORT");
     println!("{}", sep);
-    println!(
-        "{:<20} {:<40} {:>10} {}",
-        "Browser", "Check", "Time", "Result"
-    );
+    println!("{:<20} {:<40} {:>10} Result", "Browser", "Check", "Time");
     println!("{}", dash);
 
     let checks: Vec<(&str, &str)> = vec![

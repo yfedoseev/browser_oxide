@@ -7,7 +7,6 @@
 //! our isolate cleanly throws RangeError before C-stack exhaustion.
 
 use browser::Page;
-use stealth;
 
 async fn page() -> Page {
     Page::from_html(
@@ -181,6 +180,7 @@ fn test_thread_stack_is_at_least_16mb() {
 /// natives. If our shim's Function.prototype.toString wrapper accidentally
 /// invokes itself, this is the crash path.
 #[tokio::test]
+#[allow(non_snake_case)] // mirrors JS API name under test
 async fn function_toString_recursion_throws_range_error() {
     let mut p = page().await;
     let r = p

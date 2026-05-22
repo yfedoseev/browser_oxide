@@ -1,7 +1,6 @@
 //! End-to-end integration tests crossing crate boundaries.
 
 use browser::Page;
-use stealth;
 
 #[tokio::test]
 async fn html_parse_js_execute_extract() {

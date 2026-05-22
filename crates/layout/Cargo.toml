@@ -14,3 +14,6 @@ css_values = { workspace = true }
 css_cascade = { workspace = true }
 taffy = "0.8"
 serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

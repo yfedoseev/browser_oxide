@@ -192,7 +192,7 @@ mod tests {
         let mut headers: Vec<(String, String)> = Vec::new();
         s.prepare_request("example.com", &mut headers);
         assert!(headers.is_empty());
-        assert_eq!(s.solved_signal("foo=bar", "<html></html>"), false);
+        assert!(!s.solved_signal("foo=bar", "<html></html>"));
     }
 
     #[test]

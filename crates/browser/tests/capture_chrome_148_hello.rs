@@ -28,8 +28,6 @@
 //!
 //! Per PLAN.md §3 W4.4.
 
-use stealth;
-
 #[tokio::test]
 #[ignore = "network: capture our TLS ClientHello via tls.peet.ws/api/all"]
 async fn capture_chrome_148_hello_desktop() {

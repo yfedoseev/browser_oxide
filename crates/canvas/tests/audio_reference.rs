@@ -218,8 +218,8 @@ fn reports_current_sum() {
 #[test]
 fn scan_threshold_for_chrome_parity() {
     use canvas::{AudioFingerprint, AudioParams};
-    let sr = 44100u32;
-    let len = 5000usize;
+    let _sr = 44100u32;
+    let _len = 5000usize;
 
     println!("\n=== threshold scan ===");
     for threshold in [-24.0, -30.0, -40.0, -50.0] {

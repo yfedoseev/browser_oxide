@@ -10,7 +10,6 @@
 //! Run: `cargo test -p browser --test wasm_smoke -- --test-threads=1`
 
 use browser::Page;
-use stealth;
 
 fn html(body: &str) -> String {
     format!("<!DOCTYPE html><html><head></head><body>{body}</body></html>")

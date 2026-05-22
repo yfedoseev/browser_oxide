@@ -127,7 +127,7 @@ pub fn resolve_escapes(raw: &str) -> Cow<'_, str> {
                     // Trailing backslash (shouldn't happen in valid CSS, keep it)
                     result.push(ch);
                 }
-                Some(next) if next == '\n' => {
+                Some('\n') => {
                     // Escaped newline: continuation, skip both
                 }
                 Some(next) if next.is_ascii_hexdigit() => {

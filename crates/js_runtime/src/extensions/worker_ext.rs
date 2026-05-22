@@ -461,10 +461,7 @@ pub fn op_worker_self_post(#[string] data: String) {
 pub fn op_worker_self_recv() -> String {
     WORKER_SELF.with(|w| {
         if let Some(s) = w.borrow().as_ref() {
-            match s.from_parent.try_recv() {
-                Ok(msg) => msg,
-                Err(_) => String::new(),
-            }
+            s.from_parent.try_recv().unwrap_or_default()
         } else {
             String::new()
         }

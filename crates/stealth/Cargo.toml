@@ -16,3 +16,6 @@ rand_chacha = "0.10"
 rand_distr = "0.6"
 sha2 = "0.10"
 hex = "0.4"
+
+[lints]
+workspace = true

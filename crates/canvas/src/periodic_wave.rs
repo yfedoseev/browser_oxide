@@ -66,6 +66,7 @@ impl StandardWaveType {
     /// - Sawtooth: `b_n = (2/π) / n` for all n ≥ 1, with alternating
     ///   sign starting negative on even harmonics (matches Blink's
     ///   `1/n - 2/n` convention — equivalent to a standard sawtooth).
+    #[allow(clippy::needless_range_loop)] // n indexes parallel real/imag harmonic arrays
     pub fn fourier_coefficients(self) -> (Vec<f32>, Vec<f32>) {
         let len = MAX_NUMBER_OF_PARTIALS + 1;
         let real = vec![0.0f32; len];
@@ -105,8 +106,8 @@ impl StandardWaveType {
 /// so that `max(|sample|) == 1.0` (or all zeros for a silent wave).
 fn build_wavetable(real: &[f32], imag: &[f32]) -> Vec<f32> {
     let n = WAVE_TABLE_SIZE;
-    assert!(real.len() >= n / 2 + 1, "real coefficient array too short");
-    assert!(imag.len() >= n / 2 + 1, "imag coefficient array too short");
+    assert!(real.len() > n / 2, "real coefficient array too short");
+    assert!(imag.len() > n / 2, "imag coefficient array too short");
 
     // Build the length-N complex FFT input. For a real-valued time-domain
     // output we need the spectrum to be conjugate-symmetric: `X[N-k] =
@@ -306,6 +307,7 @@ mod tests {
     /// sine — this is the case the old `audio.rs` shortcut calibrated
     /// against.
     #[test]
+    #[allow(clippy::needless_range_loop)] // i indexes the wave table + analytic ref
     fn triangle_at_10khz_is_fundamental_only() {
         let wave = PeriodicWave::new(StandardWaveType::Triangle, 44100.0);
         // The topmost (narrowest) range table is what 10 kHz lands in:

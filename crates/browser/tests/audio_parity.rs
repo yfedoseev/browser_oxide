@@ -15,7 +15,6 @@
 //! default-params scenario that real fingerprint scripts use.
 
 use browser::Page;
-use stealth;
 
 #[tokio::test]
 async fn audio_compressor_in_blink_range() {

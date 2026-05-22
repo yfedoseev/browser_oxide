@@ -10,7 +10,6 @@
 
 use browser::Page;
 use sha2::{Digest, Sha256};
-use stealth;
 
 async fn evaluate(js: &str) -> String {
     let mut page = Page::from_html(

@@ -369,6 +369,95 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
     Ok(connector)
 }
 
+/// Configure a per-connection TLS session with ALPS, ECH GREASE, and SNI.
+/// Per-`profile.device_class` branching:
+///  - Desktop / Android: ECH grease + ALPS HTTP/2 SETTINGS payload
+///  - MobileIOS: skip BOTH (Safari has neither)
+pub fn configure_connection(
+    connector: &SslConnector,
+    profile: &StealthProfile,
+    domain: &str,
+) -> Result<ConnectConfiguration, NetError> {
+    let mut config = connector
+        .configure()
+        .map_err(|e| NetError::Tls(e.to_string()))?;
+
+    let is_safari_ios = profile.device_class == DeviceClass::MobileIOS;
+
+    if !is_safari_ios {
+        // ECH GREASE — Chrome desktop+Android both send it. Safari does not.
+        config.set_enable_ech_grease(true);
+
+        // Application-layer settings (ALPS) for HTTP/2.
+        // Chrome 147 Headless sends 4 settings: 1, 2, 4, 6.
+        // Safari has no ALPS extension at all — skip entirely on iOS.
+        let alps_payload: &[u8] = &[
+            // SETTINGS frame (Length 24, Type 4, Flags 0, Stream 0)
+            0x00, 0x00, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, // ID 1: 65536
+            0x00, 0x01, 0x00, 0x01, 0x00, 0x00, // ID 2: 0
+            0x00, 0x02, 0x00, 0x00, 0x00, 0x00, // ID 4: 6291456
+            0x00, 0x04, 0x00, 0x60, 0x00, 0x00, // ID 6: 262144
+            0x00, 0x06, 0x00, 0x04, 0x00, 0x00,
+            // Empty ACCEPT_CH frame (Length 0, Type 0x89, Flags 0, Stream 0)
+            0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        // SAFETY: BoringSSL's `SSL_add_application_settings` reads the
+        // ALPN name (`b"h2"`, length 2) and the ALPS payload buffer
+        // (`alps_payload` — a contiguous static slice we built above);
+        // both are valid, contiguous, non-null, and live for the
+        // entire call. `config.as_ptr()` returns a non-null pointer
+        // to the live `SslContext` we own here. BoringSSL only reads
+        // these buffers; it copies the data into the SSL_CTX, no
+        // ownership transfer.
+        unsafe {
+            if boring_sys2::SSL_add_application_settings(
+                config.as_ptr(),
+                b"h2".as_ptr(),
+                2,
+                alps_payload.as_ptr(),
+                alps_payload.len(),
+            ) != 1
+            {
+                return Err(NetError::Tls("failed to add ALPS settings".into()));
+            }
+        }
+        config.set_alps_use_new_codepoint(true);
+    }
+
+    // SNI is the same for all profiles.
+    let sni_domain = domain.trim_start_matches('[').trim_end_matches(']');
+    if sni_domain.parse::<std::net::IpAddr>().is_ok() {
+        config.set_use_server_name_indication(false);
+    } else {
+        config
+            .set_hostname(sni_domain)
+            .map_err(|e| NetError::Tls(e.to_string()))?;
+    }
+
+    Ok(config)
+}
+
+/// Establish a TLS connection to `domain` using the provided `SslConnector`.
+pub async fn connect_tls(
+    connector: &SslConnector,
+    profile: &StealthProfile,
+    domain: &str,
+    stream: TcpStream,
+) -> Result<SslStream<TcpStream>, NetError> {
+    let config = configure_connection(connector, profile, domain)?;
+    let sni_domain = domain.trim_start_matches('[').trim_end_matches(']');
+
+    tokio_boring2::connect(config, sni_domain, stream)
+        .await
+        .map_err(|e| NetError::Tls(format!("TLS handshake failed: {e}")))
+}
+
+/// Returns the negotiated ALPN protocol from a TLS stream, if any.
+pub fn negotiated_alpn(stream: &SslStream<TcpStream>) -> Option<&[u8]> {
+    stream.ssl().selected_alpn_protocol()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,93 +684,4 @@ rsa_pss_rsae_sha512:rsa_pkcs1_sha512";
         // Probabilistically should differ run-to-run.
         assert_ne!(p1, p2, "Shuffle should be non-deterministic");
     }
-}
-
-/// Configure a per-connection TLS session with ALPS, ECH GREASE, and SNI.
-/// Per-`profile.device_class` branching:
-///  - Desktop / Android: ECH grease + ALPS HTTP/2 SETTINGS payload
-///  - MobileIOS: skip BOTH (Safari has neither)
-pub fn configure_connection(
-    connector: &SslConnector,
-    profile: &StealthProfile,
-    domain: &str,
-) -> Result<ConnectConfiguration, NetError> {
-    let mut config = connector
-        .configure()
-        .map_err(|e| NetError::Tls(e.to_string()))?;
-
-    let is_safari_ios = profile.device_class == DeviceClass::MobileIOS;
-
-    if !is_safari_ios {
-        // ECH GREASE — Chrome desktop+Android both send it. Safari does not.
-        config.set_enable_ech_grease(true);
-
-        // Application-layer settings (ALPS) for HTTP/2.
-        // Chrome 147 Headless sends 4 settings: 1, 2, 4, 6.
-        // Safari has no ALPS extension at all — skip entirely on iOS.
-        let alps_payload: &[u8] = &[
-            // SETTINGS frame (Length 24, Type 4, Flags 0, Stream 0)
-            0x00, 0x00, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, // ID 1: 65536
-            0x00, 0x01, 0x00, 0x01, 0x00, 0x00, // ID 2: 0
-            0x00, 0x02, 0x00, 0x00, 0x00, 0x00, // ID 4: 6291456
-            0x00, 0x04, 0x00, 0x60, 0x00, 0x00, // ID 6: 262144
-            0x00, 0x06, 0x00, 0x04, 0x00, 0x00,
-            // Empty ACCEPT_CH frame (Length 0, Type 0x89, Flags 0, Stream 0)
-            0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
-
-        // SAFETY: BoringSSL's `SSL_add_application_settings` reads the
-        // ALPN name (`b"h2"`, length 2) and the ALPS payload buffer
-        // (`alps_payload` — a contiguous static slice we built above);
-        // both are valid, contiguous, non-null, and live for the
-        // entire call. `config.as_ptr()` returns a non-null pointer
-        // to the live `SslContext` we own here. BoringSSL only reads
-        // these buffers; it copies the data into the SSL_CTX, no
-        // ownership transfer.
-        unsafe {
-            if boring_sys2::SSL_add_application_settings(
-                config.as_ptr(),
-                b"h2".as_ptr(),
-                2,
-                alps_payload.as_ptr(),
-                alps_payload.len(),
-            ) != 1
-            {
-                return Err(NetError::Tls("failed to add ALPS settings".into()));
-            }
-        }
-        config.set_alps_use_new_codepoint(true);
-    }
-
-    // SNI is the same for all profiles.
-    let sni_domain = domain.trim_start_matches('[').trim_end_matches(']');
-    if sni_domain.parse::<std::net::IpAddr>().is_ok() {
-        config.set_use_server_name_indication(false);
-    } else {
-        config
-            .set_hostname(sni_domain)
-            .map_err(|e| NetError::Tls(e.to_string()))?;
-    }
-
-    Ok(config)
-}
-
-/// Establish a TLS connection to `domain` using the provided `SslConnector`.
-pub async fn connect_tls(
-    connector: &SslConnector,
-    profile: &StealthProfile,
-    domain: &str,
-    stream: TcpStream,
-) -> Result<SslStream<TcpStream>, NetError> {
-    let config = configure_connection(connector, profile, domain)?;
-    let sni_domain = domain.trim_start_matches('[').trim_end_matches(']');
-
-    tokio_boring2::connect(config, sni_domain, stream)
-        .await
-        .map_err(|e| NetError::Tls(format!("TLS handshake failed: {e}")))
-}
-
-/// Returns the negotiated ALPN protocol from a TLS stream, if any.
-pub fn negotiated_alpn(stream: &SslStream<TcpStream>) -> Option<&[u8]> {
-    stream.ssl().selected_alpn_protocol()
 }

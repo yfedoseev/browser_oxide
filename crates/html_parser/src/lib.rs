@@ -54,7 +54,7 @@ mod tests {
             .find(|&&id| {
                 dom.get(id)
                     .and_then(|n| n.as_element())
-                    .map_or(false, |e| e.name.local == "body")
+                    .is_some_and(|e| e.name.local == "body")
             })
             .copied()
             .unwrap();
@@ -73,7 +73,7 @@ mod tests {
             .find(|&id| {
                 dom.get(id)
                     .and_then(|n| n.as_element())
-                    .map_or(false, |e| e.name.local == "body")
+                    .is_some_and(|e| e.name.local == "body")
             })
             .unwrap();
         let div = dom.child_elements(body)[0];
@@ -93,7 +93,7 @@ mod tests {
             .find(|&id| {
                 dom.get(id)
                     .and_then(|n| n.as_element())
-                    .map_or(false, |e| e.name.local == "body")
+                    .is_some_and(|e| e.name.local == "body")
             })
             .unwrap();
 
@@ -105,7 +105,7 @@ mod tests {
             .find(|&&id| {
                 dom.get(id)
                     .and_then(|n| n.as_element())
-                    .map_or(false, |e| e.name.local == "div")
+                    .is_some_and(|e| e.name.local == "div")
             })
             .copied()
             .unwrap();
@@ -115,7 +115,7 @@ mod tests {
         let spans = dom.child_elements(div);
         // html5ever may have different parsing; just verify we got spans
         assert!(
-            spans.len() >= 1,
+            !spans.is_empty(),
             "expected at least 1 span, got {}. All children: {}",
             spans.len(),
             all_children.len()
@@ -147,7 +147,7 @@ mod tests {
             .find(|&id| {
                 dom.get(id)
                     .and_then(|n| n.as_element())
-                    .map_or(false, |e| e.name.local == "body")
+                    .is_some_and(|e| e.name.local == "body")
             })
             .unwrap();
         let div = dom.child_elements(body)[0];

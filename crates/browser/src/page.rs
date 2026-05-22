@@ -7,8 +7,6 @@ use js_runtime::{runtime::BrowserRuntimeOptions, BrowserJsRuntime};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use stealth;
-use tracing;
 
 /// Whether a URL is a "secure context" per WICG/secure-contexts §3.2.
 /// Secure: https, wss, file, plus http://localhost / http://127.0.0.1 /
@@ -555,7 +553,7 @@ impl Page {
             if let Some(srcdoc) = &iframe_info.srcdoc {
                 // Execute srcdoc scripts in an isolated function scope
                 let node_id = iframe_info.node_id.to_raw();
-                let escaped = srcdoc.replace('\\', "\\\\").replace('`', "\\`");
+                let _escaped = srcdoc.replace('\\', "\\\\").replace('`', "\\`");
                 let setup_js = format!(
                     r#"(() => {{
                         const _iframeEl = (() => {{
@@ -652,7 +650,7 @@ impl Page {
         let already: Vec<_> = self.children.iter().map(|c| c.node_id).collect();
         let mut materialized = 0usize;
         for info in &iframes {
-            if already.iter().any(|n| *n == info.node_id) {
+            if already.contains(&info.node_id) {
                 continue; // already a real child context — not script-new
             }
             if let Some(srcdoc) = &info.srcdoc {
@@ -1660,7 +1658,7 @@ impl Page {
                 || current_url.contains("udemy.com")
             {
                 tracing::info!(url = %current_url, "applying selective CSP bypass for anti-bot domain");
-                let mut rt = page.event_loop().runtime_mut();
+                let rt = page.event_loop().runtime_mut();
                 let op_state = rt.op_state();
                 let mut state = op_state.borrow_mut();
                 if let Some(stealth_state) =
@@ -1767,7 +1765,7 @@ impl Page {
                     // If a solver already reported the challenge solved
                     // this iteration, DON'T retry just because a cookie
                     // value changed (challenge cookies always rotate).
-                    if any_solved && !(last_accept_ch_upgrade && !accept_ch_retry_done) {
+                    if any_solved && (!last_accept_ch_upgrade || accept_ch_retry_done) {
                         should_retry = false;
                     }
 
@@ -2372,15 +2370,6 @@ impl Page {
         }
     }
 
-    async fn build_page_with_scripts(
-        html: &str,
-        url: &str,
-        profile: &stealth::StealthProfile,
-        client: &net::HttpClient,
-    ) -> Result<Self, deno_core::error::AnyError> {
-        Self::build_page_with_scripts_and_init(html, url, profile, client, &[]).await
-    }
-
     async fn build_page_with_scripts_and_init(
         html: &str,
         url: &str,
@@ -2572,20 +2561,16 @@ impl Page {
 
         // Build stylesheet list: inline first, then fetched external
         let mut stylesheets = inline_css;
-        for result in fetched_css_results {
-            if let Some((css, timings)) = result {
-                stylesheets.push(css);
-                all_timings.push(timings);
-            }
+        for (css, timings) in fetched_css_results.into_iter().flatten() {
+            stylesheets.push(css);
+            all_timings.push(timings);
         }
 
         // Build pre-fetched script map
         let mut prefetched = std::collections::HashMap::new();
-        for result in fetched_scripts_results {
-            if let Some((i, text, timings)) = result {
-                prefetched.insert(i, text);
-                all_timings.push(timings);
-            }
+        for (i, text, timings) in fetched_scripts_results.into_iter().flatten() {
+            prefetched.insert(i, text);
+            all_timings.push(timings);
         }
 
         let runtime = BrowserJsRuntime::with_options(
@@ -3020,7 +3005,7 @@ impl Page {
         };
         for info in &iframes {
             if let Some(srcdoc) = &info.srcdoc {
-                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &profile).await {
+                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, profile).await {
                     Ok(child) => children.push(child),
                     Err(e) => tracing::warn!(error = %e, "iframe srcdoc error"),
                 }
@@ -3046,7 +3031,7 @@ impl Page {
                     match iframe::ChildIframe::from_srcdoc(
                         info.node_id,
                         "<!DOCTYPE html><html><body></body></html>",
-                        &profile,
+                        profile,
                     )
                     .await
                     {
@@ -3077,7 +3062,7 @@ impl Page {
         // Drop children first (V8 reverse order requirement)
         self.children.clear();
         // Use ManuallyDrop to prevent the Drop impl from running
-        let mut page = std::mem::ManuallyDrop::new(self);
+        let page = std::mem::ManuallyDrop::new(self);
         // SAFETY: `page` is `ManuallyDrop`, so its destructor will not
         // run and won't double-drop the bytes we read out of it.
         // `event_loop` is read by value exactly once via `ptr::read`,
@@ -3515,7 +3500,7 @@ mod tests {
         .unwrap();
         let dom = page.take_dom();
         let ps = dom.get_elements_by_tag_name(dom::NodeId::DOCUMENT, "p");
-        assert!(ps.len() >= 1, "expected at least 1 <p>, got {}", ps.len());
+        assert!(!ps.is_empty(), "expected at least 1 <p>, got {}", ps.len());
         assert_eq!(dom.text_content(ps[0]), "test");
     }
 

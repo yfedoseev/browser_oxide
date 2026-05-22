@@ -3,7 +3,6 @@
 //! match (eval.toString().length === 33, etc.).
 
 use browser::Page;
-use stealth;
 
 async fn evaluate(js: &str) -> String {
     let mut page = Page::from_html(

@@ -13,8 +13,7 @@
 //! Each test prints [L1 L2 L3] for both the landing and the deep path so
 //! we can see if the deep path stays green or degrades.
 
-use std::collections::HashMap;
-
+#[allow(dead_code)] // diagnostic capture struct; not all fields are asserted
 struct DeepProbeResult {
     site: String,
     landing_url: String,

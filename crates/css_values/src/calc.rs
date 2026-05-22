@@ -517,9 +517,10 @@ mod tests {
     }
 
     #[test]
-    fn nested_calc_kasada_style() {
-        // A simplified mirror of the captured Kasada probe — nested
-        // calc(1px * (... + sin(...) ...)).
+    #[allow(clippy::approx_constant)] // 2.71828 is test input, not std::f64::consts::E
+    fn nested_calc_with_trig_and_constants() {
+        // Nested calc(1px * (<float> * <float> + sin(...))) exercising
+        // multiplication, addition, and a trig call inside one expression.
         let ctx = CalcContext::default();
         let v = parse_calc("calc(1px * (2.71828 * 0.5 + sin(pi / 2)))").evaluate(&ctx);
         approx(v, 1.0 * (2.71828 * 0.5 + 1.0));
@@ -656,15 +657,11 @@ fn guess_output_unit(original: &str) -> &'static str {
                 }) => {
                     return true;
                 }
-                ComponentValue::Function(f) => {
-                    if has_dim(&f.arguments) {
-                        return true;
-                    }
+                ComponentValue::Function(f) if has_dim(&f.arguments) => {
+                    return true;
                 }
-                ComponentValue::SimpleBlock(b) => {
-                    if has_dim(&b.value) {
-                        return true;
-                    }
+                ComponentValue::SimpleBlock(b) if has_dim(&b.value) => {
+                    return true;
                 }
                 _ => {}
             }

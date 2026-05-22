@@ -14,6 +14,12 @@ pub struct TimerInfo {
     pub is_interval: bool,
 }
 
+impl Default for TimerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimerState {
     pub fn new() -> Self {
         Self {

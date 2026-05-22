@@ -11,7 +11,6 @@
 //! are shape-and-identity checks, not cross-isolate execution.
 
 use browser::Page;
-use stealth;
 
 fn html(body: &str) -> String {
     format!("<!DOCTYPE html><html><head></head><body>{body}</body></html>")
@@ -80,6 +79,7 @@ async fn iframe_navigator_prototype_same_shape() {
 // Probe 3: cross-realm Function.prototype.toString
 // ================================================================
 #[tokio::test]
+#[allow(non_snake_case)] // mirrors JS API name under test
 async fn iframe_function_toString_native_shape() {
     let js = format!(
         "{IFRAME_SETUP}
@@ -175,6 +175,7 @@ async fn iframe_navigator_constructor_name() {
 
 #[tokio::test]
 #[ignore = "FIXME: iframe Navigator constructor not mirrored — same root cause as the iframe_*_distinct_identity ignores"]
+#[allow(non_snake_case)] // mirrors JS API name under test
 async fn iframe_navigator_toString_native_shape() {
     let r = evaluate(&format!(
         "{IFRAME_SETUP} cw.Function.prototype.toString.call(cw.Navigator)"

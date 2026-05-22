@@ -1,15 +1,6 @@
 //! Iframe V8 isolation tests — verify separate JS context per iframe.
 
 use browser::Page;
-use net;
-use stealth;
-
-fn html(body: &str) -> String {
-    format!(
-        "<!DOCTYPE html><html><head></head><body>{}</body></html>",
-        body
-    )
-}
 
 #[tokio::test]
 async fn iframe_srcdoc_creates_child() {

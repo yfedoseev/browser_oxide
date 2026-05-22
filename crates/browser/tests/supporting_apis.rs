@@ -5,7 +5,6 @@
 //! tests are the regression gate for Sprint 3 work.
 
 use browser::Page;
-use stealth;
 
 // ============================================================================
 // A1 — blob: URL fetch

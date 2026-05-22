@@ -274,10 +274,7 @@ impl HttpClient {
             quic_client,
             alt_svc_cache: alt_svc,
             accept_ch_origins: accept_ch,
-            proxy: match proxy::ProxyConfig::resolve(profile.proxy.as_deref()) {
-                Ok(p) => p,
-                Err(_) => None,
-            },
+            proxy: proxy::ProxyConfig::resolve(profile.proxy.as_deref()).unwrap_or_default(),
         })
     }
 
@@ -499,9 +496,6 @@ impl HttpClient {
         merge_headers(&mut hdrs, extra_headers);
         self.post_bytes_with_exact_headers(url, body, &hdrs).await
     }
-
-    /// POST with the caller's exact header set — NO chrome_headers overlay.
-    /// Counterpart to `get_with_exact_headers` for JS fetch POSTs.
 
     /// GET with the caller's exact header set — NO chrome_headers overlay.
     /// Used for "reload" flavors where sec-fetch-user must be omitted

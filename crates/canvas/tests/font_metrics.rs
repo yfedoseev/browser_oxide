@@ -1,4 +1,3 @@
-use canvas::text::ParsedFont;
 use canvas::Canvas2D;
 
 #[test]

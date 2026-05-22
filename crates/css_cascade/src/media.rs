@@ -140,12 +140,12 @@ fn evaluate_single_query(query: &str, features: &MediaFeatures) -> bool {
 
 fn evaluate_feature(feature: &str, value: &str, features: &MediaFeatures) -> bool {
     match feature {
-        "min-width" => parse_px(value).map_or(false, |v| features.width >= v),
-        "max-width" => parse_px(value).map_or(false, |v| features.width <= v),
-        "min-height" => parse_px(value).map_or(false, |v| features.height >= v),
-        "max-height" => parse_px(value).map_or(false, |v| features.height <= v),
-        "width" => parse_px(value).map_or(false, |v| (features.width - v).abs() < 0.01),
-        "height" => parse_px(value).map_or(false, |v| (features.height - v).abs() < 0.01),
+        "min-width" => parse_px(value).is_some_and(|v| features.width >= v),
+        "max-width" => parse_px(value).is_some_and(|v| features.width <= v),
+        "min-height" => parse_px(value).is_some_and(|v| features.height >= v),
+        "max-height" => parse_px(value).is_some_and(|v| features.height <= v),
+        "width" => parse_px(value).is_some_and(|v| (features.width - v).abs() < 0.01),
+        "height" => parse_px(value).is_some_and(|v| (features.height - v).abs() < 0.01),
         "prefers-color-scheme" => match value {
             "dark" => features.prefers_color_scheme == ColorScheme::Dark,
             "light" => features.prefers_color_scheme == ColorScheme::Light,

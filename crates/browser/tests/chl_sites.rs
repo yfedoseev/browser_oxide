@@ -18,7 +18,6 @@
 //! port would close.
 
 use browser::Page;
-use stealth;
 
 async fn fetch_and_classify(url: &str) -> String {
     let profile = stealth::presets::chrome_148_macos();

@@ -443,11 +443,9 @@ impl<'a> SelectorParser<'a> {
                     "nth-last-child" => self.parse_nth_function(true, false),
                     "nth-of-type" => self.parse_nth_function(false, true),
                     "nth-last-of-type" => self.parse_nth_function(true, true),
-                    "not" => self.parse_functional_pseudo(|list| PseudoClass::Not(list)),
-                    "is" => self.parse_functional_pseudo_forgiving(|list| PseudoClass::Is(list)),
-                    "where" => {
-                        self.parse_functional_pseudo_forgiving(|list| PseudoClass::Where(list))
-                    }
+                    "not" => self.parse_functional_pseudo(PseudoClass::Not),
+                    "is" => self.parse_functional_pseudo_forgiving(PseudoClass::Is),
+                    "where" => self.parse_functional_pseudo_forgiving(PseudoClass::Where),
                     "has" => self.parse_has_pseudo(),
                     "lang" => self.parse_lang_pseudo(),
                     _ => Err(SelectorParseError::UnsupportedPseudoClass(name_lower)),

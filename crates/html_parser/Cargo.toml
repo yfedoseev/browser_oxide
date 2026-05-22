@@ -14,3 +14,6 @@ markup5ever = "0.39"
 
 [dev-dependencies]
 css_selectors = { workspace = true }
+
+[lints]
+workspace = true

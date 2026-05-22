@@ -4,7 +4,7 @@ use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
 use html5ever::Attribute as H5Attribute;
 use html5ever::ExpandedName;
 use html5ever::QualName as H5QualName;
-use html5ever::{local_name, namespace_url, ns};
+use html5ever::{local_name, ns};
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
@@ -46,11 +46,6 @@ impl DomTreeSink {
         }
     }
 
-    /// Get the built DOM (consumes the sink).
-    pub fn into_dom(self) -> Dom {
-        self.dom.into_inner()
-    }
-
     fn dom(&self) -> &Dom {
         // SAFETY: see `DomTreeSink` doc comment. Single-threaded
         // parser, no concurrent or reentrant access; the returned
@@ -58,6 +53,13 @@ impl DomTreeSink {
         unsafe { &*self.dom.get() }
     }
 
+    // `mut_from_ref`: intentional. html5ever's `TreeSink` trait takes
+    // `&self` on every callback, but tree construction must mutate the
+    // DOM. We use `UnsafeCell` interior mutability; the parser is
+    // single-threaded and non-reentrant (see the `DomTreeSink` doc
+    // comment / SAFETY notes), so handing out a `&mut` from `&self`
+    // here is sound by construction.
+    #[allow(clippy::mut_from_ref)]
     fn dom_mut(&self) -> &mut Dom {
         // SAFETY: see `DomTreeSink` doc comment.
         unsafe { &mut *self.dom.get() }
@@ -68,6 +70,7 @@ impl DomTreeSink {
         unsafe { &*self.names.get() }
     }
 
+    #[allow(clippy::mut_from_ref)]
     fn names_mut(&self) -> &mut HashMap<NodeId, H5QualName> {
         // SAFETY: see `DomTreeSink` doc comment.
         unsafe { &mut *self.names.get() }

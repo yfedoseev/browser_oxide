@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use browser::Page;
-    use stealth;
 
     #[tokio::test]
     async fn test_screen_properties_oxide() {

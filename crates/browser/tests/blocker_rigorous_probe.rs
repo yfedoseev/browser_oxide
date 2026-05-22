@@ -1,5 +1,4 @@
 use browser::Page;
-use std::time::Duration;
 use stealth::StealthProfile;
 
 #[derive(Debug, PartialEq)]
@@ -10,6 +9,7 @@ enum Verdict {
     Error,
 }
 
+#[allow(dead_code)] // diagnostic capture struct; not all fields are asserted
 struct BlockerProbeResult {
     name: String,
     url: String,

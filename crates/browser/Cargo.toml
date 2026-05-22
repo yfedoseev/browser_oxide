@@ -47,3 +47,6 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 [[bench]]
 name = "page_throughput"
 harness = false
+
+[lints]
+workspace = true

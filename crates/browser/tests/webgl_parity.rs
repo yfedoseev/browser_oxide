@@ -2,7 +2,6 @@
 //! Real Chrome values from tests/fixtures/chrome147/captured_macos_arm64.json.
 
 use browser::Page;
-use stealth;
 
 async fn evaluate(js: &str) -> String {
     let mut page = Page::from_html(

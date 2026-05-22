@@ -16,6 +16,12 @@ pub struct CanvasState {
     next_id: i32,
 }
 
+impl Default for CanvasState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CanvasState {
     pub fn new() -> Self {
         Self {
@@ -503,14 +509,14 @@ fn parse_gradient(gradient_type: &str, json: &str) -> Option<canvas::canvas2d::G
 
     match gradient_type {
         "linear" => Some(canvas::canvas2d::Gradient::Linear {
-            x0: coords.get(0)?.as_f64()? as f32,
+            x0: coords.first()?.as_f64()? as f32,
             y0: coords.get(1)?.as_f64()? as f32,
             x1: coords.get(2)?.as_f64()? as f32,
             y1: coords.get(3)?.as_f64()? as f32,
             stops,
         }),
         "radial" => Some(canvas::canvas2d::Gradient::Radial {
-            x0: coords.get(0)?.as_f64()? as f32,
+            x0: coords.first()?.as_f64()? as f32,
             y0: coords.get(1)?.as_f64()? as f32,
             r0: coords.get(2)?.as_f64()? as f32,
             x1: coords.get(3)?.as_f64()? as f32,

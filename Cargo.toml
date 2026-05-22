@@ -25,6 +25,20 @@ license = "MIT OR Apache-2.0"
 authors = ["Yury Fedoseev"]
 repository = "https://github.com/yfedoseev/browser_oxide"
 
+# Central lint policy. CI runs `cargo clippy --workspace -- -D warnings`;
+# the few `allow`s below are deliberate, documented exceptions rather
+# than per-site `#[allow]` scattered through the tree. Everything else
+# is denied. Each crate opts in with `[lints] workspace = true`.
+[workspace.lints.clippy]
+# Engine entry points (Page::navigate_*, biquad_coeffs, profile builders)
+# legitimately take many parameters; splitting them into structs would
+# be churn without clarity.
+too_many_arguments = "allow"
+# Stylistic rustdoc list-formatting lints — the docs render correctly;
+# not worth reflowing every bullet list in the tree.
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+
 [workspace.dependencies]
 # Internal crates — explicit version pinned to the workspace version
 # so cargo-deny's `wildcards = "deny"` rule doesn't trip on path-only

@@ -69,10 +69,8 @@ async fn scorer_vastel_raw_html() {
     // Look for the verdict element
     for line in body.lines() {
         let l = line.trim();
-        if l.contains("headless") || l.contains("You are") {
-            if l.len() < 300 {
-                println!("  line: {l}");
-            }
+        if (l.contains("headless") || l.contains("You are")) && l.len() < 300 {
+            println!("  line: {l}");
         }
     }
     // Grep for the detection script
@@ -203,10 +201,11 @@ async fn scorer_bot_incolumitas() {
     // Fallback: grep the body text for a "score" number
     for line in text.lines() {
         let l = line.trim();
-        if l.to_lowercase().contains("score") || l.to_lowercase().contains("bot") {
-            if l.len() < 200 && !l.is_empty() {
-                println!("  {l}");
-            }
+        if (l.to_lowercase().contains("score") || l.to_lowercase().contains("bot"))
+            && l.len() < 200
+            && !l.is_empty()
+        {
+            println!("  {l}");
         }
     }
 }

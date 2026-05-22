@@ -130,7 +130,7 @@ fn matches_simple<E: Element>(element: &E, simple: &SimpleSelector) -> bool {
     match simple {
         SimpleSelector::Type(name) => element.local_name().eq_ignore_ascii_case(name),
         SimpleSelector::Universal => true,
-        SimpleSelector::Id(id) => element.id().map_or(false, |eid| eid == id),
+        SimpleSelector::Id(id) => element.id().is_some_and(|eid| eid == id),
         SimpleSelector::Class(class) => element.has_class(class),
         SimpleSelector::Attribute {
             name,
@@ -389,6 +389,7 @@ mod tests {
             self
         }
 
+        #[allow(clippy::wrong_self_convention)] // test builder: by-value chaining
         fn as_root(mut self) -> Self {
             self.is_root = true;
             self

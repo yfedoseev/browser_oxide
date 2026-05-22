@@ -6,7 +6,6 @@
 
 use browser::Page;
 use std::time::Duration;
-use stealth;
 
 fn html(body: &str) -> String {
     format!(
@@ -301,7 +300,7 @@ async fn cookie_read_write() {
     .await
     .unwrap();
 
-    let cookies = page.evaluate("document.cookie").unwrap();
+    let _cookies = page.evaluate("document.cookie").unwrap();
     // document.cookie returns all cookies as semicolon-separated string
     // Note: our stub returns "" but this test documents the expected behavior
     // In a full implementation, cookies would be readable

@@ -22,6 +22,7 @@ use stealth::StealthProfile;
 use std::collections::HashMap;
 
 /// Options for creating a BrowserJsRuntime.
+#[derive(Default)]
 pub struct BrowserRuntimeOptions {
     pub base_url: Option<url::Url>,
     pub stealth_profile: Option<StealthProfile>,
@@ -49,21 +50,6 @@ pub struct BrowserRuntimeOptions {
     /// `[SecureContext]` extended attribute. Phase 7 fix. Default false —
     /// callers (e.g. Page::from_html_with_url) classify the URL scheme.
     pub is_secure_context: bool,
-}
-
-impl Default for BrowserRuntimeOptions {
-    fn default() -> Self {
-        Self {
-            base_url: None,
-            stealth_profile: None,
-            stylesheets: Vec::new(),
-            init_scripts: Vec::new(),
-            storage: None,
-            startup_snapshot: None,
-            cross_origin_isolated: false,
-            is_secure_context: false,
-        }
-    }
 }
 
 /// Create a deno_core JsRuntime configured with browser extensions.
@@ -294,7 +280,7 @@ pub fn create_runtime_with_signals(
     // filter. A prior VM trace previously captured
     // `at h (<init_script_0>:51:34)` — anti-bot probes literally saw
     // the index. Both index and the `init_script` tag are now scrubbed.
-    for (_i, code) in options.init_scripts.iter().enumerate() {
+    for code in options.init_scripts.iter() {
         if let Err(e) = runtime.execute_script("<anonymous>", code.clone()) {
             tracing::warn!(error = %e, "init script failed");
         }

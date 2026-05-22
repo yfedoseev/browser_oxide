@@ -1,12 +1,10 @@
 use dom::node::{NodeData, NodeId};
 use dom::Dom;
-use tracing;
 
 /// Information about a <script> element found in the DOM.
 pub struct ScriptInfo {
     pub code: String,
     pub src: Option<String>,
-    pub is_module: bool,
     /// Value of the `nonce` attribute, if any. Required by CSP3
     /// `'nonce-...'` source matching — when the active policy uses
     /// `'strict-dynamic'`, only nonce-tagged parser-inserted scripts
@@ -55,8 +53,6 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                         _ => {}
                     }
 
-                    let is_module = script_type == Some("module");
-
                     let src = elem
                         .attrs
                         .iter()
@@ -75,7 +71,6 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                         scripts.push(ScriptInfo {
                             code: String::new(),
                             src,
-                            is_module,
                             nonce,
                         });
                     } else {
@@ -85,7 +80,6 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                             scripts.push(ScriptInfo {
                                 code,
                                 src: None,
-                                is_module,
                                 nonce,
                             });
                         }

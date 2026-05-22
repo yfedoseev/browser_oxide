@@ -73,15 +73,14 @@ impl CdpServer {
         });
 
         let actual_port = port_rx.recv().map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("server thread failed to start: {}", e),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(format!(
+                "server thread failed to start: {}",
+                e
+            ))) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         if actual_port == 0 {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Box::new(std::io::Error::other(
                 "server initialization failed",
             )));
         }
@@ -169,16 +168,15 @@ impl CdpServer {
         });
 
         let actual_port = port_rx.recv().map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("server thread failed to start: {}", e),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(format!(
+                "server thread failed to start: {}",
+                e
+            ))) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         // Port 0 signals that page creation/navigation failed
         if actual_port == 0 {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Box::new(std::io::Error::other(
                 "failed to create page or navigate",
             )));
         }
@@ -256,15 +254,14 @@ impl CdpServer {
         });
 
         let actual_port = port_rx.recv().map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("server thread failed to start: {}", e),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(format!(
+                "server thread failed to start: {}",
+                e
+            ))) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         if actual_port == 0 {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Box::new(std::io::Error::other(
                 "failed to create HTTP client",
             )));
         }
@@ -336,6 +333,10 @@ async fn accept_loop(
     }
 }
 
+// await_holding_refcell_ref: the CDP server runs on a single-threaded
+// runtime (V8 isolate per connection); the RefCell borrow is confined
+// to one task and dropped before the await resolves.
+#[allow(clippy::await_holding_refcell_ref)]
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     page: Rc<RefCell<browser::Page>>,
@@ -385,7 +386,7 @@ async fn handle_connection(
                     let mut page_ref = page.borrow_mut();
                     let client_ref = http_client.as_deref();
                     session
-                        .handle_request(&mut *page_ref, &req, client_ref)
+                        .handle_request(&mut page_ref, &req, client_ref)
                         .await
                 };
 

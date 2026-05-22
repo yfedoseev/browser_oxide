@@ -9,7 +9,6 @@
 //! anti-bot detectors apply.
 
 use browser::Page;
-use stealth;
 
 async fn evaluate(js: &str) -> String {
     let mut page = Page::from_html(
@@ -54,6 +53,7 @@ async fn parity_eval_to_string_exact() {
 }
 
 #[tokio::test]
+#[allow(non_snake_case)] // mirrors JS API name under test
 async fn parity_function_toString_self_native() {
     let r = evaluate("Function.prototype.toString.call(Function.prototype.toString)").await;
     assert_eq!(
@@ -185,6 +185,7 @@ async fn parity_iframe_array_instanceof_is_false() {
 }
 
 #[tokio::test]
+#[allow(non_snake_case)] // mirrors JS API name under test
 async fn parity_iframe_function_toString_native() {
     let r = evaluate(
         "(()=>{ const f = document.createElement('iframe'); document.body.appendChild(f); return f.contentWindow.Function.prototype.toString.call(window.fetch).includes('[native code]'); })()",

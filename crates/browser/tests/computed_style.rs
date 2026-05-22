@@ -1,7 +1,6 @@
 //! Tests for getComputedStyle wired to actual DOM inline styles.
 
 use browser::Page;
-use stealth;
 
 fn html(body: &str) -> String {
     format!(

@@ -294,8 +294,8 @@ impl CalcExpr {
                 // CSS mod() — sign matches divisor.
                 let av = a.evaluate(ctx);
                 let bv = b.evaluate(ctx);
-                let r = av - (av / bv).floor() * bv;
-                r
+
+                av - (av / bv).floor() * bv
             }
             Self::Rem(a, b) => {
                 // CSS rem() — sign matches dividend (Rust's `%`).
@@ -427,9 +427,11 @@ mod calc_eval_tests {
 
     #[test]
     fn length_units_resolve() {
-        let mut ctx = CalcContext::default();
-        ctx.font_size_px = 20.0;
-        ctx.viewport_w = 1000.0;
+        let ctx = CalcContext {
+            font_size_px: 20.0,
+            viewport_w: 1000.0,
+            ..Default::default()
+        };
         // 2em + 50vw = 40 + 500 = 540
         let e = CalcExpr::Add(
             Box::new(CalcExpr::Value(CalcValue::Length(2.0, LengthUnit::Em))),
@@ -439,8 +441,9 @@ mod calc_eval_tests {
     }
 
     #[test]
-    fn nested_kasada_style_expression() {
-        // Simulate the kind of nested expression Kasada injects:
+    #[allow(clippy::approx_constant)] // 2.71828 is test input, not std::f64::consts::E
+    fn nested_mul_add_trig_expression() {
+        // A deeply nested expression exercising mul/add/sin together:
         //   calc(1px * (2.71828 * 0.5 + sin(pi/2)))
         //   = 1 * (1.35914 + 1.0) = 2.35914
         let ctx = CalcContext::default();

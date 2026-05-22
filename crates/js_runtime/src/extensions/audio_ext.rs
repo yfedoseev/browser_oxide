@@ -131,7 +131,7 @@ pub fn op_audio_analyser_freq_data(
     #[smi] smoothing_x100: i32,
     #[buffer] prev_freq_bytes: &[u8],
 ) -> Vec<u8> {
-    let n = fft_size.max(32).min(32768) as usize;
+    let n = fft_size.clamp(32, 32768) as usize;
     if !n.is_power_of_two() || time_domain_bytes.len() < n * 4 {
         return Vec::new();
     }
@@ -237,6 +237,10 @@ impl BiquadType {
 
 /// Compute biquad coefficients (b0, b1, b2, a1, a2 with a0 normalized to 1)
 /// per Web Audio §1.7.7 bilinear-transform formulas.
+// eq_op: the `(1.0 / 1.0 - 1.0)` term is the spec's `(1/S - 1)` factor
+// instantiated with shelf-slope S = 1.0 — written verbatim to mirror the
+// W3C formula, not a typo.
+#[allow(clippy::eq_op)]
 fn biquad_coeffs(
     kind: BiquadType,
     frequency: f64,
@@ -477,7 +481,7 @@ mod tests {
         smoothing_x100: i32,
         prev_freq_bytes: &[u8],
     ) -> Vec<u8> {
-        let n = fft_size.max(32).min(32768) as usize;
+        let n = fft_size.clamp(32, 32768) as usize;
         if !n.is_power_of_two() || time_domain_bytes.len() < n * 4 {
             return Vec::new();
         }
@@ -533,6 +537,7 @@ mod tests {
     // ---- Biquad response ----
 
     #[test]
+    #[allow(clippy::approx_constant)] // 0.7071 = Butterworth Q (1/√2) filter arg
     fn biquad_lowpass_dc_passes_unity() {
         // Lowpass at 1 kHz, Q=0.7071 (Butterworth), sr=44100. At f=0 (DC),
         // |H| should be ~1 and phase ~0.
@@ -552,6 +557,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)] // 0.7071 = Butterworth Q (1/√2) filter arg
     fn biquad_highpass_dc_blocks() {
         // Highpass at 1 kHz, Q=0.7071. At f=0, |H| should be ~0.
         let freqs = vec![0.0_f32];

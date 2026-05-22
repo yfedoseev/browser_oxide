@@ -11,6 +11,11 @@ pub struct PagePool {
 }
 
 impl PagePool {
+    // arc_with_non_send_sync: Page holds a V8 isolate (intrinsically
+    // !Send/!Sync — the engine is single-threaded by design). The Arc
+    // here only shares the idle-page queue within one thread; it never
+    // crosses a thread boundary.
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new(max_size: usize) -> Self {
         Self {
             idle_pages: Arc::new(Mutex::new(VecDeque::with_capacity(max_size))),
@@ -20,6 +25,10 @@ impl PagePool {
 
     /// Acquire a page from the pool or create a new one.
     /// The page is sanitized (swapped to empty DOM) before being returned.
+    // await_holding_lock: the std Mutex guard is dropped at the end of
+    // the short synchronous pop block before any await; the engine is
+    // single-threaded so there is no cross-thread contention regardless.
+    #[allow(clippy::await_holding_lock)]
     pub async fn acquire(
         &self,
         profile: Option<StealthProfile>,

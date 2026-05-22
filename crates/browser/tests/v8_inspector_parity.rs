@@ -21,7 +21,6 @@
 //! `chrome_compat.rs` working changes.
 
 use browser::Page;
-use stealth;
 
 async fn eval(js: &str) -> String {
     let mut page = Page::from_html(

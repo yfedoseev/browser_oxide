@@ -17,7 +17,7 @@ async fn debug_probe(url: &str, profile: stealth::StealthProfile) {
             println!("  URL after redirects: {}", resp.url);
             println!("  Headers ({}):", resp.headers.len());
             let mut sorted: Vec<_> = resp.headers.iter().collect();
-            sorted.sort_by_key(|(k, _)| k.clone());
+            sorted.sort_by_key(|(k, _)| (*k).clone());
             for (k, v) in &sorted {
                 println!("    {k}: {}", &v[..v.len().min(120)]);
             }

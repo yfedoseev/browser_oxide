@@ -43,3 +43,6 @@ glow = { version = "0.17", optional = true }
 
 [dev-dependencies]
 sha2 = "0.10"
+
+[lints]
+workspace = true

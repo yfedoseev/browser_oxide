@@ -55,7 +55,7 @@ impl Dom {
     // --- Node creation ---
 
     fn allocate(&mut self, data: NodeData) -> NodeId {
-        let id = if let Some(idx) = self.free_list.pop() {
+        if let Some(idx) = self.free_list.pop() {
             let id = NodeId(idx);
             self.nodes[idx] = Some(Node::new(id, data));
             id
@@ -63,8 +63,7 @@ impl Dom {
             let id = NodeId(self.nodes.len());
             self.nodes.push(Some(Node::new(id, data)));
             id
-        };
-        id
+        }
     }
 
     pub fn create_element(&mut self, name: QualName, attrs: Vec<Attribute>) -> NodeId {
@@ -291,7 +290,7 @@ impl Dom {
     pub fn child_elements(&self, parent: NodeId) -> Vec<NodeId> {
         self.children(parent)
             .into_iter()
-            .filter(|id| self.get(*id).map_or(false, |n| n.is_element()))
+            .filter(|id| self.get(*id).is_some_and(|n| n.is_element()))
             .collect()
     }
 
@@ -363,7 +362,7 @@ impl Dom {
         self.find_element(NodeId::DOCUMENT, &|node| {
             node.as_element()
                 .and_then(|e| e.attrs.iter().find(|a| a.name.local == "id"))
-                .map_or(false, |a| a.value == id_value)
+                .is_some_and(|a| a.value == id_value)
         })
     }
 
@@ -374,7 +373,7 @@ impl Dom {
             root,
             &|node| {
                 node.as_element()
-                    .map_or(false, |e| e.name.local.eq_ignore_ascii_case(tag))
+                    .is_some_and(|e| e.name.local.eq_ignore_ascii_case(tag))
             },
             &mut results,
         );
@@ -389,7 +388,7 @@ impl Dom {
             &|node| {
                 node.as_element()
                     .and_then(|e| e.attrs.iter().find(|a| a.name.local == "class"))
-                    .map_or(false, |a| a.value.split_whitespace().any(|c| c == class))
+                    .is_some_and(|a| a.value.split_whitespace().any(|c| c == class))
             },
             &mut results,
         );

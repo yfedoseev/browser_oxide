@@ -16,10 +16,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Gating jobs: fmt, test, msrv, deny. Clippy is ADVISORY
-  # (continue-on-error, no -D warnings) while a pre-existing lint
-  # backlog is cleared — see the `clippy` job below. `cargo build` /
-  # `cargo test` keep default warning levels.
+  # Gating jobs: fmt, clippy (-D warnings), test, msrv, deny.
+  # Clippy lint policy is centralised in the root Cargo.toml
+  # `[workspace.lints.clippy]` table. `cargo build` / `cargo test` keep
+  # default warning levels.
 
 jobs:
   fmt:
@@ -33,21 +33,18 @@ jobs:
       - run: cargo fmt --all -- --check
 
   clippy:
-    name: Clippy (advisory)
+    name: Clippy
     runs-on: ubuntu-latest
-    # Clippy currently runs in advisory mode (continue-on-error). The
-    # engine carries a backlog of clippy lints accumulated during the
-    # 2026-04 → 2026-05 build sprint — see SCOPE.md / fix-list issues
-    # for the cleanup tracker. Once the backlog is closed, flip
-    # `continue-on-error: false` and add `-D warnings`.
-    continue-on-error: true
+    # Gating: clippy must pass with no warnings. The central lint policy
+    # lives in the root Cargo.toml `[workspace.lints.clippy]` table; any
+    # remaining per-site `#[allow(...)]` carries a justifying comment.
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo clippy --all-targets --workspace
+      - run: cargo clippy --all-targets --workspace -- -D warnings
 
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.rust }})

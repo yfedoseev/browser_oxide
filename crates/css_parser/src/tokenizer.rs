@@ -304,10 +304,7 @@ impl<'a> Tokenizer<'a> {
 
         // Decimal point + digits
         if self.input.current_char() == Some('.')
-            && self
-                .input
-                .peek_char(1)
-                .map_or(false, |c| c.is_ascii_digit())
+            && self.input.peek_char(1).is_some_and(|c| c.is_ascii_digit())
         {
             is_integer = false;
             self.input.next_char(); // .
@@ -317,12 +314,9 @@ impl<'a> Tokenizer<'a> {
         // Exponent
         if matches!(self.input.current_char(), Some('e') | Some('E')) {
             let next = self.input.peek_char(1);
-            if next.map_or(false, |c| c.is_ascii_digit())
+            if next.is_some_and(|c| c.is_ascii_digit())
                 || (matches!(next, Some('+') | Some('-'))
-                    && self
-                        .input
-                        .peek_char(2)
-                        .map_or(false, |c| c.is_ascii_digit()))
+                    && self.input.peek_char(2).is_some_and(|c| c.is_ascii_digit()))
             {
                 is_integer = false;
                 self.input.next_char(); // e/E
@@ -428,10 +422,8 @@ impl<'a> Tokenizer<'a> {
         loop {
             match self.input.next_char() {
                 None | Some(')') => return,
-                Some('\\') => {
-                    if is_valid_escape(Some('\\'), self.input.current_char()) {
-                        self.consume_escape();
-                    }
+                Some('\\') if is_valid_escape(Some('\\'), self.input.current_char()) => {
+                    self.consume_escape();
                 }
                 _ => {}
             }
@@ -554,10 +546,10 @@ fn would_start_number(first: Option<char>, second: Option<char>, third: Option<c
     match first {
         Some('+') | Some('-') => match second {
             Some(c) if c.is_ascii_digit() => true,
-            Some('.') => third.map_or(false, |c| c.is_ascii_digit()),
+            Some('.') => third.is_some_and(|c| c.is_ascii_digit()),
             _ => false,
         },
-        Some('.') => second.map_or(false, |c| c.is_ascii_digit()),
+        Some('.') => second.is_some_and(|c| c.is_ascii_digit()),
         Some(c) if c.is_ascii_digit() => true,
         _ => false,
     }
@@ -660,6 +652,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)] // 3.14 is the literal under test, not π
     fn number_float() {
         let tokens = tokenize("3.14");
         assert_eq!(

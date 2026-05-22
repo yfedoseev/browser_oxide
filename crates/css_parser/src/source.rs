@@ -162,7 +162,7 @@ impl<'a> SourceInput<'a> {
         remaining[..pattern.len()]
             .iter()
             .zip(pattern.bytes())
-            .all(|(&a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+            .all(|(&a, b)| a.eq_ignore_ascii_case(&b))
     }
 
     fn decode_char_at(&self, pos: usize) -> char {

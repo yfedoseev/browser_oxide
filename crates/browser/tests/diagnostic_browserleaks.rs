@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use browser::Page;
-    use stealth;
 
     #[tokio::test]
     #[ignore = "network: live HTTP against browserleaks.com"]

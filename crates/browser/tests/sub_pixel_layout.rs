@@ -6,7 +6,6 @@
 //! Chrome 147 reference: `width:1.3px` div returns `1.296875` (= 83/64).
 
 use browser::Page;
-use stealth;
 
 fn page_with(body: &str) -> String {
     format!("<!DOCTYPE html><html><body>{body}</body></html>")
@@ -64,6 +63,7 @@ async fn fractional_widths_quantize() {
 /// Akamai pHash-style probe: walk all elements, hash their rect floats.
 /// Without LayoutUnit, the hash drifts versus Chrome's reference.
 #[tokio::test]
+#[allow(non_snake_case)] // mirrors JS API name under test
 async fn querySelectorAll_rects_all_64ths() {
     let r = eval_with_body(
         "

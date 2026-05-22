@@ -1,5 +1,4 @@
 use browser::Page;
-use std::time::Duration;
 use stealth::presets::chrome_148_ru;
 
 #[tokio::test]

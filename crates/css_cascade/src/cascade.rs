@@ -25,7 +25,7 @@ pub fn cascade_sort(
     entries: &mut [CascadeEntry],
 ) -> std::collections::HashMap<PropertyId, CssValue> {
     // Sort by cascade precedence (ascending — last wins)
-    entries.sort_by(|a, b| cascade_compare(a, b));
+    entries.sort_by(cascade_compare);
 
     // Last entry per property wins
     let mut result = std::collections::HashMap::new();

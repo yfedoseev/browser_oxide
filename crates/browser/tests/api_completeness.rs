@@ -4,7 +4,6 @@
 //! the constructors browser_oxide stubs to land.
 
 use browser::Page;
-use stealth;
 
 async fn evaluate(js: &str) -> String {
     let mut page = Page::from_html_with_url(

@@ -2,7 +2,6 @@
 
 use browser::Page;
 use std::time::Duration;
-use stealth;
 
 fn html(body: &str) -> String {
     format!(
@@ -180,7 +179,7 @@ async fn take_records() {
     page.evaluate_async("void 0", Duration::from_millis(50))
         .await
         .ok();
-    let records = page
+    let _records = page
         .evaluate("JSON.stringify(observer.takeRecords())")
         .unwrap();
     // takeRecords returns pending records and clears queue

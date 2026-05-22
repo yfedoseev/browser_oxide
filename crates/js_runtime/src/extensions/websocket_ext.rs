@@ -28,6 +28,12 @@ impl WsStore {
 /// WebSocket state (empty — connections stored globally).
 pub struct WebSocketState;
 
+impl Default for WebSocketState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebSocketState {
     pub fn new() -> Self {
         Self
@@ -76,7 +82,7 @@ pub async fn op_ws_connect(
             // Spawn send task
             tokio::spawn(async move {
                 while let Some(msg) = out_rx.recv().await {
-                    if sink.send(Message::Text(msg.into())).await.is_err() {
+                    if sink.send(Message::Text(msg)).await.is_err() {
                         break;
                     }
                 }

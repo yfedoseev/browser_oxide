@@ -52,6 +52,12 @@ pub struct IframeRealmStore {
     pub native_tag_sym: Option<v8::Global<v8::Symbol>>,
 }
 
+impl Default for IframeRealmStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IframeRealmStore {
     pub fn new() -> Self {
         Self {
@@ -127,6 +133,11 @@ pub fn capture_original_fp_tostring(
 /// `v8::Symbol::for_global`) — those are different tables. Stealth_bootstrap.js
 /// tags host functions via `Symbol.for('__boxide_native__')` which writes to
 /// the JS registry; looking up via `v8::Symbol::for_global` silently misses all tags.
+// `v8::Symbol::for_global` is deprecated upstream but is exactly the
+// API-registry lookup we need here as a documented fallback (see the
+// doc comment above); the non-deprecated path is the JS-registry lookup
+// we already try first.
+#[allow(deprecated)]
 fn fp_to_string_cb(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,

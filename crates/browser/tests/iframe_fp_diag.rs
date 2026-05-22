@@ -6,7 +6,6 @@
 //! child realm exposes so we can diff the gap.
 
 use browser::Page;
-use stealth;
 
 const PROBE: &str = r#"(function(){
   try {

@@ -9,7 +9,6 @@
 
 use browser::Page;
 use sha2::{Digest, Sha256};
-use stealth;
 
 const CAPTURE_PROBE: &str = r##"
 (() => {

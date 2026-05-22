@@ -22,6 +22,12 @@ pub struct CdpSession {
     behavior: stealth::behavior::BehaviorProfile,
 }
 
+impl Default for CdpSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CdpSession {
     pub fn new() -> Self {
         Self {
@@ -720,7 +726,7 @@ mod tests {
             method: "Page.enable".to_string(),
             params: serde_json::Value::Null,
         };
-        let (resp, events) = session.handle_request(&mut page, &req, None).await;
+        let (resp, _events) = session.handle_request(&mut page, &req, None).await;
         assert!(resp.contains("\"id\":1"));
         assert!(session.is_domain_enabled("Page"));
     }
