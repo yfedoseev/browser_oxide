@@ -47,28 +47,28 @@ A complete browser engine for scraping, archival, and AI agent workloads:
 
 Anti-bot coverage measured against a 126-site corpus of commercially-
 protected pages (Cloudflare, Akamai, DataDome, PerimeterX, Kasada,
-Shape/F5, etc.) on 2026-05-17:
+Shape/F5, etc.), release build, on 2026-05-21:
 
 | Profile (per-site routing) | L3-rendered / 126 |
 |---|---:|
-| Chrome 148 macOS | 117 |
-| Pixel 9 Pro Chrome 148 (Android) | 119 |
-| iPhone 15 Pro Safari 18 | 113 |
-| Firefox 135 macOS | 115 |
-| **Per-domain best-of-profile (routed)** | **121** |
+| Chrome 130 macOS | 117–118 |
+| Pixel 9 Pro Chrome 147 (Android) | 119 |
+| iPhone 15 Pro Safari 18 | 116–118 |
+| Firefox 135 macOS | 114–116 |
+| **Per-domain best-of-profile (routed)** | **122** |
 
-**The five sites that no current profile passes** are three Kasada-
-protected pages (`canadagoose.com`, `hyatt.com`, `realtor.com`),
-`homedepot.com` (Akamai sec-cpt — passes the 3-iter holistic metric, fails
-under a strict 1-iter lens), and `iphey.com` (a thin-body fingerprint test
-page, debug-build render artifact under contention).
+**The hard residual** is three Kasada-protected pages
+(`canadagoose.com`, `hyatt.com`, `realtor.com`) plus `homedepot.com`
+(Akamai sec-cpt). DataDome's interactive captcha pages (`yelp.com`,
+`etsy.com`) are human-gated and out of scope.
 
-Numbers are debug-build, single-threaded (V8 isolate constraint), from one
-datacenter IP, on 2026-05-17. Release builds and clean IPs improve on
-these. We do not claim "all of Kasada" — Kasada has a known residual we
-have a named (not yet shipped) fix list for. See the engine docs in
-`docs/` and the test harness in `crates/browser/tests/` for the
-underlying measurements.
+> **Important — the engine carries this number, not bypass code.**
+> An A/B run (2026-05-21) measured the corpus with the per-vendor
+> challenge solvers **disabled** vs **enabled**: the pass rate is the
+> same. Every site that renders, renders on the from-scratch TLS +
+> fingerprint + V8 engine alone. The open-source engine therefore
+> ships **no per-vendor bypass code** (see "Challenge solving" below)
+> and the number above is what you get out of the box.
 
 ### Things to know before believing the numbers
 
@@ -76,16 +76,24 @@ underlying measurements.
   measure in the same tier as real-browser-driver tools (Camoufox,
   Patchright, nodriver). The point isn't that we win — it's that a
   from-scratch engine reaches that tier at all.
-- **No live competitor sweep was run for this README.** Comparison
-  numbers cited in older versions of this file (e.g. "Puppeteer 30/71")
-  were not freshly re-measured and have been removed.
+- **No live competitor sweep was run for this README.**
 - **Kasada is the OSS-wide gap.** No open-source tool publicly passes
   Kasada from scratch. The published 2026 winners are paid real-browser
   farms (Scrapfly et al.).
-- **Memory and startup numbers** depend heavily on workload and OS — we
-  don't have a recent apples-to-apples benchmark we'd defend in this
-  README, so they're removed. The benchmark scaffolding lives in
-  `crates/browser/tests/browser_comparison.rs`.
+
+## Challenge solving
+
+The engine exposes a `ChallengeSolver` trait + a
+`Page::navigate_with_solvers(url, profile, n, solvers)` entry point so
+embedders can plug in per-vendor challenge handling (Akamai BMP
+sensor_data, Kasada PoW, DataDome interstitial round-trip, Cloudflare
+orchestrator). **The open-source engine ships no solver
+implementations** — `Page::navigate` registers an empty set, so a
+challenged page resolves to `ChallengeVerdict::ChallengeIncomplete`
+rather than being auto-cleared. This is deliberate (see `SCOPE.md`):
+site-specific bypass code is out of scope here, and — per the A/B
+measurement above — it isn't what produces the corpus pass rate
+anyway.
 
 ## Architecture
 
@@ -121,8 +129,7 @@ copyleft so this does not infect downstream code. An optional
 | `workers` | Web Workers + Service Workers (separate V8 isolates) |
 | `stealth` | Fingerprint profiles (100+ properties), navigator spoofing |
 | `protocol` | CDP server (Puppeteer/Playwright drop-in) |
-| `browser` | Top-level `Browser`/`Page` API |
-| `akamai` | Akamai BMP sensor payload encoder |
+| `browser` | Top-level `Browser`/`Page` API + `ChallengeSolver` trait |
 
 ## Quick start
 

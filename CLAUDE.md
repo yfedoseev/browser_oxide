@@ -16,9 +16,16 @@ cargo doc --no-deps --workspace
 
 ## Architecture
 
-- **16 crates** in `[workspace.members]` — see `Cargo.toml`. Each crate
+- **15 crates** in `[workspace.members]` — see `Cargo.toml`. Each crate
   has a single responsibility (see `docs/ARCHITECTURE.md` for the full
   inventory).
+- **Per-vendor challenge solving is out of scope here.** The engine
+  exposes a `browser::ChallengeSolver` trait + `Page::navigate_with_solvers`
+  hook; the concrete Akamai/Kasada/DataDome/Cloudflare implementations
+  live in the private `vendor_solvers` companion crate. `Page::navigate`
+  registers an empty solver set. Measured 2026-05-21: solvers add 0 net
+  passes on the 126-corpus — the from-scratch engine carries the SOTA
+  rate. Do NOT reintroduce vendor bypass code into public crates.
 - **License:** MIT OR Apache-2.0; no GPL/LGPL/AGPL. One MPL-2.0
   transitive (`cooked-waker` via `deno_core` → `v8`) and one optional
   MPL-2.0 (`adblock`, behind the `blocker` feature in `net`, off by
