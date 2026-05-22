@@ -47,28 +47,31 @@ A complete browser engine for scraping, archival, and AI agent workloads:
 
 Anti-bot coverage measured against a 126-site corpus of commercially-
 protected pages (Cloudflare, Akamai, DataDome, PerimeterX, Kasada,
-Shape/F5, etc.), release build, on 2026-05-21:
+Shape/F5, etc.), release build, on 2026-05-21. **These numbers are
+from the vendor-stripped open-source engine** — no per-vendor bypass
+code in the tree:
 
 | Profile (per-site routing) | L3-rendered / 126 |
 |---|---:|
-| Chrome 130 macOS | 117–118 |
-| Pixel 9 Pro Chrome 147 (Android) | 119 |
-| iPhone 15 Pro Safari 18 | 116–118 |
-| Firefox 135 macOS | 114–116 |
-| **Per-domain best-of-profile (routed)** | **122** |
+| Chrome 130 macOS | 120 |
+| Pixel 9 Pro Chrome 147 (Android) | 121 |
+| iPhone 15 Pro Safari 18 | 116 |
+| Firefox 135 macOS | 116 |
+| **Per-domain best-of-profile (routed)** | **123** |
 
-**The hard residual** is three Kasada-protected pages
-(`canadagoose.com`, `hyatt.com`, `realtor.com`) plus `homedepot.com`
-(Akamai sec-cpt). DataDome's interactive captcha pages (`yelp.com`,
-`etsy.com`) are human-gated and out of scope.
+**The hard residual** is exactly three Kasada-protected pages —
+`canadagoose.com`, `hyatt.com`, `realtor.com`. DataDome's interactive
+captcha pages (`yelp.com`, `etsy.com`) are human-gated and out of
+scope; they pass on some profiles and block on others.
 
 > **Important — the engine carries this number, not bypass code.**
 > An A/B run (2026-05-21) measured the corpus with the per-vendor
-> challenge solvers **disabled** vs **enabled**: the pass rate is the
-> same. Every site that renders, renders on the from-scratch TLS +
-> fingerprint + V8 engine alone. The open-source engine therefore
-> ships **no per-vendor bypass code** (see "Challenge solving" below)
-> and the number above is what you get out of the box.
+> challenge solvers **enabled** vs **fully removed from the tree**:
+> the routed pass rate is the same (123). Every site that renders,
+> renders on the from-scratch TLS + fingerprint + V8 engine alone.
+> The open-source engine ships **no per-vendor bypass code** (see
+> "Challenge solving" below) and the number above is what you get
+> out of the box.
 
 ### Things to know before believing the numbers
 
