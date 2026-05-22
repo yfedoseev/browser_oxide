@@ -1233,7 +1233,7 @@ async fn webgl_eval(profile: stealth::StealthProfile, js: &str) -> String {
 async fn webgl_extensions_has_25_plus_entries() {
     // Real Chrome 131 exposes 25-35 extensions depending on GPU.
     // Our old stub returned 13.
-    let profile = stealth::chrome_130_windows();
+    let profile = stealth::chrome_148_windows();
     let r = webgl_eval(
         profile,
         r#"(() => {
@@ -1249,7 +1249,7 @@ async fn webgl_extensions_has_25_plus_entries() {
 #[tokio::test]
 async fn webgl_unmasked_vendor_matches_windows_profile() {
     // Windows Chrome profile should get the NVIDIA vendor string.
-    let profile = stealth::chrome_130_windows();
+    let profile = stealth::chrome_148_windows();
     let r = webgl_eval(
         profile,
         r#"(() => {
@@ -1267,7 +1267,7 @@ async fn webgl_unmasked_vendor_matches_windows_profile() {
 #[tokio::test]
 async fn webgl_unmasked_renderer_matches_macos_profile() {
     // macOS profile reports Apple M3 (Phase 7 — was M2 Pro).
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let r = webgl_eval(
         profile,
         r#"(() => {
@@ -1285,7 +1285,7 @@ async fn webgl_unmasked_renderer_matches_macos_profile() {
 #[tokio::test]
 async fn webgl_unmasked_renderer_matches_linux_profile() {
     // Linux profile should get the Intel UHD Graphics 630 renderer.
-    let profile = stealth::chrome_130_linux();
+    let profile = stealth::chrome_148_linux();
     let r = webgl_eval(
         profile,
         r#"(() => {
@@ -1304,8 +1304,8 @@ async fn webgl_unmasked_renderer_matches_linux_profile() {
 async fn webgl_extensions_differ_across_profiles() {
     // Apple GPU exposes WEBGL_compressed_texture_astc that neither NVIDIA nor
     // Intel Linux expose. This is THE standard CreepJS probe for GPU diversity.
-    let apple = stealth::chrome_130_macos();
-    let intel = stealth::chrome_130_linux();
+    let apple = stealth::chrome_148_macos();
+    let intel = stealth::chrome_148_linux();
     let apple_has_astc = webgl_eval(
         apple,
         r#"document.createElement('canvas').getContext('webgl').getSupportedExtensions().includes('WEBGL_compressed_texture_astc')"#,
@@ -1329,7 +1329,7 @@ async fn webgl_shader_precision_int_differs_from_float() {
     // Real Chrome returns [127, 127, 23] for HIGH_FLOAT and [31, 30, 0]
     // for HIGH_INT. Our previous stub returned {127, 127, 23} for ALL
     // precision types, which is a distinctive tell.
-    let profile = stealth::chrome_130_windows();
+    let profile = stealth::chrome_148_windows();
     let r = webgl_eval(
         profile,
         r#"(() => {
@@ -1352,7 +1352,7 @@ async fn webgl_shader_precision_int_differs_from_float() {
 
 #[tokio::test]
 async fn webgl_max_texture_size_is_16384() {
-    let profile = stealth::chrome_130_windows();
+    let profile = stealth::chrome_148_windows();
     let r = webgl_eval(
         profile,
         r#"document.createElement('canvas').getContext('webgl').getParameter(0x0D33)"#,
@@ -1444,7 +1444,7 @@ async fn perf_time_origin_is_present() {
 
 #[tokio::test]
 async fn intl_timezone_matches_moscow_profile() {
-    let profile = stealth::presets::chrome_130_ru();
+    let profile = stealth::presets::chrome_148_ru();
     let mut page = Page::with_profile(
         "<!DOCTYPE html><html><body></body></html>",
         "https://example.com/",
@@ -1460,7 +1460,7 @@ async fn intl_timezone_matches_moscow_profile() {
 
 #[tokio::test]
 async fn intl_timezone_matches_tokyo_profile() {
-    let profile = stealth::presets::chrome_130_jp();
+    let profile = stealth::presets::chrome_148_jp();
     let mut page = Page::with_profile(
         "<!DOCTYPE html><html><body></body></html>",
         "https://example.com/",
@@ -1478,7 +1478,7 @@ async fn intl_timezone_matches_tokyo_profile() {
 async fn date_timezone_offset_is_numeric_from_profile() {
     // Date.prototype.getTimezoneOffset() must return a number matching the
     // profile's timezone (Moscow = UTC+3 in summer, -180 minutes).
-    let profile = stealth::presets::chrome_130_ru();
+    let profile = stealth::presets::chrome_148_ru();
     let mut page = Page::with_profile(
         "<!DOCTYPE html><html><body></body></html>",
         "https://example.com/",
@@ -1517,7 +1517,7 @@ async fn perf_paint_entries_present() {
 
 #[tokio::test]
 async fn webgl_get_extension_returns_non_null_for_supported() {
-    let profile = stealth::chrome_130_windows();
+    let profile = stealth::chrome_148_windows();
     let r = webgl_eval(
         profile,
         r#"(() => {
@@ -1584,7 +1584,7 @@ async fn iframe_content_window() {
 async fn iframe_cross_realm_nav_stealth() {
     // Verify cross-realm property access works WITH a stealth profile.
     // Kasada's ifw probe reads cw.navigator.webdriver from the parent context.
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let mut page = browser::Page::with_profile(
         "<!DOCTYPE html><html><head></head><body></body></html>",
         "https://example.com/",
@@ -1629,7 +1629,7 @@ async fn iframe_inner_realm_nav_access() {
     // Verify that code running INSIDE the child realm (via new cw.Function(...))
     // can access navigator, screen, and devicePixelRatio — these are the
     // properties Kasada's ifw and spd probes read from inside the child realm.
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let mut page = browser::Page::with_profile(
         "<!DOCTYPE html><html><body></body></html>",
         "https://example.com/",
@@ -2215,7 +2215,7 @@ async fn to_string_tag_event_target_prototype() {
 #[tokio::test]
 async fn worker_ua_matches_window() {
     use stealth::presets;
-    let profile = presets::chrome_130_windows();
+    let profile = presets::chrome_148_windows();
     let win_ua = format!("{}", profile.user_agent);
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
     // Spin up a worker and stash its navigator.userAgent in a global
@@ -2236,7 +2236,7 @@ async fn worker_ua_matches_window() {
 #[tokio::test]
 async fn worker_platform_matches_window() {
     use stealth::presets;
-    let profile = presets::chrome_130_windows();
+    let profile = presets::chrome_148_windows();
     let expected = profile.platform.clone();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
     page.evaluate(
@@ -2255,7 +2255,7 @@ async fn worker_platform_matches_window() {
 #[tokio::test]
 async fn worker_hardware_concurrency_matches_window() {
     use stealth::presets;
-    let profile = presets::chrome_130_windows();
+    let profile = presets::chrome_148_windows();
     let expected = profile.cpu_cores.to_string();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
     page.evaluate(
@@ -2281,7 +2281,7 @@ async fn screen_avail_top_macos_is_33() {
     // Phase 7 — Chrome 147 macOS arm64 (M3) reports availTop=33,
     // not 25. Verified against Playwright MCP.
     use stealth::presets;
-    let profile = presets::chrome_130_macos();
+    let profile = presets::chrome_148_macos();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
     assert_eq!(page.evaluate("screen.availTop").unwrap(), "33");
 }
@@ -2289,7 +2289,7 @@ async fn screen_avail_top_macos_is_33() {
 #[tokio::test]
 async fn screen_avail_top_windows_is_0() {
     use stealth::presets;
-    let profile = presets::chrome_130_windows();
+    let profile = presets::chrome_148_windows();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
     assert_eq!(page.evaluate("screen.availTop").unwrap(), "0");
 }
@@ -2297,7 +2297,7 @@ async fn screen_avail_top_windows_is_0() {
 #[tokio::test]
 async fn screen_avail_top_linux_is_0() {
     use stealth::presets;
-    let profile = presets::chrome_130_linux();
+    let profile = presets::chrome_148_linux();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
     assert_eq!(page.evaluate("screen.availTop").unwrap(), "0");
 }
@@ -2437,7 +2437,7 @@ async fn nav_keyboard_getlayoutmap_is_native() {
 #[tokio::test]
 async fn media_key_widevine_resolves_on_windows() {
     use stealth::presets;
-    let profile = presets::chrome_130_windows();
+    let profile = presets::chrome_148_windows();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
     page.evaluate(
         "window.__r = null; navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{initDataTypes:['cenc'],videoCapabilities:[{contentType:'video/mp4;codecs=\"avc1.42E01E\"'}]}]).then(a => { window.__r = 'ok'; }).catch(e => { window.__r = 'err:' + e.name; });"
@@ -2451,7 +2451,7 @@ async fn media_key_widevine_resolves_on_windows() {
 #[tokio::test]
 async fn media_key_widevine_resolves_on_macos() {
     use stealth::presets;
-    let profile = presets::chrome_130_macos();
+    let profile = presets::chrome_148_macos();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
     page.evaluate(
         "window.__r = null; navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{initDataTypes:['cenc'],videoCapabilities:[{contentType:'video/mp4;codecs=\"avc1.42E01E\"'}]}]).then(a => { window.__r = 'ok'; }).catch(e => { window.__r = 'err:' + e.name; });"
@@ -2480,7 +2480,7 @@ async fn media_key_clearkey_always_resolves() {
 #[tokio::test]
 async fn media_key_access_key_system_is_string() {
     use stealth::presets;
-    let profile = presets::chrome_130_windows();
+    let profile = presets::chrome_148_windows();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
     page.evaluate(
         "window.__r = null; navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{initDataTypes:['cenc'],videoCapabilities:[{contentType:'video/mp4;codecs=\"avc1.42E01E\"'}]}]).then(a => { window.__r = typeof a.keySystem; }).catch(() => { window.__r = 'err'; });"
@@ -2574,7 +2574,7 @@ async fn crypto_subtle_digest_actually_works() {
     let mut page = Page::with_profile(
         "<!DOCTYPE html><html><head></head><body></body></html>",
         "https://example.com/",
-        stealth::presets::chrome_130_windows(),
+        stealth::presets::chrome_148_windows(),
     )
     .await
     .unwrap();
@@ -2771,7 +2771,7 @@ async fn webauthn_iscma_returns_promise() {
 
 #[tokio::test]
 async fn webauthn_isuvpa_true_on_windows_profile() {
-    let profile = stealth::presets::chrome_130_windows();
+    let profile = stealth::presets::chrome_148_windows();
     assert_eq!(
         await_promise_with_profile_secure(
             "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()",
@@ -2785,7 +2785,7 @@ async fn webauthn_isuvpa_true_on_windows_profile() {
 
 #[tokio::test]
 async fn webauthn_isuvpa_true_on_macos_profile() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     assert_eq!(
         await_promise_with_profile_secure(
             "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()",
@@ -2799,7 +2799,7 @@ async fn webauthn_isuvpa_true_on_macos_profile() {
 
 #[tokio::test]
 async fn webauthn_isuvpa_false_on_linux_profile() {
-    let profile = stealth::presets::chrome_130_linux();
+    let profile = stealth::presets::chrome_148_linux();
     assert_eq!(
         await_promise_with_profile_secure(
             "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()",
@@ -2985,7 +2985,7 @@ async fn webgl_unmasked_vendor_renderer_per_profile() {
     // Win profile: NVIDIA. Mac: Apple. Linux: Intel.
     let win_renderer = webgl_check_with_profile(
         "gl.getParameter(0x9246)", // UNMASKED_RENDERER_WEBGL
-        stealth::presets::chrome_130_windows(),
+        stealth::presets::chrome_148_windows(),
     )
     .await;
     assert!(
@@ -2995,7 +2995,7 @@ async fn webgl_unmasked_vendor_renderer_per_profile() {
 
     let mac_renderer = webgl_check_with_profile(
         "gl.getParameter(0x9246)",
-        stealth::presets::chrome_130_macos(),
+        stealth::presets::chrome_148_macos(),
     )
     .await;
     assert!(
@@ -3005,7 +3005,7 @@ async fn webgl_unmasked_vendor_renderer_per_profile() {
 
     let linux_renderer = webgl_check_with_profile(
         "gl.getParameter(0x9246)",
-        stealth::presets::chrome_130_linux(),
+        stealth::presets::chrome_148_linux(),
     )
     .await;
     assert!(
@@ -3146,7 +3146,7 @@ async fn webgl_extensions_differ_per_profile_apple() {
     // that NVIDIA/Intel typically lack (per gpu.rs::apple_m2_pro_macos).
     let exts = webgl_check_with_profile(
         "JSON.stringify(gl.getSupportedExtensions())",
-        stealth::presets::chrome_130_macos(),
+        stealth::presets::chrome_148_macos(),
     )
     .await;
     assert!(
@@ -3823,7 +3823,7 @@ async fn antibot_smoke(label: &str, url: &str, profile: stealth::StealthProfile)
 async fn kasada_canadagoose_diagnostic() {
     // Vendor Kasada session-eviction lives in the private vendor_solvers
     // crate now; this diagnostic just exercises the generic navigate path.
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     antibot_smoke(
         "KASADA-canadagoose-DIAG",
         "https://www.canadagoose.com/",
@@ -3887,7 +3887,7 @@ async fn kasada_sentinel_identity_clean() {
         Duration::from_secs(120),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             3,
             vec![init.to_string()],
         ),
@@ -4044,7 +4044,7 @@ async fn kasada_fetchlog_diagnostic() {
         Duration::from_secs(120),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             1,
             vec![init.to_string()],
         ),
@@ -4208,7 +4208,7 @@ async fn kasada_error_blob_capture() {
         Duration::from_secs(120),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             2,
             vec![capture_init.to_string()],
         ),
@@ -4294,7 +4294,7 @@ async fn kasada_child_realm_navigate_diagnostic() {
         Duration::from_secs(60),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             1,
             vec![probe_init.to_string()],
         ),
@@ -4313,7 +4313,7 @@ async fn kasada_child_realm_navigate_diagnostic() {
 #[tokio::test]
 #[ignore = "network: WBAAS smoke against wildberries.ru with current pipeline"]
 async fn wbaas_wildberries_smoke() {
-    let profile = stealth::presets::chrome_130_ru();
+    let profile = stealth::presets::chrome_148_ru();
     antibot_smoke("WBAAS-wildberries", "https://www.wildberries.ru/", profile).await;
 }
 
@@ -4356,7 +4356,7 @@ async fn wbaas_report_body_capture() {
         Duration::from_secs(60),
         Page::navigate_with_init(
             "https://www.wildberries.ru/",
-            stealth::presets::chrome_130_ru(),
+            stealth::presets::chrome_148_ru(),
             2,
             vec![intercept_init.to_string()],
         ),
@@ -5125,7 +5125,7 @@ async fn shim_recursion_ym_module_loader_pattern() {
 #[tokio::test]
 #[ignore = "network: T0 baseline (Cloudflare-lite)"]
 async fn antibot_t0_baseline() {
-    let p = stealth::presets::chrome_130_macos();
+    let p = stealth::presets::chrome_148_macos();
     antibot_smoke("T0-nowsecure", "https://nowsecure.nl/", p.clone()).await;
     antibot_smoke("T0-discord", "https://discord.com/", p.clone()).await;
     antibot_smoke("T0-chatgpt", "https://chatgpt.com/", p.clone()).await;
@@ -5139,7 +5139,7 @@ async fn antibot_t0_baseline() {
 #[tokio::test]
 #[ignore = "network: T1 Cloudflare Enterprise + AI-block (claude/openai/anthropic/HF/perplexity)"]
 async fn antibot_t1_cloudflare_enterprise() {
-    let p = stealth::presets::chrome_130_macos();
+    let p = stealth::presets::chrome_148_macos();
     antibot_smoke("T1-claude", "https://claude.ai/", p.clone()).await;
     antibot_smoke("T1-openai", "https://openai.com/", p.clone()).await;
     antibot_smoke("T1-anthropic", "https://www.anthropic.com/", p.clone()).await;
@@ -5150,7 +5150,7 @@ async fn antibot_t1_cloudflare_enterprise() {
 #[tokio::test]
 #[ignore = "network: T2 DataDome behavioral (glassdoor/crunchbase/vinted/leboncoin)"]
 async fn antibot_t2_datadome() {
-    let p = stealth::presets::chrome_130_macos();
+    let p = stealth::presets::chrome_148_macos();
     antibot_smoke("T2-glassdoor", "https://www.glassdoor.com/", p.clone()).await;
     antibot_smoke("T2-crunchbase", "https://www.crunchbase.com/", p.clone()).await;
     antibot_smoke("T2-vinted", "https://www.vinted.com/", p.clone()).await;
@@ -5160,7 +5160,7 @@ async fn antibot_t2_datadome() {
 #[tokio::test]
 #[ignore = "network: T3 Akamai BMP (adidas/nike/footlocker)"]
 async fn antibot_t3_akamai_bmp() {
-    let p = stealth::presets::chrome_130_macos();
+    let p = stealth::presets::chrome_148_macos();
     antibot_smoke("T3-adidas", "https://www.adidas.com/", p.clone()).await;
     antibot_smoke("T3-nike", "https://www.nike.com/", p.clone()).await;
     antibot_smoke("T3-footlocker", "https://www.footlocker.com/", p).await;
@@ -5169,7 +5169,7 @@ async fn antibot_t3_akamai_bmp() {
 #[tokio::test]
 #[ignore = "network: T4 Kasada (ticketmaster/canadagoose/hyatt)"]
 async fn antibot_t4_kasada() {
-    let p = stealth::presets::chrome_130_macos();
+    let p = stealth::presets::chrome_148_macos();
     antibot_smoke(
         "T4-ticketmaster",
         "https://www.ticketmaster.com/",
@@ -5183,7 +5183,7 @@ async fn antibot_t4_kasada() {
 #[tokio::test]
 #[ignore = "network: T5 HUMAN/PerimeterX + Imperva (zillow/walmart/udemy)"]
 async fn antibot_t5_human_imperva() {
-    let p = stealth::presets::chrome_130_macos();
+    let p = stealth::presets::chrome_148_macos();
     antibot_smoke("T5-zillow", "https://www.zillow.com/", p.clone()).await;
     antibot_smoke("T5-walmart", "https://www.walmart.com/", p.clone()).await;
     antibot_smoke("T5-udemy", "https://www.udemy.com/", p).await;
@@ -5192,14 +5192,14 @@ async fn antibot_t5_human_imperva() {
 #[tokio::test]
 #[ignore = "network: T6 Shape/F5 landing (delta) — login flows excluded"]
 async fn antibot_t6_shape() {
-    let p = stealth::presets::chrome_130_windows();
+    let p = stealth::presets::chrome_148_windows();
     antibot_smoke("T6-delta", "https://www.delta.com/", p).await;
 }
 
 #[tokio::test]
 #[ignore = "network: T7 Russian (ya.ru/wildberries/ozon)"]
 async fn antibot_t7_russian() {
-    let p = stealth::presets::chrome_130_ru();
+    let p = stealth::presets::chrome_148_ru();
     antibot_smoke("T7-yandex", "https://ya.ru/", p.clone()).await;
     antibot_smoke("T7-wildberries", "https://www.wildberries.ru/", p.clone()).await;
     antibot_smoke("T7-ozon", "https://www.ozon.ru/", p).await;
@@ -5208,7 +5208,7 @@ async fn antibot_t7_russian() {
 #[tokio::test]
 #[ignore = "network: T8 Chinese (taobao/jd/douyin)"]
 async fn antibot_t8_chinese() {
-    let p = stealth::presets::chrome_130_cn();
+    let p = stealth::presets::chrome_148_cn();
     antibot_smoke("T8-taobao", "https://www.taobao.com/", p.clone()).await;
     antibot_smoke("T8-jd", "https://www.jd.com/", p.clone()).await;
     antibot_smoke("T8-douyin", "https://www.douyin.com/", p).await;
@@ -5217,7 +5217,7 @@ async fn antibot_t8_chinese() {
 #[tokio::test]
 #[ignore = "network: direct fetch of WBAAS solver script to isolate the bug"]
 async fn wbaas_solver_url_direct_fetch() {
-    let profile = stealth::presets::chrome_130_ru();
+    let profile = stealth::presets::chrome_148_ru();
     let client = net::HttpClient::new(&profile).unwrap();
     let url =
         "https://www.wildberries.ru/__wbaas/challenges/antibot/statics/challenge_solver_v1.0.4.js";
@@ -5312,7 +5312,7 @@ async fn wbaas_full_network_trace() {
         Duration::from_secs(90),
         Page::navigate_with_init(
             "https://www.wildberries.ru/",
-            stealth::presets::chrome_130_ru(),
+            stealth::presets::chrome_148_ru(),
             3,
             vec![], // no extra init — rely on page.rs __fetchLog only
         ),
@@ -5405,7 +5405,7 @@ async fn wbaas_full_network_trace() {
 #[tokio::test]
 #[ignore = "network: dump initial response from hyatt to compare against playwright"]
 async fn dump_hyatt_initial_response() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let client = net::HttpClient::new(&profile).unwrap();
     let url = std::env::var("HYATT_URL").unwrap_or_else(|_| "https://www.hyatt.com/".to_string());
     let url = url.as_str();
@@ -5439,7 +5439,7 @@ async fn dump_hyatt_initial_response() {
 #[tokio::test]
 #[ignore = "network: dump our headers via httpbin to diff vs real Chrome"]
 async fn dump_our_headers_httpbin() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let client = net::HttpClient::new(&profile).unwrap();
     let url = "https://httpbin.org/headers";
     println!("\n=== Our request headers per httpbin.org/headers ===");
@@ -5462,7 +5462,7 @@ async fn dump_our_headers_httpbin() {
 #[tokio::test]
 #[ignore = "network: dump our TLS+H2 fingerprint via tls.peet.ws"]
 async fn tls_fingerprint_peet() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let client = net::HttpClient::new(&profile).unwrap();
     let url = "https://tls.peet.ws/api/all";
     println!("\n=== Our TLS fingerprint per tls.peet.ws ===");
@@ -5510,7 +5510,7 @@ async fn tls_fingerprint_peet() {
 #[tokio::test]
 #[ignore = "network: hyatt only — quick re-test after kasada cd-field changes"]
 async fn kasada_hyatt_only() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     antibot_smoke("KASADA-hyatt-RETEST", "https://www.hyatt.com/", profile).await;
 }
 
@@ -5527,7 +5527,7 @@ async fn kasada_hyatt_only() {
 #[tokio::test]
 #[ignore = "network: decisive clean-production hyatt (humanized, no FN_TRACE)"]
 async fn kasada_hyatt_clean_production() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     match tokio::time::timeout(
         std::time::Duration::from_secs(300),
         Page::navigate("https://www.hyatt.com/", profile, 3),
@@ -5590,7 +5590,7 @@ async fn kasada_hyatt_clean_production() {
 #[tokio::test]
 #[ignore = "network: decisive clean-production homedepot (humanized, no FN_TRACE)"]
 async fn akamai_homedepot_clean_production() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     match tokio::time::timeout(
         std::time::Duration::from_secs(300),
         Page::navigate("https://www.homedepot.com/", profile, 3),
@@ -5637,7 +5637,7 @@ async fn akamai_homedepot_clean_production() {
 #[tokio::test]
 #[ignore = "network: 2 alt-Kasada targets to isolate IP-gate vs fingerprint"]
 async fn kasada_alt_targets() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     // hyatt.com + ticketmaster.com as alternate Kasada sites. If one
     // passes where canadagoose doesn't, that argues for
     // canadagoose-specific IP-blocklisting (per commit 6307749 "prove IP is
@@ -5660,7 +5660,7 @@ async fn kasada_alt_targets() {
 #[tokio::test]
 #[ignore = "network: homedepot sec-cpt self-solve nav trace"]
 async fn akamai_homedepot_seccpt_diag() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     antibot_smoke(
         "AKAMAI-homedepot-SECCPT",
         "https://www.homedepot.com/",
@@ -5672,7 +5672,7 @@ async fn akamai_homedepot_seccpt_diag() {
 #[tokio::test]
 #[ignore = "network: 3-site anti-bot smoke (Cloudflare/Kasada/Akamai)"]
 async fn antibot_smoke_tier05() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     // Tier 0.5 structural-advantage targets.
     antibot_smoke(
         "CLOUDFLARE-baseline",
@@ -5692,7 +5692,7 @@ async fn antibot_smoke_tier05() {
 #[tokio::test]
 #[ignore = "network: hits reddit.com"]
 async fn reddit_smoke() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let mut page = match Page::navigate("https://www.reddit.com/", profile, 5).await {
         Ok(p) => p,
         Err(e) => {
@@ -5942,7 +5942,7 @@ async fn datadome_diagnostic_capture() {
         Duration::from_secs(120),
         Page::navigate_with_init(
             target_url,
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             2,
             vec![capture_init.to_string()],
         ),
@@ -6078,7 +6078,7 @@ async fn kasada_eval_source_capture() {
         Duration::from_secs(120),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             2,
             vec![capture_init.to_string()],
         ),
@@ -6198,7 +6198,7 @@ async fn kasada_typeerror_stack_capture() {
         Duration::from_secs(120),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             2,
             vec![capture_init.to_string()],
         ),
@@ -6273,7 +6273,7 @@ async fn kasada_typeerror_stack_capture() {
 
 #[tokio::test]
 async fn check_iterators_test() {
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let mut page = browser::Page::with_profile("", "about:blank", profile)
         .await
         .unwrap();
@@ -6302,7 +6302,7 @@ async fn check_iterators_test() {
 
 #[tokio::test]
 async fn check_ctors_test() {
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let mut page = browser::Page::with_profile("", "about:blank", profile)
         .await
         .unwrap();
@@ -6333,7 +6333,7 @@ async fn check_ctors_test() {
 
 #[tokio::test]
 async fn check_tostring_test() {
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let mut page = browser::Page::with_profile("", "about:blank", profile)
         .await
         .unwrap();
@@ -6369,7 +6369,7 @@ async fn check_tostring_test() {
 
 #[tokio::test]
 async fn check_spread_test() {
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let mut page = browser::Page::with_profile("", "about:blank", profile)
         .await
         .unwrap();
@@ -6406,7 +6406,7 @@ async fn check_spread_test() {
 /// document.fonts, HTMLCollection, RTCRtpReceiver.getCapabilities.
 #[tokio::test]
 async fn check_ao_candidates_test() {
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let mut page = browser::Page::with_profile("", "about:blank", profile)
         .await
         .unwrap();
@@ -6565,7 +6565,7 @@ async fn kasada_symbol_iterator_probe() {
         Duration::from_secs(120),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             2,
             vec![init.to_string()],
         ),
@@ -6670,7 +6670,7 @@ async fn kasada_capture_ips_js() {
         Duration::from_secs(120),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             2,
             vec![init.to_string()],
         ),
@@ -7046,7 +7046,7 @@ async fn kasada_vm_dispatcher_trace() {
         Duration::from_secs(120),
         Page::navigate_with_init(
             "https://www.canadagoose.com/",
-            stealth::presets::chrome_130_macos(),
+            stealth::presets::chrome_148_macos(),
             2,
             vec![init.to_string()],
         ),
@@ -7184,7 +7184,7 @@ async fn thin_body_diagnose(url: &str, name: &str) {
     println!("\n========== {name} ({url}) ==========");
     let r = tokio::time::timeout(
         Duration::from_secs(60),
-        Page::navigate(url, stealth::presets::chrome_130_macos(), 2),
+        Page::navigate(url, stealth::presets::chrome_148_macos(), 2),
     )
     .await;
     match r {
@@ -7225,7 +7225,7 @@ async fn diag_thin_body_sites() {
 /// (the cardinal sin: ApplePaySession + Chrome UA = instant flag).
 #[tokio::test]
 async fn check_payment_request_surface() {
-    let profile = stealth::chrome_130_linux();
+    let profile = stealth::chrome_148_linux();
     let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
         .await
         .unwrap();
@@ -7329,7 +7329,7 @@ async fn check_payment_request_surface() {
 /// under Chrome UA is a tell. Must return Promise<[]> on a fresh profile.
 #[tokio::test]
 async fn check_get_installed_related_apps() {
-    let profile = stealth::chrome_130_linux();
+    let profile = stealth::chrome_148_linux();
     let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
         .await
         .unwrap();
@@ -7381,7 +7381,7 @@ async fn check_get_installed_related_apps() {
 ///      "at Reflect.apply", "at newHandler.<computed>")
 #[tokio::test]
 async fn check_tostring_audit_full() {
-    let profile = stealth::chrome_130_linux();
+    let profile = stealth::chrome_148_linux();
     let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
         .await
         .unwrap();
@@ -7595,9 +7595,9 @@ async fn check_audio_fingerprint_per_profile() {
     }
     let _ = render_js; // referenced for documentation
 
-    let h_mac = render(stealth::chrome_130_macos()).await;
-    let h_lin = render(stealth::chrome_130_linux()).await;
-    let h_lin_2 = render(stealth::chrome_130_linux()).await;
+    let h_mac = render(stealth::chrome_148_macos()).await;
+    let h_lin = render(stealth::chrome_148_linux()).await;
+    let h_lin_2 = render(stealth::chrome_148_linux()).await;
     println!("audio hashes: mac={h_mac} lin={h_lin} lin_again={h_lin_2}");
 
     assert!(
@@ -7628,7 +7628,7 @@ async fn check_audio_fingerprint_per_profile() {
 /// divergence site Kasada is detecting; patch it to return stable references.
 #[tokio::test]
 async fn check_function_identity_preservation() {
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let mut page = Page::from_html_with_url(&html(""), "https://example.com/", Some(profile))
         .await
         .unwrap();
@@ -8545,7 +8545,7 @@ async fn kasada_smc_in_child_realm_eval() {
     let mut page = Page::from_html_with_url(
         &html(""),
         "https://example.com/",
-        Some(stealth::presets::chrome_130_macos()),
+        Some(stealth::presets::chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -9251,7 +9251,7 @@ async fn kasada_ifw_probe_srcdoc_simulation() {
     let mut page = Page::from_html_with_url(
         &html(""),
         "https://example.com/",
-        Some(stealth::presets::chrome_130_macos()),
+        Some(stealth::presets::chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -9303,7 +9303,7 @@ async fn kasada_bas_probe_full_window_scan() {
     let mut page = Page::from_html_with_url(
         &html(""),
         "https://example.com/",
-        Some(stealth::presets::chrome_130_macos()),
+        Some(stealth::presets::chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -9427,7 +9427,7 @@ async fn kasada_sbi_probe_callable_proxy_tostring() {
     let mut page = Page::from_html_with_url(
         &html(""),
         "https://example.com/",
-        Some(stealth::presets::chrome_130_macos()),
+        Some(stealth::presets::chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -9499,7 +9499,7 @@ async fn kasada_mrs_probe_mediasource_in_child_realm() {
     let mut page = Page::from_html_with_url(
         &html(""),
         "https://example.com/",
-        Some(stealth::presets::chrome_130_macos()),
+        Some(stealth::presets::chrome_148_macos()),
     )
     .await
     .unwrap();

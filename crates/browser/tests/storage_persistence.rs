@@ -1,10 +1,10 @@
 use browser::Page;
 use std::time::Duration;
-use stealth::presets::chrome_130_ru;
+use stealth::presets::chrome_148_ru;
 
 #[tokio::test]
 async fn test_local_storage_persistence_across_navigation() {
-    let profile = chrome_130_ru();
+    let profile = chrome_148_ru();
 
     // Iteration 0: Set a value in localStorage and trigger a reload
     let html_0 = r#"
@@ -37,7 +37,7 @@ async fn test_local_storage_persistence_across_navigation() {
 
 #[tokio::test]
 async fn test_session_storage_persistence_across_navigation() {
-    let profile = chrome_130_ru();
+    let profile = chrome_148_ru();
 
     let html_0 = r#"
         <html>

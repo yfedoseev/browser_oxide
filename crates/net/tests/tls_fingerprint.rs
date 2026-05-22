@@ -4,7 +4,7 @@ use stealth::presets;
 #[tokio::test]
 #[ignore] // Requires internet
 async fn test_tls_fingerprint_peet() {
-    let profile = presets::chrome_130_ru();
+    let profile = presets::chrome_148_ru();
     let client = HttpClient::new(&profile).unwrap();
 
     // tls.peet.ws returns JSON with fingerprint details

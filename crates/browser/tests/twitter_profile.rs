@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 #[ignore]
 async fn profile_twitter() {
     let url = std::env::var("BOXIDE_TARGET").unwrap_or_else(|_| "https://twitter.com/".into());
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let t0 = Instant::now();
     let result =
         tokio::time::timeout(Duration::from_secs(180), Page::navigate(&url, profile, 1)).await;

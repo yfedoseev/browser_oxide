@@ -248,7 +248,7 @@ fn get_elements_by_tag_name() {
 
 #[test]
 fn stealth_profile_overrides_navigator() {
-    let profile = stealth::chrome_130_windows();
+    let profile = stealth::chrome_148_windows();
     let dom = html_parser::parse_html("<html><head></head><body></body></html>");
     let mut rt = BrowserJsRuntime::with_profile(dom, profile);
 
@@ -270,7 +270,7 @@ fn stealth_profile_overrides_navigator() {
 
 #[test]
 fn stealth_profile_overrides_screen() {
-    let profile = stealth::chrome_130_macos();
+    let profile = stealth::chrome_148_macos();
     let dom = html_parser::parse_html("<html><head></head><body></body></html>");
     let mut rt = BrowserJsRuntime::with_profile(dom, profile);
 
@@ -283,7 +283,7 @@ fn stealth_profile_overrides_screen() {
 
 #[test]
 fn stealth_profile_overrides_window_dims() {
-    let profile = stealth::chrome_130_linux();
+    let profile = stealth::chrome_148_linux();
     let dom = html_parser::parse_html("<html><head></head><body></body></html>");
     let mut rt = BrowserJsRuntime::with_profile(dom, profile);
 

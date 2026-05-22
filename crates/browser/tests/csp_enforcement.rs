@@ -8,7 +8,7 @@
 //! `/akam/13/...` requests that Chrome never makes.
 
 use browser::Page;
-use stealth::presets::chrome_130_macos;
+use stealth::presets::chrome_148_macos;
 
 /// A miniaturized Walmart-style CSP. The page declares strict-dynamic
 /// + nonce, then includes one parser-injected script with a matching
@@ -91,7 +91,7 @@ async fn parser_injected_script_without_nonce_is_blocked() {
     // skipped without a network attempt.
     let captured_log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let _captured_for_log = captured_log.clone();
-    let mut page = Page::from_html(HTML, Some(chrome_130_macos()))
+    let mut page = Page::from_html(HTML, Some(chrome_148_macos()))
         .await
         .unwrap();
 
@@ -115,7 +115,7 @@ async fn no_csp_does_not_block_anything() {
 <html><head><title>no csp</title></head><body>
 <script>globalThis.__inline_ran = "yes";</script>
 </body></html>"#;
-    let mut page = Page::from_html(NO_CSP_HTML, Some(chrome_130_macos()))
+    let mut page = Page::from_html(NO_CSP_HTML, Some(chrome_148_macos()))
         .await
         .unwrap();
     let inline = page.evaluate("globalThis.__inline_ran").unwrap();
@@ -155,7 +155,7 @@ async fn securitypolicyviolation_event_fires_on_block() {
 </script>
 </body></html>"#;
 
-    let mut page = Page::from_html(HTML, Some(chrome_130_macos()))
+    let mut page = Page::from_html(HTML, Some(chrome_148_macos()))
         .await
         .unwrap();
 

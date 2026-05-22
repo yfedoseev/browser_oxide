@@ -6,7 +6,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "network: live HTTP against example.com"]
     async fn audit_js_surface() {
-        let profile = stealth::presets::chrome_130_macos();
+        let profile = stealth::presets::chrome_148_macos();
         let mut page = Page::navigate("https://example.com/", profile, 1)
             .await
             .unwrap();

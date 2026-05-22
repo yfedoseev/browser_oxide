@@ -461,7 +461,7 @@ impl Page {
         event_loop.reset_nav_pending();
 
         // Share the HTTP client with JS fetch()
-        let p = profile.unwrap_or_else(stealth::presets::chrome_130_ru);
+        let p = profile.unwrap_or_else(stealth::presets::chrome_148_ru);
         let client =
             net::HttpClient::new(&p).map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
@@ -3313,7 +3313,7 @@ mod tests {
     async fn apple_pay_session_present_on_macos_profile() {
         // Phase 7 — ApplePaySession is gated on isSecureContext so the
         // page must be loaded over https:// for the macOS shim to install.
-        let profile = stealth::presets::chrome_130_macos();
+        let profile = stealth::presets::chrome_148_macos();
         let mut page = Page::from_html_with_url(
             "<html><head></head><body></body></html>",
             "https://example.com/",
@@ -3334,7 +3334,7 @@ mod tests {
 
     #[tokio::test]
     async fn apple_pay_session_absent_on_windows_profile() {
-        let profile = stealth::presets::chrome_130_windows();
+        let profile = stealth::presets::chrome_148_windows();
         let mut page = Page::from_html("<html><head></head><body></body></html>", Some(profile))
             .await
             .unwrap();
@@ -3358,7 +3358,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs real canvas getContext in the test harness"]
     async fn canvas_font_detection_macos_helvetica_neue() {
-        let profile = stealth::presets::chrome_130_macos();
+        let profile = stealth::presets::chrome_148_macos();
         let mut page = Page::from_html(
             "<html><head></head><body><canvas id=\"c\" width=\"200\" height=\"50\"></canvas></body></html>",
             Some(profile),
@@ -3524,12 +3524,12 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn navigate_httpbin() {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let client = net::HttpClient::new(&profile).unwrap();
         let mut page = Page::navigate_simple(
             "https://httpbin.org/html",
             &client,
-            stealth::presets::chrome_130_ru(),
+            stealth::presets::chrome_148_ru(),
         )
         .await
         .expect("navigate to httpbin failed");
@@ -3547,12 +3547,12 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn navigate_httpbin_user_agent() {
-        let profile = stealth::chrome_130_windows();
+        let profile = stealth::chrome_148_windows();
         let client = net::HttpClient::new(&profile).unwrap();
         let mut page = Page::navigate_simple(
             "https://httpbin.org/user-agent",
             &client,
-            stealth::presets::chrome_130_ru(),
+            stealth::presets::chrome_148_ru(),
         )
         .await
         .expect("navigate to httpbin/user-agent failed");
@@ -3567,12 +3567,12 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn navigate_stealth_headers_check() {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let client = net::HttpClient::new(&profile).unwrap();
         let mut page = Page::navigate_simple(
             "https://httpbin.org/headers",
             &client,
-            stealth::presets::chrome_130_ru(),
+            stealth::presets::chrome_148_ru(),
         )
         .await
         .expect("navigate to httpbin/headers failed");
@@ -3586,7 +3586,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn navigate_stealth_js_fingerprint() {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let mut page = Page::navigate_stealth("https://httpbin.org/html", profile)
             .await
             .expect("stealth navigate failed");

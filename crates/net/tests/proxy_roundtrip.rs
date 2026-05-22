@@ -231,7 +231,7 @@ async fn live_proxy_chain() {
     // Build two clients that share nothing: one direct, one with proxy.
     // Use a minimal preset profile (we only care about the IP differing).
     use stealth::presets;
-    let mut profile_direct = presets::chrome_130_windows();
+    let mut profile_direct = presets::chrome_148_windows();
     profile_direct.proxy = None;
     let mut profile_proxy = profile_direct.clone();
     profile_proxy.proxy = Some(proxy_url.clone());

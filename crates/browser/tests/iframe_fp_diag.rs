@@ -45,7 +45,7 @@ const PROBE: &str = r#"(function(){
 #[tokio::test]
 #[ignore = "diagnostic: prints child-iframe FP surface, compare vs real Chrome"]
 async fn iframe_fp_surface_macos() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let mut page = Page::from_html(
         "<!DOCTYPE html><html><head></head><body></body></html>",
         Some(profile),
@@ -83,7 +83,7 @@ async fn iframe_fp_surface_noprofile() {
 #[tokio::test]
 #[ignore = "diagnostic: deep ifw probe — what does cw look like and why instanceof fails"]
 async fn kasada_ifw_deep_probe() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let mut page = Page::from_html(
         "<!DOCTYPE html><html><head></head><body></body></html>",
         Some(profile),
@@ -125,7 +125,7 @@ async fn kasada_ifw_deep_probe() {
 #[tokio::test]
 #[ignore = "diagnostic: frame index access (window[0], frames[0], window.length)"]
 async fn kasada_frame_index_probe() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let mut page = Page::from_html(
         "<!DOCTYPE html><html><head></head><body></body></html>",
         Some(profile),
@@ -166,7 +166,7 @@ async fn kasada_frame_index_probe() {
 #[tokio::test]
 #[ignore = "diagnostic: Kasada ifw+smc probe parity check"]
 async fn kasada_ifw_smc_probe() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let mut page = Page::from_html(
         "<!DOCTYPE html><html><head></head><body></body></html>",
         Some(profile),
@@ -222,7 +222,7 @@ async fn kasada_ifw_smc_probe() {
 #[tokio::test]
 #[ignore = "diagnostic: Kasada spd (screen pixel density) probe in child realm"]
 async fn kasada_spd_probe() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let mut page = Page::from_html(
         "<!DOCTYPE html><html><head></head><body></body></html>",
         Some(profile),

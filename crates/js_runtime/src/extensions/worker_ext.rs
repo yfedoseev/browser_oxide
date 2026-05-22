@@ -129,11 +129,11 @@ pub fn op_blob_revoke(#[string] url: String) {
 pub fn op_worker_sync_fetch(#[string] url: String) -> String {
     // Clone the process-global fetch client so the helper thread
     // inherits profile + cookie state. Falls back to a default
-    // chrome_130_linux client if no profile was wired (matches the
+    // chrome_148_linux client if no profile was wired (matches the
     // main-thread fetch_ext fallback).
     let client = match crate::extensions::fetch_ext::fetch_client() {
         Some(c) => c,
-        None => match net::HttpClient::new(&stealth::chrome_130_linux()) {
+        None => match net::HttpClient::new(&stealth::chrome_148_linux()) {
             Ok(c) => c,
             Err(_) => return String::new(),
         },

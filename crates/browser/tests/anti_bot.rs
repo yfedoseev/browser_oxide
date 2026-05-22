@@ -672,7 +672,7 @@ async fn document_write_appends_content() {
 #[test]
 fn stealth_profiles_validate() {
     use stealth::presets::*;
-    for profile in [chrome_130_windows(), chrome_130_macos(), chrome_130_linux()] {
+    for profile in [chrome_148_windows(), chrome_148_macos(), chrome_148_linux()] {
         assert!(profile.validate().is_ok(), "{:?}", profile.validate());
     }
 }

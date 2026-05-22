@@ -25,21 +25,21 @@ fn now_unix_ms() -> u64 {
 /// Returns (outcome, body_len, navigate_ms, drop_ms).
 /// The split lets us see whether time is in Page::navigate (network/JS work)
 /// or in `drop(page)` (V8 isolate teardown / pending tokio task drain).
-/// Picks profile from BOXIDE_PROFILE env var (default `chrome_130_macos`).
-/// Supported values: `chrome_130_macos|windows|linux`, `firefox_135_macos|windows|linux`.
+/// Picks profile from BOXIDE_PROFILE env var (default `chrome_148_macos`).
+/// Supported values: `chrome_148_macos|windows|linux`, `firefox_135_macos|windows|linux`.
 fn pick_profile() -> stealth::StealthProfile {
     match std::env::var("BOXIDE_PROFILE")
-        .unwrap_or_else(|_| "chrome_130_macos".into())
+        .unwrap_or_else(|_| "chrome_148_macos".into())
         .as_str()
     {
-        "chrome_130_macos" => stealth::presets::chrome_130_macos(),
-        "chrome_130_windows" => stealth::presets::chrome_130_windows(),
-        "chrome_130_linux" => stealth::presets::chrome_130_linux(),
+        "chrome_148_macos" => stealth::presets::chrome_148_macos(),
+        "chrome_148_windows" => stealth::presets::chrome_148_windows(),
+        "chrome_148_linux" => stealth::presets::chrome_148_linux(),
         "firefox_135_macos" => stealth::presets::firefox_135_macos(),
         "firefox_135_windows" => stealth::presets::firefox_135_windows(),
         "firefox_135_linux" => stealth::presets::firefox_135_linux(),
         // 2026-05-12 mobile profiles (Phase 2 + Phase 3)
-        "pixel_9_pro_chrome_147" => stealth::presets::pixel_9_pro_chrome_147(),
+        "pixel_9_pro_chrome_148" => stealth::presets::pixel_9_pro_chrome_148(),
         "iphone_15_pro_safari_18" => stealth::presets::iphone_15_pro_safari_18(),
         other => panic!("unknown BOXIDE_PROFILE={other}"),
     }

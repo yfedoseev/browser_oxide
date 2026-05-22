@@ -285,7 +285,7 @@ pub async fn op_fetch(
     let client = match FETCH_CLIENT.get() {
         Some(c) => c,
         None => {
-            let profile = stealth::chrome_130_linux();
+            let profile = stealth::chrome_148_linux();
             default_client = net::HttpClient::new(&profile)
                 .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
             &default_client
@@ -475,7 +475,7 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
             ),
         ),
         None => {
-            let p = stealth::presets::chrome_130_ru();
+            let p = stealth::presets::chrome_148_ru();
             (p.clone(), net::HttpClient::new(&p))
         }
     };
@@ -618,7 +618,7 @@ pub fn op_net_xhr_sync(
                     ).unwrap_or_else(|_| net::HttpClient::new(main.profile()).unwrap())
                 }
                 None => {
-                    let p = stealth::presets::chrome_130_ru();
+                    let p = stealth::presets::chrome_148_ru();
                     net::HttpClient::new(&p).unwrap()
                 }
             };

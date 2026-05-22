@@ -118,7 +118,7 @@ impl CdpServer {
             let local = tokio::task::LocalSet::new();
 
             local.block_on(&rt, async move {
-                let profile = stealth::chrome_130_linux();
+                let profile = stealth::chrome_148_linux();
                 // Test raw HTTP first to diagnose connection issues
                 let client = match net::HttpClient::new(&profile) {
                     Ok(c) => c,
@@ -214,7 +214,7 @@ impl CdpServer {
             let local = tokio::task::LocalSet::new();
 
             local.block_on(&rt, async move {
-                let profile = stealth::chrome_130_linux();
+                let profile = stealth::chrome_148_linux();
                 let client = match net::HttpClient::new(&profile) {
                     Ok(c) => c,
                     Err(e) => {
@@ -597,7 +597,7 @@ mod tests {
                 let page = browser::Page::from_html_fast(
                     html,
                     "https://example.com",
-                    stealth::presets::chrome_130_ru(),
+                    stealth::presets::chrome_148_ru(),
                 )
                 .await
                 .unwrap();

@@ -64,25 +64,25 @@ async fn debug_probe(url: &str, profile: stealth::StealthProfile) {
 #[tokio::test]
 #[ignore]
 async fn debug_tripadvisor() {
-    debug_probe("https://www.tripadvisor.com", stealth::chrome_130_windows()).await;
+    debug_probe("https://www.tripadvisor.com", stealth::chrome_148_windows()).await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn debug_airbnb() {
-    debug_probe("https://www.airbnb.com", stealth::chrome_130_windows()).await;
+    debug_probe("https://www.airbnb.com", stealth::chrome_148_windows()).await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn debug_amazon() {
-    debug_probe("https://www.amazon.com", stealth::chrome_130_windows()).await;
+    debug_probe("https://www.amazon.com", stealth::chrome_148_windows()).await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn debug_ozon() {
-    debug_probe("https://www.ozon.ru", stealth::presets::chrome_130_ru()).await;
+    debug_probe("https://www.ozon.ru", stealth::presets::chrome_148_ru()).await;
 }
 
 #[tokio::test]
@@ -90,7 +90,7 @@ async fn debug_ozon() {
 async fn debug_ozon_rr1() {
     debug_probe(
         "https://www.ozon.ru/?__rr=1",
-        stealth::presets::chrome_130_ru(),
+        stealth::presets::chrome_148_ru(),
     )
     .await;
 }
@@ -98,24 +98,24 @@ async fn debug_ozon_rr1() {
 #[tokio::test]
 #[ignore]
 async fn debug_yandex() {
-    debug_probe("https://ya.ru", stealth::presets::chrome_130_ru()).await;
+    debug_probe("https://ya.ru", stealth::presets::chrome_148_ru()).await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn debug_dns_shop() {
-    debug_probe("https://www.dns-shop.ru", stealth::presets::chrome_130_ru()).await;
+    debug_probe("https://www.dns-shop.ru", stealth::presets::chrome_148_ru()).await;
 }
 
 // Also test with different profiles to see if locale matters
 #[tokio::test]
 #[ignore]
 async fn debug_amazon_linux() {
-    debug_probe("https://www.amazon.com", stealth::chrome_130_linux()).await;
+    debug_probe("https://www.amazon.com", stealth::chrome_148_linux()).await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn debug_tripadvisor_macos() {
-    debug_probe("https://www.tripadvisor.com", stealth::chrome_130_macos()).await;
+    debug_probe("https://www.tripadvisor.com", stealth::chrome_148_macos()).await;
 }

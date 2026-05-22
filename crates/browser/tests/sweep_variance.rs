@@ -71,8 +71,8 @@ fn profile_from_path(p: &std::path::Path) -> Option<String> {
     let after = stem.strip_prefix("sweep_")?;
     // Drop optional trailing suffix after the recognized profile root.
     for known in [
-        "chrome_130_macos",
-        "pixel_9_pro_chrome_147",
+        "chrome_148_macos",
+        "pixel_9_pro_chrome_148",
         "iphone_15_pro_safari_18",
         "firefox_135_macos",
     ] {
@@ -234,8 +234,8 @@ async fn variance_report() {
         let suffix = {
             let mut s = stem.to_string();
             for known in [
-                "chrome_130_macos",
-                "pixel_9_pro_chrome_147",
+                "chrome_148_macos",
+                "pixel_9_pro_chrome_148",
                 "iphone_15_pro_safari_18",
                 "firefox_135_macos",
             ] {

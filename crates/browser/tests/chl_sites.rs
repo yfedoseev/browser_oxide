@@ -21,7 +21,7 @@ use browser::Page;
 use stealth;
 
 async fn fetch_and_classify(url: &str) -> String {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let mut page = match Page::navigate(url, profile, 3).await {
         Ok(p) => p,
         Err(e) => return format!("ERROR: {e}"),

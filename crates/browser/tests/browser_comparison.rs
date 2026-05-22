@@ -1933,7 +1933,7 @@ async fn compare_tls_fingerprint() {
 
     // browser_oxide — use direct HTTP client for TLS test (more meaningful than CDP)
     {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let http_client = net::HttpClient::new(&profile).unwrap();
         let start = Instant::now();
         match http_client.get("https://tls.peet.ws/api/all").await {
@@ -2388,7 +2388,7 @@ async fn compare_quic_support() {
 
     // browser_oxide — test QUIC via net crate directly
     {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let client = net::HttpClient::new(&profile).unwrap();
 
         // First request — should go HTTP/2, learn Alt-Svc

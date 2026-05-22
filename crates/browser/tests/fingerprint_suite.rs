@@ -811,7 +811,7 @@ fn write_summary(results: &[SiteResult]) {
         "Run via `cargo test --release -p browser --test fingerprint_suite \
                  -- --ignored --test-threads=1 --nocapture fingerprint_suite_full_run`.\n\n",
     );
-    md.push_str("Profile: `stealth::presets::chrome_130_windows()` (UA reports Chrome 147).\n\n");
+    md.push_str("Profile: `stealth::presets::chrome_148_windows()` (UA reports Chrome 147).\n\n");
     md.push_str("| Site | URL | Verdict | Note |\n");
     md.push_str("|------|-----|---------|------|\n");
     for r in results {
@@ -865,18 +865,18 @@ async fn fingerprint_suite_full_run() {
     // is required because the test runner uses --test-threads=1
     // anyway and concurrent isolates inside one tokio task would
     // not help.
-    results.push(run_creepjs(stealth::presets::chrome_130_windows()).await);
-    results.push(run_pixelscan(stealth::presets::chrome_130_windows()).await);
+    results.push(run_creepjs(stealth::presets::chrome_148_windows()).await);
+    results.push(run_pixelscan(stealth::presets::chrome_148_windows()).await);
     for section in ["canvas", "webgl", "javascript", "fonts", "webrtc", "proxy"] {
-        results.push(run_browserleaks(stealth::presets::chrome_130_windows(), section).await);
+        results.push(run_browserleaks(stealth::presets::chrome_148_windows(), section).await);
     }
-    results.push(run_rebrowser(stealth::presets::chrome_130_windows()).await);
-    results.push(run_fingerprint_demo(stealth::presets::chrome_130_windows()).await);
-    results.push(run_amiunique(stealth::presets::chrome_130_windows()).await);
-    results.push(run_eff(stealth::presets::chrome_130_windows()).await);
-    results.push(run_deviceinfo(stealth::presets::chrome_130_windows()).await);
-    results.push(run_nowsecure(stealth::presets::chrome_130_windows()).await);
-    results.push(run_datadome(stealth::presets::chrome_130_windows()).await);
+    results.push(run_rebrowser(stealth::presets::chrome_148_windows()).await);
+    results.push(run_fingerprint_demo(stealth::presets::chrome_148_windows()).await);
+    results.push(run_amiunique(stealth::presets::chrome_148_windows()).await);
+    results.push(run_eff(stealth::presets::chrome_148_windows()).await);
+    results.push(run_deviceinfo(stealth::presets::chrome_148_windows()).await);
+    results.push(run_nowsecure(stealth::presets::chrome_148_windows()).await);
+    results.push(run_datadome(stealth::presets::chrome_148_windows()).await);
 
     write_summary(&results);
     print_summary(&results);

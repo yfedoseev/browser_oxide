@@ -4,7 +4,7 @@
 #[tokio::test]
 #[ignore]
 async fn ozon_with_redirect_follow() {
-    let profile = stealth::presets::chrome_130_ru();
+    let profile = stealth::presets::chrome_148_ru();
     let client = net::HttpClient::new(&profile).unwrap();
     let resp = client.get_follow("https://www.ozon.ru", 5).await.unwrap();
     println!("[ozon follow] status: {}", resp.status);
@@ -18,7 +18,7 @@ async fn ozon_with_redirect_follow() {
 #[ignore]
 async fn airbnb_header_check() {
     // Check what headers we're actually sending
-    let profile = stealth::chrome_130_windows();
+    let profile = stealth::chrome_148_windows();
     let client = net::HttpClient::new(&profile).unwrap();
     let resp = client.get("https://httpbin.org/headers").await.unwrap();
     println!("[our headers]:\n{}", resp.text());
@@ -28,7 +28,7 @@ async fn airbnb_header_check() {
 #[ignore]
 async fn yandex_http11() {
     // Try ya.ru with explicit HTTP/1.1 fallback
-    let profile = stealth::presets::chrome_130_ru();
+    let profile = stealth::presets::chrome_148_ru();
     let client = net::HttpClient::new(&profile).unwrap();
     // Try the search page instead of root
     let resp = client.get("https://yandex.ru/search/?text=test").await;
@@ -45,7 +45,7 @@ async fn yandex_http11() {
 #[ignore]
 async fn amazon_challenge_content() {
     // Get Amazon's challenge page and examine the JS
-    let profile = stealth::chrome_130_windows();
+    let profile = stealth::chrome_148_windows();
     let client = net::HttpClient::new(&profile).unwrap();
     let resp = client.get("https://www.amazon.com").await.unwrap();
     println!("[amazon] status: {}", resp.status);

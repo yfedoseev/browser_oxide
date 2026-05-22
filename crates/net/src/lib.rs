@@ -1401,7 +1401,7 @@ mod tests {
 
     #[test]
     fn client_creates_successfully() {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let client = HttpClient::new(&profile);
         assert!(client.is_ok());
     }
@@ -1476,7 +1476,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn get_request() {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let client = HttpClient::new(&profile).unwrap();
         let resp = client.get("https://httpbin.org/get").await.unwrap();
         assert_eq!(resp.status, 200);
@@ -1486,7 +1486,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn get_ipv6_example_com() {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let client = HttpClient::new(&profile).unwrap();
         let resp = client.get("https://example.com").await.unwrap();
         assert_eq!(resp.status, 200);
@@ -1496,7 +1496,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn get_hacker_news() {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let client = HttpClient::new(&profile).unwrap();
         let resp = client.get("https://news.ycombinator.com").await.unwrap();
         assert_eq!(resp.status, 200);
@@ -1506,7 +1506,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn headers_include_ua() {
-        let profile = stealth::chrome_130_windows();
+        let profile = stealth::chrome_148_windows();
         let client = HttpClient::new(&profile).unwrap();
         let resp = client.get("https://httpbin.org/headers").await.unwrap();
         let body = resp.text();
@@ -1519,7 +1519,7 @@ mod tests {
 
     #[tokio::test]
     async fn accept_ch_starts_false_then_true_after_learn() {
-        let profile = stealth::chrome_130_windows();
+        let profile = stealth::chrome_148_windows();
         let client = HttpClient::new(&profile).unwrap();
 
         // No response seen yet → no Accept-CH for this origin.
@@ -1540,7 +1540,7 @@ mod tests {
 
     #[tokio::test]
     async fn accept_ch_header_name_is_case_insensitive() {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let client = HttpClient::new(&profile).unwrap();
 
         // Mixed-case header name (e.g. from an HTTP/1.1 server that sends
@@ -1554,7 +1554,7 @@ mod tests {
 
     #[tokio::test]
     async fn response_without_accept_ch_does_not_upgrade_origin() {
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let client = HttpClient::new(&profile).unwrap();
 
         let mut headers = HashMap::new();

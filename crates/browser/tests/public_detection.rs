@@ -5,7 +5,7 @@ use stealth::presets;
 #[tokio::test]
 #[ignore] // Requires internet
 async fn probe_sannysoft_bot_detection() {
-    let profile = presets::chrome_130_ru();
+    let profile = presets::chrome_148_ru();
     // navigate() uses the full loop with 5 iterations, including __pendingNavigation follow
     let mut page = Page::navigate("https://bot.sannysoft.com", profile, 5)
         .await
@@ -62,7 +62,7 @@ async fn probe_sannysoft_bot_detection() {
 #[tokio::test]
 #[ignore] // Requires internet
 async fn probe_creepjs_score() {
-    let profile = presets::chrome_130_ru();
+    let profile = presets::chrome_148_ru();
     // CreepJS is heavy and takes time to compute
     let mut page = Page::with_profile("", "https://abrahamjuliot.github.io/creepjs/", profile)
         .await
@@ -102,7 +102,7 @@ async fn probe_creepjs_score() {
 #[tokio::test]
 #[ignore] // Requires internet
 async fn probe_browser_scan() {
-    let profile = presets::chrome_130_ru();
+    let profile = presets::chrome_148_ru();
     let mut page = Page::with_profile("", "https://www.browserscan.net/bot-detection", profile)
         .await
         .unwrap();

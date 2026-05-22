@@ -33,15 +33,15 @@ use stealth;
 #[tokio::test]
 #[ignore = "network: capture our TLS ClientHello via tls.peet.ws/api/all"]
 async fn capture_chrome_148_hello_desktop() {
-    let profile = stealth::presets::chrome_130_macos();
-    capture_tls_fingerprint("chrome_130_macos", &profile).await;
+    let profile = stealth::presets::chrome_148_macos();
+    capture_tls_fingerprint("chrome_148_macos", &profile).await;
 }
 
 #[tokio::test]
 #[ignore = "network: capture Pixel Android TLS via tls.peet.ws/api/all"]
 async fn capture_chrome_148_hello_pixel() {
-    let profile = stealth::presets::pixel_9_pro_chrome_147();
-    capture_tls_fingerprint("pixel_9_pro_chrome_147", &profile).await;
+    let profile = stealth::presets::pixel_9_pro_chrome_148();
+    capture_tls_fingerprint("pixel_9_pro_chrome_148", &profile).await;
 }
 
 #[tokio::test]

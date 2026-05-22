@@ -143,7 +143,7 @@ async fn deep_amazon_dp() {
         "amazon.com",
         "https://www.amazon.com/",
         "https://www.amazon.com/dp/B08N3TCP5Z",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["validateCaptcha", "Sorry, we just need"],
     )
@@ -158,7 +158,7 @@ async fn deep_chatgpt_about() {
         "chatgpt.com",
         "https://chatgpt.com/",
         "https://chatgpt.com/auth/login",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Just a moment"],
     )
@@ -173,7 +173,7 @@ async fn deep_linkedin_feed() {
         "linkedin.com",
         "https://www.linkedin.com/",
         "https://www.linkedin.com/feed/",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Access denied", "Pardon Our Interruption"],
     )
@@ -188,7 +188,7 @@ async fn deep_coinbase_price() {
         "coinbase.com",
         "https://www.coinbase.com/",
         "https://www.coinbase.com/price/bitcoin",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html", "Bitcoin"],
         &["Just a moment"],
     )
@@ -203,7 +203,7 @@ async fn deep_medium_topics() {
         "medium.com",
         "https://medium.com/",
         "https://medium.com/topic/technology",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Just a moment"],
     )
@@ -218,7 +218,7 @@ async fn deep_discord_developers() {
         "discord.com",
         "https://discord.com/",
         "https://discord.com/developers/docs/intro",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Just a moment"],
     )
@@ -236,7 +236,7 @@ async fn deep_nike_product() {
         "nike.com",
         "https://www.nike.com/",
         "https://www.nike.com/w/mens-shoes-nik1zy7ok",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Access Denied", "Pardon Our Interruption"],
     )
@@ -251,7 +251,7 @@ async fn deep_walmart_search() {
         "walmart.com",
         "https://www.walmart.com/",
         "https://www.walmart.com/search?q=laptop",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Robot or human", "Access Denied"],
     )
@@ -266,7 +266,7 @@ async fn deep_zillow_search() {
         "zillow.com",
         "https://www.zillow.com/",
         "https://www.zillow.com/homes/San-Francisco_rb/",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Robot", "Access Denied"],
     )
@@ -281,7 +281,7 @@ async fn deep_stockx_browse() {
         "stockx.com",
         "https://www.stockx.com/",
         "https://stockx.com/sneakers",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Access denied"],
     )
@@ -296,7 +296,7 @@ async fn deep_glassdoor_jobs() {
         "glassdoor.com",
         "https://www.glassdoor.com/",
         "https://www.glassdoor.com/Job/jobs.htm?sc.keyword=software%20engineer",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &[r#"dd={"rt""#, "ct.captcha-delivery.com"],
     )
@@ -311,7 +311,7 @@ async fn deep_crunchbase_search() {
         "crunchbase.com",
         "https://www.crunchbase.com/",
         "https://www.crunchbase.com/discover/organization.companies",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &[r#"dd={"rt""#],
     )
@@ -326,7 +326,7 @@ async fn deep_reddit_sub() {
         "reddit.com",
         "https://www.reddit.com/",
         "https://www.reddit.com/r/rust/",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &[r#"dd={"rt""#, "Access denied"],
     )
@@ -341,7 +341,7 @@ async fn deep_delta_destinations() {
         "delta.com",
         "https://www.delta.com/",
         "https://www.delta.com/flight-search/book-a-flight",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Access Denied"],
     )
@@ -356,7 +356,7 @@ async fn deep_turbotax_products() {
         "turbotax.com",
         "https://turbotax.intuit.com/",
         "https://turbotax.intuit.com/personal-taxes/online/",
-        stealth::chrome_130_windows(),
+        stealth::chrome_148_windows(),
         &["<html"],
         &["Access Denied"],
     )
@@ -373,7 +373,7 @@ async fn deep_taobao_search() {
         "taobao.com",
         "https://www.taobao.com/",
         "https://s.taobao.com/search?q=laptop",
-        stealth::presets::chrome_130_cn(),
+        stealth::presets::chrome_148_cn(),
         &["<html"],
         &[r#""code":"punish""#, "slider"],
     )
@@ -388,7 +388,7 @@ async fn deep_tmall_search() {
         "tmall.com",
         "https://www.tmall.com/",
         "https://list.tmall.com/search_product.htm?q=laptop",
-        stealth::presets::chrome_130_cn(),
+        stealth::presets::chrome_148_cn(),
         &["<html"],
         &[r#""code":"punish""#, "slider"],
     )
@@ -403,7 +403,7 @@ async fn deep_jd_search() {
         "jd.com",
         "https://www.jd.com/",
         "https://search.jd.com/Search?keyword=laptop",
-        stealth::presets::chrome_130_cn(),
+        stealth::presets::chrome_148_cn(),
         &["<html"],
         &["access denied"],
     )
@@ -418,7 +418,7 @@ async fn deep_baidu_search() {
         "baidu.com",
         "https://www.baidu.com/",
         "https://www.baidu.com/s?wd=rust",
-        stealth::presets::chrome_130_cn(),
+        stealth::presets::chrome_148_cn(),
         &["<html"],
         &["百度安全验证"],
     )
@@ -433,7 +433,7 @@ async fn deep_douyin_explore() {
         "douyin.com",
         "https://www.douyin.com/",
         "https://www.douyin.com/discover",
-        stealth::presets::chrome_130_cn(),
+        stealth::presets::chrome_148_cn(),
         &["<html"],
         &[],
     )
@@ -448,7 +448,7 @@ async fn deep_bilibili_play() {
         "bilibili.com",
         "https://www.bilibili.com/",
         "https://www.bilibili.com/v/popular/all",
-        stealth::presets::chrome_130_cn(),
+        stealth::presets::chrome_148_cn(),
         &["<html"],
         &[],
     )
@@ -465,7 +465,7 @@ async fn deep_avito_search() {
         "avito.ru",
         "https://www.avito.ru/",
         "https://www.avito.ru/moskva?q=iphone",
-        stealth::presets::chrome_130_ru(),
+        stealth::presets::chrome_148_ru(),
         &["<html"],
         &["Доступ ограничен"],
     )
@@ -480,7 +480,7 @@ async fn deep_ya_search() {
         "ya.ru",
         "https://ya.ru/",
         "https://ya.ru/search/?text=rust%20language",
-        stealth::presets::chrome_130_ru(),
+        stealth::presets::chrome_148_ru(),
         &["<html"],
         &["showcaptcha"],
     )
@@ -495,7 +495,7 @@ async fn deep_vk_feed() {
         "vk.com",
         "https://vk.com/",
         "https://vk.com/feed",
-        stealth::presets::chrome_130_ru(),
+        stealth::presets::chrome_148_ru(),
         &["<html"],
         &["Доступ ограничен"],
     )

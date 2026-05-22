@@ -853,9 +853,9 @@ mod tests {
 
     #[test]
     fn pixel_android_emits_mobile_client_hints() {
-        // Phase 2 (2026-05-12) — verify the pixel_9_pro_chrome_147 preset
+        // Phase 2 (2026-05-12) — verify the pixel_9_pro_chrome_148 preset
         // wires through to mobile-flavored Sec-CH-UA-* headers.
-        let profile = stealth::presets::pixel_9_pro_chrome_147();
+        let profile = stealth::presets::pixel_9_pro_chrome_148();
         assert_eq!(profile.device_class, DeviceClass::MobileAndroid);
         let headers = chrome_headers_with_accept_ch(&profile);
         let h: std::collections::HashMap<_, _> = headers.iter().cloned().collect();
@@ -896,7 +896,7 @@ mod tests {
     fn desktop_chrome_emits_desktop_client_hints() {
         // Sanity gate: existing desktop behavior unchanged after Phase 2
         // (zero-behavior-change invariant).
-        let profile = stealth::presets::chrome_130_macos();
+        let profile = stealth::presets::chrome_148_macos();
         assert_eq!(profile.device_class, DeviceClass::Desktop);
         let headers = chrome_headers_with_accept_ch(&profile);
         let h: std::collections::HashMap<_, _> = headers.iter().cloned().collect();
@@ -970,7 +970,7 @@ mod tests {
         // Real Chrome 130 first-visit navigation has 13 headers and
         // does NOT include the high-entropy Client Hints. Those only
         // appear on requests that follow an `Accept-CH` advertisement.
-        let profile = stealth::chrome_130_windows();
+        let profile = stealth::chrome_148_windows();
         let headers = chrome_headers(&profile);
         let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(
@@ -1010,7 +1010,7 @@ mod tests {
         // Chrome upgrades subsequent requests on the same origin with
         // the full high-entropy client-hint set. This is the variant
         // callers reach for when they see `Accept-CH` in a response.
-        let profile = stealth::chrome_130_windows();
+        let profile = stealth::chrome_148_windows();
         let headers = chrome_headers_with_accept_ch(&profile);
         let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_str()).collect();
         for required in &[
@@ -1037,7 +1037,7 @@ mod tests {
         //   "Google Chrome";v="<ver>", "Not.A/Brand";v="8.0.0.0", "Chromium";v="<ver>"
         // The "Not" brand name rotates across major releases (was `Not-A.Brand`
         // v="24" in Chrome 130-146; changed to `Not.A/Brand` v="8" in Chrome 147+).
-        let profile = stealth::chrome_130_linux();
+        let profile = stealth::chrome_148_linux();
         let value = build_sec_ch_ua_full_version_list(&profile);
         assert!(value.contains("Google Chrome"));
         assert!(value.contains(&profile.browser_version));
@@ -1151,7 +1151,7 @@ mod tests {
         // must both reference the same major version, otherwise detection scripts
         // that cross-check the two get a free signal. Checked against the
         // Accept-CH variant because that's the one that carries both values.
-        let profile = stealth::chrome_130_windows();
+        let profile = stealth::chrome_148_windows();
         let headers = chrome_headers_with_accept_ch(&profile);
         let sec_ch_ua = headers
             .iter()

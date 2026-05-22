@@ -10,7 +10,7 @@
 
 use browser::Page;
 use std::collections::HashMap;
-use stealth::presets::chrome_130_macos;
+use stealth::presets::chrome_148_macos;
 
 const PROBE_HTML: &str = r#"<!doctype html><html><head><title>probe</title></head><body><canvas id=c width=300 height=80></canvas><div id=test>x</div><script>
 globalThis.__P7_RESULT = null;
@@ -121,7 +121,7 @@ async fn run_probe(_url_label: &str) -> HashMap<String, String> {
     // match Chrome's insecure-context capture). Phase 7 follow-up.
     const PROBE_URL: &str =
         "data:text/html,<!doctype html><html><head><title>probe</title></head><body><canvas id=c width=300 height=80></canvas><div id=test>x</div></body></html>";
-    let mut page = Page::from_html_with_url(PROBE_HTML, PROBE_URL, Some(chrome_130_macos()))
+    let mut page = Page::from_html_with_url(PROBE_HTML, PROBE_URL, Some(chrome_148_macos()))
         .await
         .unwrap();
     let _ = page
@@ -184,10 +184,10 @@ async fn phase7_ab_probe_capture_oxide() {
 #[ignore = "diagnostic"]
 async fn diag_dump_own_property_names() {
     use browser::Page;
-    use stealth::presets::chrome_130_macos;
+    use stealth::presets::chrome_148_macos;
     let mut p = Page::from_html(
         "<!DOCTYPE html><html><body></body></html>",
-        Some(chrome_130_macos()),
+        Some(chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -207,11 +207,11 @@ async fn diag_dump_own_property_names() {
 #[tokio::test]
 async fn phase7_d5_doc_charset_default() {
     use browser::Page;
-    use stealth::presets::chrome_130_macos;
+    use stealth::presets::chrome_148_macos;
     let mut p = Page::from_html_with_url(
         "<!doctype html><html><body></body></html>",
         "https://example.com/",
-        Some(chrome_130_macos()),
+        Some(chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -231,11 +231,11 @@ async fn phase7_d5_doc_charset_default() {
 #[tokio::test]
 async fn phase7_d4_screen_webgl_tostringtag() {
     use browser::Page;
-    use stealth::presets::chrome_130_macos;
+    use stealth::presets::chrome_148_macos;
     let mut p = Page::from_html_with_url(
         "<!doctype html><html><body><canvas id=c></canvas></body></html>",
         "https://example.com/",
-        Some(chrome_130_macos()),
+        Some(chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -307,11 +307,11 @@ async fn phase7_d4_screen_webgl_tostringtag() {
 #[tokio::test]
 async fn phase7_d3_scroll_eventcounts_grease() {
     use browser::Page;
-    use stealth::presets::chrome_130_macos;
+    use stealth::presets::chrome_148_macos;
     let mut p = Page::from_html_with_url(
         "<!doctype html><html></html>",
         "https://example.com/",
-        Some(chrome_130_macos()),
+        Some(chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -378,12 +378,12 @@ async fn phase7_d3_scroll_eventcounts_grease() {
 #[ignore = "FIXME: navigator.virtualKeyboard / DevicePosture / WebTransport stub installs are not stripped on insecure context — cleanup_bootstrap purge path is incomplete (see window_bootstrap.js:6605 comment)"]
 async fn phase7_d2_secure_context_gating() {
     use browser::Page;
-    use stealth::presets::chrome_130_macos;
+    use stealth::presets::chrome_148_macos;
 
     // INSECURE: about:blank — every gated API should be undefined
     let mut p = Page::from_html(
         "<!doctype html><html><body></body></html>",
-        Some(chrome_130_macos()),
+        Some(chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -441,7 +441,7 @@ async fn phase7_d2_secure_context_gating() {
     let mut p = Page::from_html_with_url(
         "<!doctype html><html><body></body></html>",
         "https://example.com/",
-        Some(chrome_130_macos()),
+        Some(chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -485,10 +485,10 @@ async fn phase7_d2_secure_context_gating() {
 #[tokio::test]
 async fn phase7_d1_is_secure_context_per_scheme() {
     use browser::Page;
-    use stealth::presets::chrome_130_macos;
+    use stealth::presets::chrome_148_macos;
 
     // about:blank — the default `from_html` URL — is insecure
-    let mut p = Page::from_html("<!doctype html><html></html>", Some(chrome_130_macos()))
+    let mut p = Page::from_html("<!doctype html><html></html>", Some(chrome_148_macos()))
         .await
         .unwrap();
     assert_eq!(
@@ -503,7 +503,7 @@ async fn phase7_d1_is_secure_context_per_scheme() {
     let mut p = Page::from_html_with_url(
         "<!doctype html><html></html>",
         "https://example.com/",
-        Some(chrome_130_macos()),
+        Some(chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -519,7 +519,7 @@ async fn phase7_d1_is_secure_context_per_scheme() {
     let mut p = Page::from_html_with_url(
         "<!doctype html><html></html>",
         "http://localhost:3000/",
-        Some(chrome_130_macos()),
+        Some(chrome_148_macos()),
     )
     .await
     .unwrap();
@@ -535,7 +535,7 @@ async fn phase7_d1_is_secure_context_per_scheme() {
     let mut p = Page::from_html_with_url(
         "<!doctype html><html></html>",
         "http://example.com/",
-        Some(chrome_130_macos()),
+        Some(chrome_148_macos()),
     )
     .await
     .unwrap();

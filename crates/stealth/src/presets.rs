@@ -687,7 +687,7 @@ pub fn random_desktop() -> StealthProfile {
 ///   - hardwareConcurrency: 8 (Tensor G4 reports 8 from 9 actual cores)
 ///   - deviceMemory: 8 (Chrome rounds to spec set {0.25, 0.5, 1, 2, 4, 8})
 ///   - WebGL renderer: "ANGLE (Google, Mali-G715 MP7, OpenGL ES 3.2)"
-pub fn pixel_9_pro_chrome_147() -> StealthProfile {
+pub fn pixel_9_pro_chrome_148() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
         user_agent: "Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro Build/AP4A.250105.002) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36".into(),
@@ -872,44 +872,6 @@ pub fn iphone_15_pro_safari_18() -> StealthProfile {
         media_devices: default_media_devices("ios"),
         gpu_profile: crate::gpu::apple_m3_macos(), // TODO: ios_apple_a17_pro GPU profile
     }
-}
-
-// ===== Back-compat aliases =====
-//
-// These functions were originally named `chrome_130_*` when the engine
-// shipped against Chrome 130. The UA payload was bumped to Chrome 148 on
-// 2026-04-29 (see `browser_version: "148.0.7778.168"` above) but the
-// function names were not renamed at the time. The canonical names are now
-// the `chrome_148_*` set above; the aliases below stay in place so existing
-// downstream callers don't break. New code should call `chrome_148_*`.
-
-#[inline]
-pub fn chrome_130_windows() -> StealthProfile {
-    chrome_148_windows()
-}
-#[inline]
-pub fn chrome_130_macos() -> StealthProfile {
-    chrome_148_macos()
-}
-#[inline]
-pub fn chrome_130_linux() -> StealthProfile {
-    chrome_148_linux()
-}
-#[inline]
-pub fn chrome_130_ru() -> StealthProfile {
-    chrome_148_ru()
-}
-#[inline]
-pub fn chrome_130_cn() -> StealthProfile {
-    chrome_148_cn()
-}
-#[inline]
-pub fn chrome_130_de() -> StealthProfile {
-    chrome_148_de()
-}
-#[inline]
-pub fn chrome_130_jp() -> StealthProfile {
-    chrome_148_jp()
 }
 
 #[cfg(test)]

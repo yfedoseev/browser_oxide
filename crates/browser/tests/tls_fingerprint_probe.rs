@@ -7,12 +7,12 @@
 //!     -- --ignored --test-threads=1 --nocapture
 
 use net::HttpClient;
-use stealth::chrome_130_macos;
+use stealth::chrome_148_macos;
 
 #[tokio::test]
 #[ignore]
 async fn probe_tls_peet_ws() {
-    let client = HttpClient::new(&chrome_130_macos()).unwrap();
+    let client = HttpClient::new(&chrome_148_macos()).unwrap();
     let resp = client
         .get("https://tls.peet.ws/api/all")
         .await
@@ -49,7 +49,7 @@ async fn probe_tls_peet_ws() {
 #[tokio::test]
 #[ignore]
 async fn probe_example_com_sanity() {
-    let client = HttpClient::new(&chrome_130_macos()).unwrap();
+    let client = HttpClient::new(&chrome_148_macos()).unwrap();
     let resp = client.get("https://example.com").await.expect("fetch");
     let body = resp.text();
     std::fs::write("probe_raw.json", &body).unwrap();
@@ -63,7 +63,7 @@ async fn probe_example_com_sanity() {
 #[tokio::test]
 #[ignore]
 async fn probe_httpbin_headers() {
-    let client = HttpClient::new(&chrome_130_macos()).unwrap();
+    let client = HttpClient::new(&chrome_148_macos()).unwrap();
     let resp = client
         .get("https://httpbin.org/headers")
         .await

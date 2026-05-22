@@ -142,7 +142,7 @@ async fn multiple_iframes_isolated() {
 #[ignore = "FP-E1: rescan infra landed; needs createElement/.src arena-interception (decisive experiment recorded in 99 doc)"]
 #[tokio::test]
 async fn fp_e1_post_js_injected_iframe_is_materialized() {
-    let profile = stealth::presets::chrome_130_macos();
+    let profile = stealth::presets::chrome_148_macos();
     let client = net::HttpClient::new(&profile).unwrap();
     let mut page = Page::from_html(
         "<!DOCTYPE html><html><body><div id=root></div></body></html>",
