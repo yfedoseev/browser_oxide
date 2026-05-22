@@ -41,7 +41,8 @@ A complete browser engine for scraping, archival, and AI agent workloads:
 - **EventSource (SSE)** for streaming endpoints
 - **Configurable browser identity** — load profiles from YAML or JSON at
   runtime, or use the built-in `chrome_148_*` / `firefox_135_*` /
-  `pixel_9_pro_chrome_148` / `iphone_15_pro_safari_18` presets
+  `pixel_9_pro_chrome_147` / `iphone_15_pro_safari_18` presets (the
+  `pixel_9_pro_chrome_147` constructor emits a current Chrome 148 UA)
 
 ## What it can do (measured, not estimated)
 
@@ -53,11 +54,16 @@ code in the tree:
 
 | Profile (per-site routing) | L3-rendered / 126 |
 |---|---:|
-| Chrome 130 macOS | 120 |
-| Pixel 9 Pro Chrome 147 (Android) | 121 |
-| iPhone 15 Pro Safari 18 | 116 |
+| Chrome 148 macOS | 120 |
+| Chrome 148 Android (Pixel 9 Pro) | 121 |
+| Safari 18 iOS (iPhone 15 Pro) | 116 |
 | Firefox 135 macOS | 116 |
 | **Per-domain best-of-profile (routed)** | **123** |
+
+(Built-in preset constructors `chrome_130_*` / `pixel_9_pro_chrome_147`
+are deprecated aliases that emit a current Chrome 148 UA — the profile
+labels above reflect the actual emitted User-Agent, not the legacy
+function name.)
 
 **The hard residual** is exactly three Kasada-protected pages —
 `canadagoose.com`, `hyatt.com`, `realtor.com`. DataDome's interactive
