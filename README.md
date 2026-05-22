@@ -201,6 +201,7 @@ binaries are present; it is `#[ignore]` by default.
 | Doc | Description |
 |---|---|
 | [Architecture](docs/ARCHITECTURE.md) | Workspace layout, dependency graph, external deps |
+| [Stealth profiles](docs/STEALTH.md) | Custom browser identity — fields, loading from YAML/JSON, consistency rules |
 | [Networking](docs/NETWORKING.md) | HTTP/1+2+3 + stealth TLS + WebSocket + SSE |
 | [CDP Protocol](docs/PROTOCOL.md) | Puppeteer/Playwright drop-in surface |
 | [CSS Parser](docs/CSS_PARSER.md) / [Selectors](docs/CSS_SELECTORS.md) / [Values](docs/CSS_VALUES.md) / [Cascade](docs/CSS_CASCADE.md) | The CSS engine |

@@ -25,8 +25,11 @@ pub struct MediaDeviceInfo {
 
 /// A complete stealth fingerprint profile.
 ///
-/// All fields must be internally consistent. Use pre-built profiles
-/// from `presets` or build with `StealthProfileBuilder` and call `validate()`.
+/// All fields must be internally consistent. Start from a `presets::*`
+/// constructor (or load a YAML/JSON profile via
+/// [`StealthProfile::load_from_file`]); to customise, clone a preset,
+/// mutate fields, and call [`StealthProfile::validate`]. See
+/// `docs/STEALTH.md` for the full field reference and consistency rules.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StealthProfile {
     // === Identity ===
