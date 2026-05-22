@@ -938,14 +938,7 @@ impl Page {
         // deterministic snapshot tests where synthetic input would skew
         // results.
         let humanize = include_str!("js/humanize.js").to_string();
-        Self::navigate_with_init(
-            url,
-            profile,
-            max_iterations,
-            vec![humanize],
-            Self::default_solvers(),
-        )
-        .await
+        Self::navigate_with_init(url, profile, max_iterations, vec![humanize]).await
     }
 
     /// Like [`Page::navigate`] but with a caller-supplied
@@ -960,7 +953,8 @@ impl Page {
         solvers: std::sync::Arc<[std::sync::Arc<dyn crate::ChallengeSolver>]>,
     ) -> Result<Self, deno_core::error::AnyError> {
         let humanize = include_str!("js/humanize.js").to_string();
-        Self::navigate_with_init(url, profile, max_iterations, vec![humanize], solvers).await
+        Self::navigate_with_init_solvers(url, profile, max_iterations, vec![humanize], solvers)
+            .await
     }
 
     /// Pure navigation — no humanization, no synthetic events. Use for
@@ -972,14 +966,7 @@ impl Page {
         profile: stealth::StealthProfile,
         max_iterations: u8,
     ) -> Result<Self, deno_core::error::AnyError> {
-        Self::navigate_with_init(
-            url,
-            profile,
-            max_iterations,
-            Vec::new(),
-            Self::default_solvers(),
-        )
-        .await
+        Self::navigate_with_init(url, profile, max_iterations, Vec::new()).await
     }
 
     /// Alias of [`Page::navigate`] preserved for backward compatibility.
@@ -1003,6 +990,24 @@ impl Page {
     /// within a single frame (equivalent to Chromium's
     /// `Page.addScriptToEvaluateOnNewDocument`).
     pub async fn navigate_with_init(
+        url: &str,
+        profile: stealth::StealthProfile,
+        max_iterations: u8,
+        init_scripts: Vec<String>,
+    ) -> Result<Self, deno_core::error::AnyError> {
+        Self::navigate_with_init_solvers(
+            url,
+            profile,
+            max_iterations,
+            init_scripts,
+            Self::default_solvers(),
+        )
+        .await
+    }
+
+    /// [`Self::navigate_with_init`] + an explicit solver list. The
+    /// 4-arg `navigate_with_init` forwards here with `default_solvers()`.
+    pub async fn navigate_with_init_solvers(
         url: &str,
         profile: stealth::StealthProfile,
         max_iterations: u8,
