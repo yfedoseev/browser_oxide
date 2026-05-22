@@ -42,6 +42,21 @@ The engine is intended to support, but is not limited to:
   your responsibility and we will not accept PRs whose purpose is to
   ship site-specific exploit code.
 
+## Per-vendor challenge solving is out of scope
+
+The engine exposes a `ChallengeSolver` trait and a
+`Page::navigate_with_solvers(...)` hook so embedders can plug in their
+own per-vendor challenge handling. **This repository ships no solver
+implementations** — `Page::navigate` registers an empty set, and a
+challenged page resolves to `ChallengeVerdict::ChallengeIncomplete`
+rather than being auto-cleared. Concrete Akamai BMP sensor_data /
+Kasada PoW / DataDome / Cloudflare-orchestrator solvers are kept in a
+private companion repository and are out of scope here. (Empirically
+they also add nothing to the engine's measured pass rate — the
+from-scratch TLS + fingerprint + V8 engine carries it — so their
+absence costs no capability the corpus exercises.) PRs that
+reintroduce site-specific bypass code into this repo will be declined.
+
 If you are unsure whether your use is in scope, the test we apply is:
 *would the operator of the target site reasonably consent if you
 asked them?* If yes, you're fine. If no, this is the wrong tool.
