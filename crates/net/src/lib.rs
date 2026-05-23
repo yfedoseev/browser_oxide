@@ -118,6 +118,61 @@ impl QuicPool {
     }
 }
 
+/// Process-wide shared browser-session state. One cookie jar, one DNS
+/// cache, one Alt-Svc cache, one Accept-CH origin set — shared across
+/// every [`HttpClient`] built via [`HttpClient::shared`]. This mimics
+/// a real user with one persistent browser profile across all tabs.
+///
+/// Without shared state, sites that fingerprint on "browsing history"
+/// (amazon, yandex, homedepot, leboncoin, quora, adidas, …) flag a
+/// fresh cold-jar client as a bot on first visit and serve a stub or
+/// challenge page. Measured 2026-05-23 same-IP A/B: 8 sites flip
+/// pass↔fail depending on whether the cookie jar carries history
+/// from prior navigations.
+#[derive(Clone)]
+pub struct SharedSession {
+    pub cookies: Arc<Mutex<CookieJar>>,
+    pub accept_ch: Arc<Mutex<HashSet<String>>>,
+    pub dns: tcp::DnsCache,
+    pub alt_svc: AltSvcCache,
+}
+
+static SHARED_SESSION: std::sync::OnceLock<SharedSession> = std::sync::OnceLock::new();
+
+/// Get (lazily initialize) the process-wide shared session. The cookie
+/// jar can be seeded from disk via `BOXIDE_COOKIE_JAR=<path>` (same env
+/// var the legacy per-client `HttpClient::new` honors). Otherwise the
+/// jar starts empty and grows as navigations execute.
+pub fn shared_session() -> SharedSession {
+    SHARED_SESSION
+        .get_or_init(|| {
+            let initial_jar = if let Ok(path) = std::env::var("BOXIDE_COOKIE_JAR") {
+                match CookieJar::load_from_file(&std::path::PathBuf::from(&path)) {
+                    Ok(j) => {
+                        eprintln!("[cookies] shared session loaded persisted jar from {}", path);
+                        j
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[cookies] shared session: failed to load {}: {} (starting fresh)",
+                            path, e
+                        );
+                        CookieJar::new()
+                    }
+                }
+            } else {
+                CookieJar::new()
+            };
+            SharedSession {
+                cookies: Arc::new(Mutex::new(initial_jar)),
+                accept_ch: Arc::new(Mutex::new(HashSet::new())),
+                dns: tcp::DnsCache::new(),
+                alt_svc: AltSvcCache::new(),
+            }
+        })
+        .clone()
+}
+
 #[derive(Clone)]
 pub struct HttpClient {
     tls_connector: Arc<SslConnector>,
@@ -249,6 +304,37 @@ impl HttpClient {
                 }
             },
         })
+    }
+
+    /// Build a client that participates in the process-wide
+    /// [`SharedSession`] — cookies, DNS cache, Accept-CH origins, and
+    /// Alt-Svc cache all persist across navigations.
+    ///
+    /// This is the production / benchmarking model: one user, one
+    /// cookie jar, accumulating browsing history across page loads.
+    /// Real browsers do this; without it, sites like amazon / yandex /
+    /// homedepot / leboncoin / quora / adidas flag a fresh no-cookie
+    /// client as a bot and serve a stub or a challenge page.
+    ///
+    /// The shared session is lazily initialized on first call. A
+    /// `BOXIDE_COOKIE_JAR=<path>` env var seeds the cookie jar from a
+    /// previously-persisted file (preserved from the legacy `new()`
+    /// path).
+    pub fn shared(profile: &StealthProfile) -> Result<Self, NetError> {
+        // Share the cookie jar and the Accept-CH origin set, but keep
+        // DNS cache and Alt-Svc cache per-client. Real browsers share
+        // cookies and Client-Hints opt-ins across tabs but DNS / Alt-Svc
+        // are connection-level state that can leak per-IP routing across
+        // unrelated origins (DataDome flagged leboncoin when a shared
+        // Alt-Svc cache routed us to a previously-throttled CDN node).
+        let s = shared_session();
+        Self::new_with_shared_state(
+            profile,
+            s.cookies,
+            s.accept_ch,
+            tcp::DnsCache::new(),
+            AltSvcCache::new(),
+        )
     }
 
     /// Create a new client that shares session state (cookies, DNS/H3

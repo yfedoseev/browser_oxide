@@ -336,7 +336,7 @@ impl Page {
         event_loop.reset_nav_pending();
 
         // Share the HTTP client with JS fetch()
-        let client = net::HttpClient::new(&profile)
+        let client = net::HttpClient::shared(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
 
@@ -850,7 +850,7 @@ impl Page {
         url: &str,
         profile: stealth::StealthProfile,
     ) -> Result<Self, deno_core::error::AnyError> {
-        let client = net::HttpClient::new(&profile)
+        let client = net::HttpClient::shared(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         Self::build_page_with_scripts_and_init(html, url, &profile, &client, &[]).await
     }
@@ -895,7 +895,7 @@ impl Page {
         url: &str,
         profile: stealth::StealthProfile,
     ) -> Result<Self, deno_core::error::AnyError> {
-        let client = net::HttpClient::new(&profile)
+        let client = net::HttpClient::shared(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         let resp = client
             .get_follow(url, 10)
@@ -1014,7 +1014,7 @@ impl Page {
         init_scripts: Vec<String>,
         solvers: std::sync::Arc<[std::sync::Arc<dyn crate::ChallengeSolver>]>,
     ) -> Result<Self, deno_core::error::AnyError> {
-        let client = net::HttpClient::new(&profile)
+        let client = net::HttpClient::shared(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
 
         // Share the HTTP client with JS fetch() so scripts running inside
@@ -1104,7 +1104,7 @@ impl Page {
         profile: stealth::StealthProfile,
         max_iterations: u8,
     ) -> Result<Self, deno_core::error::AnyError> {
-        let client = net::HttpClient::new(&profile)
+        let client = net::HttpClient::shared(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
 
