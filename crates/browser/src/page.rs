@@ -1920,6 +1920,45 @@ impl Page {
                             );
                         }
 
+                        // PERF: no-progress early exit. The cookie-diff path
+                        // above fires whenever ANY cookie changes — for
+                        // ephemeral-cookie classes (amazon aws-waf token
+                        // rotation, akamai bm_sz reseed) that means we
+                        // burn the full per-iteration budget (~25-35 s) on
+                        // a Rust-side fallback fetch that will return the
+                        // exact same stub, then do it again for iter 2.
+                        // If we're already past iter 0 AND the V8 refetch
+                        // produced no real growth AND there's no engine-
+                        // session token (Kasada x-kpsdk-ct) AND no solver
+                        // reported solved AND no keystone solve cookie
+                        // was freshly set, the retry is chasing rotation.
+                        // Return the live page now. Iter 0 always gets a
+                        // full attempt; genuine Kasada/DD/sec-cpt/CF sites
+                        // produce at least one of the positive signals
+                        // and keep iterating.
+                        // PERF: applies from iter 0 onward — a V8 refetch
+                        // that did not grow the body is the proximate
+                        // "we're stuck" signal regardless of which iter
+                        // we are on. Benign SPA bootstraps that produce
+                        // real content via the pending-nav fetch land in
+                        // the `v8_html_is_real=true` branch above, so
+                        // the iter-0 case is safe.
+                        if !v8_html_is_real && kpsdk.is_empty() && !any_solved {
+                            let fresh_keystone = cookies_after.contains("cf_clearance=")
+                                || cookies_after.contains("sec_cpt=")
+                                || (cookies_after.contains("datadome=")
+                                    && !cookies_before.contains("datadome="));
+                            if !fresh_keystone {
+                                if debug_nav {
+                                    eprintln!(
+                                        "[navigate] iter={} no-progress exit (no V8 growth, no engine token, no solver signal, no fresh keystone cookie)",
+                                        iter
+                                    );
+                                }
+                                return Ok(page);
+                            }
+                        }
+
                         current_storage = Some(page.event_loop().get_storage());
                         drop(page);
                         if v8_html_is_real {
@@ -2185,6 +2224,38 @@ impl Page {
             } else {
                 None
             };
+
+            // PERF: same no-progress early exit as the cookie-diff retry
+            // path (~L1942). The pending-nav path is what amazon's aws-waf
+            // (×6 country domains), several Akamai-SDK sites, and most
+            // location.href-driven retries take. If we're past iter 0 AND
+            // V8 refetch produced no growth (looks_real was false) AND no
+            // Kasada session token was harvested AND no solver reported
+            // solved this iteration, the next iter will fetch the same
+            // stub via Rust GET. Burning that ~35s for nothing is the
+            // dominant cost — return the live page now. Iter 0 always
+            // gets a full attempt.
+            // PERF: applies from iter 0 onward — see the matching guard
+            // in the cookie-diff path above for the rationale.
+            if v8_refetched.is_none() && harvested_kpsdk.is_empty() && !any_solved {
+                let now_cookies: String = if let Some(p) = parsed_current.as_ref() {
+                    client.cookies_for_url(p).await.unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let fresh_keystone = now_cookies.contains("cf_clearance=")
+                    || now_cookies.contains("sec_cpt=")
+                    || now_cookies.contains("datadome=");
+                if !fresh_keystone {
+                    if debug_nav {
+                        eprintln!(
+                            "[navigate] iter={} no-progress exit (pending-nav: no V8 growth, no engine token, no solver signal, no keystone cookie)",
+                            iter
+                        );
+                    }
+                    return Ok(page);
+                }
+            }
 
             current_storage = Some(page.event_loop().get_storage());
             drop(page);
