@@ -2,8 +2,7 @@ use crate::state::DomState;
 use deno_core::op2;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::OnceLock;
+use std::cell::{Cell, RefCell};
 use url::Url;
 
 /// Per-page sync-fetch chain ceiling. Without this, sites like
@@ -14,12 +13,14 @@ use url::Url;
 /// 30 is comfortable: any anti-bot vendor's solver chain fits in
 /// <10 sync fetches, leaving headroom for legitimate inline scripts.
 const MAX_SYNC_FETCH_PER_PAGE: usize = 30;
-static SYNC_FETCH_COUNT: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static SYNC_FETCH_COUNT: Cell<usize> = const { Cell::new(0) };
+}
 
 /// Reset the per-page sync-fetch counter. Called by Page::navigate_with_init
 /// at the start of each navigation iteration.
 pub fn reset_sync_fetch_count() {
-    SYNC_FETCH_COUNT.store(0, Ordering::Relaxed);
+    SYNC_FETCH_COUNT.with(|c| c.set(0));
 }
 
 pub fn record_resource_timing(state: &mut deno_core::OpState, timings: net::TimingStats) {
@@ -45,30 +46,31 @@ impl FetchState {
     }
 }
 
-/// Shared fetch client, initialized once from the stealth profile.
-/// Used by the async op_fetch since deno_core async ops can't borrow OpState.
-static FETCH_CLIENT: OnceLock<net::HttpClient> = OnceLock::new();
+/// Per-thread fetch client, initialized from the stealth profile when a
+/// Page is constructed. Thread-local (not process-global) so concurrent
+/// `ParallelPager` workers don't clobber each other's HttpClient + cookie
+/// jar — each worker owns its own V8 isolate on a dedicated OS thread,
+/// and that's the natural scope for the fetch state too. Before this was
+/// a `OnceLock<HttpClient>`, two parallel workers caused the SECOND
+/// worker's JS `fetch()` to go through the FIRST worker's HttpClient
+/// (with the first site's cookies), which silently corrupted XHR-driven
+/// SPA hydration on yandex / reddit / amazon / zara / yandex-ru / etc.
+thread_local! {
+    static FETCH_CLIENT: RefCell<Option<net::HttpClient>> = const { RefCell::new(None) };
+}
 
-/// Active CSP policy + origin, mirrored from `DomState` so async
-/// `op_fetch` can enforce without borrowing `OpState`. Updated per
-/// top-level navigation by `set_csp_policy`. Reset (set to None-style
-/// empty) by `clear_csp_policy` between navigations.
-///
-/// We use `std::sync::RwLock<Option<...>>` instead of `OnceLock` here
-/// because the policy genuinely changes per navigation; OnceLock would
-/// strand stale walmart policy on the next site we visit.
-static ACTIVE_CSP: std::sync::OnceLock<std::sync::RwLock<Option<ActiveCsp>>> =
-    std::sync::OnceLock::new();
+/// Per-thread active CSP policy + origin. Same thread-local rationale as
+/// FETCH_CLIENT: concurrent parallel workers were overwriting each other,
+/// so worker B's fetches were enforced against worker A's policy.
+thread_local! {
+    static ACTIVE_CSP: RefCell<Option<ActiveCsp>> = const { RefCell::new(None) };
+}
 
 #[derive(Clone)]
 struct ActiveCsp {
     policy: std::sync::Arc<net::csp::PolicySet>,
     origin: Url,
     enforce: bool,
-}
-
-fn active_csp_lock() -> &'static std::sync::RwLock<Option<ActiveCsp>> {
-    ACTIVE_CSP.get_or_init(|| std::sync::RwLock::new(None))
 }
 
 /// Install a CSP policy + origin for the current navigation. `enforce`
@@ -81,14 +83,13 @@ fn active_csp_lock() -> &'static std::sync::RwLock<Option<ActiveCsp>> {
 /// installs its own policy. Real Chrome resets the violation list per
 /// top-level navigation; this matches that behaviour.
 pub fn set_csp_policy(policy: std::sync::Arc<net::csp::PolicySet>, origin: Url, enforce: bool) {
-    if let Ok(mut q) = violations_lock().lock() {
-        q.clear();
-    }
-    let mut w = active_csp_lock().write().expect("CSP lock poisoned");
-    *w = Some(ActiveCsp {
-        policy,
-        origin,
-        enforce,
+    CSP_VIOLATIONS.with(|q| q.borrow_mut().clear());
+    ACTIVE_CSP.with(|c| {
+        *c.borrow_mut() = Some(ActiveCsp {
+            policy,
+            origin,
+            enforce,
+        });
     });
 }
 
@@ -96,11 +97,8 @@ pub fn set_csp_policy(policy: std::sync::Arc<net::csp::PolicySet>, origin: Url, 
 /// strict policy from site A doesn't leak into site B. Also drains
 /// any queued violations — they belong to the previous document.
 pub fn clear_csp_policy() {
-    if let Ok(mut q) = violations_lock().lock() {
-        q.clear();
-    }
-    let mut w = active_csp_lock().write().expect("CSP lock poisoned");
-    *w = None;
+    CSP_VIOLATIONS.with(|q| q.borrow_mut().clear());
+    ACTIVE_CSP.with(|c| *c.borrow_mut() = None);
 }
 
 /// Returns `Err(blocked_directive)` when the active policy denies the
@@ -113,21 +111,24 @@ pub fn check_csp(
     nonce: Option<&str>,
     parser_inserted: bool,
 ) -> Result<(), &'static str> {
-    let guard = active_csp_lock().read().expect("CSP lock poisoned");
-    let Some(active) = guard.as_ref() else {
+    let decision = ACTIVE_CSP.with(|c| {
+        let guard = c.borrow();
+        let active = guard.as_ref()?;
+        if !active.enforce {
+            return None;
+        }
+        let ctx = net::csp::CheckCtx {
+            directive,
+            url,
+            page_origin: &active.origin,
+            nonce,
+            parser_inserted,
+        };
+        Some(active.policy.allows(&ctx))
+    });
+    let Some(decision) = decision else {
         return Ok(());
     };
-    if !active.enforce {
-        return Ok(());
-    }
-    let ctx = net::csp::CheckCtx {
-        directive,
-        url,
-        page_origin: &active.origin,
-        nonce,
-        parser_inserted,
-    };
-    let decision = active.policy.allows(&ctx);
     if decision.allowed {
         Ok(())
     } else {
@@ -161,21 +162,19 @@ pub struct CspViolation {
     pub disposition: String,
 }
 
-static CSP_VIOLATIONS: std::sync::OnceLock<std::sync::Mutex<Vec<CspViolation>>> =
-    std::sync::OnceLock::new();
-
-fn violations_lock() -> &'static std::sync::Mutex<Vec<CspViolation>> {
-    CSP_VIOLATIONS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+thread_local! {
+    static CSP_VIOLATIONS: RefCell<Vec<CspViolation>> = const { RefCell::new(Vec::new()) };
 }
 
 fn push_csp_violation(v: CspViolation) {
-    if let Ok(mut q) = violations_lock().lock() {
+    CSP_VIOLATIONS.with(|q| {
+        let mut q = q.borrow_mut();
         // Cap queue at 256 to avoid unbounded growth on pathological
         // scripts that retry blocked fetches in a loop.
         if q.len() < 256 {
             q.push(v);
         }
-    }
+    });
 }
 
 /// JS-callable drain. Returns the queue contents and clears it.
@@ -184,33 +183,30 @@ fn push_csp_violation(v: CspViolation) {
 #[op2]
 #[serde]
 pub fn op_drain_csp_violations() -> Vec<CspViolation> {
-    if let Ok(mut q) = violations_lock().lock() {
-        std::mem::take(&mut *q)
-    } else {
-        Vec::new()
-    }
+    CSP_VIOLATIONS.with(|q| std::mem::take(&mut *q.borrow_mut()))
 }
 
 /// Initialize the shared fetch client from a profile.
 /// Call this once during runtime setup.
 pub fn init_fetch_client(profile: &stealth::StealthProfile) {
     if let Ok(client) = net::HttpClient::new(profile) {
-        let _ = FETCH_CLIENT.set(client);
+        FETCH_CLIENT.with(|c| *c.borrow_mut() = Some(client));
     }
 }
 
 /// Set the shared fetch client to an existing HttpClient.
-/// Used by navigate_with_challenges to share cookies between
-/// the navigation client and the JS fetch() calls.
+/// Used by Page::navigate_with_init to share cookies between the
+/// navigation client and the JS fetch() calls. Thread-local so each
+/// ParallelPager worker thread has its own slot.
 pub fn set_fetch_client(client: net::HttpClient) {
-    let _ = FETCH_CLIENT.set(client);
+    FETCH_CLIENT.with(|c| *c.borrow_mut() = Some(client));
 }
 
 /// Clone of the shared fetch client, if one has been installed.
 /// Used by the worker `importScripts` synchronous fetch path in
 /// `worker_ext::op_worker_sync_fetch`.
 pub fn fetch_client() -> Option<net::HttpClient> {
-    FETCH_CLIENT.get().cloned()
+    FETCH_CLIENT.with(|c| c.borrow().clone())
 }
 
 #[derive(Serialize)]
@@ -281,8 +277,11 @@ pub async fn op_fetch(
         });
     }
 
+    // Clone the thread-local client out so we don't hold the RefCell borrow
+    // across awaits below. Each ParallelPager worker has its own slot.
+    let installed_client = FETCH_CLIENT.with(|c| c.borrow().clone());
     let default_client;
-    let client = match FETCH_CLIENT.get() {
+    let client = match installed_client.as_ref() {
         Some(c) => c,
         None => {
             let profile = stealth::chrome_148_linux();
@@ -386,7 +385,7 @@ pub async fn op_fetch(
 #[op2(async)]
 #[string]
 pub async fn op_cookie_get(#[string] url: String) -> String {
-    let Some(client) = FETCH_CLIENT.get() else {
+    let Some(client) = FETCH_CLIENT.with(|c| c.borrow().clone()) else {
         return String::new();
     };
     let Ok(parsed) = Url::parse(&url) else {
@@ -398,7 +397,7 @@ pub async fn op_cookie_get(#[string] url: String) -> String {
 /// Set a cookie via a raw "name=value; path=/; ..." string, scoped to the URL's origin.
 #[op2(async)]
 pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
-    let Some(client) = FETCH_CLIENT.get() else {
+    let Some(client) = FETCH_CLIENT.with(|c| c.borrow().clone()) else {
         return;
     };
     let Ok(parsed) = Url::parse(&url) else { return };
@@ -440,7 +439,11 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
     }
 
     // Per-page chain ceiling — see MAX_SYNC_FETCH_PER_PAGE.
-    let n = SYNC_FETCH_COUNT.fetch_add(1, Ordering::Relaxed);
+    let n = SYNC_FETCH_COUNT.with(|c| {
+        let v = c.get();
+        c.set(v + 1);
+        v
+    });
     if n >= MAX_SYNC_FETCH_PER_PAGE {
         eprintln!(
             "[op_net_fetch_sync] CHAIN LIMIT ({}) exceeded — returning empty for {}",
@@ -463,7 +466,8 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
     // with its own connection pool fully owned by the spawned runtime
     // sidesteps the deadlock. We DO read the profile from FETCH_CLIENT
     // so cookies + stealth settings are consistent.
-    let (_profile, client_res) = match FETCH_CLIENT.get() {
+    let main_client = FETCH_CLIENT.with(|c| c.borrow().clone());
+    let (_profile, client_res) = match main_client.as_ref() {
         Some(main) => (
             main.profile().clone(),
             net::HttpClient::new_with_shared_state(
@@ -596,6 +600,11 @@ pub fn op_net_xhr_sync(
         Some(origin)
     };
 
+    // Clone the thread-local client BEFORE spawning a new thread — TLS is
+    // per-thread, so the spawned thread sees an empty slot. We pass the
+    // main client in by ownership and share its state into a fresh client
+    // owned by the spawned runtime.
+    let main_client = FETCH_CLIENT.with(|c| c.borrow().clone());
     let result = std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -607,7 +616,7 @@ pub fn op_net_xhr_sync(
         rt.block_on(async move {
             // Fresh client for sync execution (avoids H2 deadlock on FETCH_CLIENT).
             // Shares all state (cookies, tokens, cache) with the main client.
-            let client = match FETCH_CLIENT.get() {
+            let client = match main_client.as_ref() {
                 Some(main) => {
                     net::HttpClient::new_with_shared_state(
                         main.profile(),
@@ -644,8 +653,10 @@ pub fn op_net_xhr_sync(
                 async { resp_result },
             ).await {
                 Ok(Ok(resp)) => {
-                    // Write response cookies back to FETCH_CLIENT.
-                    if let Some(main) = FETCH_CLIENT.get() {
+                    // Write response cookies back to the main client (whose
+                    // jar is shared with the cookies-Arc above, so the write
+                    // is observable from the V8 thread).
+                    if let Some(main) = main_client.as_ref() {
                         if let Ok(parsed) = url::Url::parse(&url_clone) {
                             for ck in &resp.set_cookies {
                                 main.set_cookie_str(&parsed, ck).await;
