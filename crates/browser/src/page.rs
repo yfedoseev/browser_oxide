@@ -7,6 +7,8 @@ use js_runtime::{runtime::BrowserRuntimeOptions, BrowserJsRuntime};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use stealth;
+use tracing;
 
 /// Whether a URL is a "secure context" per WICG/secure-contexts §3.2.
 /// Secure: https, wss, file, plus http://localhost / http://127.0.0.1 /
@@ -553,7 +555,7 @@ impl Page {
             if let Some(srcdoc) = &iframe_info.srcdoc {
                 // Execute srcdoc scripts in an isolated function scope
                 let node_id = iframe_info.node_id.to_raw();
-                let _escaped = srcdoc.replace('\\', "\\\\").replace('`', "\\`");
+                let escaped = srcdoc.replace('\\', "\\\\").replace('`', "\\`");
                 let setup_js = format!(
                     r#"(() => {{
                         const _iframeEl = (() => {{
@@ -650,7 +652,7 @@ impl Page {
         let already: Vec<_> = self.children.iter().map(|c| c.node_id).collect();
         let mut materialized = 0usize;
         for info in &iframes {
-            if already.contains(&info.node_id) {
+            if already.iter().any(|n| *n == info.node_id) {
                 continue; // already a real child context — not script-new
             }
             if let Some(srcdoc) = &info.srcdoc {
@@ -1658,7 +1660,7 @@ impl Page {
                 || current_url.contains("udemy.com")
             {
                 tracing::info!(url = %current_url, "applying selective CSP bypass for anti-bot domain");
-                let rt = page.event_loop().runtime_mut();
+                let mut rt = page.event_loop().runtime_mut();
                 let op_state = rt.op_state();
                 let mut state = op_state.borrow_mut();
                 if let Some(stealth_state) =
@@ -1765,7 +1767,7 @@ impl Page {
                     // If a solver already reported the challenge solved
                     // this iteration, DON'T retry just because a cookie
                     // value changed (challenge cookies always rotate).
-                    if any_solved && (!last_accept_ch_upgrade || accept_ch_retry_done) {
+                    if any_solved && !(last_accept_ch_upgrade && !accept_ch_retry_done) {
                         should_retry = false;
                     }
 
@@ -1918,45 +1920,6 @@ impl Page {
                                 "[navigate] iter={} harvested x-kpsdk-* headers: {:?}",
                                 iter, keys
                             );
-                        }
-
-                        // PERF: no-progress early exit. The cookie-diff path
-                        // above fires whenever ANY cookie changes — for
-                        // ephemeral-cookie classes (amazon aws-waf token
-                        // rotation, akamai bm_sz reseed) that means we
-                        // burn the full per-iteration budget (~25-35 s) on
-                        // a Rust-side fallback fetch that will return the
-                        // exact same stub, then do it again for iter 2.
-                        // If we're already past iter 0 AND the V8 refetch
-                        // produced no real growth AND there's no engine-
-                        // session token (Kasada x-kpsdk-ct) AND no solver
-                        // reported solved AND no keystone solve cookie
-                        // was freshly set, the retry is chasing rotation.
-                        // Return the live page now. Iter 0 always gets a
-                        // full attempt; genuine Kasada/DD/sec-cpt/CF sites
-                        // produce at least one of the positive signals
-                        // and keep iterating.
-                        // PERF: applies from iter 0 onward — a V8 refetch
-                        // that did not grow the body is the proximate
-                        // "we're stuck" signal regardless of which iter
-                        // we are on. Benign SPA bootstraps that produce
-                        // real content via the pending-nav fetch land in
-                        // the `v8_html_is_real=true` branch above, so
-                        // the iter-0 case is safe.
-                        if !v8_html_is_real && kpsdk.is_empty() && !any_solved {
-                            let fresh_keystone = cookies_after.contains("cf_clearance=")
-                                || cookies_after.contains("sec_cpt=")
-                                || (cookies_after.contains("datadome=")
-                                    && !cookies_before.contains("datadome="));
-                            if !fresh_keystone {
-                                if debug_nav {
-                                    eprintln!(
-                                        "[navigate] iter={} no-progress exit (no V8 growth, no engine token, no solver signal, no fresh keystone cookie)",
-                                        iter
-                                    );
-                                }
-                                return Ok(page);
-                            }
                         }
 
                         current_storage = Some(page.event_loop().get_storage());
@@ -2225,38 +2188,6 @@ impl Page {
                 None
             };
 
-            // PERF: same no-progress early exit as the cookie-diff retry
-            // path (~L1942). The pending-nav path is what amazon's aws-waf
-            // (×6 country domains), several Akamai-SDK sites, and most
-            // location.href-driven retries take. If we're past iter 0 AND
-            // V8 refetch produced no growth (looks_real was false) AND no
-            // Kasada session token was harvested AND no solver reported
-            // solved this iteration, the next iter will fetch the same
-            // stub via Rust GET. Burning that ~35s for nothing is the
-            // dominant cost — return the live page now. Iter 0 always
-            // gets a full attempt.
-            // PERF: applies from iter 0 onward — see the matching guard
-            // in the cookie-diff path above for the rationale.
-            if v8_refetched.is_none() && harvested_kpsdk.is_empty() && !any_solved {
-                let now_cookies: String = if let Some(p) = parsed_current.as_ref() {
-                    client.cookies_for_url(p).await.unwrap_or_default()
-                } else {
-                    String::new()
-                };
-                let fresh_keystone = now_cookies.contains("cf_clearance=")
-                    || now_cookies.contains("sec_cpt=")
-                    || now_cookies.contains("datadome=");
-                if !fresh_keystone {
-                    if debug_nav {
-                        eprintln!(
-                            "[navigate] iter={} no-progress exit (pending-nav: no V8 growth, no engine token, no solver signal, no keystone cookie)",
-                            iter
-                        );
-                    }
-                    return Ok(page);
-                }
-            }
-
             current_storage = Some(page.event_loop().get_storage());
             drop(page);
 
@@ -2439,6 +2370,15 @@ impl Page {
             "http" | "https" => Some(joined.to_string()),
             _ => None,
         }
+    }
+
+    async fn build_page_with_scripts(
+        html: &str,
+        url: &str,
+        profile: &stealth::StealthProfile,
+        client: &net::HttpClient,
+    ) -> Result<Self, deno_core::error::AnyError> {
+        Self::build_page_with_scripts_and_init(html, url, profile, client, &[]).await
     }
 
     async fn build_page_with_scripts_and_init(
@@ -2632,16 +2572,20 @@ impl Page {
 
         // Build stylesheet list: inline first, then fetched external
         let mut stylesheets = inline_css;
-        for (css, timings) in fetched_css_results.into_iter().flatten() {
-            stylesheets.push(css);
-            all_timings.push(timings);
+        for result in fetched_css_results {
+            if let Some((css, timings)) = result {
+                stylesheets.push(css);
+                all_timings.push(timings);
+            }
         }
 
         // Build pre-fetched script map
         let mut prefetched = std::collections::HashMap::new();
-        for (i, text, timings) in fetched_scripts_results.into_iter().flatten() {
-            prefetched.insert(i, text);
-            all_timings.push(timings);
+        for result in fetched_scripts_results {
+            if let Some((i, text, timings)) = result {
+                prefetched.insert(i, text);
+                all_timings.push(timings);
+            }
         }
 
         let runtime = BrowserJsRuntime::with_options(
@@ -3076,7 +3020,7 @@ impl Page {
         };
         for info in &iframes {
             if let Some(srcdoc) = &info.srcdoc {
-                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, profile).await {
+                match iframe::ChildIframe::from_srcdoc(info.node_id, srcdoc, &profile).await {
                     Ok(child) => children.push(child),
                     Err(e) => tracing::warn!(error = %e, "iframe srcdoc error"),
                 }
@@ -3102,7 +3046,7 @@ impl Page {
                     match iframe::ChildIframe::from_srcdoc(
                         info.node_id,
                         "<!DOCTYPE html><html><body></body></html>",
-                        profile,
+                        &profile,
                     )
                     .await
                     {
@@ -3133,7 +3077,7 @@ impl Page {
         // Drop children first (V8 reverse order requirement)
         self.children.clear();
         // Use ManuallyDrop to prevent the Drop impl from running
-        let page = std::mem::ManuallyDrop::new(self);
+        let mut page = std::mem::ManuallyDrop::new(self);
         // SAFETY: `page` is `ManuallyDrop`, so its destructor will not
         // run and won't double-drop the bytes we read out of it.
         // `event_loop` is read by value exactly once via `ptr::read`,
@@ -3369,7 +3313,7 @@ mod tests {
     async fn apple_pay_session_present_on_macos_profile() {
         // Phase 7 — ApplePaySession is gated on isSecureContext so the
         // page must be loaded over https:// for the macOS shim to install.
-        let profile = stealth::presets::chrome_148_macos();
+        let profile = stealth::presets::chrome_130_macos();
         let mut page = Page::from_html_with_url(
             "<html><head></head><body></body></html>",
             "https://example.com/",
@@ -3390,7 +3334,7 @@ mod tests {
 
     #[tokio::test]
     async fn apple_pay_session_absent_on_windows_profile() {
-        let profile = stealth::presets::chrome_148_windows();
+        let profile = stealth::presets::chrome_130_windows();
         let mut page = Page::from_html("<html><head></head><body></body></html>", Some(profile))
             .await
             .unwrap();
@@ -3414,7 +3358,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs real canvas getContext in the test harness"]
     async fn canvas_font_detection_macos_helvetica_neue() {
-        let profile = stealth::presets::chrome_148_macos();
+        let profile = stealth::presets::chrome_130_macos();
         let mut page = Page::from_html(
             "<html><head></head><body><canvas id=\"c\" width=\"200\" height=\"50\"></canvas></body></html>",
             Some(profile),
@@ -3571,7 +3515,7 @@ mod tests {
         .unwrap();
         let dom = page.take_dom();
         let ps = dom.get_elements_by_tag_name(dom::NodeId::DOCUMENT, "p");
-        assert!(!ps.is_empty(), "expected at least 1 <p>, got {}", ps.len());
+        assert!(ps.len() >= 1, "expected at least 1 <p>, got {}", ps.len());
         assert_eq!(dom.text_content(ps[0]), "test");
     }
 
@@ -3580,7 +3524,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn navigate_httpbin() {
-        let profile = stealth::chrome_148_linux();
+        let profile = stealth::chrome_130_linux();
         let client = net::HttpClient::new(&profile).unwrap();
         let mut page = Page::navigate_simple(
             "https://httpbin.org/html",
@@ -3603,7 +3547,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn navigate_httpbin_user_agent() {
-        let profile = stealth::chrome_148_windows();
+        let profile = stealth::chrome_130_windows();
         let client = net::HttpClient::new(&profile).unwrap();
         let mut page = Page::navigate_simple(
             "https://httpbin.org/user-agent",
@@ -3623,7 +3567,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn navigate_stealth_headers_check() {
-        let profile = stealth::chrome_148_linux();
+        let profile = stealth::chrome_130_linux();
         let client = net::HttpClient::new(&profile).unwrap();
         let mut page = Page::navigate_simple(
             "https://httpbin.org/headers",
@@ -3642,7 +3586,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn navigate_stealth_js_fingerprint() {
-        let profile = stealth::chrome_148_linux();
+        let profile = stealth::chrome_130_linux();
         let mut page = Page::navigate_stealth("https://httpbin.org/html", profile)
             .await
             .expect("stealth navigate failed");
