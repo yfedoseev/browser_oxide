@@ -566,12 +566,12 @@
     }
 
     // --- Internal Bridge ---
-    if (!globalThis.__boxide) {
-        Object.defineProperty(globalThis, '__boxide', { value: {}, enumerable: false, configurable: true });
+    if (!globalThis.__browser_oxide) {
+        Object.defineProperty(globalThis, '__browser_oxide', { value: {}, enumerable: false, configurable: true });
     }
-    globalThis.__boxide._getNodeId = _getNodeId;
-    globalThis.__boxide._wrapNode = _wrapNode;
-    globalThis.__boxide._setCurrentScript = _setCurrentScript;
+    globalThis.__browser_oxide._getNodeId = _getNodeId;
+    globalThis.__browser_oxide._wrapNode = _wrapNode;
+    globalThis.__browser_oxide._setCurrentScript = _setCurrentScript;
 
     function _createStyleProxy(nodeId) {
         const cache = {};
@@ -1309,11 +1309,11 @@
             // resolved to 0 (the "no such node" sentinel), which broke
             // anything walking parentNode→isConnected. Phase 7 follow-up.
             super(nodeId);
-            if (!globalThis.__boxide) {
-                Object.defineProperty(globalThis, '__boxide', { value: {}, enumerable: false, configurable: true });
+            if (!globalThis.__browser_oxide) {
+                Object.defineProperty(globalThis, '__browser_oxide', { value: {}, enumerable: false, configurable: true });
             }
             // Capture initial base URL from ops or a global hint
-            globalThis.__boxide._baseUrl = ops.op_dom_get_base_url && ops.op_dom_get_base_url();
+            globalThis.__browser_oxide._baseUrl = ops.op_dom_get_base_url && ops.op_dom_get_base_url();
 
             const all = new HTMLAllCollection(this);
             // Hide 'all' from enumeration but keep it truthy
@@ -1456,7 +1456,7 @@
         caretPositionFromPoint(x, y) { return null; }
         hasFocus() { return true; }  // Anti-bot: must return true
         get readyState() { 
-            return (globalThis._boxide && globalThis._boxide.__documentReadyState) || "complete"; 
+            return (globalThis._browser_oxide && globalThis._browser_oxide.__documentReadyState) || "complete"; 
         }
         get URL() { return globalThis.location?.href || "about:blank"; }
         get documentURI() { return this.URL; }
@@ -1494,7 +1494,7 @@
             try {
                 let url = globalThis.location?.href;
                 if (!url || url === "about:blank" || url === "javascript:;" || url === "") {
-                    url = globalThis.__boxide && globalThis.__boxide._baseUrl;
+                    url = globalThis.__browser_oxide && globalThis.__browser_oxide._baseUrl;
                 }
                 if (url && ops.op_cookie_set) {
                     ops.op_cookie_set(url, String(val));
@@ -2073,7 +2073,7 @@
     // exposes it as globalThis._nativeTag. We capture explicitly so the
     // freshToString and _mkNativeFn don't accidentally see undefined when
     // bare-identifier scope chain is shadowed by the IIFE parameter.
-    const _NATIVE_TAG_SYMBOL = globalThis._nativeTag || Symbol.for('__boxide_native__');
+    const _NATIVE_TAG_SYMBOL = globalThis._nativeTag || Symbol.for('__browser_oxide_native__');
 
     function _mkNativeFn(name) {
         const fn = function() {};
@@ -2683,7 +2683,7 @@
             const _dprVal = globalThis.devicePixelRatio || 1;
             try {
                 ops.op_eval_in_child_realm(_realmId,
-                    `(function(){var _nt=Symbol.for('__boxide_native__');var _g=function(){return ${_dprVal};};Object.defineProperty(_g,_nt,{value:'get devicePixelRatio',configurable:true});Object.defineProperty(_g,'name',{value:'get devicePixelRatio',configurable:true});var _s=function(v){Object.defineProperty(this,'devicePixelRatio',{value:v,writable:true,enumerable:true,configurable:true});};Object.defineProperty(_s,_nt,{value:'set devicePixelRatio',configurable:true});Object.defineProperty(_s,'name',{value:'set devicePixelRatio',configurable:true});Object.defineProperty(globalThis,'devicePixelRatio',{get:_g,set:_s,enumerable:true,configurable:true});})();`
+                    `(function(){var _nt=Symbol.for('__browser_oxide_native__');var _g=function(){return ${_dprVal};};Object.defineProperty(_g,_nt,{value:'get devicePixelRatio',configurable:true});Object.defineProperty(_g,'name',{value:'get devicePixelRatio',configurable:true});var _s=function(v){Object.defineProperty(this,'devicePixelRatio',{value:v,writable:true,enumerable:true,configurable:true});};Object.defineProperty(_s,_nt,{value:'set devicePixelRatio',configurable:true});Object.defineProperty(_s,'name',{value:'set devicePixelRatio',configurable:true});Object.defineProperty(globalThis,'devicePixelRatio',{get:_g,set:_s,enumerable:true,configurable:true});})();`
                 );
             } catch (_) {
                 _sp("devicePixelRatio", _dprVal);
@@ -3100,10 +3100,10 @@
 
     // Expose node-id resolution to sibling bootstrap files that need it
     // (event_bootstrap.js wires listeners by nodeId, not by Node identity).
-    // Installed non-enumerable; cleanup_bootstrap.js deletes __boxide
+    // Installed non-enumerable; cleanup_bootstrap.js deletes __browser_oxide
     // before page scripts run. Callers must CAPTURE the helper during
     // their own bootstrap execution, not look it up per-call.
-    Object.defineProperty(globalThis, '__boxide', {
+    Object.defineProperty(globalThis, '__browser_oxide', {
         value: { _getNodeId },
         enumerable: false,
         configurable: true,

@@ -12,9 +12,9 @@
 //! When the feature is on, uses Brave's `adblock` crate (MPL-2.0) which
 //! parses Adblock-Plus syntax (the same format as EasyList,
 //! EasyPrivacy, uBlock filter lists). We bundle a minimal high-impact
-//! baseline and accept extra rules from the `BOXIDE_BLOCKER_RULES` env
+//! baseline and accept extra rules from the `BROWSER_OXIDE_BLOCKER_RULES` env
 //! var for users who want full EasyList integration. The runtime path
-//! is *also* opt-in via `BOXIDE_BLOCKER=1`.
+//! is *also* opt-in via `BROWSER_OXIDE_BLOCKER=1`.
 
 #[cfg(feature = "blocker")]
 mod engine {
@@ -26,7 +26,7 @@ mod engine {
     /// Top tracker / ad-network domains that show up in the holistic-sweep
     /// `op_net_fetch_sync` log. This baseline is only ~30 rules — full
     /// EasyList has ~100K and provides much broader coverage. To enable full
-    /// EasyList, set `BOXIDE_BLOCKER_RULES=/path/to/easylist.txt`.
+    /// EasyList, set `BROWSER_OXIDE_BLOCKER_RULES=/path/to/easylist.txt`.
     ///
     /// Format: Adblock-Plus syntax. `||domain^` blocks any request to that
     /// domain. The `^` anchor matches end-of-domain or a path separator.
@@ -98,13 +98,13 @@ mod engine {
         // segment.io initialization) — blocking them costs ~2 PASSes.
         //
         // Default off; users who want to drop tracker requests for batch
-        // scraping where stealth doesn't matter can set BOXIDE_BLOCKER=1.
-        if std::env::var("BOXIDE_BLOCKER").is_err() {
+        // scraping where stealth doesn't matter can set BROWSER_OXIDE_BLOCKER=1.
+        if std::env::var("BROWSER_OXIDE_BLOCKER").is_err() {
             return None;
         }
 
         let mut rules = String::from(BUILTIN_RULES);
-        if let Ok(path) = std::env::var("BOXIDE_BLOCKER_RULES") {
+        if let Ok(path) = std::env::var("BROWSER_OXIDE_BLOCKER_RULES") {
             match std::fs::read_to_string(&path) {
                 Ok(extra) => {
                     rules.push('\n');
@@ -112,7 +112,7 @@ mod engine {
                 }
                 Err(e) => {
                     eprintln!(
-                        "[blocker] WARN: BOXIDE_BLOCKER_RULES={} failed to read: {}",
+                        "[blocker] WARN: BROWSER_OXIDE_BLOCKER_RULES={} failed to read: {}",
                         path, e
                     );
                 }
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn default_off_means_does_not_block() {
-        // BOXIDE_BLOCKER not set in cargo test env → engine() returns
+        // BROWSER_OXIDE_BLOCKER not set in cargo test env → engine() returns
         // None → all should_block calls return false. This guarantees
         // the default test/run path doesn't get any blocker behaviour.
         assert!(!should_block(
@@ -218,13 +218,13 @@ mod tests {
     }
 
     // Tests that exercise the actual engine require the `blocker`
-    // Cargo feature *and* BOXIDE_BLOCKER=1. Run them via:
-    //   BOXIDE_BLOCKER=1 cargo test -p net --features blocker --lib blocker -- --ignored
+    // Cargo feature *and* BROWSER_OXIDE_BLOCKER=1. Run them via:
+    //   BROWSER_OXIDE_BLOCKER=1 cargo test -p net --features blocker --lib blocker -- --ignored
     #[cfg(feature = "blocker")]
     #[test]
     #[ignore]
     fn blocks_known_tracker_when_enabled() {
-        std::env::set_var("BOXIDE_BLOCKER", "1");
+        std::env::set_var("BROWSER_OXIDE_BLOCKER", "1");
         assert!(should_block(
             "https://www.google-analytics.com/analytics.js",
             "https://www.example.com/",
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     #[ignore]
     fn allows_legitimate_request_when_enabled() {
-        std::env::set_var("BOXIDE_BLOCKER", "1");
+        std::env::set_var("BROWSER_OXIDE_BLOCKER", "1");
         // First-party CDN-fetched JS should NOT match (no rule covers it).
         assert!(!should_block(
             "https://www.example.com/static/main.js",

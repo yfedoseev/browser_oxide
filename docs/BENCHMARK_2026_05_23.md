@@ -41,12 +41,12 @@ Same 126-corpus, same classifier, same IP, today.
 | Chromium headless (vanilla)       | 86 | 11 | 25 | 1 | 3 | 0 | 97 | 126 |
 | Playwright + Stealth              | 87 | 10 | 25 | 1 | 3 | 0 | 97 | 126 |
 | Patchright (CDP-hidden)           | 86 | 11 | 25 | 4 | 0 | 0 | 97 | 126 |
-| **boxide.chrome_148_macos**       | **102** | 14 | 7 | 2 | 0 | 1 | 116 | 125 |
-| **boxide.pixel_9_pro_chrome_148** | **104** | 15 | 6 | 1 | 0 | 0 | 119 | 126 |
-| **boxide.iphone_15_pro_safari_18**| **106** | 14 | 4 | 1 | 0 | 1 | 120 | 125 |
-| **boxide.firefox_135_macos**      | **101** | 14 | 9 | 2 | 0 | 0 | 115 | 126 |
+| **browser_oxide.chrome_148_macos**       | **102** | 14 | 7 | 2 | 0 | 1 | 116 | 125 |
+| **browser_oxide.pixel_9_pro_chrome_148** | **104** | 15 | 6 | 1 | 0 | 0 | 119 | 126 |
+| **browser_oxide.iphone_15_pro_safari_18**| **106** | 14 | 4 | 1 | 0 | 1 | 120 | 125 |
+| **browser_oxide.firefox_135_macos**      | **101** | 14 | 9 | 2 | 0 | 0 | 115 | 126 |
 | Camoufox (Firefox-based)          | **108** | 10 | 8 | 0 | 0 | 0 | 118 | 126 |
-| **boxide BEST-OF-4 routed**       | **110** | 10 | 4 | 0 | 0 | 2 | 122 | 126 |
+| **browser_oxide BEST-OF-4 routed**       | **110** | 10 | 4 | 0 | 0 | 2 | 122 | 126 |
 
 ## Honest reads
 
@@ -98,7 +98,7 @@ Known engineering items to close the residual gap:
 - **Pre-warm cookie jar**: navigate a few neutral sites at engine
   startup to populate the shared jar before user code runs
   (a `Page::with_warm_session()` constructor).
-- **`BOXIDE_COOKIE_JAR=<path>` persistence**: already wired through
+- **`BROWSER_OXIDE_COOKIE_JAR=<path>` persistence**: already wired through
   the shared session; long-running scrapers get free improvement
   run-over-run.
 
@@ -151,7 +151,7 @@ this report publishes.
 git checkout fix/yandex-regression
 cargo test --release -p browser --test holistic_sweep --no-run
 for p in chrome_148_macos pixel_9_pro_chrome_148 iphone_15_pro_safari_18 firefox_135_macos; do
-  BOXIDE_PROFILE=$p BOXIDE_PARALLEL_WORKERS=2 \
+  BROWSER_OXIDE_PROFILE=$p BROWSER_OXIDE_PARALLEL_WORKERS=2 \
     cargo test --release -p browser --test holistic_sweep \
     holistic_sweep_parallel -- --ignored --nocapture \
     > /tmp/v10_${p}.log 2>&1

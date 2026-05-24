@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 // PROFILER (env-gated, near-zero overhead when disabled)
 // ---------------------------------------------------------------------------
 //
-// Enable with `BOXIDE_EVENT_LOOP_PROFILE=1`. When active, every
+// Enable with `BROWSER_OXIDE_EVENT_LOOP_PROFILE=1`. When active, every
 // `run_until_idle` invocation captures per-tick wall-clock plus the
 // deno_core RuntimeActivity snapshot (pending async ops, timers, intervals,
 // resources) and dumps a histogram + per-tick CSV to stderr at exit.
@@ -36,7 +36,7 @@ fn profile_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
         matches!(
-            std::env::var("BOXIDE_EVENT_LOOP_PROFILE").as_deref(),
+            std::env::var("BROWSER_OXIDE_EVENT_LOOP_PROFILE").as_deref(),
             Ok("1") | Ok("true") | Ok("yes")
         )
     })
@@ -90,7 +90,7 @@ fn dump_profile(label: &str, rows: &[TickRow], total: Duration, reason: IdleReas
     let stderr = std::io::stderr();
     let mut w = stderr.lock();
 
-    let _ = writeln!(w, "\n========== BOXIDE EVENT-LOOP PROFILE ==========");
+    let _ = writeln!(w, "\n========== BROWSER_OXIDE EVENT-LOOP PROFILE ==========");
     let _ = writeln!(w, "label              : {}", label);
     let _ = writeln!(w, "reason             : {:?}", reason);
     let _ = writeln!(w, "total wall (ms)    : {}", total.as_millis());
@@ -375,7 +375,7 @@ impl BrowserEventLoop {
 
         if profiling {
             let total = profile_start.map(|s| s.elapsed()).unwrap_or_default();
-            let label = std::env::var("BOXIDE_EVENT_LOOP_PROFILE_LABEL")
+            let label = std::env::var("BROWSER_OXIDE_EVENT_LOOP_PROFILE_LABEL")
                 .unwrap_or_else(|_| "run_until_idle".to_string());
             let reason = match &outcome {
                 Ok(r) => *r,

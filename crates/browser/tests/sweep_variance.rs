@@ -1,7 +1,7 @@
 //! W4.3 — 5-run sweep variance characterization.
 //!
 //! Reads all sweep logs matching `/tmp/sweep_<profile>*.log` (or a path
-//! supplied via the `BOXIDE_VARIANCE_LOGS` env var as a colon-separated
+//! supplied via the `BROWSER_OXIDE_VARIANCE_LOGS` env var as a colon-separated
 //! list) and reports per-(profile, site) pass-rate distribution.
 //!
 //! Output classifies each site into one of four buckets per profile:
@@ -41,7 +41,7 @@ impl Tally {
 }
 
 fn collect_log_paths() -> Vec<PathBuf> {
-    if let Ok(env) = std::env::var("BOXIDE_VARIANCE_LOGS") {
+    if let Ok(env) = std::env::var("BROWSER_OXIDE_VARIANCE_LOGS") {
         return env
             .split(':')
             .map(PathBuf::from)
@@ -154,7 +154,7 @@ async fn variance_report() {
     let paths = collect_log_paths();
     if paths.is_empty() {
         println!(
-            "no sweep logs found (looked at /tmp/sweep_*.log or BOXIDE_VARIANCE_LOGS env var)"
+            "no sweep logs found (looked at /tmp/sweep_*.log or BROWSER_OXIDE_VARIANCE_LOGS env var)"
         );
         return;
     }

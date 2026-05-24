@@ -10,7 +10,7 @@
     // returns the raw JS source of polyfilled functions. We patch
     // Function.prototype.toString itself to consult a private Symbol tag
     // we set on masked functions.
-    const _nativeTag = Symbol.for('__boxide_native__');
+    const _nativeTag = Symbol.for('__browser_oxide_native__');
     const _origFnToStr = Function.prototype.toString;
 
     // Re-entrant guard: prevents infinite recursion when this[_nativeTag] access

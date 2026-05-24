@@ -1369,14 +1369,14 @@ pub fn op_eval_in_child_realm<'s>(
     // here means the child realm is silently under-populated (a missing
     // shim → Kasada/DataDome bail "score is not numeric" / undefined
     // receiver). Surface it to an opt-in diagnostic channel
-    // (`BOXIDE_DEBUG_CHILD_REALM`) WITHOUT changing behavior: still
+    // (`BROWSER_OXIDE_DEBUG_CHILD_REALM`) WITHOUT changing behavior: still
     // best-effort runs the script, still returns `None`.
     let tc = &mut v8::TryCatch::new(cs);
     let ok = match v8::Script::compile(tc, src, None) {
         Some(script) => script.run(tc).is_some(),
         None => false,
     };
-    if !ok && std::env::var("BOXIDE_DEBUG_CHILD_REALM").is_ok() {
+    if !ok && std::env::var("BROWSER_OXIDE_DEBUG_CHILD_REALM").is_ok() {
         let msg = tc
             .exception()
             .and_then(|e| e.to_string(tc))

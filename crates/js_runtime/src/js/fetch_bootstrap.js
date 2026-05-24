@@ -286,10 +286,10 @@
         try {
             const loc = globalThis.location;
             if (loc && loc.origin && loc.origin !== "null") {
-                headers["x-boxide-origin"] = loc.origin;
+                headers["x-browser-oxide-origin"] = loc.origin;
             } else if (loc && loc.href && loc.href !== "about:blank") {
                 const u = new URL(loc.href);
-                headers["x-boxide-origin"] = u.origin;
+                headers["x-browser-oxide-origin"] = u.origin;
             }
         } catch {}
 
@@ -297,13 +297,13 @@
             const startTime = performance.now();
             const result = await ops.op_fetch(url, method, headers, body);
             
-            const boxide = globalThis._boxide;
-            const fetchLog = boxide && boxide.__fetchLog;
+            const browser_oxide = globalThis._browser_oxide;
+            const fetchLog = browser_oxide && browser_oxide.__fetchLog;
             if (fetchLog) {
                 fetchLog.push({ method, url, status: result.status });
             }
 
-            const entries = boxide && boxide.__perfResourceEntries;
+            const entries = browser_oxide && browser_oxide.__perfResourceEntries;
             if (entries) {
                 entries.push({ url, type: "fetch", startTime, duration: performance.now() - startTime, size: result.body ? result.body.length : 0 });
             }
@@ -320,8 +320,8 @@
             });
         } catch (e) {
             // Log error for audit
-            const boxide = globalThis._boxide;
-            const fetchLog = boxide && boxide.__fetchLog;
+            const browser_oxide = globalThis._browser_oxide;
+            const fetchLog = browser_oxide && browser_oxide.__fetchLog;
             if (fetchLog) {
                 fetchLog.push({ method, url, status: 0, error: e.message });
             }

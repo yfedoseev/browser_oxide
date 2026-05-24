@@ -508,7 +508,7 @@
         '_nativeTag',
         '_customElementsRegistry',
         '__bootstrap',
-        '__boxide',
+        '__browser_oxide',
         '__syncCookiesFromNet',
         '__documentReadyState',
         '__drainCspViolations',

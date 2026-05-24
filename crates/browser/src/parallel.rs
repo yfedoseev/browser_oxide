@@ -69,7 +69,7 @@ impl ParallelPager {
             .map(|i| {
                 let (tx, rx) = mpsc::channel::<Job>();
                 let thread = thread::Builder::new()
-                    .name(format!("boxide-pager-{i}"))
+                    .name(format!("browser_oxide-pager-{i}"))
                     .stack_size(64 * 1024 * 1024) // 64 MB — match RUST_MIN_STACK gate per V8 needs
                     .spawn(move || worker_main(rx))
                     .expect("failed to spawn pager worker");

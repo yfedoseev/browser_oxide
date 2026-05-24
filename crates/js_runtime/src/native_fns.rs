@@ -15,7 +15,7 @@
 //!
 //! This installs `Function.prototype.toString` as a genuine API
 //! function. Behaviour preserved: masked host fns (carrying the
-//! `Symbol.for('__boxide_native__')` tag set by stealth_bootstrap.js)
+//! `Symbol.for('__browser_oxide_native__')` tag set by stealth_bootstrap.js)
 //! stringify as `function <tag>() { [native code] }`; everything else
 //! delegates to the GENUINE original `Function.prototype.toString`
 //! (captured BEFORE any bootstrap ran) so real JS user functions still
@@ -27,7 +27,7 @@
 use deno_core::v8;
 use std::collections::HashMap;
 
-const NATIVE_TAG: &str = "__boxide_native__";
+const NATIVE_TAG: &str = "__browser_oxide_native__";
 
 /// Per-runtime storage for child iframe realms (genuine v8::Context instances).
 ///
@@ -41,7 +41,7 @@ const NATIVE_TAG: &str = "__boxide_native__";
 /// `toString` calls (`cw.Function.prototype.toString.call(parent.fetch)`)
 /// produce `[native code]` — same as the main window.
 ///
-/// `native_tag_sym` is the JS-global-registry symbol `Symbol.for('__boxide_native__')`
+/// `native_tag_sym` is the JS-global-registry symbol `Symbol.for('__browser_oxide_native__')`
 /// captured after bootstrap runs. It is the SAME symbol object that stealth_bootstrap.js
 /// uses to tag masked host functions. The V8 API registry symbol from
 /// `v8::Symbol::for_global` is a DIFFERENT registry and will NOT find these tags.
@@ -125,13 +125,13 @@ pub fn capture_original_fp_tostring(
 ///
 /// `args.data()` is an Array `[orig, sym]` where:
 ///   - index 0: the captured genuine `Function.prototype.toString` (v8::Function)
-///   - index 1: the JS-global-registry `Symbol.for('__boxide_native__')` (v8::Symbol)
+///   - index 1: the JS-global-registry `Symbol.for('__browser_oxide_native__')` (v8::Symbol)
 ///
 /// Using Array data is necessary because V8 callback data can only hold a
 /// single v8::Value. The symbol MUST come from the JS global registry
 /// (`Symbol::For`), not V8's API registry (`Symbol::ForApi` /
 /// `v8::Symbol::for_global`) — those are different tables. Stealth_bootstrap.js
-/// tags host functions via `Symbol.for('__boxide_native__')` which writes to
+/// tags host functions via `Symbol.for('__browser_oxide_native__')` which writes to
 /// the JS registry; looking up via `v8::Symbol::for_global` silently misses all tags.
 // `v8::Symbol::for_global` is deprecated upstream but is exactly the
 // API-registry lookup we need here as a documented fallback (see the
@@ -164,7 +164,7 @@ fn fp_to_string_cb(
 
     // Masked host fn? Check via the JS-global-registry Symbol before the
     // is_function() guard, so Proxy-wrapped tagged objects also stringify.
-    // stealth_bootstrap.js sets `fn[Symbol.for('__boxide_native__')] = name`.
+    // stealth_bootstrap.js sets `fn[Symbol.for('__browser_oxide_native__')] = name`.
     if let Ok(this_obj) = v8::Local::<v8::Object>::try_from(this) {
         // Resolve which symbol to use for the tag lookup.
         // Primary path: the JS-registry symbol from Array data.
@@ -248,7 +248,7 @@ fn fp_to_string_cb(
 /// Install the genuine-native `Function.prototype.toString`, replacing
 /// the JS-level patch. `original` must be the builtin captured pre-
 /// bootstrap (see `capture_original_fp_tostring`). `native_tag_sym` must
-/// be `Symbol.for('__boxide_native__')` captured from the JS environment
+/// be `Symbol.for('__browser_oxide_native__')` captured from the JS environment
 /// AFTER bootstrap runs — it is the JS-global-registry symbol that
 /// stealth_bootstrap.js uses to tag host functions. Pass `None` only when
 /// no bootstrap has run (e.g. child realms before symbol is captured).
@@ -479,11 +479,11 @@ mod tests {
             capture_original_fp_tostring(scope).expect("capture original")
         };
 
-        // Simulate bootstrap: set Symbol.for('__boxide_native__') tag on a function.
+        // Simulate bootstrap: set Symbol.for('__browser_oxide_native__') tag on a function.
         rt.execute_script(
             "<test>",
             r#"
-                const _nativeTag = Symbol.for('__boxide_native__');
+                const _nativeTag = Symbol.for('__browser_oxide_native__');
                 function myTaggedFn() {}
                 Object.defineProperty(myTaggedFn, _nativeTag, { value: 'myTaggedFn', configurable: true });
                 globalThis.__testFn = myTaggedFn;
@@ -491,10 +491,10 @@ mod tests {
         )
         .expect("setup script");
 
-        // Capture Symbol.for('__boxide_native__') from JS environment.
+        // Capture Symbol.for('__browser_oxide_native__') from JS environment.
         let native_tag_sym_g: Option<v8::Global<v8::Symbol>> = {
             let scope = &mut rt.handle_scope();
-            let src = v8::String::new(scope, "Symbol.for('__boxide_native__')").unwrap();
+            let src = v8::String::new(scope, "Symbol.for('__browser_oxide_native__')").unwrap();
             let script = v8::Script::compile(scope, src, None).unwrap();
             let val = script.run(scope).unwrap();
             let sym = v8::Local::<v8::Symbol>::try_from(val).ok().unwrap();

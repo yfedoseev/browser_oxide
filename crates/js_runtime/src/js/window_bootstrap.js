@@ -1,18 +1,18 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
-    const _boxide = {
+    const _browser_oxide = {
         __documentReadyState: "loading",
         __pendingNavigation: null,
         __perfResourceEntries: [],
         __fetchLog: [],
         __cspViolations: [],
         __drainCspViolations: () => {
-            const v = [..._boxide.__cspViolations];
-            _boxide.__cspViolations = [];
+            const v = [..._browser_oxide.__cspViolations];
+            _browser_oxide.__cspViolations = [];
             return v;
         }
     };
-    Object.defineProperty(globalThis, '_boxide', { value: _boxide, configurable: true, enumerable: false, writable: true });
+    Object.defineProperty(globalThis, '_browser_oxide', { value: _browser_oxide, configurable: true, enumerable: false, writable: true });
 
     if (globalThis.WebAssembly) {
         // Streaming stubs
@@ -1326,39 +1326,39 @@
     // crates/js_runtime/src/extensions/nav_ext.rs.
     const _signalNav = () => { try { ops.op_set_pending_nav(); } catch (_) {} };
 
-    // Mirror `_boxide.__pendingNavigation` onto `globalThis.__pendingNavigation`
+    // Mirror `_browser_oxide.__pendingNavigation` onto `globalThis.__pendingNavigation`
     // — JS-side consumers (and the navigation_primitives tests) read it
     // off globalThis per the documented contract at the top of this
-    // section. We keep _boxide as the underlying store so the existing
+    // section. We keep _browser_oxide as the underlying store so the existing
     // Rust event-loop driver and per-call assignments keep working.
     Object.defineProperty(globalThis, '__pendingNavigation', {
-        get: () => _boxide.__pendingNavigation,
-        set: (v) => { _boxide.__pendingNavigation = v; },
+        get: () => _browser_oxide.__pendingNavigation,
+        set: (v) => { _browser_oxide.__pendingNavigation = v; },
         configurable: true,
         enumerable: false,
     });
 
     _defLoc('href', () => _locationData.href, (v) => {
         _parseLocationUrl(v);
-        _boxide.__pendingNavigation = { url: _locationData.href, kind: "assign" };
+        _browser_oxide.__pendingNavigation = { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defLoc('origin', () => _locationData.origin);
     _defLoc('protocol', () => _locationData.protocol, (v) => {
         _parseLocationUrl(v + "//" + _locationData.host + _locationData.pathname);
-        _boxide.__pendingNavigation = 
+        _browser_oxide.__pendingNavigation = 
  { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defLoc('host', () => _locationData.host, (v) => {
         _parseLocationUrl(_locationData.protocol + "//" + v + _locationData.pathname);
-        _boxide.__pendingNavigation = 
+        _browser_oxide.__pendingNavigation = 
  { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defLoc('hostname', () => _locationData.hostname, (v) => {
         _parseLocationUrl(_locationData.protocol + "//" + v + (_locationData.port ? ":" + _locationData.port : "") + _locationData.pathname);
-        _boxide.__pendingNavigation = 
+        _browser_oxide.__pendingNavigation = 
  { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
@@ -1377,18 +1377,18 @@
 
     _defProtoMethod(_LocProto, 'assign', (url) => {
         _parseLocationUrl(url);
-        _boxide.__pendingNavigation = 
+        _browser_oxide.__pendingNavigation = 
  { url: _locationData.href, kind: "assign" };
         _signalNav();
     });
     _defProtoMethod(_LocProto, 'replace', (url) => {
         _parseLocationUrl(url);
-        _boxide.__pendingNavigation = 
+        _browser_oxide.__pendingNavigation = 
  { url: _locationData.href, kind: "replace" };
         _signalNav();
     });
     _defProtoMethod(_LocProto, 'reload', () => {
-        _boxide.__pendingNavigation = 
+        _browser_oxide.__pendingNavigation = 
  { url: _locationData.href, kind: "reload" };
         _signalNav();
     });
@@ -1867,7 +1867,7 @@
             }
             // Fallback to relative URL resolution via base
             if (!s.includes(':')) {
-                const base = (globalThis.__boxide && globalThis.__boxide._baseUrl) || '';
+                const base = (globalThis.__browser_oxide && globalThis.__browser_oxide._baseUrl) || '';
                 if (base.startsWith('http')) {
                     const full = base.replace(/\/[^\/]*$/, '/') + s;
                     try { return _wops.op_worker_sync_fetch(full) || ''; } catch (e) { return ''; }
@@ -1930,7 +1930,7 @@
                     _wops.op_worker_await_message(self._id).then((raw) => {
                         if (!raw || !self._id) return; // worker died
                         const deserializer =
-                            _boxide && _boxide.deserializeFromWire;
+                            _browser_oxide && _browser_oxide.deserializeFromWire;
                         let payload = null;
                         try { payload = JSON.parse(raw); }
                         catch (e) { return _drainOnce(); }
@@ -1992,9 +1992,9 @@
                 let wire;
                 try {
                     wire =
-                        (_boxide &&
-                            _boxide.serializeForWire &&
-                            _boxide.serializeForWire(message)) ||
+                        (_browser_oxide &&
+                            _browser_oxide.serializeForWire &&
+                            _browser_oxide.serializeForWire(message)) ||
                         message;
                 } catch (e) {
                     // DataCloneError (e.g. function inside message).
@@ -2680,7 +2680,7 @@
             const origin = globalThis.location?.origin || "https://example.com";
             const base = _perfNav.fetchStart;
             let offset = 10;
-            const _internalEntries = _boxide.__perfResourceEntries || [];
+            const _internalEntries = _browser_oxide.__perfResourceEntries || [];
             const _rustEntries = (ops.op_perf_get_resource_timings && ops.op_perf_get_resource_timings()) || [];
 
             const mk = (name, startOffset, duration, type, size) => ({
@@ -3392,13 +3392,13 @@
 
     // getComputedStyle — reads inline style from actual element, falls back to CSS defaults.
     // CAPTURE _getNodeId at bootstrap time: cleanup_bootstrap.js deletes
-    // __boxide before page scripts run, so per-call lookup degrades to
+    // __browser_oxide before page scripts run, so per-call lookup degrades to
     // nodeId=0 (same bug that broke event_stop_propagation). This was why
     // every getComputedStyle() call returned the same root-element defaults
     // regardless of which element was passed.
     const _compStyleCache = new WeakMap();
-    const _getNodeIdForCompStyle = (globalThis.__boxide && globalThis.__boxide._getNodeId)
-        ? globalThis.__boxide._getNodeId
+    const _getNodeIdForCompStyle = (globalThis.__browser_oxide && globalThis.__browser_oxide._getNodeId)
+        ? globalThis.__browser_oxide._getNodeId
         : (() => 0);
     globalThis.getComputedStyle = ({
         getComputedStyle(element, pseudoElt) {
@@ -3592,7 +3592,7 @@
                     );
                     const result = JSON.parse(resultJson);
                     
-                    const _internalEntries = _boxide.__perfResourceEntries;
+                    const _internalEntries = _browser_oxide.__perfResourceEntries;
                     if (_internalEntries) {
                         _internalEntries.push({ url: xhr._url, type: "xmlhttprequest", startTime, duration: performance.now() - startTime, size: result.body ? result.body.length : 0 });
                     }
@@ -3630,7 +3630,7 @@
                 credentials: xhr.withCredentials ? 'include' : 'same-origin',
             })
                 .then(async (resp) => {
-                    const _internalEntries = _boxide.__perfResourceEntries;
+                    const _internalEntries = _browser_oxide.__perfResourceEntries;
                     if (_internalEntries && _internalEntries.length > 0) {
                         _internalEntries[_internalEntries.length - 1].type = "xmlhttprequest";
                     }

@@ -25,10 +25,10 @@ fn now_unix_ms() -> u64 {
 /// Returns (outcome, body_len, navigate_ms, drop_ms).
 /// The split lets us see whether time is in Page::navigate (network/JS work)
 /// or in `drop(page)` (V8 isolate teardown / pending tokio task drain).
-/// Picks profile from BOXIDE_PROFILE env var (default `chrome_148_macos`).
+/// Picks profile from BROWSER_OXIDE_PROFILE env var (default `chrome_148_macos`).
 /// Supported values: `chrome_148_macos|windows|linux`, `firefox_135_macos|windows|linux`.
 fn pick_profile() -> stealth::StealthProfile {
-    match std::env::var("BOXIDE_PROFILE")
+    match std::env::var("BROWSER_OXIDE_PROFILE")
         .unwrap_or_else(|_| "chrome_148_macos".into())
         .as_str()
     {
@@ -41,7 +41,7 @@ fn pick_profile() -> stealth::StealthProfile {
         // 2026-05-12 mobile profiles (Phase 2 + Phase 3)
         "pixel_9_pro_chrome_148" => stealth::presets::pixel_9_pro_chrome_148(),
         "iphone_15_pro_safari_18" => stealth::presets::iphone_15_pro_safari_18(),
-        other => panic!("unknown BOXIDE_PROFILE={other}"),
+        other => panic!("unknown BROWSER_OXIDE_PROFILE={other}"),
     }
 }
 
@@ -1011,7 +1011,7 @@ mod classifier_tests {
 }
 
 /// Run all 126 sites concurrently across N workers (default 4, override
-/// with `BOXIDE_PARALLEL_WORKERS` env var). Output format matches the
+/// with `BROWSER_OXIDE_PARALLEL_WORKERS` env var). Output format matches the
 /// per-site `holistic-end:` lines for downstream comparison.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore]
@@ -1020,8 +1020,8 @@ async fn holistic_sweep_parallel() {
     // small-page sites (iphey ~29 KB renders as THIN-BODY 901 B under
     // load; passes 29 KB in isolation). 2 keeps most of the speedup
     // (~2x vs single-threaded) without the flake. Override with
-    // BOXIDE_PARALLEL_WORKERS env when the box can take more.
-    let n_workers: usize = std::env::var("BOXIDE_PARALLEL_WORKERS")
+    // BROWSER_OXIDE_PARALLEL_WORKERS env when the box can take more.
+    let n_workers: usize = std::env::var("BROWSER_OXIDE_PARALLEL_WORKERS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(2);

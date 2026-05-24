@@ -269,8 +269,8 @@
     const _nodeListeners = new Map(); // nodeId → Map<eventType, [{callback, capture, once}]>
     const _objListeners = new WeakMap(); // object → Map<eventType, [{callback, capture, once}]>
 
-    const _getNodeIdOrMinusOne = (globalThis.__boxide && globalThis.__boxide._getNodeId)
-        ? globalThis.__boxide._getNodeId
+    const _getNodeIdOrMinusOne = (globalThis.__browser_oxide && globalThis.__browser_oxide._getNodeId)
+        ? globalThis.__browser_oxide._getNodeId
         : (() => -1);
 
     function _getListenersMap(target) {

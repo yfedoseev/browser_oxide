@@ -3,7 +3,7 @@
 //! Runs browser_oxide against a curated panel of fingerprinting test
 //! pages and captures (a) the rendered HTML, (b) a per-site extracted
 //! JSON state blob, and (c) a PASS / PARTIAL / FAIL / ERROR
-//! classification. Output goes to `${BOXIDE_FP_OUTDIR:-fp_suite_out}/`.
+//! classification. Output goes to `${BROWSER_OXIDE_FP_OUTDIR:-fp_suite_out}/`.
 //!
 //! Every site here is a known, public, modern fingerprint detector and
 //! the verdicts are captured straight from the page's own DOM/globals.
@@ -11,7 +11,7 @@
 //! Run with:
 //!
 //! ```bash
-//! BOXIDE_NAV_BUDGET_MS=45000 \
+//! BROWSER_OXIDE_NAV_BUDGET_MS=45000 \
 //!   cargo test --release -p browser --test fingerprint_suite \
 //!     -- --ignored --test-threads=1 --nocapture fingerprint_suite_full_run
 //! ```
@@ -55,10 +55,10 @@ struct SiteResult {
 }
 
 fn out_dir() -> PathBuf {
-    // Overridable via BOXIDE_FP_OUTDIR; otherwise writes under the
+    // Overridable via BROWSER_OXIDE_FP_OUTDIR; otherwise writes under the
     // current working directory so the suite doesn't pollute `docs/`
     // on a fresh checkout.
-    if let Ok(custom) = std::env::var("BOXIDE_FP_OUTDIR") {
+    if let Ok(custom) = std::env::var("BROWSER_OXIDE_FP_OUTDIR") {
         return PathBuf::from(custom);
     }
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

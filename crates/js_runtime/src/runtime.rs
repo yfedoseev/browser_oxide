@@ -224,7 +224,7 @@ pub fn create_runtime_with_signals(
         .execute_script("<anonymous>", include_str!("js/cleanup_bootstrap.js"))
         .expect("cleanup failed");
 
-    // Capture Symbol.for('__boxide_native__') from the JS global registry
+    // Capture Symbol.for('__browser_oxide_native__') from the JS global registry
     // AFTER bootstrap runs (stealth_bootstrap.js creates it at startup).
     // This is the CORRECT symbol: v8::Symbol::for_global uses V8's API
     // registry (Symbol::ForApi), which is a DIFFERENT table from the JS
@@ -233,7 +233,7 @@ pub fn create_runtime_with_signals(
     // from JS and pass it into the native FP.toString callback via Array data.
     let native_tag_sym: Option<v8::Global<v8::Symbol>> = {
         let scope = &mut runtime.handle_scope();
-        let src = v8::String::new(scope, "Symbol.for('__boxide_native__')");
+        let src = v8::String::new(scope, "Symbol.for('__browser_oxide_native__')");
         src.and_then(|s| {
             let script = v8::Script::compile(scope, s, None)?;
             let val = script.run(scope)?;
@@ -265,7 +265,7 @@ pub fn create_runtime_with_signals(
     // unpatchable [[SourceText]] leak (class-extends TypeError /
     // NoSideEffectsToString / error stacks / eval) — Kasada `fsc`
     // probe. Behaviour preserved via the captured genuine original +
-    // the `Symbol.for('__boxide_native__')` tag scheme. doc 27.
+    // the `Symbol.for('__browser_oxide_native__')` tag scheme. doc 27.
     if let Some(ref orig) = orig_fp_tostring {
         let scope = &mut runtime.handle_scope();
         crate::native_fns::install_native_fp_tostring(scope, orig, native_tag_sym.as_ref());

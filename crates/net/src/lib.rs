@@ -140,13 +140,13 @@ pub struct SharedSession {
 static SHARED_SESSION: std::sync::OnceLock<SharedSession> = std::sync::OnceLock::new();
 
 /// Get (lazily initialize) the process-wide shared session. The cookie
-/// jar can be seeded from disk via `BOXIDE_COOKIE_JAR=<path>` (same env
+/// jar can be seeded from disk via `BROWSER_OXIDE_COOKIE_JAR=<path>` (same env
 /// var the legacy per-client `HttpClient::new` honors). Otherwise the
 /// jar starts empty and grows as navigations execute.
 pub fn shared_session() -> SharedSession {
     SHARED_SESSION
         .get_or_init(|| {
-            let initial_jar = if let Ok(path) = std::env::var("BOXIDE_COOKIE_JAR") {
+            let initial_jar = if let Ok(path) = std::env::var("BROWSER_OXIDE_COOKIE_JAR") {
                 match CookieJar::load_from_file(&std::path::PathBuf::from(&path)) {
                     Ok(j) => {
                         eprintln!("[cookies] shared session loaded persisted jar from {}", path);
@@ -188,7 +188,7 @@ pub struct HttpClient {
     /// which adds the full set of high-entropy Client Hints. Mirrors Chrome's
     /// behaviour: baseline 13 headers on first visit, full hints after opt-in.
     accept_ch_origins: Arc<Mutex<HashSet<String>>>,
-    /// Resolved proxy config. `BOXIDE_PROXY` env var overrides
+    /// Resolved proxy config. `BROWSER_OXIDE_PROXY` env var overrides
     /// `profile.proxy`. None = direct connect (the existing path). T1C.
     proxy: Option<proxy::ProxyConfig>,
 }
@@ -253,10 +253,10 @@ impl HttpClient {
         let quic_client = quic::QuicClient::new().ok();
 
         // Optionally load a persisted cookie jar so per-origin trust
-        // accumulates across runs. Set BOXIDE_COOKIE_JAR to the desired
+        // accumulates across runs. Set BROWSER_OXIDE_COOKIE_JAR to the desired
         // file path. Without this env var, behavior is the same as before
         // (fresh in-memory jar each run).
-        let initial_jar = if let Ok(path) = std::env::var("BOXIDE_COOKIE_JAR") {
+        let initial_jar = if let Ok(path) = std::env::var("BROWSER_OXIDE_COOKIE_JAR") {
             let p = std::path::PathBuf::from(&path);
             match CookieJar::load_from_file(&p) {
                 Ok(jar) => {
@@ -282,7 +282,7 @@ impl HttpClient {
             quic_client,
             alt_svc_cache: AltSvcCache::new(),
             accept_ch_origins: Arc::new(Mutex::new(HashSet::new())),
-            // Resolve proxy: BOXIDE_PROXY env override, then profile.proxy.
+            // Resolve proxy: BROWSER_OXIDE_PROXY env override, then profile.proxy.
             // Bad proxy URLs are non-fatal — log and continue without proxy.
             proxy: match proxy::ProxyConfig::resolve(profile.proxy.as_deref()) {
                 Ok(p) => {
@@ -317,7 +317,7 @@ impl HttpClient {
     /// client as a bot and serve a stub or a challenge page.
     ///
     /// The shared session is lazily initialized on first call. A
-    /// `BOXIDE_COOKIE_JAR=<path>` env var seeds the cookie jar from a
+    /// `BROWSER_OXIDE_COOKIE_JAR=<path>` env var seeds the cookie jar from a
     /// previously-persisted file (preserved from the legacy `new()`
     /// path).
     pub fn shared(profile: &StealthProfile) -> Result<Self, NetError> {
@@ -844,9 +844,9 @@ impl HttpClient {
         }
         let mut jar = self.cookies.lock().await;
         jar.set_cookies(url, set_cookies);
-        // Persist if BOXIDE_COOKIE_JAR is set. Atomic write (tempfile +
+        // Persist if BROWSER_OXIDE_COOKIE_JAR is set. Atomic write (tempfile +
         // rename) so concurrent runs don't tear the file.
-        if let Ok(path) = std::env::var("BOXIDE_COOKIE_JAR") {
+        if let Ok(path) = std::env::var("BROWSER_OXIDE_COOKIE_JAR") {
             let p = std::path::PathBuf::from(&path);
             if let Err(e) = jar.save_to_file(&p) {
                 eprintln!("[cookies] save_to_file({}) failed: {}", path, e);
@@ -856,9 +856,9 @@ impl HttpClient {
 
     /// GET with explicit redirect following.
     /// Perform a GET request, following redirects up to `max_redirects`.
-    /// Set `BOXIDE_DEBUG_REDIRECTS=1` for hop-by-hop tracing.
+    /// Set `BROWSER_OXIDE_DEBUG_REDIRECTS=1` for hop-by-hop tracing.
     pub async fn get_follow(&self, url: &str, max_redirects: u8) -> Result<Response, NetError> {
-        let debug = std::env::var("BOXIDE_DEBUG_REDIRECTS").is_ok();
+        let debug = std::env::var("BROWSER_OXIDE_DEBUG_REDIRECTS").is_ok();
         let mut current_url = url.to_string();
         for hop in 0..max_redirects {
             if debug {
@@ -1060,7 +1060,7 @@ impl HttpClient {
         }
 
         // Env-gated POST body dump
-        if let Ok(dir) = std::env::var("BOXIDE_DUMP_POST_DIR") {
+        if let Ok(dir) = std::env::var("BROWSER_OXIDE_DUMP_POST_DIR") {
             use std::io::Write;
             let _ = std::fs::create_dir_all(&dir);
             let counter_path = format!("{}/.counter", dir);
@@ -1206,9 +1206,9 @@ impl HttpClient {
         merge_headers(&mut hdrs, extra_headers);
 
         // Env-gated POST body dump (for sensor-payload diffing). Writes one
-        // file per POST into BOXIDE_DUMP_POST_DIR with a numeric index, plus
+        // file per POST into BROWSER_OXIDE_DUMP_POST_DIR with a numeric index, plus
         // a sidecar .meta.json holding the URL and request headers.
-        if let Ok(dir) = std::env::var("BOXIDE_DUMP_POST_DIR") {
+        if let Ok(dir) = std::env::var("BROWSER_OXIDE_DUMP_POST_DIR") {
             use std::io::Write;
             let _ = std::fs::create_dir_all(&dir);
             let counter_path = format!("{}/.counter", dir);

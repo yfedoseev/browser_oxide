@@ -1,8 +1,8 @@
 //! Dedicated profile test for twitter.com / x.com SPA hydration.
 //!
 //! Run:
-//!   BOXIDE_EVENT_LOOP_PROFILE=1 \
-//!   BOXIDE_EVENT_LOOP_PROFILE_LABEL=xcom \
+//!   BROWSER_OXIDE_EVENT_LOOP_PROFILE=1 \
+//!   BROWSER_OXIDE_EVENT_LOOP_PROFILE_LABEL=xcom \
 //!   cargo test --release -p browser --test twitter_profile \
 //!     -- --ignored --test-threads=1 --nocapture 2>&1 | tee /tmp/xcom.log
 
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 #[tokio::test]
 #[ignore]
 async fn profile_twitter() {
-    let url = std::env::var("BOXIDE_TARGET").unwrap_or_else(|_| "https://twitter.com/".into());
+    let url = std::env::var("BROWSER_OXIDE_TARGET").unwrap_or_else(|_| "https://twitter.com/".into());
     let profile = stealth::presets::chrome_148_macos();
     let t0 = Instant::now();
     let result =

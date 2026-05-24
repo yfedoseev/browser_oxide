@@ -6,7 +6,7 @@
 
 ((globalThis) => {
     const ops = Deno.core.ops;
-    const _boxide = globalThis.__boxide;
+    const _browser_oxide = globalThis.__browser_oxide;
 
     // Helper: read from stealth profile or use default
     const _p = (key, fallback) => {
@@ -171,9 +171,9 @@
         let wire;
         try {
             wire =
-                (_boxide &&
-                    _boxide.serializeForWire &&
-                    _boxide.serializeForWire(message)) ||
+                (_browser_oxide &&
+                    _browser_oxide.serializeForWire &&
+                    _browser_oxide.serializeForWire(message)) ||
                 message;
         } catch (e) {
             // DataCloneError — propagate.
@@ -206,7 +206,7 @@
                 continue;
             }
             const deserializer =
-                _boxide && _boxide.deserializeFromWire;
+                _browser_oxide && _browser_oxide.deserializeFromWire;
             const data = deserializer
                 ? deserializer(payload && payload.data)
                 : payload && payload.data;

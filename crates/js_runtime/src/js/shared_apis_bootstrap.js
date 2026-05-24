@@ -1,6 +1,6 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
-    const _nativeTag = Symbol.for('__boxide_native__');
+    const _nativeTag = Symbol.for('__browser_oxide_native__');
     
     // Helpers used by various bootstraps. Ensure they exist in Workers too.
     const _defNav = (name, get) => Object.defineProperty(globalThis.navigator, name, { get, enumerable: true, configurable: true });

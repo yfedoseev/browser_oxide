@@ -418,7 +418,7 @@ impl Page {
         {
             let policy_set = crate::csp_collector::collect_csp(&[], &dom);
             let enforce_csp = profile.as_ref().map(|p| p.enforce_csp).unwrap_or(true)
-                && std::env::var("BOXIDE_CSP_BYPASS").is_err();
+                && std::env::var("BROWSER_OXIDE_CSP_BYPASS").is_err();
             if !policy_set.is_empty() {
                 if let Ok(origin) = url::Url::parse(url) {
                     js_runtime::extensions::fetch_ext::set_csp_policy(
@@ -508,10 +508,10 @@ impl Page {
         // Set document.readyState = loading
         // Non-enumerable own property so it doesn't leak into
         // Object.keys(window) — defined here so subsequent
-        // `globalThis.__boxide.__documentReadyState = ...` assignments preserve
+        // `globalThis.__browser_oxide.__documentReadyState = ...` assignments preserve
         // enumerable=false (writable=true, descriptor inherited).
         event_loop
-            .execute_script("globalThis._boxide.__documentReadyState = 'loading';")
+            .execute_script("globalThis._browser_oxide.__documentReadyState = 'loading';")
             .ok();
 
         // Fire DOMContentLoaded and load events — many scripts wait for these
@@ -523,7 +523,7 @@ impl Page {
 
         // After DOMContentLoaded, readyState = interactive
         event_loop
-            .execute_script("globalThis._boxide.__documentReadyState = 'interactive';")
+            .execute_script("globalThis._browser_oxide.__documentReadyState = 'interactive';")
             .ok();
 
         event_loop
@@ -532,7 +532,7 @@ impl Page {
 
         // After load, readyState = complete
         event_loop
-            .execute_script("globalThis._boxide.__documentReadyState = 'complete';")
+            .execute_script("globalThis._browser_oxide.__documentReadyState = 'complete';")
             .ok();
 
         // Run event loop until idle, capped at 8s. Real Chrome treats a page
@@ -1022,7 +1022,7 @@ impl Page {
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
 
         let iterations = max_iterations.max(1);
-        let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
+        let debug_nav = std::env::var("BROWSER_OXIDE_DEBUG_NAV").is_ok();
 
         tracing::debug!(url = %url, "navigate initial fetch");
         let resp = client
@@ -1109,7 +1109,7 @@ impl Page {
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
 
         let iterations = max_iterations.max(1);
-        let debug_nav = std::env::var("BOXIDE_DEBUG_NAV").is_ok();
+        let debug_nav = std::env::var("BROWSER_OXIDE_DEBUG_NAV").is_ok();
 
         // Iteration 0 uses provided HTML — no headers means no CSP
         // (this entry point is for tests that hand us synthetic HTML).
@@ -1166,7 +1166,7 @@ impl Page {
             );
             // Bypass switch — useful to compare engine behaviour with
             // and without enforcement on the same site without rebuild.
-            let env_bypass = std::env::var("BOXIDE_CSP_BYPASS").is_ok();
+            let env_bypass = std::env::var("BROWSER_OXIDE_CSP_BYPASS").is_ok();
             // Phase 5 (doc 05 §2c/§2d): a DataDome `rt:'i'` interstitial
             // is a DataDome-served challenge document, NOT the origin's
             // page — enforcing the origin's restrictive 403-response CSP
@@ -1210,9 +1210,9 @@ impl Page {
         }
 
         const PENDING_NAV_JS: &str = "(function(){\
-                const boxide = globalThis._boxide;\
-                const p = boxide && boxide.__pendingNavigation;\
-                if (p) boxide.__pendingNavigation = null;\
+                const browser_oxide = globalThis._browser_oxide;\
+                const p = browser_oxide && browser_oxide.__pendingNavigation;\
+                if (p) browser_oxide.__pendingNavigation = null;\
                 return p ? JSON.stringify({url: p.url, method: p.method || 'GET', body: p.body, kind: p.kind}) : '';\
             })()";
 
@@ -1259,10 +1259,10 @@ impl Page {
 
         // Wall-clock budget for this entire navigate_with_init call.
         // Default 50 s leaves headroom under the antibot_smoke 60 s wrapper.
-        // Override via BOXIDE_NAV_BUDGET_MS for slow-link or debugging runs.
+        // Override via BROWSER_OXIDE_NAV_BUDGET_MS for slow-link or debugging runs.
         // The budget is mutable: if iter=0 returns a *real-content* page
         // (no challenge marker AND body > 50 KB), we extend the budget by
-        // BOXIDE_NAV_BUDGET_EXTEND_MS (default 25 s) to allow heavy
+        // BROWSER_OXIDE_NAV_BUDGET_EXTEND_MS (default 25 s) to allow heavy
         // legitimate sites (footlocker, walmart) to fully render.
         // Default budget aggressively low (15 s) — most pages render their
         // primary body well under that. Sites that legitimately need more
@@ -1329,13 +1329,13 @@ impl Page {
             _ => 15_000,
         };
         let mut nav_budget = Duration::from_millis(
-            std::env::var("BOXIDE_NAV_BUDGET_MS")
+            std::env::var("BROWSER_OXIDE_NAV_BUDGET_MS")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(host_budget_default_ms),
         );
         let nav_budget_extend = Duration::from_millis(
-            std::env::var("BOXIDE_NAV_BUDGET_EXTEND_MS")
+            std::env::var("BROWSER_OXIDE_NAV_BUDGET_EXTEND_MS")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(25_000),
@@ -1748,7 +1748,7 @@ impl Page {
                         let fl = page
                             .event_loop()
                             .execute_script(
-                                "JSON.stringify((globalThis._boxide&&globalThis._boxide.__fetchLog)||[])",
+                                "JSON.stringify((globalThis._browser_oxide&&globalThis._browser_oxide.__fetchLog)||[])",
                             )
                             .unwrap_or_default();
                         let secck = page
@@ -2489,15 +2489,15 @@ impl Page {
                     // off ⇒ zero behavioral/perf/log change to the §4
                     // gate.
                     let dd_trace = full_url.contains("captcha-delivery.com")
-                        && std::env::var("BOXIDE_DD_TRACE").is_ok();
+                        && std::env::var("BROWSER_OXIDE_DD_TRACE").is_ok();
                     // Phase 5 (homedepot): trace EVERY external-script
-                    // fetch when BOXIDE_SC_TRACE is set, so we can see
+                    // fetch when BROWSER_OXIDE_SC_TRACE is set, so we can see
                     // whether the obfuscated `/Wjv3…` sec-cpt bundle is
                     // actually fetched + its size/status (the unknown the
                     // "bundle doesn't self-solve" verdict assumed but
                     // never measured). Env-gated, default off ⇒ zero §4
                     // gate impact.
-                    let sc_trace = std::env::var("BOXIDE_SC_TRACE").is_ok();
+                    let sc_trace = std::env::var("BROWSER_OXIDE_SC_TRACE").is_ok();
                     match client.get_follow_with_headers(&full_url, &hdrs, 5).await {
                         Ok(resp) if resp.ok() => {
                             let text = resp.text();
@@ -2613,7 +2613,7 @@ impl Page {
         // 25s is generous: any honest first-paint completes well under it.
         // Without this, build_page_with_scripts_and_init can run forever
         // because tokio::time::timeout cannot preempt V8 microtask spins.
-        let build_budget_ms: u64 = std::env::var("BOXIDE_BUILD_BUDGET_MS")
+        let build_budget_ms: u64 = std::env::var("BROWSER_OXIDE_BUILD_BUDGET_MS")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(25_000);
@@ -2691,7 +2691,7 @@ impl Page {
             });
             const _origFetch = globalThis.fetch;
             globalThis.fetch = async function(input, init) {
-                const log = globalThis._boxide && globalThis._boxide.__fetchLog;
+                const log = globalThis._browser_oxide && globalThis._browser_oxide.__fetchLog;
                 const entry = { method: 'GET', url: '', hasBody: false };
                 let args = Array.from(arguments);
 
@@ -2778,7 +2778,7 @@ impl Page {
                     }
                     entry.reqHeaders = hdrs;
                 } catch {}
-                const log = globalThis._boxide && globalThis._boxide.__fetchLog;
+                const log = globalThis._browser_oxide && globalThis._browser_oxide.__fetchLog;
                 if (log) log.push(entry);
                 try {
                     const resp = await _origFetch.apply(this, args);
@@ -2814,7 +2814,7 @@ impl Page {
                 _XHR.prototype.send = function(body) {
                     const entry = this.__logEntry || { method: this._method||'GET', url: this._url||'', sync: !this._async };
                     entry.hasBody = body != null && body !== '';
-                    const log = globalThis._boxide && globalThis._boxide.__fetchLog;
+                    const log = globalThis._browser_oxide && globalThis._browser_oxide.__fetchLog;
                 if (log) log.push(entry);
                     const _origRSC = this.onreadystatechange;
                     const self = this;

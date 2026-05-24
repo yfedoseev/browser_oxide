@@ -17,7 +17,7 @@
 //! a second local TCP listener acts as the "proxy". Tests are NOT
 //! `#[ignore]` — they're hermetic.
 //!
-//! A separate `live_proxy_chain` test (gated by `BOXIDE_TEST_PROXY` env
+//! A separate `live_proxy_chain` test (gated by `BROWSER_OXIDE_TEST_PROXY` env
 //! var) hits a real `https://api.ipify.org` through whatever proxy the
 //! operator wires up.
 
@@ -212,21 +212,21 @@ async fn http_connect_propagates_407_denied() {
     );
 }
 
-/// Live test: requires a working proxy at $BOXIDE_TEST_PROXY (URL form,
+/// Live test: requires a working proxy at $BROWSER_OXIDE_TEST_PROXY (URL form,
 /// e.g. `http://user:pass@host:port` or `socks5://...`). Hits
 /// `https://api.ipify.org/?format=text` direct AND through the proxy,
 /// asserts both succeed and that the IPs differ.
 ///
 /// Always `#[ignore]` because it requires an external paid resource.
 /// Run with:
-///     BOXIDE_TEST_PROXY=http://user:pass@your-proxy:8080 \
+///     BROWSER_OXIDE_TEST_PROXY=http://user:pass@your-proxy:8080 \
 ///       cargo test -p net --test proxy_roundtrip live_proxy_chain \
 ///       -- --ignored --test-threads=1 --nocapture
 #[tokio::test]
-#[ignore = "requires BOXIDE_TEST_PROXY env var pointing at a real proxy"]
+#[ignore = "requires BROWSER_OXIDE_TEST_PROXY env var pointing at a real proxy"]
 async fn live_proxy_chain() {
-    let proxy_url = std::env::var("BOXIDE_TEST_PROXY")
-        .expect("BOXIDE_TEST_PROXY must be set to a real proxy URL");
+    let proxy_url = std::env::var("BROWSER_OXIDE_TEST_PROXY")
+        .expect("BROWSER_OXIDE_TEST_PROXY must be set to a real proxy URL");
 
     // Build two clients that share nothing: one direct, one with proxy.
     // Use a minimal preset profile (we only care about the IP differing).

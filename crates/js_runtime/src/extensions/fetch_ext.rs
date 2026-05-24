@@ -74,7 +74,7 @@ struct ActiveCsp {
 }
 
 /// Install a CSP policy + origin for the current navigation. `enforce`
-/// is wired from `profile.enforce_csp` and the `BOXIDE_CSP_BYPASS=1`
+/// is wired from `profile.enforce_csp` and the `BROWSER_OXIDE_CSP_BYPASS=1`
 /// escape hatch. Called by `Page::navigate_with_init` after parsing
 /// the response headers + meta tags.
 ///
@@ -264,7 +264,7 @@ pub async fn op_fetch(
     // origin here, but adblock's first-party rules degrade gracefully.
     let request_type = net::blocker::classify_request_type(
         &url,
-        headers.get("x-boxide-request-type").map(|s| s.as_str()),
+        headers.get("x-browser-oxide-request-type").map(|s| s.as_str()),
     );
     if net::blocker::should_block(&url, "", request_type) {
         return Ok(FetchResponse {
@@ -291,14 +291,14 @@ pub async fn op_fetch(
         }
     };
 
-    // Pull JS-provided headers. JS may pass "x-boxide-origin" as a pseudo
+    // Pull JS-provided headers. JS may pass "x-browser-oxide-origin" as a pseudo
     // header carrying the page's origin; strip it here and forward as the
     // origin context so the net layer can compute sec-fetch-site correctly.
     let mut extra_headers: Vec<(String, String)> = Vec::with_capacity(headers.len());
     let mut origin: Option<String> = None;
     for (k, v) in headers.into_iter() {
         let lk = k.to_ascii_lowercase();
-        if lk == "x-boxide-origin" {
+        if lk == "x-browser-oxide-origin" {
             origin = Some(v);
             continue;
         }

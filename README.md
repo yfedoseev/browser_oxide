@@ -59,12 +59,12 @@ competitor.
 | Chromium headless (vanilla)       | 86 | 97 |
 | Playwright + Stealth              | 87 | 97 |
 | Patchright (CDP-hidden)           | 86 | 97 |
-| **boxide chrome_148_macos**       | **102** | **116** |
-| **boxide pixel_9_pro_chrome_148** | **104** | **119** |
-| **boxide iphone_15_pro_safari_18**| **106** | **120** |
-| **boxide firefox_135_macos**      | **101** | **115** |
+| **browser_oxide chrome_148_macos**       | **102** | **116** |
+| **browser_oxide pixel_9_pro_chrome_148** | **104** | **119** |
+| **browser_oxide iphone_15_pro_safari_18**| **106** | **120** |
+| **browser_oxide firefox_135_macos**      | **101** | **115** |
 | Camoufox (Firefox-based)          | 108 | 118 |
-| **boxide best-of-4 routed**       | **110** | **122** |
+| **browser_oxide best-of-4 routed**       | **110** | **122** |
 
 Two numbers per row because the corpus contains 10–15 SPA-bootstrap
 sites (amazon stubs, imdb, booking, …) that ship a 2–13 KB shell to

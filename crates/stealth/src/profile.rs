@@ -180,7 +180,7 @@ pub struct StealthProfile {
     /// Defaults via `serde(default)` to `true` so new profiles get the
     /// safer behaviour automatically; preset constructors can flip
     /// it for benchmarking purity. Override at runtime with
-    /// `BOXIDE_CSP_BYPASS=1`.
+    /// `BROWSER_OXIDE_CSP_BYPASS=1`.
     #[serde(default = "default_true")]
     pub enforce_csp: bool,
 }

@@ -18,7 +18,7 @@
 //! ## Selection
 //!
 //! Read in priority order:
-//! 1. `BOXIDE_PROXY` env var (override; useful for one-off CI runs)
+//! 1. `BROWSER_OXIDE_PROXY` env var (override; useful for one-off CI runs)
 //! 2. `StealthProfile.proxy` field on the active profile
 //!
 //! If both are absent, no proxy is used (direct connect via
@@ -58,12 +58,12 @@ pub enum ProxyConfig {
 impl ProxyConfig {
     /// Resolve the active proxy config:
     ///
-    /// 1. `BOXIDE_PROXY` env var (override)
+    /// 1. `BROWSER_OXIDE_PROXY` env var (override)
     /// 2. `profile_proxy` (the `StealthProfile.proxy` string)
     ///
     /// Returns `None` if neither is set.
     pub fn resolve(profile_proxy: Option<&str>) -> Result<Option<Self>, NetError> {
-        if let Ok(env) = std::env::var("BOXIDE_PROXY") {
+        if let Ok(env) = std::env::var("BROWSER_OXIDE_PROXY") {
             if !env.is_empty() {
                 return Self::parse(&env).map(Some);
             }
@@ -453,16 +453,16 @@ mod tests {
     #[test]
     fn resolve_env_overrides_profile() {
         // Save and restore env to avoid affecting other tests.
-        let saved = std::env::var("BOXIDE_PROXY").ok();
-        std::env::set_var("BOXIDE_PROXY", "socks5://env.example:1080");
+        let saved = std::env::var("BROWSER_OXIDE_PROXY").ok();
+        std::env::set_var("BROWSER_OXIDE_PROXY", "socks5://env.example:1080");
         let r = ProxyConfig::resolve(Some("http://profile.example:8080")).unwrap();
         match r {
             Some(ProxyConfig::Socks5 { host, .. }) => assert_eq!(host, "env.example"),
             other => panic!("expected env override Socks5, got {other:?}"),
         }
         match saved {
-            Some(v) => std::env::set_var("BOXIDE_PROXY", v),
-            None => std::env::remove_var("BOXIDE_PROXY"),
+            Some(v) => std::env::set_var("BROWSER_OXIDE_PROXY", v),
+            None => std::env::remove_var("BROWSER_OXIDE_PROXY"),
         }
     }
 
@@ -525,8 +525,8 @@ mod tests {
 
     #[test]
     fn resolve_profile_when_no_env() {
-        let saved = std::env::var("BOXIDE_PROXY").ok();
-        std::env::remove_var("BOXIDE_PROXY");
+        let saved = std::env::var("BROWSER_OXIDE_PROXY").ok();
+        std::env::remove_var("BROWSER_OXIDE_PROXY");
         let r = ProxyConfig::resolve(Some("http://profile.example:8080")).unwrap();
         assert!(matches!(r, Some(ProxyConfig::Http { .. })));
         let r = ProxyConfig::resolve(None).unwrap();
@@ -534,7 +534,7 @@ mod tests {
         let r = ProxyConfig::resolve(Some("")).unwrap();
         assert!(r.is_none());
         if let Some(v) = saved {
-            std::env::set_var("BOXIDE_PROXY", v);
+            std::env::set_var("BROWSER_OXIDE_PROXY", v);
         }
     }
 }

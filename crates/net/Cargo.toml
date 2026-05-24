@@ -11,7 +11,7 @@ publish = false  # 9 of 15 crate names collide on crates.io; flip per-crate when
 default = []
 # Optional ad/tracker blocker via Brave's Rust `adblock` crate. Off by
 # default because (a) the runtime path is already opt-in via the
-# `BOXIDE_BLOCKER=1` env var, and (b) `adblock` is MPL-2.0 which we
+# `BROWSER_OXIDE_BLOCKER=1` env var, and (b) `adblock` is MPL-2.0 which we
 # don't want to force on downstream consumers.
 blocker = ["dep:adblock"]
 

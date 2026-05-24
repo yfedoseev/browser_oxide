@@ -156,22 +156,22 @@
         return out;
     }
 
-    // Install wire-serialization onto BOTH the long-lived `_boxide` bag
+    // Install wire-serialization onto BOTH the long-lived `_browser_oxide` bag
     // (single underscore, owned by window_bootstrap.js — survives the
-    // cleanup pass) AND the legacy `__boxide` (double underscore, deleted
+    // cleanup pass) AND the legacy `__browser_oxide` (double underscore, deleted
     // by cleanup_bootstrap.js's internals purge). window_bootstrap's
     // Worker class captures the single-underscore object via closure, so
     // installing onto it lets the Worker postMessage / onmessage path
     // round-trip ArrayBuffer / TypedArray / Map / Set / Date / RegExp
     // payloads. The double-underscore copy stays for any code that
     // captured a reference to it before cleanup runs (e.g.
-    // worker_bootstrap.js's `const _boxide = globalThis.__boxide;`).
-    if (!globalThis.__boxide) globalThis.__boxide = {};
-    globalThis.__boxide.serializeForWire = _serializeForWire;
-    globalThis.__boxide.deserializeFromWire = _deserializeFromWire;
-    if (globalThis._boxide) {
-        globalThis._boxide.serializeForWire = _serializeForWire;
-        globalThis._boxide.deserializeFromWire = _deserializeFromWire;
+    // worker_bootstrap.js's `const _browser_oxide = globalThis.__browser_oxide;`).
+    if (!globalThis.__browser_oxide) globalThis.__browser_oxide = {};
+    globalThis.__browser_oxide.serializeForWire = _serializeForWire;
+    globalThis.__browser_oxide.deserializeFromWire = _deserializeFromWire;
+    if (globalThis._browser_oxide) {
+        globalThis._browser_oxide.serializeForWire = _serializeForWire;
+        globalThis._browser_oxide.deserializeFromWire = _deserializeFromWire;
     }
 
     // structuredClone polyfill — only install if V8 doesn't provide it natively.

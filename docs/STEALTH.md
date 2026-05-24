@@ -173,7 +173,7 @@ default and may be omitted from YAML/JSON; everything else is required.
 | `connection_effective_type` | String | `"4g"` etc. |
 | `connection_rtt`, `connection_downlink` | u32 / f64 | `navigator.connection`. |
 | `allow_http3` | bool | **(opt, default false)** Leave false unless you have a Chrome-matched QUIC stack — vanilla `quinn-proto` emits a worse fingerprint than no h3. |
-| `proxy` | Option<String> | **(opt)** Proxy URL; `BOXIDE_PROXY` env overrides. |
+| `proxy` | Option<String> | **(opt)** Proxy URL; `BROWSER_OXIDE_PROXY` env overrides. |
 
 ### Plugins / media / fingerprint
 
@@ -194,7 +194,7 @@ default and may be omitted from YAML/JSON; everything else is required.
 
 | Field | Type | Notes |
 |---|---|---|
-| `enforce_csp` | bool | **(opt, default true)** Refuse sub-resource fetches that violate the page CSP (matches real Chrome). `BOXIDE_CSP_BYPASS=1` overrides at runtime. |
+| `enforce_csp` | bool | **(opt, default true)** Refuse sub-resource fetches that violate the page CSP (matches real Chrome). `BROWSER_OXIDE_CSP_BYPASS=1` overrides at runtime. |
 
 ## Consistency rules (`validate()`)
 

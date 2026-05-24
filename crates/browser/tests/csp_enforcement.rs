@@ -368,7 +368,7 @@ async fn frame_src_falls_back_through_child_src_to_default_src() {
     csp_state::clear_csp_policy();
 }
 
-/// `BOXIDE_CSP_BYPASS=1` env var must turn off enforcement entirely
+/// `BROWSER_OXIDE_CSP_BYPASS=1` env var must turn off enforcement entirely
 /// without touching the policy parser. Useful for benchmarking and
 /// for sites where the policy is overly tight on us specifically.
 #[tokio::test]
@@ -387,7 +387,7 @@ async fn bypass_env_var_disables_enforcement() {
     );
     let policy = collect_csp(&[], &dom);
 
-    // enforce=false simulates BOXIDE_CSP_BYPASS=1.
+    // enforce=false simulates BROWSER_OXIDE_CSP_BYPASS=1.
     csp_state::set_csp_policy(
         Arc::new(policy),
         Url::parse("https://example.com/").unwrap(),
