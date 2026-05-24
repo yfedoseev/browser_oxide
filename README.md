@@ -48,17 +48,32 @@ A complete browser engine for scraping, archival, and AI agent workloads:
 
 Anti-bot coverage measured against a 126-site corpus of commercially-
 protected pages (Cloudflare, Akamai, DataDome, PerimeterX, Kasada,
-Shape/F5, etc.), release build, on 2026-05-21. **These numbers are
-from the vendor-stripped open-source engine** — no per-vendor bypass
-code in the tree:
+Shape/F5, etc.), release build, 2026-05-23. **These numbers are from
+the vendor-stripped open-source engine** — no per-vendor bypass code
+in the tree. Same machine, same IP, same hour, same classifier
+(`browser::engine_classify`) across browser_oxide and every
+competitor.
 
-| Profile (per-site routing) | L3-rendered / 126 |
-|---|---:|
-| Chrome 148 macOS | 120 |
-| Chrome 148 Android (Pixel 9 Pro) | 121 |
-| Safari 18 iOS (iPhone 15 Pro) | 116 |
-| Firefox 135 macOS | 116 |
-| **Per-domain best-of-profile (routed)** | **123** |
+| Engine                            | **Pass** (real render, ≥15 KB) | L3-tag (loose) |
+|-----------------------------------|--:|--:|
+| Chromium headless (vanilla)       | 86 | 97 |
+| Playwright + Stealth              | 87 | 97 |
+| Patchright (CDP-hidden)           | 86 | 97 |
+| **boxide chrome_148_macos**       | **102** | **116** |
+| **boxide pixel_9_pro_chrome_148** | **104** | **119** |
+| **boxide iphone_15_pro_safari_18**| **106** | **120** |
+| **boxide firefox_135_macos**      | **101** | **115** |
+| Camoufox (Firefox-based)          | 108 | 118 |
+| **boxide best-of-4 routed**       | **110** | **122** |
+
+Two numbers per row because the corpus contains 10–15 SPA-bootstrap
+sites (amazon stubs, imdb, booking, …) that ship a 2–13 KB shell to
+*any* non-real-browser HTTP client — they get tagged `L3-RENDERED` by
+absence of a challenge marker but the body isn't a real render. The
+strict `Pass` column requires `≥15 KB` of actual content
+(`ChallengeVerdict::Pass`, the rule the engine's own audit harness
+uses). `L3-tag` is the loose count for compatibility with prior
+reports.
 
 (Built-in preset constructors `chrome_130_*` / `pixel_9_pro_chrome_147`
 are deprecated aliases that emit a current Chrome 148 UA — the profile
@@ -70,25 +85,34 @@ function name.)
 captcha pages (`yelp.com`, `etsy.com`) are human-gated and out of
 scope; they pass on some profiles and block on others.
 
-> **Important — the engine carries this number, not bypass code.**
-> An A/B run (2026-05-21) measured the corpus with the per-vendor
-> challenge solvers **enabled** vs **fully removed from the tree**:
-> the routed pass rate is the same (123). Every site that renders,
-> renders on the from-scratch TLS + fingerprint + V8 engine alone.
-> The open-source engine ships **no per-vendor bypass code** (see
-> "Challenge solving" below) and the number above is what you get
-> out of the box.
+> **The engine carries the number, not bypass code.** Earlier A/B
+> measurements with per-vendor challenge solvers enabled vs fully
+> removed from the tree show no difference in routed pass rate. Every
+> site that renders, renders on the from-scratch TLS + fingerprint +
+> V8 engine alone. The open-source engine ships no solver
+> implementations (see "Challenge solving" below).
 
 ### Things to know before believing the numbers
 
-- **Free-OSS SOTA parity, not "we beat Chrome"**: On the broad corpus we
-  measure in the same tier as real-browser-driver tools (Camoufox,
-  Patchright, nodriver). The point isn't that we win — it's that a
-  from-scratch engine reaches that tier at all.
-- **No live competitor sweep was run for this README.**
+- **Best single-profile result trails Camoufox by 2 Pass** (iphone 106
+  vs Camoufox 108). When the caller is free to pick the best profile
+  per domain (the routed row above), browser_oxide takes the lead by
+  +2 Pass / +4 L3-tag. Most real scraping pipelines do this naturally.
+- **Clear lead over the CDP-driver tier**: Chromium headless,
+  Playwright + Stealth, and Patchright all sit at 86–87 Pass with
+  ~25 CHL per engine (anti-bot vendors detect their CDP-driver
+  fingerprint regardless of stealth plugins). browser_oxide routed
+  shows 3 routed CHL — almost 8× fewer challenges hit us.
+- **Anti-bot responses are noisy.** Single sweep runs vary by ±5
+  sites from WAF lottery alone (measured per-site 3× re-tests: amazon
+  variants have ~1-in-3 pass rate per fetch on any engine). The
+  routed `110` number is the central tendency, not a guaranteed
+  per-run result. See `docs/BENCHMARK_2026_05_23.md` and
+  `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md` for the full per-site
+  breakdown and reproduction commands.
 - **Kasada is the OSS-wide gap.** No open-source tool publicly passes
-  Kasada from scratch. The published 2026 winners are paid real-browser
-  farms (Scrapfly et al.).
+  Kasada from scratch. The published 2026 winners are paid
+  real-browser farms (Scrapfly et al.).
 
 ## Challenge solving
 
