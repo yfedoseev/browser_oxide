@@ -114,6 +114,38 @@ scope; they pass on some profiles and block on others.
   Kasada from scratch. The published 2026 winners are paid
   real-browser farms (Scrapfly et al.).
 
+### Per-page performance (post 2026-05-24 perf pass)
+
+Three navigation-path fixes (see `docs/PERFORMANCE_2026_05_24.md`)
+combined with a new `PagePool::navigate(url)` API land browser_oxide
+within 5–20% of Playwright on per-page wall-clock — with **~10× lower
+memory** because it's a single Rust process, not Chrome over CDP.
+
+5-run median per site, same box, single-IP, warm Chrome binary cache:
+
+| Engine | example.com (528 B) | hacker news (~35 KB) | wikipedia (~230 KB) |
+|---|--:|--:|--:|
+| browser_oxide (cold, `Page::navigate`) | 244 ms | 444 ms | 849 ms |
+| **browser_oxide (warm pool, `PagePool::navigate`)** | **141 ms** | **333 ms** | **724 ms** |
+| Playwright (chromium-headless) | 181 ms | 412 ms | 829 ms |
+| Puppeteer | 595 ms | 751 ms | 1131 ms |
+| Puppeteer + Stealth | 617 ms | 882 ms | 1319 ms |
+
+On the 528-byte static page (pure per-navigation-overhead measurement)
+the pool path is now **22% faster than Playwright**. On heavier pages
+where parse + script execution dominate, browser_oxide tracks Playwright
+within ~4%.
+
+The pre-fix per-navigate cost on example.com was 6585 ms — three
+specific bugs (`__pendingNavigation` re-fetch loop, build-phase drain
+caps, `humanize.js` timers pinning the event loop) accounted for
+**26× of the 47× total speedup**; the new pool API closed the
+remaining gap to Playwright's per-page steady state. All
+chrome_compat / anti_bot / navigation_primitives tests still pass.
+Full root-cause writeup: `docs/PERFORMANCE_2026_05_24.md`. Full per-engine
+sweep (Playwright / Patchright / Camoufox / Puppeteer-stealth) over the
+126-site corpus: `docs/BENCHMARK_2026_05_24.md`.
+
 ## Challenge solving
 
 The engine exposes a `ChallengeSolver` trait + a
