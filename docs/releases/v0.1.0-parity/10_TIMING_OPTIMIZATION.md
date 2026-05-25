@@ -16,7 +16,7 @@
 | Playwright + Stealth | 4.4 s | 23.6 s | 45.8 s | 16.7 min | 7.5 / min |
 | Camoufox | 5.6 s | 9.5 s | 42.5 s | 15.0 min | 8.4 / min |
 
-Source: `/tmp/full_sweep_2026_05_24/*.json` `summary.ms_median`,
+Source: `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/*.json` `summary.ms_median`,
 `ms_p95`, `ms_p99`, `wall_total_ms`.
 
 **Two truths**:
@@ -159,7 +159,7 @@ Per `docs/PERFORMANCE_2026_05_24.md` (single-page benchmark):
 
 ### Symptom
 
-From `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_pool.log:762`:
+From `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_pool.log:762`:
 
 ```
 thread 'main' (22889) panicked at crates/dom/src/arena.rs:678:17:
@@ -684,25 +684,25 @@ Benchmark / data:
 
 Sweep JSONs (timing data source):
 
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json` —
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json` —
   median 15115 ms, p95 92938, p99 115298, wall 2900 s
-- `/tmp/full_sweep_2026_05_24/bo_firefox_135_macos_cold.json` —
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_firefox_135_macos_cold.json` —
   median 15108, p95 93424, p99 107732, wall 3027 s
-- `/tmp/full_sweep_2026_05_24/bo_iphone_15_pro_safari_18_cold.json` —
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_iphone_15_pro_safari_18_cold.json` —
   median 15413, p95 93365, p99 116006, wall 3241 s
-- `/tmp/full_sweep_2026_05_24/bo_pixel_9_pro_chrome_148_cold.json` —
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_pixel_9_pro_chrome_148_cold.json` —
   median 15108, p95 93542, p99 115286, wall 2769 s
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_pool.json` —
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_pool.json` —
   median 2576, p95 9731, p99 61381, wall 415 s (97 sites, panic on
   98); `summary._note` documents the panic + JSON reconstruction
   from log
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_pool.log:762-783` —
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_pool.log:762-783` —
   panic capture (wellsfargo collect_elements cycle)
-- `/tmp/full_sweep_2026_05_24/comp_camoufox.json` — median 5603, p95
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/comp_camoufox.json` — median 5603, p95
   9511, p99 42543, wall 899 s
-- `/tmp/full_sweep_2026_05_24/comp_patchright.json` — median 3470,
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/comp_patchright.json` — median 3470,
   p95 8484, p99 13270, wall 558 s
-- `/tmp/full_sweep_2026_05_24/comp_playwright.json` — Playwright
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/comp_playwright.json` — Playwright
   baseline
 
 Sibling chapters:

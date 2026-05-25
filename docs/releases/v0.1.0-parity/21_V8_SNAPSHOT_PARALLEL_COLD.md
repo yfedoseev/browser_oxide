@@ -559,7 +559,7 @@ ls /tmp/parallel_v1/*.json
 python3 -c "
 import json
 for p in ['chrome_148_macos','firefox_135_macos','iphone_15_pro_safari_18','pixel_9_pro_chrome_148']:
-    s = json.load(open(f'/tmp/full_sweep_2026_05_24/bo_{p}_cold.json'))
+    s = json.load(open(f'~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_{p}_cold.json'))
     par = json.load(open(f'/tmp/parallel_v1/{p}.json'))
     print(f'{p}: serial pass={s[\"summary\"][\"pass\"]}  parallel pass={par[\"summary\"][\"pass\"]}  delta={par[\"summary\"][\"pass\"]-s[\"summary\"][\"pass\"]:+d}')
 "
@@ -698,7 +698,7 @@ All paths absolute under `/home/yfedoseev/projects/browser_oxide`.
 - `benchmarks/run_parallel_sweep.sh` — **new**, per §B.4
 - `benchmarks/bench_corpus_v2.py:101-106` — `tree_rss_mb` (why
   per-process RSS attribution matters)
-- `/tmp/full_sweep_2026_05_24/bo_*_cold.json` — serial baselines for
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_*_cold.json` — serial baselines for
   the §B.7 pass-rate parity check
 
 **Project rules / conventions**:

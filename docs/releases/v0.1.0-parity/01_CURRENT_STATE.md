@@ -2,7 +2,7 @@
 
 ## Headline numbers — 126-site holistic corpus
 
-All measurements 2026-05-24, single-run, same machine, same IP, same hour. Source: `/tmp/full_sweep_2026_05_24/*.json`.
+All measurements 2026-05-24, single-run, same machine, same IP, same hour. Source: `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/*.json`.
 
 ### Pass rate (the customer-facing metric)
 
@@ -117,7 +117,7 @@ These are NOT in the recoverable surface for v0.1.0; they are the documented fro
 
 ## File pointers for this section
 
-- Raw sweep JSONs: `/tmp/full_sweep_2026_05_24/{bo,comp}_*.json`
+- Raw sweep JSONs: `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/{bo,comp}_*.json`
 - Corpus definition: `crates/browser/tests/holistic_sweep.rs:1-700`
 - Classifier rules: `crates/browser/src/classify.rs`
 - Benchmark report: `docs/BENCHMARK_2026_05_24.md`

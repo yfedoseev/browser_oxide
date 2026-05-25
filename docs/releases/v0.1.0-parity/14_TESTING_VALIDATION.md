@@ -169,7 +169,7 @@ Wall-clock: 12-18 minutes (some sites burn 90 s on DataDome/Kasada timeouts).
 python3 << 'EOF'
 import json, sys
 new = json.load(open('/tmp/spotcheck.json'))
-old = json.load(open('/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json'))
+old = json.load(open('~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json'))
 old_by_name = {r['name']:r for r in old['results']}
 regressions = 0
 flips = 0
@@ -208,7 +208,7 @@ Or use the existing orchestrator: `benchmarks/run_full_sweep.sh` (runs 4 BO cold
 
 ### Pass criteria (single run)
 
-For each profile, compare against the 2026-05-24 baseline at `/tmp/full_sweep_2026_05_24/bo_<profile>_cold.json`:
+For each profile, compare against the 2026-05-24 baseline at `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_<profile>_cold.json`:
 
 | Metric | Pass criterion |
 |---|---|
@@ -488,7 +488,7 @@ Before tagging v0.1.0, every Phase acceptance above must be green PLUS:
 - `benchmarks/bench_corpus_v2.py` — competitor sweep
 - `benchmarks/run_full_sweep.sh` — orchestrator
 - `benchmarks/build_report.py` — aggregator
-- `/tmp/full_sweep_2026_05_24/` — baseline artifacts
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/` — baseline artifacts
 - `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md` — ±5 noise documentation
 - `04_TOOLING_SPEC.md` — capture mode spec (blocking dep)
 - `03_BENCHMARK_METHODOLOGY.md` — methodology spec

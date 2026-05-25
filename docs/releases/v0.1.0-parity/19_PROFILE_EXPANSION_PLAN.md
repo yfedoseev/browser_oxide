@@ -27,7 +27,7 @@ Read `11_PER_PROFILE_STRATEGY.md` §5 for the full analysis. The compressed pict
 
 ## 2. New profile candidates — ranked by expected routing gain
 
-The ranking below assumes the 2026-05-24 baseline (`/tmp/full_sweep_2026_05_24/`) and the noise floor of ±5 sites (`docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md`). Every projection below is an *upper bound* — actual gains are bounded by what the 18 residual sites tolerate (most are 0/4 across our shipped 4 profiles, so most new profiles will pile up wins on a small subset).
+The ranking below assumes the 2026-05-24 baseline (`~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/`) and the noise floor of ±5 sites (`docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md`). Every projection below is an *upper bound* — actual gains are bounded by what the 18 residual sites tolerate (most are 0/4 across our shipped 4 profiles, so most new profiles will pile up wins on a small subset).
 
 ### 2.1 Candidate A — `safari_18_macos` (desktop Safari, NEW TLS branch)
 
@@ -396,10 +396,10 @@ For mobile, `inner == outer` typically (no chrome bars on the JS surface).
 - `benchmarks/run_full_sweep.sh` — multi-profile sweep driver
 
 ### Sweep data (2026-05-24 baseline)
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json`
-- `/tmp/full_sweep_2026_05_24/bo_pixel_9_pro_chrome_148_cold.json`
-- `/tmp/full_sweep_2026_05_24/bo_iphone_15_pro_safari_18_cold.json`
-- `/tmp/full_sweep_2026_05_24/bo_firefox_135_macos_cold.json`
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json`
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_pixel_9_pro_chrome_148_cold.json`
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_iphone_15_pro_safari_18_cold.json`
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_firefox_135_macos_cold.json`
 
 ### Workspace docs
 - `CLAUDE.md` — conventions (per-thread V8, license rules, scope rules)

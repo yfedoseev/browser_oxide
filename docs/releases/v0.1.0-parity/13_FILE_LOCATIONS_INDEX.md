@@ -166,15 +166,15 @@ One-page lookup. Every file:line referenced anywhere in this release plan. Cross
 
 | Path | What |
 |---|---|
-| `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json` | BO chrome cold sweep results |
-| `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.log` | Per-site trace output |
-| `/tmp/full_sweep_2026_05_24/bo_pixel_9_pro_chrome_148_cold.json` | BO pixel cold |
-| `/tmp/full_sweep_2026_05_24/bo_iphone_15_pro_safari_18_cold.json` | BO iphone cold |
-| `/tmp/full_sweep_2026_05_24/bo_firefox_135_macos_cold.json` | BO firefox cold |
-| `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_pool.json` | BO chrome pool (97 sites, partial — wellsfargo panic) |
-| `/tmp/full_sweep_2026_05_24/comp_camoufox.json` | Camoufox results |
-| `/tmp/full_sweep_2026_05_24/comp_{playwright,patchright,playwright_stealth}.json` | Competitor results |
-| `/tmp/full_sweep_2026_05_24/run.log` | Orchestrator log |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json` | BO chrome cold sweep results |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.log` | Per-site trace output |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_pixel_9_pro_chrome_148_cold.json` | BO pixel cold |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_iphone_15_pro_safari_18_cold.json` | BO iphone cold |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_firefox_135_macos_cold.json` | BO firefox cold |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_pool.json` | BO chrome pool (97 sites, partial — wellsfargo panic) |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/comp_camoufox.json` | Camoufox results |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/comp_{playwright,patchright,playwright_stealth}.json` | Competitor results |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/run.log` | Orchestrator log |
 | `/tmp/spotcheck_corpus.json` | Curated 33-site stratified spot-check corpus (created during 2026-05-24 work) |
 | `/tmp/gap_corpus.json` | Curated 11-site gap corpus (the Camoufox-only-pass set) |
 | `/tmp/amazon_de_curl.html` | Captured 2011-byte AWS WAF stub |

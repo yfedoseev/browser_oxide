@@ -25,7 +25,7 @@ regression. Honest comparison:
 | Patchright (chromium tree) | 5681 MB | 5681 MB | |
 | Playwright + Stealth | 5011 MB | 5011 MB | |
 
-Source: `/tmp/full_sweep_2026_05_24/*.json` `summary.rss_peak_mb`.
+Source: `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/*.json` `summary.rss_peak_mb`.
 
 Two engine bugs are *real* and addressed in this chapter:
 
@@ -43,7 +43,7 @@ of an honestly measured Camoufox.
 
 ## 2. Per-profile RSS analysis (cold sweep)
 
-All numbers from `/tmp/full_sweep_2026_05_24/bo_*_cold.json` `summary.rss_peak_mb`.
+All numbers from `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_*_cold.json` `summary.rss_peak_mb`.
 
 | Profile | RSS peak | Bootstrap chars | Notes |
 |---|--:|--:|---|
@@ -619,14 +619,14 @@ Benchmark / data:
 
 Sweep JSONs (RSS data source):
 
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json` — peak 418.9
-- `/tmp/full_sweep_2026_05_24/bo_firefox_135_macos_cold.json` — peak 471.9
-- `/tmp/full_sweep_2026_05_24/bo_iphone_15_pro_safari_18_cold.json` — peak 444.7
-- `/tmp/full_sweep_2026_05_24/bo_pixel_9_pro_chrome_148_cold.json` — peak 388.0
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_pool.json` — peak 1365 (97 sites, panic on wellsfargo)
-- `/tmp/full_sweep_2026_05_24/comp_camoufox.json` — reported 48 (BUG); fix applied to harness
-- `/tmp/full_sweep_2026_05_24/comp_playwright.json` — 5618
-- `/tmp/full_sweep_2026_05_24/comp_patchright.json` — 5681
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json` — peak 418.9
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_firefox_135_macos_cold.json` — peak 471.9
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_iphone_15_pro_safari_18_cold.json` — peak 444.7
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_pixel_9_pro_chrome_148_cold.json` — peak 388.0
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_pool.json` — peak 1365 (97 sites, panic on wellsfargo)
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/comp_camoufox.json` — reported 48 (BUG); fix applied to harness
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/comp_playwright.json` — 5618
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/comp_patchright.json` — 5681
 
 Sibling chapters:
 

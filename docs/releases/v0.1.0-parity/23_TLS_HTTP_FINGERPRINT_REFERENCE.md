@@ -114,7 +114,7 @@ Expected JA4 prefix: `t13d1516h2_*_*` — the first 13 characters are stable; th
 
 ### 2.4 What BO emits today
 
-**We do NOT have a current published JA4 in the repo or in `/tmp/full_sweep_2026_05_24/`.** The closest in-tree evidence:
+**We do NOT have a current published JA4 in the repo or in `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/`.** The closest in-tree evidence:
 - The Chrome cipher list constant (`tls.rs:60-76`) — 15 entries, in the order matching the verified-real Chrome 147 reference
 - `CHROME_EXTENSION_PERMUTATION.len() == 16` asserted at `tls.rs:516-520`
 - ALPN `\x02h2\x08http/1.1` at `tls.rs:186` (length-prefixed list: `h2` then `http/1.1`)

@@ -97,7 +97,7 @@ gate in § 6).
 **Bar:** body > 100 000 bytes (Camoufox got 1 145 961).
 
 **Today's number:** BO `L3-RENDERED` 8 326 bytes in 316 ms (chrome_148_macos cold).
-Source: `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json` — entry for
+Source: `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json` — entry for
 `"name": "reddit"`.
 
 ### 1.1 Reproduce
@@ -729,12 +729,12 @@ python3 /home/yfedoseev/projects/browser_oxide/benchmarks/bench_corpus_v2.py --e
 ```
 
 The script writes per-profile JSONs under `/tmp/full_sweep_$(date +%Y_%m_%d)/`.
-Diff against the 2026-05-24 baseline (`/tmp/full_sweep_2026_05_24/`):
+Diff against the 2026-05-24 baseline (`~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/`):
 
 ```bash
 for f in bo_chrome_148_macos_cold bo_pixel_9_pro_chrome_148_cold \
          bo_iphone_15_pro_safari_18_cold bo_firefox_135_macos_cold; do
-    diff <(jq -r '.results[] | "\(.name)\t\(.tag)\t\(.len)"' /tmp/full_sweep_2026_05_24/$f.json | sort) \
+    diff <(jq -r '.results[] | "\(.name)\t\(.tag)\t\(.len)"' ~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/$f.json | sort) \
          <(jq -r '.results[] | "\(.name)\t\(.tag)\t\(.len)"' /tmp/full_sweep_$(date +%Y_%m_%d)/$f.json | sort) \
          | head -50
 done
@@ -768,7 +768,7 @@ Any reduction in `len` for a non-targeted site indicates a regression.
 | `crates/browser/tests/holistic_sweep.rs:303, 470, 668, 685` | reddit / booking / douyin / duolingo corpus |
 | `crates/browser/examples/sweep_metrics.rs` | Sweep runner |
 | `benchmarks/bench_corpus_v2.py`, `benchmarks/run_full_sweep.sh` | Corpus builder + full sweep |
-| `/tmp/full_sweep_2026_05_24/{bo_chrome_148_macos_cold,comp_camoufox}.json` | Baselines |
+| `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/{bo_chrome_148_macos_cold,comp_camoufox}.json` | Baselines |
 
 ---
 

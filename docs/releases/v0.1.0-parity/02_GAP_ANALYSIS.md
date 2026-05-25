@@ -257,5 +257,5 @@ See `11_PER_PROFILE_STRATEGY.md` for the routing-decision tree.
 - `crates/browser/src/page.rs:1981` — `rematerialize_iframes` (DataDome-gated)
 - `crates/js_runtime/src/js/dom_bootstrap.js:1098-1110` — `submit()` / `requestSubmit()`
 - `crates/js_runtime/src/extensions/worker_ext.rs` — Worker implementation
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.log` — full per-site trace
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.log` — full per-site trace
 - `/tmp/amazon_de_curl.html` — captured 2011-byte AWS WAF stub

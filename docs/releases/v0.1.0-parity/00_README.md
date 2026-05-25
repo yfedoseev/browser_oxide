@@ -73,7 +73,7 @@ This directory is a self-contained engineering plan. Any contributor should be a
 
 ## Source-of-truth artifacts (read these before believing this doc)
 
-- `/tmp/full_sweep_2026_05_24/` — last full 4-profile sweep raw JSON outputs (BO + competitors)
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/` — last full 4-profile sweep raw JSON outputs (BO + competitors)
 - `docs/BENCHMARK_2026_05_24.md` — narrative report of the 2026-05-24 sweep
 - `docs/PERFORMANCE_2026_05_24.md` — per-page perf investigation that motivated the pool path
 - `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md` — WAF variance characterization (±5 sites is noise)

@@ -100,7 +100,7 @@ vendor URL appears (and it's a closed enum, not a flow gate).
 
 ### Concrete targets
 
-From `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json` and
+From `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json` and
 `comp_camoufox.json`:
 
 | Site | BO chrome (all profiles) | Camoufox | Bytes shipped |
@@ -659,8 +659,8 @@ The boundary is clear: public engine makes vendor solvers POSSIBLE
 - `crates/browser/src/classify.rs:247-251` — `is_cf_challenge_doc` (the body-shape predicate pattern to follow)
 - `crates/browser/src/classify.rs:94` — the only place vendor URLs appear as classification keys
 - `git show aecdf19 -- crates/browser/src/datadome_handler.rs` — what was removed (423 LOC)
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json` — current measured baseline
-- `/tmp/full_sweep_2026_05_24/comp_camoufox.json` — Camoufox reference verdicts
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json` — current measured baseline
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/comp_camoufox.json` — Camoufox reference verdicts
 - `~/.claude/projects/-home-yfedoseev-projects-browser-oxide/memory/state_2026_05_16_phase5_datadome.md` — pre-strip Phase 5 history
 - `~/.claude/projects/-home-yfedoseev-projects-browser-oxide/memory/state_2026_05_16_engines_research_set.md` — FP-E1 (script-created iframe gap) original diagnosis
 - `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md` — ±5 site variance discipline

@@ -623,7 +623,7 @@ realm-local.
 - [ ] **The audit golden is empty** (or contains only documented exceptions) on a release-build run with HEAD
 - [ ] **Top-20 most-probed methods masked** (Event ctors, Headers/Request/Response, XHR, WebGL, Worker.postMessage, MutationObserver/IntersectionObserver, History.pushState, Storage.getItem). Each commit message references the audit-script delta.
 - [ ] **Kasada `sfc`/`sdt` error-field count drops** in the blob-capture test at `crates/browser/tests/chrome_compat.rs::kasada_error_blob_capture` — current count (per `08_KASADA_FRONTIER.md` Phase 3) is **5+ blobs with `sfc`/`sdt`**; target: **0 blobs** in the captured set.
-- [ ] **AWS WAF `/report` POST volume decreases** (= less detected as bot). Measure: `grep -c 'awswaf.com/.../report' /tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.log` BEFORE vs AFTER. Expect at least amazon-de or imdb to flip from `2011 bytes` to `>15 KB` after sweep + relevant per-vendor fixes.
+- [ ] **AWS WAF `/report` POST volume decreases** (= less detected as bot). Measure: `grep -c 'awswaf.com/.../report' ~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.log` BEFORE vs AFTER. Expect at least amazon-de or imdb to flip from `2011 bytes` to `>15 KB` after sweep + relevant per-vendor fixes.
 - [ ] **No regression** on the 437+ existing chrome_compat tests (`cargo test --workspace -- --test-threads=1`).
 
 ---

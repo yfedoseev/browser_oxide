@@ -315,7 +315,7 @@ PLAYWRIGHT_BROWSERS_PATH=/home/yfedoseev/.cache/ms-playwright /tmp/bo-venv/bin/p
 ./benchmarks/build_report.py
 ```
 
-Raw per-engine sweep outputs preserved at `/tmp/full_sweep_2026_05_24/`:
+Raw per-engine sweep outputs preserved at `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/`:
 - `bo_<profile>_cold.json` — BO 4 profiles, cold `Page::navigate`
 - `bo_chrome_148_macos_pool.json` — BO chrome warm pool (97 sites,
   partial; reconstructed from log after the wellsfargo panic)

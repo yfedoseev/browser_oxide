@@ -27,7 +27,7 @@ any change that adds a `Vec`, a `HashMap`, or a per-page V8 closure.
 ## 2. Where the 388-472 MB goes — full decomposition
 
 Source for "current MB": `summary.rss_peak_mb` and per-result `rss_mb`
-trajectories in `/tmp/full_sweep_2026_05_24/bo_*_cold.json`, combined
+trajectories in `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_*_cold.json`, combined
 with line-level reads of each subsystem. Where direct measurement
 isn't available the entry is marked *(est.)*.
 
@@ -535,7 +535,7 @@ in `crates/browser/src/lib.rs`.
 ## 7. Per-profile memory comparison — why iPhone is +57 MB vs Pixel
 
 Source: `summary.rss_peak_mb` in
-`/tmp/full_sweep_2026_05_24/bo_*_cold.json`.
+`~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_*_cold.json`.
 
 | Profile | RSS peak (MB) | File:line | Cause |
 |---|--:|---|---|
@@ -695,7 +695,7 @@ All paths absolute under `/home/yfedoseev/projects/browser_oxide`.
 - `benchmarks/bench_corpus_v2.py:50-54` — `get_rss_mb`
 - `benchmarks/bench_corpus_v2.py:101-106` — `tree_rss_mb`
 - `benchmarks/bench_corpus_v2.py:265-268` — `run_camoufox` PID fix
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json` (peak 418.9),
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json` (peak 418.9),
   `bo_firefox_135_macos_cold.json` (471.9),
   `bo_iphone_15_pro_safari_18_cold.json` (444.7),
   `bo_pixel_9_pro_chrome_148_cold.json` (388.0),

@@ -147,7 +147,7 @@ Every preset is checked by `StealthProfile::validate()` and a set of test gates 
 
 ## 2. Per-profile pass-rate summary
 
-Source data: `/tmp/full_sweep_2026_05_24/bo_*_cold.json`. Strict Pass = `tag == "L3-RENDERED" AND len ≥ 15000`. n=126.
+Source data: `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_*_cold.json`. Strict Pass = `tag == "L3-RENDERED" AND len ≥ 15000`. n=126.
 
 ### 2.1 Totals
 
@@ -628,10 +628,10 @@ When adding a new field: ALWAYS add a `#[serde(default = ...)]` so existing on-d
 - `crates/browser/tests/holistic_sweep.rs:1-700` — 126-site corpus definition
 - `crates/browser/src/classify.rs` — verdict classifier (Pass / ThinShell / CHL / ThinBody / Error)
 - `benchmarks/run_full_sweep.sh` — driver script for 4-profile + 4-competitor sweep
-- `/tmp/full_sweep_2026_05_24/bo_chrome_148_macos_cold.json` — chrome raw
-- `/tmp/full_sweep_2026_05_24/bo_pixel_9_pro_chrome_148_cold.json` — pixel raw
-- `/tmp/full_sweep_2026_05_24/bo_iphone_15_pro_safari_18_cold.json` — iphone raw
-- `/tmp/full_sweep_2026_05_24/bo_firefox_135_macos_cold.json` — firefox raw
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_chrome_148_macos_cold.json` — chrome raw
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_pixel_9_pro_chrome_148_cold.json` — pixel raw
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_iphone_15_pro_safari_18_cold.json` — iphone raw
+- `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/bo_firefox_135_macos_cold.json` — firefox raw
 
 ### Adjacent doc cross-references
 - `docs/releases/v0.1.0-parity/02_GAP_ANALYSIS.md` — per-site recovery plan (the 10 Camoufox-only-pass sites)

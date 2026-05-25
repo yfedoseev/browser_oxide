@@ -212,7 +212,7 @@ Patchright defeats the easier signals (navigator.webdriver, --enable-automation,
 
 ### 2.5 ~12× less memory than Playwright at peak
 
-Per the 2026-05-24 sweep (`/tmp/full_sweep_2026_05_24/`):
+Per the 2026-05-24 sweep (`~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/`):
 
 | Engine | Peak RSS (MB) | Per-page incremental | Honest? |
 |---|--:|---|---|
@@ -235,7 +235,7 @@ No competitor ships a profile rotation system. Camoufox can be initialized with 
 
 ## 3. Per-category competitive matrix
 
-Source: `/tmp/full_sweep_2026_05_24/{bo_*_cold,comp_*}.json`. Strict Pass per category.
+Source: `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/{bo_*_cold,comp_*}.json`. Strict Pass per category.
 
 | Category | n | BO chrome | BO pixel | BO iphone | BO firefox | **BO routed** | **Camoufox** | Playwright | Patchright | PW+Stealth |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
@@ -416,7 +416,7 @@ Hitting (1) gets us to 112; (1)+(2) gets us to 117 (well past Camoufox 113); (1)
 - **lexiforest / curl-impersonate** — https://github.com/lexiforest/curl-impersonate — canonical signatures for per-browser TLS fingerprints; used as the reference for our `tls.rs:107,151,161` constants
 
 ### BO-side measurement data
-- Raw sweep JSONs: `/tmp/full_sweep_2026_05_24/{bo,comp}_*.json`
+- Raw sweep JSONs: `~/projects/browser_oxide_internal/benchmarks/baselines/2026-05-24/{bo,comp}_*.json`
 - Sweep harness: `crates/browser/examples/sweep_metrics.rs`
 - Corpus: `crates/browser/tests/holistic_sweep.rs:1-700`
 - Classifier: `crates/browser/src/classify.rs`
