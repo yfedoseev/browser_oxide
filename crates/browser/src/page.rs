@@ -215,6 +215,18 @@ pub struct Page {
 
 impl Drop for Page {
     fn drop(&mut self) {
+        // Reap any Workers this page's V8 isolate spawned but never
+        // explicitly `worker.terminate()`'d from JS. Without this,
+        // each orphan worker keeps a 64 MB stack OS thread + child
+        // JsRuntime heap alive for the rest of the process — the
+        // dominant memory leak observed in the cold-sweep RSS curve
+        // (cnn / bloomberg / youtube / discord / udemy and ~8 others
+        // produce >15 MB step-ups that never reclaim).
+        {
+            let op_state = self.event_loop.runtime_mut().op_state();
+            let mut state = op_state.borrow_mut();
+            js_runtime::extensions::worker_ext::drain_owned_workers(&mut state);
+        }
         // Drop children (newer isolates) before parent (older isolate)
         // V8 requires reverse drop order
         while self.children.pop().is_some() {}
@@ -1128,6 +1140,406 @@ impl Page {
             Self::default_solvers(),
         )
         .await
+    }
+
+    /// Reset all cross-navigation JS state on this Page so its V8 isolate
+    /// can be safely reused for a different URL. Called by
+    /// [`Page::navigate_warm`] and [`crate::pool::PagePool::navigate`].
+    ///
+    /// What gets cleared:
+    /// - In-flight `setTimeout` / `setInterval` callbacks (via
+    ///   `__cancelAllTimers()` generation bump in `timer_bootstrap.js`).
+    ///   Without this, the previous page's `humanize.js` 30 pending
+    ///   timers + recurring 4 s setInterval would fire on the new DOM
+    ///   and dispatch synthetic mouse events into the wrong document.
+    /// - `_browser_oxide.__pendingNavigation` — spurious value left by the
+    ///   `location.href = …` setter inside the previous build.
+    /// - `_browser_oxide.__fetchLog` — DevTools-style network log; must
+    ///   reset so the new page's fetches aren't mixed with the old's.
+    /// - `window.__cookieWrites`, `window.__scriptErrors` —
+    ///   instrumentation buffers re-initialised per page.
+    /// - `globalThis.__akamai_events` (mouse / key / touch / scroll
+    ///   buffers + counters) — humanize.js re-installs into these and
+    ///   sensors read them on POST, so stale values would skew detection.
+    /// - `globalThis.__jsCookies` — cookie cache snapshot (the real
+    ///   source of truth is the HTTP client's jar, re-synced below).
+    ///
+    /// What stays:
+    /// - V8 isolate, bootstrap scripts (`window_bootstrap.js`,
+    ///   `dom_bootstrap.js`, …), and the page-instrumentation wrappers
+    ///   on `globalThis.fetch` / `document.cookie` / `XMLHttpRequest`.
+    ///   These are the expensive bits we're reusing.
+    fn reset_warm_state(&mut self) {
+        let _ = self.event_loop.execute_script(
+            r#"(function() {
+                const g = globalThis;
+                try { g.__cancelAllTimers && g.__cancelAllTimers(); } catch (_) {}
+                if (g._browser_oxide) {
+                    g._browser_oxide.__pendingNavigation = null;
+                    if (Array.isArray(g._browser_oxide.__fetchLog)) {
+                        g._browser_oxide.__fetchLog.length = 0;
+                    }
+                }
+                const w = (g.window && g.window !== g) ? g.window : g;
+                try { if (Array.isArray(w.__cookieWrites)) w.__cookieWrites.length = 0; } catch (_) {}
+                try { if (Array.isArray(w.__scriptErrors)) w.__scriptErrors.length = 0; } catch (_) {}
+                if (g.__akamai_events) {
+                    g.__akamai_events.mouse.length = 0;
+                    g.__akamai_events.key.length = 0;
+                    g.__akamai_events.touch.length = 0;
+                    g.__akamai_events.scroll.length = 0;
+                    if (g.__akamai_events.counters) {
+                        g.__akamai_events.counters.key = 0;
+                        g.__akamai_events.counters.mouse = 0;
+                        g.__akamai_events.counters.touch = 0;
+                        g.__akamai_events.counters.scroll = 0;
+                        g.__akamai_events.counters.accel = 0;
+                    }
+                }
+                if (g.__jsCookies) g.__jsCookies = {};
+            })();"#,
+        );
+    }
+
+    /// Navigate this *warm* Page to a new URL by reusing its V8 isolate
+    /// and bootstrap. Saves ~150 ms vs the cold [`Page::navigate`] path
+    /// by skipping isolate creation, bootstrap-script execution, and
+    /// the page-instrumentation install (cookie-write / fetch wrapper /
+    /// error-tracking wrappers stay across navigations).
+    ///
+    /// Use via [`crate::pool::PagePool::navigate`] for the canonical
+    /// "scrape many URLs with one warm engine" pattern. The Page's
+    /// existing stealth profile is reused — call sites that need a
+    /// different profile should `pool.release` this Page and acquire a
+    /// fresh one.
+    ///
+    /// **Scope**: warm reuse handles the benign content-extraction case.
+    /// It does NOT run the cookie-diff / pending-nav iteration loop that
+    /// [`Page::navigate`] does for anti-bot pages — challenge scripts
+    /// keep V8 busy on their own so the savings from a warm isolate are
+    /// negligible there anyway, and reproducing the iteration loop on
+    /// the warm path is a known follow-up (see the comment above
+    /// [`Self::navigate_loop_internal`]).
+    pub async fn navigate_warm(
+        &mut self,
+        url: &str,
+    ) -> Result<(), deno_core::error::AnyError> {
+        let warm_trace = std::env::var("BROWSER_OXIDE_WARM_PROFILE").is_ok();
+        let warm_t0 = std::time::Instant::now();
+        macro_rules! wmark {
+            ($label:expr) => {
+                if warm_trace {
+                    eprintln!(
+                        "[warm] {:>5}ms {}",
+                        warm_t0.elapsed().as_millis(),
+                        $label
+                    );
+                }
+            };
+        }
+
+        // Pull the stealth profile out of the runtime's `StealthState`.
+        // The pool stores Pages by profile; this guards against silent
+        // misuse where a caller hand-builds a Page without a profile and
+        // tries to warm-navigate it.
+        let profile: stealth::StealthProfile = {
+            let op_state = self.event_loop.runtime_mut().op_state();
+            let state = op_state.borrow();
+            state
+                .try_borrow::<js_runtime::extensions::stealth_ext::StealthState>()
+                .and_then(|s| s.profile.clone())
+                .ok_or_else(|| {
+                    deno_core::error::AnyError::msg(
+                        "navigate_warm requires a Page built with a stealth profile",
+                    )
+                })?
+        };
+        let client = net::HttpClient::shared(&profile)
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
+        wmark!("profile + shared client");
+
+        // Initial fetch (redirect-follow, same as cold path).
+        let resp = client
+            .get_follow(url, 10)
+            .await
+            .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
+        let csp_headers: Vec<String> = resp
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("content-security-policy"))
+            .map(|(_, v)| v.clone())
+            .collect();
+        let csp_headers_ro: Vec<String> = resp
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("content-security-policy-report-only"))
+            .map(|(_, v)| v.clone())
+            .collect();
+        let html = resp.text();
+        let resp_url = resp.url.clone();
+        let timings = resp.timings.clone();
+        drop(resp);
+        wmark!("fetch done");
+
+        // Install CSP for this navigation (same logic as the cold build).
+        {
+            let csp_dom = html_parser::parse_html(&html);
+            let header_refs: Vec<&str> = csp_headers.iter().map(|s| s.as_str()).collect();
+            let report_refs: Vec<&str> =
+                csp_headers_ro.iter().map(|s| s.as_str()).collect();
+            let policy_set = crate::csp_collector::collect_csp_with_report_only(
+                &header_refs,
+                &report_refs,
+                &csp_dom,
+            );
+            let env_bypass = std::env::var("BROWSER_OXIDE_CSP_BYPASS").is_ok();
+            let enforce = profile.enforce_csp && !env_bypass;
+            if let Ok(origin) = url::Url::parse(&resp_url) {
+                if !policy_set.is_empty() {
+                    js_runtime::extensions::fetch_ext::set_csp_policy(
+                        std::sync::Arc::new(policy_set),
+                        origin,
+                        enforce,
+                    );
+                } else {
+                    js_runtime::extensions::fetch_ext::clear_csp_policy();
+                }
+            } else {
+                js_runtime::extensions::fetch_ext::clear_csp_policy();
+            }
+        }
+        wmark!("CSP set");
+
+        // Parse + find subresources. Parsing the same DOM twice (once
+        // for CSP, once here) is cheap (~µs for typical pages) and keeps
+        // the CSP block lifted from the cold path without a refactor.
+        let dom = html_parser::parse_html(&html);
+        let scripts_meta = script_runner::find_scripts(&dom);
+        let stylesheet_entries = stylesheet_collector::find_stylesheets(&dom);
+
+        // Parallel fetch external CSS + external scripts. Mirrors the
+        // cold build path; we only inline the bits we actually need
+        // here so this method stays self-contained.
+        let mut inline_css: Vec<String> = Vec::new();
+        let css_futures: Vec<_> = stylesheet_entries
+            .iter()
+            .filter_map(|entry| match entry {
+                stylesheet_collector::StylesheetEntry::Inline(css) => {
+                    inline_css.push(css.clone());
+                    None
+                }
+                stylesheet_collector::StylesheetEntry::External(href) => {
+                    let full_url = Self::resolve_url(&resp_url, href)?;
+                    let client = client.clone();
+                    Some(async move {
+                        match client.get(&full_url).await {
+                            Ok(r) if r.ok() => {
+                                let text = r.text();
+                                if !text.trim_start().starts_with("<!") {
+                                    Some((text, r.timings.clone()))
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    })
+                }
+            })
+            .collect();
+        let script_futures: Vec<_> = scripts_meta
+            .iter()
+            .enumerate()
+            .filter_map(|(i, script)| {
+                let src = script.src.as_ref()?;
+                let full_url = Self::resolve_url(&resp_url, src)?;
+                if let Ok(parsed_url) = url::Url::parse(&full_url) {
+                    if js_runtime::extensions::fetch_ext::check_csp(
+                        net::csp::Directive::ScriptSrcElem,
+                        &parsed_url,
+                        script.nonce.as_deref(),
+                        true,
+                    )
+                    .is_err()
+                    {
+                        return None;
+                    }
+                }
+                let client = client.clone();
+                let profile = profile.clone();
+                let referer = resp_url.clone();
+                Some(async move {
+                    let mut hdrs = net::headers::nav_headers(&profile, false);
+                    hdrs.push(("referer".to_string(), referer));
+                    hdrs.push(("accept".to_string(), "*/*".to_string()));
+                    hdrs.push(("sec-fetch-dest".to_string(), "script".to_string()));
+                    hdrs.push(("sec-fetch-mode".to_string(), "no-cors".to_string()));
+                    hdrs.push((
+                        "sec-fetch-site".to_string(),
+                        "cross-site".to_string(),
+                    ));
+                    match client.get_follow_with_headers(&full_url, &hdrs, 5).await {
+                        Ok(r) if r.ok() => {
+                            let text = r.text();
+                            if text.trim_start().starts_with("<!")
+                                || text.trim_start().starts_with("<html")
+                            {
+                                None
+                            } else {
+                                Some((i, text, r.timings.clone()))
+                            }
+                        }
+                        _ => None,
+                    }
+                })
+            })
+            .collect();
+        let (fetched_css, fetched_scripts) = futures_util::future::join(
+            futures_util::future::join_all(css_futures),
+            futures_util::future::join_all(script_futures),
+        )
+        .await;
+        wmark!("subresources fetched");
+
+        let mut all_timings = vec![timings];
+        let mut stylesheets = inline_css;
+        for r in fetched_css.into_iter().flatten() {
+            stylesheets.push(r.0);
+            all_timings.push(r.1);
+        }
+        let mut prefetched: std::collections::HashMap<usize, String> =
+            std::collections::HashMap::new();
+        for r in fetched_scripts.into_iter().flatten() {
+            prefetched.insert(r.0, r.1);
+            all_timings.push(r.2);
+        }
+
+        // Cancel all in-flight timers from the previous page and clear
+        // cross-nav JS buffers BEFORE swapping the DOM, so any straggler
+        // callbacks that try to fire don't see a half-installed state.
+        self.reset_warm_state();
+        wmark!("reset_warm_state");
+
+        // Swap DOM (also resets `TimerState` Rust-side).
+        self.event_loop.runtime_mut().replace_dom(dom, stylesheets);
+        self.children.clear();
+        self.url = resp_url.clone();
+        for t in all_timings {
+            self.event_loop.runtime_mut().record_resource_timing(t);
+        }
+        wmark!("replace_dom");
+
+        // Build-phase deadline watcher — preempts CPU-bound inline-script
+        // spins on the warm isolate the same way the cold build does.
+        let build_budget_ms: u64 = std::env::var("BROWSER_OXIDE_BUILD_BUDGET_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(25_000);
+        let _build_watcher = V8DeadlineWatcher::new(
+            self.event_loop.runtime_mut().isolate_handle(),
+            Duration::from_millis(build_budget_ms),
+        );
+
+        // Seed `location` for this navigation. The `reset_nav_pending` now
+        // scrubs the spurious `__pendingNavigation` the setter writes, so
+        // downstream `PENDING_NAV_JS` reads see a clean empty value.
+        let url_js = resp_url.replace('\\', "\\\\").replace('\'', "\\'");
+        let _ = self
+            .event_loop
+            .execute_script(&format!("location.href = '{}';", url_js));
+        self.event_loop.reset_nav_pending();
+
+        // Refresh `document.cookie` for the new origin. Fast op call,
+        // 50 ms cap is plenty (same as the cold path).
+        let _ = self
+            .event_loop
+            .execute_and_run(
+                "globalThis.__syncCookiesFromNet && globalThis.__syncCookiesFromNet();",
+                Duration::from_millis(50),
+            )
+            .await;
+
+        // Run inline + external scripts in document order, draining
+        // between each so microtasks land before the next script reads
+        // them. Mirrors the cold path's script loop.
+        for (i, script) in scripts_meta.iter().enumerate() {
+            let code = if script.src.is_some() {
+                match prefetched.get(&i) {
+                    Some(c) => c.clone(),
+                    None => continue,
+                }
+            } else {
+                script.code.clone()
+            };
+            if code.trim().is_empty() {
+                continue;
+            }
+            let name = script.src.clone().unwrap_or_else(|| resp_url.clone());
+            if let Err(e) = self.event_loop.execute_script_with_name(&code, &name) {
+                tracing::warn!(script = %name, error = %e, "warm script error");
+            }
+            let _ = self
+                .event_loop
+                .run_until_idle(Duration::from_millis(50))
+                .await;
+        }
+        wmark!("scripts executed");
+
+        // Re-install `humanize.js` on the fresh DOM. The previous page's
+        // humanize closure captured the old `document.body`; its setInterval
+        // has been cancelled by the generation bump, so we install fresh.
+        let _ = self
+            .event_loop
+            .execute_script(include_str!("js/humanize.js"));
+
+        // DOMContentLoaded + load events — same setTimeout(0) trick the
+        // cold build uses so dispatched handlers run inside the event
+        // loop (not synchronously during setup).
+        let _ = self.event_loop.execute_script(
+            r#"setTimeout(() => {
+                document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
+                window.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
+                window.dispatchEvent(new Event('load'));
+            }, 0);"#,
+        );
+
+        // Meta-refresh scanner — sets `__pendingNavigation` if the page
+        // has one. The caller doesn't loop on it (warm path skips the
+        // iter retry loop) but downstream `Page::content()` / classifier
+        // calls won't see a half-applied refresh either way.
+        let _ = self.event_loop.execute_script(
+            r#"(function() {
+                const metas = document.getElementsByTagName('meta');
+                for (let i = 0; i < metas.length; i++) {
+                    const m = metas[i];
+                    const equiv = String(m.getAttribute('http-equiv') || '').toLowerCase();
+                    if (equiv !== 'refresh') continue;
+                    const content = String(m.getAttribute('content') || '');
+                    const match = content.match(/^\s*(\d+)(?:\s*[;,]\s*url\s*=\s*(.+))?$/i);
+                    if (!match) continue;
+                    const delay = parseInt(match[1], 10) || 0;
+                    const target = ((match[2] || '').trim()).replace(/^['"]|['"]$/g, '') || location.href;
+                    setTimeout(() => {
+                        globalThis.__pendingNavigation = { url: target, kind: 'assign' };
+                        try { Deno.core.ops.op_set_pending_nav(); } catch (_) {}
+                    }, delay * 1000);
+                    break;
+                }
+            })();"#,
+        );
+
+        // Final drain to let async work settle. Same cap as the cold
+        // build phase — humanize timers are unref'd so they don't pin.
+        let _ = self
+            .event_loop
+            .run_until_idle(Duration::from_millis(500))
+            .await;
+        self.event_loop.runtime_mut().cancel_terminate_execution();
+        drop(_build_watcher);
+        wmark!("drain done [READY]");
+
+        Ok(())
     }
 
     async fn navigate_loop_internal(
@@ -2409,9 +2821,13 @@ impl Page {
             std::collections::HashMap<String, std::collections::HashMap<String, String>>,
         >,
     ) -> Result<Self, deno_core::error::AnyError> {
+        let bp_trace = std::env::var("BROWSER_OXIDE_BUILD_PROFILE").is_ok();
+        let bp_t0 = std::time::Instant::now();
+        macro_rules! mark { ($label:expr) => { if bp_trace { eprintln!("[bp] {:>5}ms {}", bp_t0.elapsed().as_millis(), $label); } } }
         let dom = html_parser::parse_html(html);
         let scripts = script_runner::find_scripts(&dom);
         let stylesheet_entries = stylesheet_collector::find_stylesheets(&dom);
+        mark!("parse_html + find_scripts + find_stylesheets");
 
         // Fetch ALL external stylesheets in parallel
         let mut inline_css = Vec::new();
@@ -2567,6 +2983,7 @@ impl Page {
             futures_util::future::join_all(script_futures),
         )
         .await;
+        mark!("subresource fetch join (css + scripts)");
 
         let mut all_timings = Vec::new();
 
@@ -2600,11 +3017,13 @@ impl Page {
             },
         );
         let mut event_loop = BrowserEventLoop::new(runtime);
+        mark!("BrowserJsRuntime::with_options (V8 isolate + bootstrap)");
 
         // Install all sub-resource timings
         for timings in all_timings {
             event_loop.runtime_mut().record_resource_timing(timings);
         }
+        mark!("record_resource_timing");
 
         // Install a build-phase V8 deadline watcher to preempt CPU-bound
         // inline-script execution (delta.com, taobao.com — pages whose
@@ -2634,14 +3053,24 @@ impl Page {
             .execute_script("globalThis.location.href")
             .unwrap_or_default();
         tracing::debug!(location = %loc, "Location set");
+        mark!("location.href setup + reset_nav_pending");
 
-        // Synchronize cookies from the net client so document.cookie is accurate
+        // Synchronize cookies from the net client so document.cookie is accurate.
+        // This is one async op (`op_cookie_get`) — it returns in ≪1 ms. The drain
+        // here only needs to flush that one microtask. The previous 1 s cap was
+        // pessimistic: with `humanize.js` already installed (~30 pending
+        // setTimeouts that don't resolve for ~2 s), the drain hits its full
+        // timeout on every navigation regardless of how trivial the page is.
+        // 50 ms is more than enough for the one cookie microtask to land, and
+        // the humanize timers continue firing during the outer nav-loop drain
+        // where the budget is correctly allocated.
         let _ = event_loop
             .execute_and_run(
                 "globalThis.__syncCookiesFromNet && globalThis.__syncCookiesFromNet();",
-                Duration::from_secs(1),
+                Duration::from_millis(50),
             )
             .await;
+        mark!("__syncCookiesFromNet");
 
         // Install cookie-write instrumentation. Generic DevTools-style
         // debugging — lets us see what values scripts assign to
@@ -2675,6 +3104,7 @@ impl Page {
                 });
             })();"#)
             .ok();
+        mark!("install cookie-write instrumentation");
 
         // Install error tracking + fetch/XHR logging BEFORE scripts run.
         // Generic request log, equivalent to DevTools' Network tab.
@@ -2830,6 +3260,7 @@ impl Page {
                 };
             })();"#)
             .ok();
+        mark!("install error + fetch/XHR instrumentation");
 
         // Execute scripts in document order using pre-fetched code.
         // Interleave with event loop ticks to allow for microtasks and
@@ -2891,11 +3322,13 @@ impl Page {
             // Run loop for a short burst between scripts to flush tasks
             let _ = event_loop.run_until_idle(Duration::from_millis(50)).await;
         }
+        mark!("inline scripts + interleaved drains");
 
         // Final cleanup — hides Deno and internal globals from user JS.
         event_loop
             .execute_script(include_str!("../../js_runtime/src/js/cleanup_bootstrap.js"))
             .ok();
+        mark!("cleanup_bootstrap.js");
 
         // Fire DOMContentLoaded and load events via setTimeout so they execute
         // within the event loop (not synchronously during script setup).
@@ -2911,6 +3344,8 @@ impl Page {
         "#,
             )
             .ok();
+
+        mark!("DOMContentLoaded/load setTimeout install");
 
         // Scan for <meta http-equiv="refresh" content="N;url=..."> and
         // schedule a pending navigation. Generic navigation primitive —
@@ -2942,12 +3377,30 @@ impl Page {
         "#)
             .ok();
 
+        mark!("meta-refresh scanner install");
+
         // Run event loop until idle. Script errors should NOT abort
         // navigation — log and continue, matching real browser behavior.
-        // 8s cap (was 30s) — see comment in navigate_with_init.
+        //
+        // 8 s cap. This drain flushes microtasks, zero-delay setTimeouts
+        // (DOMContentLoaded / load handlers, meta-refresh scanner), and
+        // any short async chains kicked off by inline scripts.
+        //
+        // Important: `humanize.js` now schedules its synthetic mouse /
+        // scroll timers via `globalThis.__bgSetTimeout` (timer_bootstrap.js)
+        // which is `.unref()`'d — so the humanize setTimeouts no longer
+        // pin this drain to its full ceiling. Benign pages exit idle in
+        // milliseconds; anti-bot challenge pages (AWS WAF / reddit verify /
+        // recaptcha invisible / DataDome) get the full 8 s they need for
+        // their async POST+reload chain to complete, which sets
+        // `__pendingNavigation` and triggers iter 1 with the proper token
+        // cookie. Cutting this below ~5 s causes those chains to never
+        // complete and the outer loop returns the challenge stub as the
+        // "rendered" page.
         if let Err(e) = event_loop.run_until_idle(Duration::from_secs(8)).await {
             tracing::warn!(error = %e, "Event loop error during run");
         }
+        mark!("build-phase run_until_idle");
 
         // Log errors captured during script execution
         if let Ok(errors) = event_loop.execute_script("JSON.stringify(window.__scriptErrors || [])")
@@ -3063,6 +3516,7 @@ impl Page {
         // pending termination on the isolate.
         drop(_build_watcher);
         event_loop.runtime_mut().cancel_terminate_execution();
+        mark!("post-drain summary + iframes + watcher cleanup [DONE]");
 
         Ok(Self {
             event_loop,

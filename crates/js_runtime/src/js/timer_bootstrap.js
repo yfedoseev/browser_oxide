@@ -1,6 +1,21 @@
 ((globalThis) => {
     const ops = Deno.core.ops;
     const _cancelledTimers = new Set();
+    // Timer generation — bumped by `globalThis.__cancelAllTimers()` so that
+    // the warm-reuse path in `Page::navigate_warm` can mass-cancel every
+    // in-flight `setTimeout`/`setInterval` callback from the previous page
+    // in one O(1) op. Each callback captures the generation at schedule
+    // time; on resolve, if `_timerGen` has moved past it, the callback
+    // bails before running. Why this is needed: `op_timer_sleep` is just
+    // `tokio::sleep(ms)` and isn't tied to `TimerState`, so the Rust-side
+    // `replace_dom` doesn't preempt in-flight tokio sleeps — those still
+    // fire and try to run their callbacks. Without the generation guard,
+    // `humanize.js`'s 30 pending setTimeouts from the previous page would
+    // dispatch synthetic mouse events into the newly-loaded DOM.
+    let _timerGen = 0;
+    globalThis.__cancelAllTimers = function __cancelAllTimers() {
+        _timerGen++;
+    };
     // W5b-PLUS (twitter/x.com hydration fix): unref every op_timer_sleep
     // promise. The deno_core event loop treats every in-flight async op as
     // "is_pending=true" (jsruntime.rs:2223 — has_pending_refed_ops).
@@ -53,7 +68,37 @@
         // Async ops in deno_core 0.311 are called directly and return Promise
         const p = ops.op_timer_sleep(ms);
         _maybeUnref(p, ms);
+        const myGen = _timerGen;
         p.then(() => {
+            if (myGen !== _timerGen) return; // post `__cancelAllTimers`, drop
+            if (!_cancelledTimers.has(id)) {
+                callback(...args);
+            }
+        });
+        return id;
+    };
+
+    // Background-timer helper for engine-internal scripts that want their
+    // setTimeout callbacks to fire eventually but DON'T want the timer to
+    // pin `run_until_idle` open. Used by `crates/browser/src/js/humanize.js`
+    // — its ~30 synthetic-input timers (50 ms-1.8 s spread) should not
+    // gate engine "idle" because the page can be returned to the caller
+    // the moment its own work settles; whatever humanize timers haven't
+    // fired yet are background no-ops for benign pages, and anti-bot
+    // pages keep the loop busy with their own challenge VMs so the
+    // humanize timers still fire there. Same semantics as Node's
+    // `setTimeout(...).unref()`.
+    globalThis.__bgSetTimeout = function __bgSetTimeout(callback, delay = 0, ...args) {
+        if (typeof callback !== "function") {
+            callback = new Function(String(callback));
+        }
+        const ms = Math.max(0, delay | 0);
+        const id = ops.op_set_timeout(ms);
+        const p = ops.op_timer_sleep(ms);
+        if (_unrefRaw) _unrefRaw(p);
+        const myGen = _timerGen;
+        p.then(() => {
+            if (myGen !== _timerGen) return;
             if (!_cancelledTimers.has(id)) {
                 callback(...args);
             }
@@ -68,6 +113,7 @@
         const ms = Math.max(4, delay | 0);
         const id = ops.op_set_interval(ms);
 
+        const myGen = _timerGen;
         function tick() {
             const p = ops.op_timer_sleep(ms);
             // Intervals are by definition recurring — unref them at the
@@ -75,6 +121,7 @@
             // pin the loop any more than a 5 s setTimeout.
             _maybeUnref(p, ms);
             p.then(() => {
+                if (myGen !== _timerGen) return;
                 if (!_cancelledTimers.has(id)) {
                     callback(...args);
                     tick();

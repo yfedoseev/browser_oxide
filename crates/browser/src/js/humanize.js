@@ -41,6 +41,16 @@
     const body = document.body || document.documentElement;
     if (!body) return;
 
+    // Use the engine-internal background-timer helper so our synthetic
+    // mouse/scroll/key timers don't pin `run_until_idle` open. They fire
+    // eventually when the event loop is alive (anti-bot pages keep it
+    // alive with their challenge VMs so all events still fire); for
+    // benign pages where they would otherwise be ~2 s of idle waiting,
+    // the engine can return to the caller as soon as the page's own
+    // work settles. Falls back to plain `setTimeout` if the helper isn't
+    // installed (test-only paths that bypass timer_bootstrap.js).
+    const _sched = globalThis.__bgSetTimeout || globalThis.setTimeout;
+
     // ---- Akamai sensor_data behavioural tap (T3A-A4) -------------
     // Each event we synthesise also gets recorded into a per-page
     // buffer that `crates/akamai/src/payload.rs::field_mouse_trajectory`
@@ -255,7 +265,7 @@
                 const at = mouseT + Math.round(tau * dur);
                 const px = x + jx, py = y + jy;
                 const prevSnapshot = prev ? prev.slice() : null;
-                setTimeout(() => _fireMove(px, py, prevSnapshot), at);
+                _sched(() => _fireMove(px, py, prevSnapshot), at);
                 prev = [px, py];
             }
             mouseT += dur + microPause;
@@ -266,7 +276,7 @@
         const steps = [80 + Math.random() * 40, 60 + Math.random() * 30];
         let curScT = scStartT;
         for (const step of steps) {
-            setTimeout(() => _fireScrollStep(step), curScT);
+            _sched(() => _fireScrollStep(step), curScT);
             curScT += 100 + Math.random() * 100;
         }
     }

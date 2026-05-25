@@ -54,4 +54,34 @@ impl PagePool {
             pages.push_back(page);
         }
     }
+
+    /// Acquire a warm Page and navigate it to `url`. Saves the V8-isolate +
+    /// bootstrap cost (~150 ms) compared to calling [`crate::Page::navigate`]
+    /// cold for every URL. The caller is expected to `release(page)` once
+    /// done extracting content so the warm isolate stays in the pool.
+    ///
+    /// Profile note: the returned page reuses whatever profile its V8
+    /// isolate was originally built with. The first call seeds the pool
+    /// with the requested profile; subsequent calls return the same
+    /// isolate regardless of profile argument. If your workload needs
+    /// multiple profiles, run a `PagePool` per profile — V8 bootstrap
+    /// is profile-baked, so per-profile pools are the correct unit
+    /// anyway.
+    ///
+    /// Anti-bot pages: warm reuse is for benign content extraction. If
+    /// the response is a challenge document, the engine's cookie-diff
+    /// / pending-nav iteration loop is NOT run (warm path skips it for
+    /// simplicity). Caller should `release(page)` and fall back to
+    /// `Page::navigate(url, profile, max_iter)` for challenge-protected
+    /// origins — the challenge VM dominates runtime anyway, so warm
+    /// reuse offers little benefit there.
+    pub async fn navigate(
+        &self,
+        url: &str,
+        profile: StealthProfile,
+    ) -> Result<Page, deno_core::error::AnyError> {
+        let mut page = self.acquire(Some(profile)).await?;
+        page.navigate_warm(url).await?;
+        Ok(page)
+    }
 }

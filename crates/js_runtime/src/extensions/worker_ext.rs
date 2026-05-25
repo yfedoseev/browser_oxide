@@ -214,6 +214,7 @@ thread_local! {
 pub fn op_worker_spawn(
     #[state] state: &DomState,
     #[state] stealth: &StealthState,
+    #[state] owned: &WorkerOwnership,
     #[string] script: String,
     #[string] _name: String,
     is_module: bool,
@@ -242,6 +243,10 @@ pub fn op_worker_spawn(
             },
         );
     }
+    // Track this worker as owned by the current isolate so
+    // `drain_owned_workers` (called from `Page::drop`) can reap it
+    // if the page never explicitly called `worker.terminate()`.
+    owned.spawned_ids.borrow_mut().push(worker_id);
 
     // 64 MB stack: V8's default stack guard isn't large enough for some
     // anti-bot probes that recurse deeply through wrapped natives.
@@ -379,14 +384,53 @@ pub fn op_worker_poll_from_worker(#[smi] worker_id: i32) -> String {
 
 #[op2(fast)]
 pub fn op_worker_terminate(#[smi] worker_id: i32) {
+    terminate_worker_inner(worker_id as u32);
+}
+
+/// Synchronous terminate, callable from non-V8 contexts (notably
+/// `Page::drop` reaping orphan workers a page never explicitly
+/// terminated). Signals the worker's terminate flag and removes the
+/// registry slot — the worker thread polls the flag and exits its
+/// tokio runtime on the next tick, which releases its 64 MB stack
+/// + child `JsRuntime` heap. Idempotent: missing slot is a no-op.
+pub fn terminate_worker_inner(worker_id: u32) {
     let mut reg = worker_registry().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(slot) = reg.get(&(worker_id as u32)) {
+    if let Some(slot) = reg.get(&worker_id) {
         slot.terminate.store(true, Ordering::Release);
         // Wake any in-flight `op_worker_await_message` so it can return
         // empty and the JS-side pump can stop chaining.
         slot.notify_parent.notify_waiters();
     }
-    reg.remove(&(worker_id as u32));
+    reg.remove(&worker_id);
+}
+
+/// Reaper for `Page::drop` — terminates every worker spawned by a
+/// page's V8 isolate. Without this, workers created via `new Worker(blob)`
+/// keep their OS thread + child `JsRuntime` alive for the lifetime of
+/// the process, leaking ~30 MB per worker. Pages that explicitly call
+/// `worker.terminate()` from JS pre-drained the list, so this is a no-op
+/// for well-behaved pages and a critical reap for sites that don't
+/// (cnn / bloomberg / youtube / discord / udemy — the 13 sites driving
+/// the +15 MB step-ups in the cold-sweep RSS curve).
+pub fn drain_owned_workers(state: &mut deno_core::OpState) {
+    let ids: Vec<u32> = state
+        .try_borrow::<WorkerOwnership>()
+        .map(|o| std::mem::take(&mut *o.spawned_ids.borrow_mut()))
+        .unwrap_or_default();
+    for id in ids {
+        terminate_worker_inner(id);
+    }
+}
+
+/// Per-`JsRuntime` set of worker IDs spawned by this isolate. Populated
+/// by `op_worker_spawn`; drained by `drain_owned_workers` at `Page::drop`.
+/// `RefCell` because deno_core's `#[op2]` macro requires all `#[state]`
+/// parameters on a single op be either all `&` or all `&mut` — we need
+/// `&DomState` + `&StealthState` (immutable) so the only way to mutate
+/// this third state from inside the op is via interior mutability.
+#[derive(Default)]
+pub struct WorkerOwnership {
+    pub spawned_ids: RefCell<Vec<u32>>,
 }
 
 /// W5b-deep: async op that returns the next worker→parent message,

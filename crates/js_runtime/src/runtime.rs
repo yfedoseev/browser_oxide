@@ -153,6 +153,13 @@ pub fn create_runtime_with_signals(
     runtime.op_state().borrow_mut().put(WebSocketState::new());
     runtime.op_state().borrow_mut().put(WebGLState::new());
     runtime.op_state().borrow_mut().put(SseState::new());
+    // Per-Page worker-ownership tracker — every `new Worker(...)` push
+    // its id here so `Page::drop` can reap orphans (see
+    // `extensions::worker_ext::drain_owned_workers`).
+    runtime
+        .op_state()
+        .borrow_mut()
+        .put(crate::extensions::worker_ext::WorkerOwnership::default());
 
     // Capture the GENUINE `Function.prototype.toString` before any
     // bootstrap replaces it (doc 27). Untagged functions delegate to

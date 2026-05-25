@@ -421,8 +421,20 @@ impl BrowserEventLoop {
     /// a real navigation trigger) — without this, subsequent
     /// `run_until_idle` calls would see nav_pending=true and short-circuit
     /// immediately, breaking timer-based tests.
-    pub fn reset_nav_pending(&self) {
+    ///
+    /// Also scrubs the JS-side `_browser_oxide.__pendingNavigation` value,
+    /// which the `location.href = …` setter writes as a side-effect. Without
+    /// the JS-side scrub the navigate loop's `PENDING_NAV_JS` reads back a
+    /// spurious `{kind: "assign"}` after every initial URL setup and burns
+    /// `max_iterations` round-trips re-fetching the same URL — observed as
+    /// 6.5 s for an empty `example.com` because each iteration spins up a
+    /// fresh V8 isolate before realising nothing actually requested a nav.
+    pub fn reset_nav_pending(&mut self) {
         self.runtime.reset_nav_pending();
+        let _ = self.runtime.execute_script(
+            "globalThis._browser_oxide && (globalThis._browser_oxide.__pendingNavigation = null);",
+            None,
+        );
     }
 
     /// Get a mutable reference to the underlying runtime.
