@@ -2,6 +2,8 @@
 
 **Status:** NOT in v0.1.0 scope. This doc preserves the research arc so future contributors can pick up where we left off.
 
+**Path note (2026-05-24 update):** All capture artifacts and analysis scripts referenced below (`ab_harness/tl/`, `docs/kasada_ips_analysis/`) live in the **private** `~/projects/browser_oxide_internal/` repo, NOT in this public repo. Per CLAUDE.md scope, Kasada VM analysis + decrypted real-Chrome captures are private. Public contributors who want to reproduce this work need either internal-repo access OR to re-capture from real Chrome themselves.
+
 ## Scope
 
 Three sites in the 126-corpus are protected by Kasada and consistently fail across every BO profile:
@@ -16,7 +18,7 @@ Even Camoufox (the documented Kasada SOTA in the open-source space) only gets **
 
 ## Critical correction (2026-05-16 user-driven)
 
-Prior research had concluded these were "no engine-only path / need behavioural capability + paid farm / unverifiable holistic tail". **That is superseded.** The decisive measurement (re-confirmed from `ab_harness/nocdp/*.windows.txt`):
+Prior research had concluded these were "no engine-only path / need behavioural capability + paid farm / unverifiable holistic tail". **That is superseded.** The decisive measurement (re-confirmed from `~/projects/browser_oxide_internal/ab_harness/nocdp/*.windows.txt`):
 
 > `nocdp.sh` real Chrome 147 — opens URL, waits, **zero** mouse/scroll/keyboard, **this datacenter IP** — **passes all three** (window titles = real homepages).  
 > Our engine: same IP, same zero interaction → Kasada 429 / `bot1225.b:1`.
@@ -40,7 +42,7 @@ Kasada's `/tl` POST body uses a known wrapper:
 ```
 POST_BODY = base64(json({"data": base64(xor(plaintext, b"omgtopkek"))}))
 ```
-9-byte repeating XOR. Key is deployment-wide constant, not per-session. Decryptor: `docs/kasada_ips_analysis/scratch/decrypt_report.py`.
+9-byte repeating XOR. Key is deployment-wide constant, not per-session. Decryptor: `~/projects/browser_oxide_internal/docs/kasada_ips_analysis/scratch/decrypt_report.py`.
 
 (TEA-CBC IS in the bytecode VM at `kasada_function_bodies.js:129` but for the *primary* `/tl` sensor POST, not the error reports.)
 
@@ -87,8 +89,8 @@ From the same memory (`kasada_wrapper_cracked_and_remaining_leaks`):
 `memory/state_2026_05_16_kasada_engine_gap_sharpened.md` (the canonical current-state):
 
 > The live-oracle reference is **ALREADY captured** — `tl_capture.sh` recorded real Chrome 147's decrypted Kasada `/tl` sensor POST:
-> - `ab_harness/tl/hyatt.tl_body.bin` (36 KB) — decrypted plaintext
-> - `ab_harness/tl/canadagoose.pcap` (15 MB) + `.keys`
+> - `~/projects/browser_oxide_internal/ab_harness/tl/hyatt.tl_body.bin` (36 KB) — decrypted plaintext
+> - `~/projects/browser_oxide_internal/ab_harness/tl/canadagoose.pcap` (15 MB) + `.keys`
 >
 > Decisive next experiment = **K2-DIFF**: capture our engine's `/tl` POST for hyatt/canadagoose (we run ips.js in V8) and field-by-field diff vs the real-Chrome capture → the divergent field(s) = the named, fixable engine bug.
 
@@ -105,16 +107,16 @@ In priority order. Each is a multi-day to multi-week effort.
 **Capture our `/tl` POST for hyatt + canadagoose, field-by-field diff vs the real-Chrome reference.**
 
 Both halves of the diff exist:
-- Real-Chrome ground truth: `ab_harness/tl/hyatt.tl_body.bin` + `canadagoose.pcap+.keys`
-- Our engine output: run BO against hyatt with a test that intercepts the `/tl` POST and decrypts it (use the XOR wrapper from `docs/kasada_ips_analysis/scratch/decrypt_report.py`)
+- Real-Chrome ground truth: `~/projects/browser_oxide_internal/ab_harness/tl/hyatt.tl_body.bin` + `canadagoose.pcap+.keys`
+- Our engine output: run BO against hyatt with a test that intercepts the `/tl` POST and decrypts it (use the XOR wrapper from `~/projects/browser_oxide_internal/docs/kasada_ips_analysis/scratch/decrypt_report.py`)
 
 Each divergent field is a named bug we can fix. The 8 categories from Phase 3 are the working list of what to expect; K2-DIFF will tell us if there are MORE.
 
 **Concrete steps:**
 1. Build the in-VM plaintext-sensor dump tool (mentioned in `state_2026_05_17_unblock_execution`). It should: intercept `XMLHttpRequest.send` and `fetch` on URL `/tl`, capture the body PRE-encryption (since the JS-side has it in plaintext before XOR), dump to a Rust-side log.
 2. Run hyatt → get our plaintext sensor.
-3. Diff vs `ab_harness/tl/hyatt.tl_body.bin`.
-4. For each divergent field, look up the obfuscated identifier in `docs/kasada_ips_analysis/scratch/decode_strings.js` → identify the Web API → fix.
+3. Diff vs `~/projects/browser_oxide_internal/ab_harness/tl/hyatt.tl_body.bin`.
+4. For each divergent field, look up the obfuscated identifier in `~/projects/browser_oxide_internal/docs/kasada_ips_analysis/scratch/decode_strings.js` → identify the Web API → fix.
 5. Re-run hyatt. Expected: each fix reduces blob count + error-field count. Pass = no error POSTs + Kasada serves real `<title>` content.
 
 ### Lever 2 — CSS calc math completion
@@ -131,7 +133,7 @@ Per Phase 2: ship the rest of CSS Values 4 math functions in `crates/css_values/
 1. Extend `CalcExpr` enum in `crates/css_values/src/types/length.rs` with each variant.
 2. Update the calc parser (`crates/css_values/src/calc.rs`) to recognize each function-call syntax.
 3. Update the evaluator with Rust f64 std math (libm-equivalent — should match Chrome `<cmath>`, but verify bit-exactly with a captured Chrome reference).
-4. Run `cargo test -p browser --test chrome_compat kasada_error_blob_capture -- --ignored --test-threads=1 --nocapture`; move generated `kasada_error_*.b64` to `docs/kasada_ips_analysis/scratch/`; run `python3 docs/kasada_ips_analysis/scratch/decrypt_report.py`; verify the calc-precision blob is GONE from the inventory.
+4. Run `cargo test -p browser --test chrome_compat kasada_error_blob_capture -- --ignored --test-threads=1 --nocapture`; move generated `kasada_error_*.b64` to `~/projects/browser_oxide_internal/docs/kasada_ips_analysis/scratch/`; run `python3 ~/projects/browser_oxide_internal/docs/kasada_ips_analysis/scratch/decrypt_report.py`; verify the calc-precision blob is GONE from the inventory.
 
 ### Lever 3 — _maskAsNative sweep (Function.toString leaks)
 
@@ -146,8 +148,8 @@ Per Phase 3 finding 2: our `Function.prototype.toString` returns BO's literal JS
 The single biggest trust-score driver. The 28-char obfuscated identifier maps to a Web API surface Kasada probes that we don't implement (or implement with the wrong signature).
 
 **Concrete steps:**
-1. `grep -r 'unjzomuybtbyyhwwkdpkxomylnab' docs/kasada_ips_analysis/`
-2. Run the string-table decoder: `node docs/kasada_ips_analysis/scratch/decode_strings.js`
+1. `grep -r 'unjzomuybtbyyhwwkdpkxomylnab' ~/projects/browser_oxide_internal/docs/kasada_ips_analysis/`
+2. Run the string-table decoder: `node ~/projects/browser_oxide_internal/docs/kasada_ips_analysis/scratch/decode_strings.js`
 3. Identify the missing API.
 4. Stub it in the appropriate `*_bootstrap.js`.
 5. Re-run blob capture, verify `bot1225` field disappears.
@@ -162,8 +164,8 @@ cat ~/.claude/projects/-home-yfedoseev-projects-browser-oxide/memory/kasada_real
 
 # 2. Verify nothing changed since 2026-05-16
 grep -A20 'pub enum CalcExpr' crates/css_values/src/types/length.rs  # is sin/cos there yet?
-ls docs/kasada_ips_analysis/ 2>/dev/null  # is the analysis dir still there?
-ls ab_harness/tl/ 2>/dev/null              # is the real-Chrome reference still captured?
+ls ~/projects/browser_oxide_internal/docs/kasada_ips_analysis/ 2>/dev/null  # is the analysis dir still there?
+ls ~/projects/browser_oxide_internal/ab_harness/tl/ 2>/dev/null              # is the real-Chrome reference still captured?
 
 # 3. Set up the K2-DIFF tool — build the in-VM plaintext sensor dump
 # (interception path: window_bootstrap.js -> fetch wrapper -> if url contains '/tl' POST, JSON.stringify the request body to globalThis.__lastTlPlaintext)
@@ -172,7 +174,7 @@ ls ab_harness/tl/ 2>/dev/null              # is the real-Chrome reference still 
 cargo run --release --example sweep_metrics chrome_148_macos /tmp/hyatt_only.json /tmp/out.json
 
 # 5. Diff against the captured real-Chrome
-python3 docs/kasada_ips_analysis/scratch/diff_tl_payload.py ab_harness/tl/hyatt.tl_body.bin /tmp/our_hyatt_tl.bin
+python3 ~/projects/browser_oxide_internal/docs/kasada_ips_analysis/scratch/diff_tl_payload.py ~/projects/browser_oxide_internal/ab_harness/tl/hyatt.tl_body.bin /tmp/our_hyatt_tl.bin
 
 # 6. Each divergent field is a fix. Loop until convergence.
 ```
@@ -199,8 +201,8 @@ For v0.1.0 the realistic frame is: BO ties Camoufox on Kasada (both 1/3 to 2/3 o
 - `~/.claude/projects/-home-yfedoseev-projects-browser-oxide/memory/state_2026_05_17_unblock_execution.md`
 - `docs/CANADA_GOOSE_DIAGNOSIS_2026_05_10.md` (full diagnosis writeup)
 - `docs/CANADA_GOOSE_DIAGNOSIS_2026_05_10_PART2.md` (16-field inventory)
-- `docs/kasada_ips_analysis/` (analysis directory — verify still present)
-- `ab_harness/tl/` (real-Chrome captures — verify still present)
+- `~/projects/browser_oxide_internal/docs/kasada_ips_analysis/` (analysis directory — verify still present)
+- `~/projects/browser_oxide_internal/ab_harness/tl/` (real-Chrome captures — verify still present)
 - `crates/css_values/src/types/length.rs:43-57` (`CalcExpr` enum — verify if math fns added since 05-10)
 - `crates/css_values/src/calc.rs` (calc parser)
 - `crates/browser/tests/chrome_compat.rs::kasada_error_blob_capture` (the diagnostic test)

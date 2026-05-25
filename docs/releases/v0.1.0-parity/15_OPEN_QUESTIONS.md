@@ -6,18 +6,67 @@ Living document. Add to it as questions surface. Resolve by removing + linking t
 
 ### Q1 — Why does reddit's challenge handler not trigger iter 1?
 
-**Status:** Investigated 2026-05-24, not resolved.  
-**Owner:** TBD (Phase 1, see `05_SPA_HYDRATION_CLUSTER.md`)
+**Status:** Investigated 2026-05-24; **likely resolved by chapter 17 finding** (HTMLFormElement.elements is missing).  
+**Owner:** TBD (Phase 1, see `05_SPA_HYDRATION_CLUSTER.md` + `17_WEB_API_PARITY_MATRIX.md`)
 
 Reddit's 8326-byte body contains a `<script>` that on DOMContentLoaded calls `form.requestSubmit()`. Our `requestSubmit` impl (`dom_bootstrap.js:1108`) calls `submit()` which sets `__pendingNavigation` (`dom_bootstrap.js:1098`). The outer nav loop reads `__pendingNavigation` at `page.rs:1944` and `2367`.
 
-But: sweep_metrics shows reddit completing in 316-448 ms with only iter=0. Something in the chain doesn't fire. Hypotheses (in `05_SPA_HYDRATION_CLUSTER.md`):
-- H1: DOMContentLoaded never fires before drain exits
-- H2: `document.forms[0]` returns wrong element
-- H3: `e.elements.namedItem("solution")` returns null
-- H4: requestSubmit throws (prototype not properly registered)
+But: sweep_metrics shows reddit completing in 316-448 ms with only iter=0. **Chapter 17 § 2 found the root cause**: `HTMLFormElement.prototype.elements` does not exist. Reddit's challenge calls `e.elements.namedItem('solution')` → `undefined.namedItem(...)` throws TypeError → silently caught by the top-level trap at `page.rs:3406` → `__pendingNavigation` never set → no iter 1.
 
-**Next step:** add temporary logging in `dom_bootstrap.js` submit() to confirm it fires + log to `globalThis.__scriptErrors` if anything throws. Run reddit in isolation with `RUST_LOG=js_runtime=trace,browser=debug` and grep for the pending_nav signal.
+**Likely fix**: implement `HTMLFormElement.prototype.elements` returning an HTMLFormControlsCollection-like wrapper. Chapter 43 § 3 has this as MUST-HAVE fix #11 (0.5 day). Validation: reddit body should flip from 8326 → 100+ KB.
+
+### Q5 — Worker-context fingerprint identity check (HIGHEST RISK unknown)
+
+**Status:** Surfaced by chapter 41 § 4.4 + chapter 42 § 3 Pattern 5; **not audited**.  
+**Owner:** TBD (Phase 0 prerequisite)
+
+Per chapter 42 matrix: 9 of 12 vendors check that the WORKER context returns the SAME fingerprint as the main thread. If main says "Chrome 148 Linux" but Worker says "stub" → bot.
+
+**BO status**: chapter 16 documented main-thread coverage; Worker-context coverage NOT audited. Single failing check on a single API in Worker context could explain WHY duolingo/recaptcha fails despite our main-thread API surface looking complete.
+
+**Next step**: audit `crates/js_runtime/src/js/worker_bootstrap.js` (or wherever Worker-context shims live) against `window_bootstrap.js`. Each prototype method in window should have an equivalent in worker; values must match.
+
+### Q6 — homedepot inversion: why does Playwright/Patchright PASS but BO + Camoufox FAIL?
+
+**Status:** Surfaced by chapter 27 § 4 + chapter 42 § 4.  
+**Owner:** TBD (research; informs chapter 26)
+
+Per chapter 27 measured data: Playwright + Patchright + PW-Stealth ALL pass homedepot.com with 1+ MB body. BO + Camoufox both fail at ~2638 bytes (Akamai-CHL). Akamai's homedepot tenant evidently trusts real Chromium TLS+UA+headers enough that even CDP-detected Playwright passes. This INVERTS the usual narrative ("CDP-driver tier is worst").
+
+**Hypothesis**: real Chromium chrome_for_testing build sends a header or TLS extension that boring2's chrome_147 codename doesn't include, AND Akamai's homedepot tenant checks specifically for it. Camoufox loses because it's Firefox-class, not Chromium-class.
+
+**Next step**: capture both real Chromium (via Playwright + CDP intercept) and BO chrome_148_macos on homedepot. Diff at TLS layer (ClientHello bytes), HTTP layer (header set + order), and JS layer. Identify the differentiator. Could be a free win.
+
+### Q7 — adidas firefox-only win: what specifically makes BO firefox uniquely pass Akamai BMP?
+
+**Status:** Surfaced by chapter 26 § 4.1 + chapter 27 § 2.  
+**Owner:** TBD (research; informs chapter 26 + 11)
+
+Per chapter 26: BO firefox profile uniquely flips adidas 2494 → 1.3 MB. Camoufox FAILS adidas (2384 bytes). Other BO profiles (chrome/pixel/iphone) all fail. **Camoufox is NOT strictly better than us** — this is the proof.
+
+Four hypotheses in chapter 26 § 4.1 (all unverified):
+- H1: TLS class — Firefox-class TLS impersonation acceptable to Akamai's adidas tenant
+- H2: `WebGLRenderingContext.getParameter(VENDOR)` returns `""` for Firefox (per Mozilla spec), masked WebGL
+- H3: No UA-CH (sec-ch-ua-*) headers on Firefox profile — Akamai may distrust UA-CH presence
+- H4: Combination of the above
+
+**Next step**: capture diff per chapter 04 between BO chrome (fails adidas) and BO firefox (passes adidas). Bisect to find the load-bearing field. Bake the learning into other profiles where possible.
+
+### Q8 — Castle `__cuid` cookie: real or third-party rumor?
+
+**Status:** Surfaced by chapter 36 § 2.3 honest-uncertainty note.
+
+Castle's own device-fingerprinting docs reference "first-party cookies" without naming them. The `__cuid` cookie name comes from third-party reports (scrapfly, capsolver writeups), not Castle docs. May not be the actual cookie.
+
+**Next step (if customer brings Castle-protected site)**: capture real request via Playwright + CDP, identify Castle's actual cookie name.
+
+### Q9 — Reblaze "Mc Cohen module" / `mc.cohen.io`: unverified
+
+**Status:** Surfaced by chapter 37 § 1.3 honest-uncertainty note.
+
+The "Mc Cohen module" reference (which I included in the prompt for Reblaze research) is not verifiable in any public source. Agent searched Tracxn, Crunchbase, all Reblaze/Link11 docs subdomains, press releases — zero hits.
+
+**Status: research-item-not-confirmed.** Reblaze's bot decision engine appears to be unnamed in public docs. If a customer brings a Reblaze-protected site, capture the actual JS asset URL.
 
 ### Q2 — What fingerprint signal does AWS WAF challenge.js check?
 
