@@ -349,7 +349,7 @@ These don't move the routed-Pass needle directly but raise per-profile quality +
 | 8 — MessageChannel + MessagePort | not started | — | — | — | — |
 | 9 — RAF jitter | not started | — | — | — | — |
 | 10 — Vendor-detect markers extension | completed | claude | branch `fix/v0.1.0-fix10-vendor-detect-markers` @ `775bd2a` | n/a (observability) | +9 vendor header markers, +11 body markers; +0 regressions |
-| 11 — reddit HTMLFormElement.elements | not started | — | — | — | — |
+| 11 — reddit HTMLFormElement.elements | completed | claude | branch `fix/v0.1.0-fix11-form-elements` @ `b74c266` | pending (Fix 12 sweep) | new form_elements_collection test passes; +0 regressions |
 | 12 — 3-run baseline validation | not started | — | — | — | gate |
 
 Update the status column as PRs land. Keep the doc current.
