@@ -108,6 +108,28 @@
     Object.defineProperty(globalThis, '_maskFunction', { value: _maskFunction, enumerable: false, configurable: true });
     Object.defineProperty(globalThis, '_maskAsNative', { value: _maskAsNative, enumerable: false, configurable: true });
 
+    // v0.1.0-parity Fix 6 — expose seeded random under a Symbol-keyed
+    // slot that survives cleanup_bootstrap's string-keyed `internals`
+    // purge. humanize.js (injected per-navigation, AFTER cleanup) reads
+    // this via `globalThis[Symbol.for('__browser_oxide_behavior_rand__')]`
+    // and uses it instead of Math.random(), so synthetic mouse/scroll/
+    // key event streams are deterministic per page lifetime (two-level
+    // seed pattern). Falls back to undefined if the op is unavailable —
+    // humanize.js degrades to Math.random().
+    try {
+        const _randOp = Deno && Deno.core && Deno.core.ops
+            && Deno.core.ops.op_behavior_random;
+        if (typeof _randOp === 'function') {
+            const _sym = Symbol.for('__browser_oxide_behavior_rand__');
+            Object.defineProperty(globalThis, _sym, {
+                value: function () {
+                    try { return _randOp(); } catch (_e) { return Math.random(); }
+                },
+                writable: false, configurable: true, enumerable: false,
+            });
+        }
+    } catch (_e) {}
+
     // BotD `eval_length.ts` detector: `eval.toString().length === 33` for Chromium.
     // V8 natively produces "function eval() { [native code] }" (33 chars), so this
     // is usually a no-op. We tag `eval` defensively so any V8 build drift is

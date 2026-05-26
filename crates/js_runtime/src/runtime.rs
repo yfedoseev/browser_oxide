@@ -146,6 +146,10 @@ pub fn create_runtime_with_signals(
     runtime.op_state().borrow_mut().put(state);
     runtime.op_state().borrow_mut().put(TimerState::new());
     runtime.op_state().borrow_mut().put(PerfState::new());
+    runtime
+        .op_state()
+        .borrow_mut()
+        .put(crate::extensions::input_ext::BehaviorRngState::from_env_or_random());
     runtime.op_state().borrow_mut().put(nav_signal.clone());
     runtime.op_state().borrow_mut().put(stealth_state);
     runtime.op_state().borrow_mut().put(fetch_state);

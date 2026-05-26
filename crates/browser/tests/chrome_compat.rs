@@ -5688,6 +5688,44 @@ async fn native_code_mask_audit() {
 }
 
 // ================================================================
+// v0.1.0-parity Fix 6 — seeded random wired through Symbol-keyed slot
+// Per EXECUTION_PLAN.md + 40_TIMING_BEHAVIORAL.md §5: humanize.js was
+// using `Math.random()` per-page, making different visits look like
+// N different users to Kasada/Akamai behavioral models. Replaced with
+// a Symbol-keyed `__browser_oxide_behavior_rand__` slot backed by a
+// per-runtime ChaCha12 RNG (BehaviorRngState), seeded from
+// BROWSER_OXIDE_BEHAVIOR_SEED env var or fresh-random per page.
+// ================================================================
+
+#[tokio::test]
+async fn behavior_rand_slot_installed_and_in_unit_range() {
+    let result = check(
+        r#"
+        (() => {
+            const sym = Symbol.for('__browser_oxide_behavior_rand__');
+            const fn = globalThis[sym];
+            if (typeof fn !== 'function') return JSON.stringify({err: 'slot missing'});
+            const a = fn();
+            const b = fn();
+            const c = fn();
+            return JSON.stringify({
+                type: typeof fn,
+                inRange: (a >= 0 && a < 1) && (b >= 0 && b < 1) && (c >= 0 && c < 1),
+                advanced: !(a === b && b === c),
+                a, b, c,
+            });
+        })()
+        "#,
+    )
+    .await;
+    let v: serde_json::Value =
+        serde_json::from_str(&result).unwrap_or_else(|e| panic!("json: {e}; raw={result}"));
+    assert_eq!(v["type"], "function", "slot must be a function: {result}");
+    assert_eq!(v["inRange"], true, "values out of [0,1): {result}");
+    assert_eq!(v["advanced"], true, "sequence not advancing: {result}");
+}
+
+// ================================================================
 // v0.1.0-parity Fix 7 — performance.timeOrigin consistency
 // Per EXECUTION_PLAN.md + 40_TIMING_BEHAVIORAL.md §2.6: Kasada's
 // origin-skew probe checks `Math.abs((performance.timeOrigin +

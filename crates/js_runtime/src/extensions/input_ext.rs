@@ -7,8 +7,54 @@
 //! BeCAPTCHA-Mouse benchmarks against.
 
 use deno_core::op2;
+use rand::rngs::StdRng;
+use rand::{RngExt, SeedableRng};
 use serde::Serialize;
 use stealth::BehaviorProfile;
+
+/// Per-page seeded RNG state for `op_behavior_random`. Replaces
+/// `Math.random()` in humanize.js so synthetic mouse/scroll/key event
+/// streams are deterministic per page lifetime (two-level seed pattern —
+/// session-stable, page-deterministic). v0.1.0-parity Fix 6.
+///
+/// Seed source priority (constructor):
+///   1. BROWSER_OXIDE_BEHAVIOR_SEED env var (decimal u64) — for tests +
+///      reproducibility-pinned harnesses.
+///   2. `rand::random::<u64>()` — fresh per page, so two unrelated visits
+///      don't produce identical event streams.
+pub struct BehaviorRngState {
+    rng: StdRng,
+}
+
+impl BehaviorRngState {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
+    pub fn from_env_or_random() -> Self {
+        let seed = std::env::var("BROWSER_OXIDE_BEHAVIOR_SEED")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or_else(rand::random::<u64>);
+        Self::new(seed)
+    }
+}
+
+impl Default for BehaviorRngState {
+    fn default() -> Self {
+        Self::from_env_or_random()
+    }
+}
+
+/// Per-page seeded random in [0, 1) — drop-in `Math.random` substitute
+/// for humanize.js. Each call advances the per-page ChaCha12 stream so
+/// the sequence is reproducible given a fixed seed yet not
+/// fingerprintable across pages (each page gets its own seed by default).
+#[op2(fast)]
+pub fn op_behavior_random(#[state] s: &mut BehaviorRngState) -> f64 {
+    s.rng.random::<f64>()
+}
 
 /// Generate a humanlike mouse path from (x1,y1) to (x2,y2).
 ///
@@ -85,5 +131,9 @@ pub struct MousePoint {
 
 deno_core::extension!(
     input_extension,
-    ops = [op_human_mouse_path, op_human_typing_delays],
+    ops = [
+        op_human_mouse_path,
+        op_human_typing_delays,
+        op_behavior_random
+    ],
 );

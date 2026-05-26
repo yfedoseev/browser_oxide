@@ -41,6 +41,14 @@
     const body = document.body || document.documentElement;
     if (!body) return;
 
+    // v0.1.0-parity Fix 6 — seeded random for two-level per-session
+    // determinism. Symbol-keyed slot is installed by stealth_bootstrap.js
+    // and survives cleanup_bootstrap's `internals` string purge. Without
+    // a backing op (e.g. test paths that don't run a full runtime) we
+    // fall back to the V8 default so the page still renders.
+    const _rand = globalThis[Symbol.for('__browser_oxide_behavior_rand__')]
+        || Math.random;
+
     // Use the engine-internal background-timer helper so our synthetic
     // mouse/scroll/key timers don't pin `run_until_idle` open. They fire
     // eventually when the event loop is alive (anti-bot pages keep it
@@ -103,8 +111,8 @@
     // velocity-curve quantiles.
     function _gauss() {
         let u = 0, v = 0;
-        while (u === 0) u = Math.random();
-        while (v === 0) v = Math.random();
+        while (u === 0) u = _rand();
+        while (v === 0) v = _rand();
         return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
     }
 
@@ -119,7 +127,7 @@
     // the tails. Parameters match Plamondon's μ ≈ -0.4, σ ≈ 0.25
     // baseline for casual cursor motion.
     function _sigmaLognormalTimes(n, sigma) {
-        sigma = sigma || (0.22 + Math.random() * 0.10);
+        sigma = sigma || (0.22 + _rand() * 0.10);
         const mu = -0.4;
         const out = [];
         for (let i = 0; i < n; i++) {
@@ -242,13 +250,13 @@
 
         // 2) Mouse motion — sigma-lognormal velocity, 2-stroke
         const anchors = [
-            [100 + Math.random() * 200,   200 + Math.random() * 300],
-            [600 + Math.random() * 300,   100 + Math.random() * 400],
-            [1000 + Math.random() * 200,  300 + Math.random() * 300],
+            [100 + _rand() * 200,   200 + _rand() * 300],
+            [600 + _rand() * 300,   100 + _rand() * 400],
+            [1000 + _rand() * 200,  300 + _rand() * 300],
         ];
-        const strokeDurations = [800 + Math.random() * 300, 600 + Math.random() * 300];
+        const strokeDurations = [800 + _rand() * 300, 600 + _rand() * 300];
         const samplesPerStroke = 15;
-        const microPause = 50 + Math.random() * 100;
+        const microPause = 50 + _rand() * 100;
 
         let mouseT = 50; 
         let prev = null;
@@ -273,11 +281,11 @@
 
         // 3) Scroll-down
         const scStartT = mouseT + 100;
-        const steps = [80 + Math.random() * 40, 60 + Math.random() * 30];
+        const steps = [80 + _rand() * 40, 60 + _rand() * 30];
         let curScT = scStartT;
         for (const step of steps) {
             _sched(() => _fireScrollStep(step), curScT);
-            curScT += 100 + Math.random() * 100;
+            curScT += 100 + _rand() * 100;
         }
     }
 
@@ -310,11 +318,11 @@
         // approximation this replaces was distinguishable from real
         // human motion to the RF classifier downstream of HUMAN/Kasada/
         // DataDome — research 08_BEHAVIORAL.md §1.6.
-        const fromX = vw * 0.5 + (Math.random() - 0.5) * 80;
-        const fromY = vh * 0.4 + (Math.random() - 0.5) * 80;
-        const toX = vw * 0.45 + (Math.random() - 0.5) * 200;
-        const toY = vh * 0.55 + (Math.random() - 0.5) * 200;
-        const targetW = 40 + Math.random() * 40;
+        const fromX = vw * 0.5 + (_rand() - 0.5) * 80;
+        const fromY = vh * 0.4 + (_rand() - 0.5) * 80;
+        const toX = vw * 0.45 + (_rand() - 0.5) * 200;
+        const toY = vh * 0.55 + (_rand() - 0.5) * 200;
+        const targetW = 40 + _rand() * 40;
         let traj = [];
         try {
             const ops = Deno && Deno.core && Deno.core.ops;
