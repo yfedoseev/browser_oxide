@@ -5629,34 +5629,49 @@ async fn location_origin_secure_page() {
 #[tokio::test]
 #[ignore]
 async fn native_code_mask_audit() {
+    // Enumerates every constructor on globalThis that has a .prototype,
+    // walks each prototype's own-function descriptors, asserts
+    // `String(value)` matches `function <ident>() { [native code] }`.
+    // The pattern (rather than exact-name match) accepts V8/ECMA spec
+    // aliases (Date.toGMTString == toUTCString, String.trimLeft ==
+    // trimStart, Set.keys == Set.values) — real Chrome serializes the
+    // same way, so vendors fingerprinting these see no divergence.
+    // The leak this catches is "JS source body" (function with body),
+    // which IS a fingerprint tell.
     let js = r#"
         (() => {
-            const STRICT = ['WebGLRenderingContext', 'WebGL2RenderingContext'];
-            const failures = [];
-            for (const ifaceName of STRICT) {
-                const ctor = globalThis[ifaceName];
-                if (typeof ctor !== 'function') {
-                    failures.push({iface: ifaceName, method: '<ctor>', got: 'ctor missing or not function'});
-                    continue;
-                }
-                const proto = ctor.prototype;
-                if (!proto) {
-                    failures.push({iface: ifaceName, method: '<proto>', got: 'no prototype'});
-                    continue;
-                }
-                for (const mname of Object.getOwnPropertyNames(proto)) {
+            const NATIVE_RE = /^function [A-Za-z_$][A-Za-z0-9_$]*\(\) \{ \[native code\] \}$/;
+            const SKIP_PROTOS = new Set([Object.prototype, Function.prototype]);
+            const failuresByIface = {};
+            const totalNames = Object.getOwnPropertyNames(globalThis);
+            for (const name of totalNames) {
+                let v;
+                try { v = globalThis[name]; } catch (e) { continue; }
+                if (typeof v !== 'function') continue;
+                const proto = v.prototype;
+                if (!proto || SKIP_PROTOS.has(proto)) continue;
+                let mnames;
+                try { mnames = Object.getOwnPropertyNames(proto); } catch (e) { continue; }
+                for (const mname of mnames) {
                     if (mname === 'constructor') continue;
                     let desc;
                     try { desc = Object.getOwnPropertyDescriptor(proto, mname); } catch (e) { continue; }
                     if (!desc || typeof desc.value !== 'function') continue;
-                    const s = String(desc.value);
-                    const expected = `function ${mname}() { [native code] }`;
-                    if (s !== expected) {
-                        failures.push({iface: ifaceName, method: mname, got: s.slice(0, 120)});
+                    let s;
+                    try { s = String(desc.value); } catch (e) { continue; }
+                    if (!NATIVE_RE.test(s)) {
+                        (failuresByIface[name] = failuresByIface[name] || []).push({method: mname, got: s.slice(0, 100)});
                     }
                 }
             }
-            return JSON.stringify({count: failures.length, failures});
+            // Flat list + per-iface counts
+            const flat = [];
+            const counts = {};
+            for (const iface of Object.keys(failuresByIface).sort()) {
+                counts[iface] = failuresByIface[iface].length;
+                for (const f of failuresByIface[iface]) flat.push({iface, ...f});
+            }
+            return JSON.stringify({count: flat.length, counts, failures: flat});
         })()
     "#;
     let result = check(js).await;
@@ -5664,7 +5679,10 @@ async fn native_code_mask_audit() {
         .unwrap_or_else(|e| panic!("audit json parse: {e}; raw={result}"));
     let count = v["count"].as_u64().unwrap_or(0);
     if count > 0 {
+        let counts_pretty = serde_json::to_string_pretty(&v["counts"]).unwrap();
         let dump = serde_json::to_string_pretty(&v["failures"]).unwrap();
-        panic!("native_code_mask_audit: {count} method(s) on STRICT interfaces returned non-canonical toString:\n{dump}");
+        panic!(
+            "native_code_mask_audit: {count} total failures.\nPer-interface counts:\n{counts_pretty}\nFull list:\n{dump}"
+        );
     }
 }

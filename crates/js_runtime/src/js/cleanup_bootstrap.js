@@ -500,6 +500,45 @@
         }
     } catch (_e) { /* sfc masking is best-effort */ }
 
+    // -- Universal prototype mask sweep (v0.1.0-parity Fix 3) ----------
+    // Per 16_STEALTH_FINGERPRINT_AUDIT.md §5 + 08 Lever 3 + 41 §4.4:
+    // 11 of 12 anti-bot vendors fingerprint Function.prototype.toString
+    // on patched prototype methods (Headers/Request/Response, XHR,
+    // Observers, Streams, Event subclasses, IDB, Range, etc.). Walk
+    // every globalThis constructor that has a .prototype, mask every
+    // own-function method to `function NAME() { [native code] }`.
+    // Runs AFTER all bootstraps (interfaces / shared_apis / streams /
+    // events / canvas / window / worker) so it covers every prototype
+    // installed by them — including bootstraps that run post-snapshot.
+    // Safe on real V8 natives: `_maskAsNative` is idempotent — sets the
+    // Symbol(__browser_oxide_native__) tag; if the function was already
+    // native-toString-ing it stays so.
+    try {
+        const _mask = globalThis._maskAsNative;
+        if (typeof _mask === 'function') {
+            const _SKIP = new Set([Object.prototype, Function.prototype]);
+            for (const _gname of Object.getOwnPropertyNames(globalThis)) {
+                let _v;
+                try { _v = globalThis[_gname]; } catch (_e) { continue; }
+                if (typeof _v !== 'function') continue;
+                const _p = _v.prototype;
+                if (!_p || _SKIP.has(_p)) continue;
+                const _methods = [];
+                let _ns;
+                try { _ns = Object.getOwnPropertyNames(_p); } catch (_e) { continue; }
+                for (const _n of _ns) {
+                    if (_n === 'constructor') continue;
+                    let _d;
+                    try { _d = Object.getOwnPropertyDescriptor(_p, _n); } catch (_e) { continue; }
+                    if (_d && typeof _d.value === 'function') _methods.push(_n);
+                }
+                if (_methods.length) {
+                    try { _mask(_p, ..._methods); } catch (_e) {}
+                }
+            }
+        }
+    } catch (_e) { /* universal mask sweep is best-effort */ }
+
     const internals = [
         'Deno',
         'ops',
