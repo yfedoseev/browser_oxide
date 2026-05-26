@@ -5613,3 +5613,58 @@ async fn location_origin_secure_page() {
         "location.origin or URL broken: {result}"
     );
 }
+
+// ================================================================
+// Per docs/releases/v0.1.0-parity/EXECUTION_PLAN.md Fix 1 / Fix 3
+// + 38_VISUAL_AUDIO_FINGERPRINTING.md §5.4 + 16_STEALTH_FINGERPRINT_AUDIT.md §5:
+// every patched native must return `function NAME() { [native code] }`
+// from Function.prototype.toString — 11 of 12 anti-bot vendors fingerprint
+// this. Fix 1 closes WebGL[2]RenderingContext.prototype. Fix 3 widens
+// STRICT_INTERFACES (JS-side) to the remaining prototypes.
+// Marked #[ignore] per EXECUTION_PLAN.md per-fix validation command:
+//   cargo test -p browser --test chrome_compat native_code_mask_audit \
+//       -- --ignored --test-threads=1 --nocapture
+// ================================================================
+
+#[tokio::test]
+#[ignore]
+async fn native_code_mask_audit() {
+    let js = r#"
+        (() => {
+            const STRICT = ['WebGLRenderingContext', 'WebGL2RenderingContext'];
+            const failures = [];
+            for (const ifaceName of STRICT) {
+                const ctor = globalThis[ifaceName];
+                if (typeof ctor !== 'function') {
+                    failures.push({iface: ifaceName, method: '<ctor>', got: 'ctor missing or not function'});
+                    continue;
+                }
+                const proto = ctor.prototype;
+                if (!proto) {
+                    failures.push({iface: ifaceName, method: '<proto>', got: 'no prototype'});
+                    continue;
+                }
+                for (const mname of Object.getOwnPropertyNames(proto)) {
+                    if (mname === 'constructor') continue;
+                    let desc;
+                    try { desc = Object.getOwnPropertyDescriptor(proto, mname); } catch (e) { continue; }
+                    if (!desc || typeof desc.value !== 'function') continue;
+                    const s = String(desc.value);
+                    const expected = `function ${mname}() { [native code] }`;
+                    if (s !== expected) {
+                        failures.push({iface: ifaceName, method: mname, got: s.slice(0, 120)});
+                    }
+                }
+            }
+            return JSON.stringify({count: failures.length, failures});
+        })()
+    "#;
+    let result = check(js).await;
+    let v: serde_json::Value = serde_json::from_str(&result)
+        .unwrap_or_else(|e| panic!("audit json parse: {e}; raw={result}"));
+    let count = v["count"].as_u64().unwrap_or(0);
+    if count > 0 {
+        let dump = serde_json::to_string_pretty(&v["failures"]).unwrap();
+        panic!("native_code_mask_audit: {count} method(s) on STRICT interfaces returned non-canonical toString:\n{dump}");
+    }
+}

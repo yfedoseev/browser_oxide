@@ -1286,16 +1286,26 @@
             _maskAsNative(BaseAudioContext.prototype, 'createOscillator', 'createDynamicsCompressor', 'createAnalyser', 'createGain', 'createBiquadFilter');
         }
         
-        // Also mask WebGL if available
+        // Mask every own-function method on WebGL[2]RenderingContext.prototype.
+        // 11 of 12 anti-bot vendors fingerprint Function.prototype.toString of
+        // these methods (38_VISUAL_AUDIO_FINGERPRINTING.md §5.4). Iterating
+        // the prototype's own names is durable as the engine grows method
+        // coverage — every new method gets masked automatically.
+        const _maskAllProtoFns = (proto) => {
+            if (!proto) return;
+            const names = [];
+            for (const n of Object.getOwnPropertyNames(proto)) {
+                if (n === 'constructor') continue;
+                const d = Object.getOwnPropertyDescriptor(proto, n);
+                if (d && typeof d.value === 'function') names.push(n);
+            }
+            if (names.length) _maskAsNative(proto, ...names);
+        };
         if (globalThis.WebGLRenderingContext) {
-            _maskAsNative(globalThis.WebGLRenderingContext.prototype, 
-                'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter',
-                'getShaderInfoLog', 'getProgramInfoLog');
+            _maskAllProtoFns(globalThis.WebGLRenderingContext.prototype);
         }
         if (globalThis.WebGL2RenderingContext) {
-            _maskAsNative(globalThis.WebGL2RenderingContext.prototype, 
-                'clear', 'clearColor', 'drawArrays', 'drawElements', 'enable', 'disable', 'getParameter',
-                'getShaderInfoLog', 'getProgramInfoLog');
+            _maskAllProtoFns(globalThis.WebGL2RenderingContext.prototype);
         }
     }
 })(globalThis);
