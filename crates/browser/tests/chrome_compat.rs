@@ -5688,6 +5688,85 @@ async fn native_code_mask_audit() {
 }
 
 // ================================================================
+// v0.1.0-parity Fix 4 — Canvas toDataURL parity (engine side)
+// Per EXECUTION_PLAN.md + 38_VISUAL_AUDIO_FINGERPRINTING.md §5.6: 10
+// of 12 anti-bot vendors hash canvas 2D output. Full real-Chrome
+// pixel parity is filed as R-FIX-4 in 15_OPEN_QUESTIONS.md (needs
+// `crates/browser/tests/captures/canvas_chrome_148.json` captured via
+// Playwright + CDP). This engine-side test asserts two weaker but
+// still-required properties:
+//
+//   (a) Same draw sequence on the SAME profile produces the SAME
+//       toDataURL hash across two fresh pages — determinism.
+//   (b) Same draw sequence on TWO DIFFERENT profiles produces
+//       DIFFERENT hashes — per-profile uniqueness (a vendor that
+//       routes via profile-routing must see distinct fingerprints).
+//
+// Draw sequence is the canonical FingerprintJS "text + arc + emoji"
+// pattern — close to what every fingerprinter does.
+// ================================================================
+
+const CANVAS_FP_SEQUENCE_JS: &str = r#"(() => {
+    const c = document.createElement('canvas');
+    c.width = 200; c.height = 60;
+    const ctx = c.getContext('2d');
+    if (!ctx) return 'NO_CTX';
+    // FingerprintJS-style canonical sequence
+    ctx.textBaseline = 'top';
+    ctx.font = '14px Arial';
+    ctx.fillStyle = '#f60';
+    ctx.fillRect(0, 0, 100, 30);
+    ctx.fillStyle = '#069';
+    ctx.fillText('browser_oxide', 2, 15);
+    ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+    ctx.fillText('parity-test', 4, 17);
+    ctx.beginPath();
+    ctx.arc(150, 30, 12, 0, Math.PI * 2);
+    ctx.fill();
+    return c.toDataURL();
+})()"#;
+
+async fn canvas_hash_for(profile: stealth::StealthProfile) -> String {
+    let mut page = Page::from_html(
+        "<!DOCTYPE html><html><head></head><body></body></html>",
+        Some(profile),
+    )
+    .await
+    .unwrap();
+    let data_url = page.evaluate(CANVAS_FP_SEQUENCE_JS).unwrap();
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(data_url.as_bytes());
+    format!("{:x}", h.finalize())
+}
+
+#[tokio::test]
+async fn canvas_todataurl_deterministic_within_profile() {
+    let a = canvas_hash_for(stealth::presets::chrome_148_macos()).await;
+    let b = canvas_hash_for(stealth::presets::chrome_148_macos()).await;
+    assert_eq!(
+        a, b,
+        "two fresh pages with the same profile must hash to the same toDataURL: a={a} b={b}"
+    );
+}
+
+#[tokio::test]
+async fn canvas_todataurl_differs_across_profiles() {
+    let mac = canvas_hash_for(stealth::presets::chrome_148_macos()).await;
+    let win = canvas_hash_for(stealth::presets::chrome_148_windows()).await;
+    let lin = canvas_hash_for(stealth::presets::chrome_148_linux()).await;
+    // Per-profile uniqueness: at least one of the three pairs must
+    // differ. (Some profiles may share canvas backends and tie; the
+    // important property is that profile-routing isn't all identical.)
+    let pairs_equal = (mac == win) as u32 + (mac == lin) as u32 + (win == lin) as u32;
+    assert!(
+        pairs_equal <= 1,
+        "≥2 of 3 profiles produced identical canvas hashes (per-profile uniqueness broken). \
+         mac={mac} win={win} lin={lin}"
+    );
+}
+
+// ================================================================
 // v0.1.0-parity Fix 2 — WebGL per-profile golden snapshot (engine side)
 // Per EXECUTION_PLAN.md + 38_VISUAL_AUDIO_FINGERPRINTING.md §5.5:
 // each stealth profile must produce a CONSISTENT WebGL parameter set
