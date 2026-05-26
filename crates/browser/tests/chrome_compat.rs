@@ -5776,6 +5776,99 @@ async fn behavior_rand_slot_installed_and_in_unit_range() {
 }
 
 // ================================================================
+// v0.1.0-parity Fix 8 — MessageChannel/MessagePort proper impl
+// Per EXECUTION_PLAN.md + 17_WEB_API_PARITY_MATRIX.md + 41_POW_WASM_WORKER_PATTERNS.md §4.4:
+// pre-fix `new MessageChannel(); port1.postMessage(...)` was a no-op,
+// breaking recaptcha enterprise (duolingo) and every Worker that uses
+// channels for message routing. Tests paired routing, start-gating,
+// and close-detach.
+// ================================================================
+
+// deno_core's `execute_script` calls share the global scope; `const`
+// declarations clash on redeclaration → SyntaxError silently aborts
+// the next script. Wrap each evaluate in an IIFE to scope locals.
+
+#[tokio::test]
+async fn message_channel_paired_routing() {
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
+    let _ = page.evaluate(
+        r#"(() => {
+            globalThis.__mctest = { got: [] };
+            const ch = new MessageChannel();
+            globalThis.__mctest.ch = ch;
+            ch.port2.onmessage = (e) => { globalThis.__mctest.got.push(e.data); };
+            ch.port1.postMessage('hello');
+            ch.port1.postMessage({n: 42});
+        })()"#,
+    );
+    let result = page
+        .evaluate("JSON.stringify({len: globalThis.__mctest.got.length, first: globalThis.__mctest.got[0], second: globalThis.__mctest.got[1] && globalThis.__mctest.got[1].n})")
+        .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&result).unwrap_or_else(|e| panic!("json: {e}; raw={result}"));
+    assert_eq!(
+        v["len"].as_u64().unwrap(),
+        2,
+        "paired delivery failed: {result}"
+    );
+    assert_eq!(v["first"], "hello");
+    assert_eq!(v["second"].as_u64().unwrap(), 42);
+}
+
+#[tokio::test]
+async fn message_channel_queue_then_start() {
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
+    let _ = page.evaluate(
+        r#"(() => {
+            globalThis.__mctest = { got: [] };
+            const ch = new MessageChannel();
+            globalThis.__mctest.ch = ch;
+            ch.port1.postMessage('queued-1');
+            ch.port1.postMessage('queued-2');
+        })()"#,
+    );
+    let pre = page
+        .evaluate("globalThis.__mctest.got.length")
+        .unwrap_or_default();
+    let _ = page.evaluate(
+        r#"(() => {
+            const ch = globalThis.__mctest.ch;
+            ch.port2.onmessage = (e) => { globalThis.__mctest.got.push(e.data); };
+            ch.port2.start();
+        })()"#,
+    );
+    let post = page
+        .evaluate("globalThis.__mctest.got.length")
+        .unwrap_or_default();
+    assert_eq!(pre, "0", "queued msgs should not deliver pre-start: {pre}");
+    assert_eq!(post, "2", "start should drain queue: {post}");
+}
+
+#[tokio::test]
+async fn message_channel_close_detaches() {
+    let mut page = Page::from_html(&html(""), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
+    let _ = page.evaluate(
+        r#"(() => {
+            globalThis.__mctest = { got: [] };
+            const ch = new MessageChannel();
+            ch.port2.onmessage = (e) => { globalThis.__mctest.got.push(e.data); };
+            ch.port1.close();
+            ch.port1.postMessage('after-close');
+        })()"#,
+    );
+    let len = page
+        .evaluate("globalThis.__mctest.got.length")
+        .unwrap_or_default();
+    assert_eq!(len, "0", "post-close postMessage must not deliver: {len}");
+}
+
+// ================================================================
 // v0.1.0-parity Fix 9 — RAF cadence jitter
 // Per EXECUTION_PLAN.md + 40_TIMING_BEHAVIORAL.md §2.3: real Chrome's
 // requestAnimationFrame cadence shows scheduler noise around the 60Hz

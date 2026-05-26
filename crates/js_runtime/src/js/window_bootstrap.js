@@ -2253,20 +2253,117 @@
         };
     }
 
-    if (!globalThis.MessagePort) {
-        globalThis.MessagePort = class MessagePort extends EventTarget {
-            constructor() { super(); this.onmessage = null; this.onmessageerror = null; }
-            postMessage() {}
-            start() {}
-            close() {}
-        };
-    }
+    // v0.1.0-parity Fix 8 — proper MessageChannel / MessagePort
+    // implementation per HTML spec §9.4. The pre-fix no-op stub broke
+    // recaptcha enterprise (duolingo) and any worker that relays via
+    // a channel. Per 17_WEB_API_PARITY_MATRIX.md + 41_POW_WASM_WORKER_PATTERNS.md §4.4:
+    //   - paired ports route postMessage bidirectionally
+    //   - port stays in "non-started" mode until start() / onmessage
+    //     setter / addEventListener('message') is called (HTML spec
+    //     enables-message-dispatch trigger). Messages queued before
+    //     enabling are delivered when enabled.
+    //   - close() detaches the port from its pair; further postMessage
+    //     is a silent no-op (spec: discard).
+    // Structured-clone is approximated via globalThis.structuredClone
+    // (the engine ships a real impl in structured_clone.js); falls back
+    // to identity if unavailable so tests that bypass the polyfill
+    // still see the right wiring.
+    {
+        const _PortPaired = new WeakMap();   // port → paired port
+        const _PortQueue = new WeakMap();    // port → Array<msg> queued pre-start
+        const _PortEnabled = new WeakMap();  // port → bool (start gate)
+        const _PortClosed = new WeakMap();   // port → bool
 
-    if (!globalThis.MessageChannel) {
+        const _clone = (data) => {
+            try {
+                if (typeof globalThis.structuredClone === 'function') {
+                    return globalThis.structuredClone(data);
+                }
+            } catch (_e) {}
+            return data;
+        };
+
+        const _enable = (port) => {
+            if (_PortEnabled.get(port)) return;
+            _PortEnabled.set(port, true);
+            const q = _PortQueue.get(port);
+            if (!q || !q.length) return;
+            _PortQueue.set(port, []);
+            // Drain synchronously. HTML spec routes via the event loop;
+            // we drain inline so that `port.onmessage = fn; port.start()`
+            // sees its queued messages before control returns to the
+            // caller (deno_core's microtask drain across `execute_script`
+            // boundaries isn't reliable for this).
+            for (const msg of q) _deliver(port, msg);
+        };
+
+        const _deliver = (port, data) => {
+            if (_PortClosed.get(port)) return;
+            if (!_PortEnabled.get(port)) {
+                let q = _PortQueue.get(port);
+                if (!q) { q = []; _PortQueue.set(port, q); }
+                q.push(data);
+                return;
+            }
+            try {
+                const ev = new MessageEvent('message', { data, bubbles: false, cancelable: false });
+                // dispatchEvent fires both addEventListener handlers AND
+                // the on-property (deno_core's EventTarget auto-promotes
+                // `onmessage` to a listener). Calling the on-property
+                // explicitly in addition would double-fire it.
+                try { port.dispatchEvent(ev); } catch (_e) {}
+            } catch (_e) {}
+        };
+
+        globalThis.MessagePort = class MessagePort extends EventTarget {
+            constructor() {
+                super();
+                this._onmessage = null;
+                this.onmessageerror = null;
+            }
+            get onmessage() { return this._onmessage; }
+            set onmessage(fn) {
+                this._onmessage = (typeof fn === 'function') ? fn : null;
+                // Spec: setting onmessage implicitly enables dispatch.
+                if (this._onmessage) _enable(this);
+            }
+            postMessage(data /*, transfer */) {
+                if (_PortClosed.get(this)) return;
+                const paired = _PortPaired.get(this);
+                if (!paired) return;
+                const cloned = _clone(data);
+                // Delivery to the PAIRED port (spec semantics).
+                _deliver(paired, cloned);
+            }
+            start() { _enable(this); }
+            close() {
+                _PortClosed.set(this, true);
+                // Detach from pair so the other side stops being able
+                // to deliver to us. Pair is preserved on the other
+                // port's side so its close() still works.
+                const paired = _PortPaired.get(this);
+                if (paired) _PortPaired.delete(this);
+            }
+            addEventListener(type, listener, options) {
+                super.addEventListener(type, listener, options);
+                // Spec: addEventListener('message', …) also implicitly
+                // enables dispatch (mirrors onmessage setter).
+                if (type === 'message') _enable(this);
+            }
+        };
+
+        // Re-tag the constructor + prototype methods so the universal
+        // mask sweep (cleanup_bootstrap) tags them with the right name;
+        // they are already function declarations so their identity is
+        // fine. The Symbol-tagged closures (_PortPaired et al.) live in
+        // the bootstrap IIFE scope and survive the snapshot.
+
         globalThis.MessageChannel = class MessageChannel {
             constructor() {
-                this.port1 = new MessagePort();
-                this.port2 = new MessagePort();
+                this.port1 = new globalThis.MessagePort();
+                this.port2 = new globalThis.MessagePort();
+                _PortPaired.set(this.port1, this.port2);
+                _PortPaired.set(this.port2, this.port1);
             }
         };
     }
