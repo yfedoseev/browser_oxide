@@ -345,7 +345,7 @@ These don't move the routed-Pass needle directly but raise per-profile quality +
 | 4 — Canvas toDataURL parity | not started | — | — | — | — |
 | 5 — Wire keystroke generator | not started | — | — | — | — |
 | 6 — Wire two-level seed | not started | — | — | — | — |
-| 7 — Wire performance.timeOrigin | not started | — | — | — | — |
+| 7 — Wire performance.timeOrigin | completed | claude | branch `fix/v0.1.0-fix7-time-origin` @ `3532444` | pending (Fix 12 sweep) | drift 230→0.5 ms; new perf_origin_now_consistency test passes |
 | 8 — MessageChannel + MessagePort | not started | — | — | — | — |
 | 9 — RAF jitter | not started | — | — | — | — |
 | 10 — Vendor-detect markers extension | completed | claude | branch `fix/v0.1.0-fix10-vendor-detect-markers` @ `775bd2a` | n/a (observability) | +9 vendor header markers, +11 body markers; +0 regressions |
