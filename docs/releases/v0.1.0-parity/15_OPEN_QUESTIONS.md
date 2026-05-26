@@ -183,6 +183,30 @@ iPhone 98 Pass, pixel 102. iPhone has 11 CHL vs pixel's 6. Some WAFs treat iOS S
 
 Both 6-8 KB SSR shells. Not investigated past hypothesis. Need capture + diff vs Camoufox (`04_TOOLING_SPEC.md`).
 
+## v0.1.0-parity Fix-list residuals (2026-05-26)
+
+Nine of the twelve EXECUTION_PLAN.md fixes landed in-session (pre-flight + Fixes 1, 3, 5, 6, 7, 8, 9, 10, 11) on stacked branches under `fix/v0.1.0-fixN-*`. The remaining three are blocked on out-of-session infrastructure:
+
+### R-FIX-2 — WebGL per-profile golden snapshot needs real-Chrome captures
+
+EXECUTION_PLAN.md Fix 2 step 1: "Capture real Chrome 148 macOS WebGL output via Playwright + CDP". The capture requires a working Playwright install pointing at real Chrome 148 (per 4 profiles: chrome_148_macos, chrome_148_windows, iphone_15_pro_safari_18, firefox_135_macos). Not runnable in this session — no Playwright/Chrome on the box; outputs would be needed under `crates/browser/tests/captures/`. **Owner action:** run the capture, commit the four JSON snapshots, then the engine-side `webgl_param_golden_snapshot` test + any `webgl_ext.rs` fixes are mechanical.
+
+### R-FIX-4 — Canvas toDataURL parity needs real-Chrome captures
+
+EXECUTION_PLAN.md Fix 4 step 1: "Capture real Chrome 148 canvas output for the FingerprintJS + browserleaks + thumbmarkjs standard draw sequences". Same external dependency as R-FIX-2. Once `crates/browser/tests/captures/canvas_chrome_148.json` exists, the `canvas_todataurl_parity` test + per-divergence fixes in `crates/canvas/` are mechanical.
+
+### R-FIX-12 — 3-run aggregated baseline + acceptance gate
+
+EXECUTION_PLAN.md Fix 12 needs ~12 h sweep wall-clock (3 runs × 4 profiles × 126 sites in pool mode). Cannot run in-session for time + the need to merge Fixes 1, 3, 5-11 to a single branch before sweeping. **Suggested next steps**:
+  1. Cherry-pick / merge all `fix/v0.1.0-fixN-*` branches onto a single `release/v0.1.0-parity` branch.
+  2. Run the sweep command listed in EXECUTION_PLAN.md Fix 12.
+  3. Aggregate per 14_TESTING_VALIDATION.md §L5; compare to the 2026-05-24 internal baseline.
+  4. If median routed best-of-4 ≥ 115: tag `v0.1.0-parity-rc1`. If 113-114: tag `v0.1.0-parity`.
+
+### R-FIX-pre — Pre-flight HEAD breakage at `385d70a`
+
+main HEAD was not gate-green when the v0.1.0 work started: (a) 7 test compile errors from a missed `chrome_130_*` → `chrome_148_*` rename in `c3ec0ed`; (b) 14 clippy `-D warnings` errors (redundant imports, unused mut, dead code, etc. in `page.rs` + 2 unused doc comments in `fetch_ext.rs`); (c) fmt drift across 10+ files. All fixed mechanically on branch `fix/pre-flight-head` @ `2a373e2`. The single remaining test failure (`humanize_mouse_intervals_are_right_skewed`) pre-existed at HEAD and is the Σ-Λ signal Fixes 5/6/9 are designed to flip — verify post-Fix-12 sweep.
+
 ## Resolved questions (for posterity)
 
 ### RES-1 — Was the "121 → 108" a real regression?
