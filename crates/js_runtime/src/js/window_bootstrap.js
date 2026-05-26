@@ -2605,7 +2605,21 @@
     // broadband.
     // =========================================================
     if (globalThis.performance) {
-        const _perfOrigin = Date.now();
+        // v0.1.0-parity Fix 7: anchor performance.timeOrigin to the
+        // Rust-side PerfState origin (wall-clock at the moment t=0 was
+        // captured for op_perf_now_humanized). This preserves the Web
+        // Platform invariant `timeOrigin + performance.now() ≈ Date.now()`
+        // that Kasada's origin-skew probe checks. Pre-fix the local
+        // `Date.now() - loadEventEnd` computation drifted out of sync with
+        // the Rust monotonic clock.
+        const _perfOrigin = (() => {
+            try {
+                const v = ops && ops.op_perf_time_origin_ms
+                    && ops.op_perf_time_origin_ms();
+                if (typeof v === 'number' && isFinite(v) && v > 0) return v;
+            } catch (e) {}
+            return Date.now();
+        })();
         // Navigation timing constants (relative to the navigation start)
         const _perfNav = {
             name: globalThis.location?.href || "about:blank",
@@ -2840,7 +2854,24 @@
             }
             return timing;
         });
-        _defProtoGetter(_PerfProto, 'timeOrigin', () => _perfTimingStart);
+        // v0.1.0-parity Fix 7: timeOrigin is the modern HRT epoch (t=0
+        // for performance.now()), NOT the legacy navigationStart
+        // (`_perfTimingStart`, which trails by ~loadEventEnd ms to
+        // synthesize a plausible navigation timeline). The Web Platform
+        // invariant `timeOrigin + performance.now() ≈ Date.now()` is
+        // probed by Kasada and others — only the live wall-clock at the
+        // PerfState origin (per-page; the snapshot-captured `_perfOrigin`
+        // is stale because the bootstrap runs at snapshot-build time)
+        // satisfies it. Read the op on every access — cheap (returns a
+        // stored f64) and keeps the invariant on the per-page PerfState.
+        _defProtoGetter(_PerfProto, 'timeOrigin', () => {
+            try {
+                const v = ops && ops.op_perf_time_origin_ms
+                    && ops.op_perf_time_origin_ms();
+                if (typeof v === 'number' && isFinite(v) && v > 0) return v;
+            } catch (e) {}
+            return _perfOrigin;
+        });
         _defProtoGetter(_PerfProto, 'navigation', () => _perfNavigation);
         _defProtoGetter(_PerfProto, 'onresourcetimingbufferfull', () => null);
 
@@ -2911,7 +2942,15 @@
         });
         _defProtoMethod(_PerfProto, 'setResourceTimingBufferSize', function setResourceTimingBufferSize() {});
         _defProtoMethod(_PerfProto, 'toJSON', function toJSON() {
-            return { timeOrigin: _perfTimingStart };
+            // v0.1.0-parity Fix 7: read live via the op so a snapshot-
+            // hosted value doesn't leak.
+            let to = _perfOrigin;
+            try {
+                const v = ops && ops.op_perf_time_origin_ms
+                    && ops.op_perf_time_origin_ms();
+                if (typeof v === 'number' && isFinite(v) && v > 0) to = v;
+            } catch (e) {}
+            return { timeOrigin: to };
         });
 
         if (_origNow) {

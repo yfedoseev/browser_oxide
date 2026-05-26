@@ -5688,6 +5688,41 @@ async fn native_code_mask_audit() {
 }
 
 // ================================================================
+// v0.1.0-parity Fix 7 — performance.timeOrigin consistency
+// Per EXECUTION_PLAN.md + 40_TIMING_BEHAVIORAL.md §2.6: Kasada's
+// origin-skew probe checks `Math.abs((performance.timeOrigin +
+// performance.now()) - Date.now()) < small`. Engine pre-fix anchored
+// timeOrigin via a Date.now() snapshot at bootstrap minus a hardcoded
+// nav offset → ~516ms drift from the Rust-side `performance.now()`
+// monotonic origin. Fix 7 exposes `op_perf_time_origin_ms` (wall-clock
+// at Rust origin) and sets timeOrigin from it.
+// ================================================================
+
+#[tokio::test]
+async fn perf_origin_now_consistency() {
+    let result = check(
+        r#"
+        const to = performance.timeOrigin;
+        const nv = performance.now();
+        const dn = Date.now();
+        JSON.stringify({to, nv, dn, drift: to + nv - dn})
+        "#,
+    )
+    .await;
+    let v: serde_json::Value =
+        serde_json::from_str(&result).unwrap_or_else(|e| panic!("json: {e}; raw={result}"));
+    let drift = v["drift"].as_f64().unwrap_or(f64::INFINITY);
+    eprintln!("perf-origin probe: {v}");
+    // Per EXECUTION_PLAN.md Fix 7 spec: <10 ms. Humanization adds
+    // 0-35µs of typical jitter + a rare ≤1.5ms spike, plus a few µs of
+    // op-overhead — comfortably under 10ms.
+    assert!(
+        drift.abs() < 10.0,
+        "timeOrigin + now() vs Date.now() drift = {drift} ms (>= 10 ms threshold). raw={v}"
+    );
+}
+
+// ================================================================
 // v0.1.0-parity Fix 11 — HTMLFormElement.prototype.elements
 // Per EXECUTION_PLAN.md + 17_WEB_API_PARITY_MATRIX.md §2 +
 // 05_SPA_HYDRATION_CLUSTER.md: reddit's verify-page solver calls

@@ -29,6 +29,14 @@ pub struct PerfState {
     /// Process-relative origin; `performance.now()` returns ms since this
     /// instant (matches DOM HighResolutionTime contract for the document).
     origin: Instant,
+    /// Wall-clock (UNIX epoch ms) corresponding to `origin`. Read by
+    /// `op_perf_time_origin_ms` so JS `performance.timeOrigin` honors the
+    /// invariant `timeOrigin + performance.now() ≈ Date.now()` — without
+    /// this, Kasada's origin-skew probe (`performance.timeOrigin +
+    /// performance.now() vs Date.now()`) catches the JS-side ad-hoc
+    /// computation that used `Date.now() - <hardcoded nav_end>` as a
+    /// stand-in. v0.1.0-parity Fix 7.
+    origin_unix_ms: f64,
     rng: StdRng,
     log_normal: LogNormal<f64>,
     spike_exp: Exp<f64>,
@@ -43,8 +51,13 @@ impl PerfState {
         Self::with_seed(0xCAFEF00DDEADBEEF)
     }
     pub fn with_seed(seed: u64) -> Self {
+        let origin_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64() * 1000.0)
+            .unwrap_or(0.0);
         Self {
             origin: Instant::now(),
+            origin_unix_ms,
             rng: StdRng::seed_from_u64(seed),
             // μ=ln(8 µs) ≈ 2.079
             log_normal: LogNormal::new(2.079_441_541_679_835, 0.4).expect("valid lognormal"),
@@ -84,6 +97,15 @@ impl Default for PerfState {
 #[op2(fast)]
 pub fn op_perf_now_humanized(#[state] s: &mut PerfState) -> f64 {
     s.now_ms()
+}
+
+/// Returns the UNIX-epoch ms corresponding to `PerfState.origin` (the
+/// process-relative t=0 for `performance.now()`). JS uses this as the
+/// `performance.timeOrigin` value so the standard Web Platform invariant
+/// `timeOrigin + performance.now() ≈ Date.now()` holds. v0.1.0-parity Fix 7.
+#[op2(fast)]
+pub fn op_perf_time_origin_ms(#[state] s: &PerfState) -> f64 {
+    s.origin_unix_ms
 }
 
 #[derive(serde::Serialize)]
@@ -135,7 +157,11 @@ pub fn op_perf_get_resource_timings(#[state] state: &DomState) -> Vec<JsResource
 
 deno_core::extension!(
     perf_extension,
-    ops = [op_perf_now_humanized, op_perf_get_resource_timings],
+    ops = [
+        op_perf_now_humanized,
+        op_perf_get_resource_timings,
+        op_perf_time_origin_ms,
+    ],
 );
 
 #[cfg(test)]
