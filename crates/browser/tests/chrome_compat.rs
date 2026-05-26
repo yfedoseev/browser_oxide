@@ -5686,3 +5686,63 @@ async fn native_code_mask_audit() {
         );
     }
 }
+
+// ================================================================
+// v0.1.0-parity Fix 11 — HTMLFormElement.prototype.elements
+// Per EXECUTION_PLAN.md + 17_WEB_API_PARITY_MATRIX.md §2 +
+// 05_SPA_HYDRATION_CLUSTER.md: reddit's verify-page solver calls
+// `form.elements.namedItem('solution').value = token`. Without the
+// `elements` getter that throws TypeError → silently caught at
+// page.rs:3406 → __pendingNavigation never set → iter=0 stub return.
+// ================================================================
+
+#[tokio::test]
+async fn form_elements_collection() {
+    let body = r#"
+        <form id="f">
+            <input type="hidden" name="solution" value="">
+            <input type="text" name="user">
+            <input type="submit" value="Go">
+            <select name="kind"><option value="a">A</option></select>
+            <textarea name="notes"></textarea>
+            <button type="button" id="btn">Click</button>
+        </form>
+    "#;
+    let mut page = Page::from_html(&html(body), None::<stealth::StealthProfile>)
+        .await
+        .unwrap();
+    let js = r#"
+        (() => {
+            const form = document.forms[0] || document.getElementById('f');
+            if (!form) return JSON.stringify({err: 'no form'});
+            const els = form.elements;
+            if (!els) return JSON.stringify({err: 'no elements getter'});
+            const sol = els.namedItem('solution');
+            const usr = els.namedItem('user');
+            const item0 = els.item(0);
+            let iterCount = 0;
+            try { for (const _ of els) iterCount++; } catch (e) {}
+            return JSON.stringify({
+                length: els.length,
+                solName: sol && sol.name,
+                solTag: sol && sol.tagName,
+                usrName: usr && usr.name,
+                item0Tag: item0 && item0.tagName,
+                iterCount,
+                missing: els.namedItem('nope'),
+            });
+        })()
+    "#;
+    let result = page
+        .evaluate(js)
+        .unwrap_or_else(|e| panic!("evaluate: {e}"));
+    let v: serde_json::Value =
+        serde_json::from_str(&result).unwrap_or_else(|e| panic!("json: {e}; raw={result}"));
+    assert_eq!(v["solName"], "solution", "namedItem('solution') wrong");
+    assert_eq!(v["solTag"], "INPUT", "tagName wrong");
+    assert_eq!(v["usrName"], "user");
+    assert!(v["length"].as_u64().unwrap() >= 5, "length < 5: {result}");
+    assert!(v["item0Tag"].as_str().is_some(), "item(0) failed");
+    assert!(v["iterCount"].as_u64().unwrap() >= 5, "iteration count low");
+    assert!(v["missing"].is_null(), "namedItem('nope') should be null");
+}

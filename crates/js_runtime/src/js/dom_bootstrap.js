@@ -1148,6 +1148,69 @@
     _reflectStr(HTMLFormElement.prototype, 'name');
     _reflectBool(HTMLFormElement.prototype, 'noValidate', 'novalidate');
 
+    // HTMLFormElement.prototype.elements — live HTMLFormControlsCollection
+    // of the form's listed elements (HTML spec §6.4.3: button, fieldset,
+    // input, object, output, select, textarea). Reddit's verify-page solver
+    // calls `form.elements.namedItem('solution').value = token`; without
+    // this getter that throws TypeError, the SPA's pendingNavigation is
+    // never set, and the page returns iter=0 with the challenge stub.
+    // v0.1.0-parity Fix 11 per EXECUTION_PLAN.md.
+    Object.defineProperty(HTMLFormElement.prototype, 'elements', {
+        get() {
+            const form = this;
+            const controls = form.querySelectorAll(
+                'button, fieldset, input, object, output, select, textarea',
+            );
+            const len = controls.length;
+            const ctor = globalThis.HTMLFormControlsCollection;
+            const wrap = ctor && ctor.prototype
+                ? Object.create(ctor.prototype)
+                : Object.create(null);
+            for (let i = 0; i < len; i++) {
+                Object.defineProperty(wrap, i, {
+                    value: controls[i],
+                    writable: false, configurable: true, enumerable: true,
+                });
+            }
+            Object.defineProperty(wrap, 'length', {
+                value: len,
+                writable: false, configurable: true, enumerable: false,
+            });
+            Object.defineProperty(wrap, 'item', {
+                value: function item(idx) {
+                    idx = Math.trunc(+idx);
+                    return idx >= 0 && idx < len ? wrap[idx] : null;
+                },
+                writable: true, configurable: true, enumerable: false,
+            });
+            Object.defineProperty(wrap, 'namedItem', {
+                value: function namedItem(name) {
+                    if (typeof name !== 'string' || name === '') return null;
+                    const matches = [];
+                    for (let i = 0; i < len; i++) {
+                        const el = controls[i];
+                        if (el.name === name || el.id === name) matches.push(el);
+                    }
+                    if (matches.length === 0) return null;
+                    if (matches.length === 1) return matches[0];
+                    // Spec: multiple → RadioNodeList. Returning an array
+                    // covers reddit's single-name case + iteration.
+                    return matches;
+                },
+                writable: true, configurable: true, enumerable: false,
+            });
+            Object.defineProperty(wrap, Symbol.iterator, {
+                value: function* () {
+                    for (let i = 0; i < len; i++) yield wrap[i];
+                },
+                writable: true, configurable: true, enumerable: false,
+            });
+            return wrap;
+        },
+        configurable: true,
+        enumerable: true,
+    });
+
     class HTMLButtonElement extends HTMLElement {}
     class HTMLSelectElement extends HTMLElement {}
     class HTMLTextAreaElement extends HTMLElement {}
