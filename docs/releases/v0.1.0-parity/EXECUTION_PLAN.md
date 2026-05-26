@@ -346,7 +346,7 @@ These don't move the routed-Pass needle directly but raise per-profile quality +
 | 5 — Wire keystroke generator | completed | claude | branch `fix/v0.1.0-fix5-keystroke-generator` @ `2d7dcf6` | pending (Fix 12 sweep) | rich op + focusin synthesis; new keystroke_schedule test; +0 regressions |
 | 6 — Wire two-level seed | completed | claude | branch `fix/v0.1.0-fix6-two-level-seed` @ `35db6fc` | pending (Fix 12 sweep) | 15 Math.random→_rand sites; new behavior_rand test passes; +0 regressions |
 | 7 — Wire performance.timeOrigin | completed | claude | branch `fix/v0.1.0-fix7-time-origin` @ `3532444` | pending (Fix 12 sweep) | drift 230→0.5 ms; new perf_origin_now_consistency test passes |
-| 8 — MessageChannel + MessagePort | not started | — | — | — | — |
+| 8 — MessageChannel + MessagePort | completed | claude | branch `fix/v0.1.0-fix8-message-channel` @ `f3ea599` | pending (Fix 12 sweep) | paired routing + queue/start/close; 3 new tests; +0 regressions |
 | 9 — RAF jitter | completed | claude | branch `fix/v0.1.0-fix9-raf-jitter` @ `57b4d7a` | pending (Fix 12 sweep) | seeded Gaussian σ=0.5ms over 16.67ms mean, max<33ms; +0 regressions |
 | 10 — Vendor-detect markers extension | completed | claude | branch `fix/v0.1.0-fix10-vendor-detect-markers` @ `775bd2a` | n/a (observability) | +9 vendor header markers, +11 body markers; +0 regressions |
 | 11 — reddit HTMLFormElement.elements | completed | claude | branch `fix/v0.1.0-fix11-form-elements` @ `b74c266` | pending (Fix 12 sweep) | new form_elements_collection test passes; +0 regressions |
