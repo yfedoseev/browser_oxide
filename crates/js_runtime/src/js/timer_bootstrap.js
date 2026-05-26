@@ -144,18 +144,59 @@
     let _rafId = 0;
     const _rafCallbacks = new Map();
 
+    // v0.1.0-parity Fix 9 — RAF cadence jitter (60 Hz target, Gaussian
+    // σ=0.5 ms around 16.67 ms mean, clamped ≥1 ms). A perfect 16 ms
+    // grid is a Kasada-class bot tell — real Chrome's RAF cadence
+    // shows scheduler noise. Sourced from the Fix 6 seeded RNG (the
+    // Symbol-keyed slot installed by stealth_bootstrap) so the cadence
+    // is deterministic per session.
+    const _behaviorRandSym = Symbol.for('__browser_oxide_behavior_rand__');
+    const _rand = globalThis[_behaviorRandSym] || Math.random;
+    let _gaussSpare = null;
+    const _gauss = () => {
+        if (_gaussSpare !== null) {
+            const v = _gaussSpare;
+            _gaussSpare = null;
+            return v;
+        }
+        let u, v, s;
+        do {
+            u = _rand() * 2 - 1;
+            v = _rand() * 2 - 1;
+            s = u * u + v * v;
+        } while (s >= 1 || s === 0);
+        const mul = Math.sqrt(-2 * Math.log(s) / s);
+        _gaussSpare = v * mul;
+        return u * mul;
+    };
+    const _RAF_MEAN_MS = 16.67;
+    const _RAF_SIGMA_MS = 0.5;
+    const _rafDelayMs = () => Math.max(1, _RAF_MEAN_MS + _gauss() * _RAF_SIGMA_MS);
+
+    // Symbol-keyed exposure so chrome_compat.rs raf_cadence_jitter test
+    // can sample the actual delay generator (1000 callbacks ≈ 16 s wall —
+    // too slow to drive via real setTimeout) without triggering RAF.
+    try {
+        const _rafJitterSym = Symbol.for('__browser_oxide_raf_jitter_ms__');
+        Object.defineProperty(globalThis, _rafJitterSym, {
+            value: _rafDelayMs,
+            writable: false, configurable: true, enumerable: false,
+        });
+    } catch (e) {}
+
     globalThis.requestAnimationFrame = function requestAnimationFrame(callback) {
         const id = ++_rafId;
         _rafCallbacks.set(id, callback);
-        // Fire at ~16ms (60fps) via real timer, not microtask.
-        // Anti-bot systems (Kasada) measure rAF timing and flag instant firing.
+        // Fire near 60 Hz via real timer, not microtask. Anti-bot
+        // systems (Kasada `set(diffs).size === 1` probe) measure RAF
+        // timing and flag perfect-grid cadence.
         setTimeout(() => {
             const cb = _rafCallbacks.get(id);
             if (cb) {
                 _rafCallbacks.delete(id);
                 cb(performance.now());
             }
-        }, 16);
+        }, _rafDelayMs());
         return id;
     };
 

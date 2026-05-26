@@ -5726,6 +5726,52 @@ async fn behavior_rand_slot_installed_and_in_unit_range() {
 }
 
 // ================================================================
+// v0.1.0-parity Fix 9 — RAF cadence jitter
+// Per EXECUTION_PLAN.md + 40_TIMING_BEHAVIORAL.md §2.3: real Chrome's
+// requestAnimationFrame cadence shows scheduler noise around the 60Hz
+// step (mean ≈ 16.67 ms, σ ≈ 0.5 ms). A perfect 16ms grid (engine
+// pre-fix) is Kasada's `set(diffs).size === 1` bot tell. Symbol-keyed
+// `__browser_oxide_raf_jitter_ms__` exposes the delay sampler so we
+// can pull 1000 samples without 16 s wall clock.
+// ================================================================
+
+#[tokio::test]
+async fn raf_cadence_jitter() {
+    let result = check(
+        r#"
+        (() => {
+            const fn = globalThis[Symbol.for('__browser_oxide_raf_jitter_ms__')];
+            if (typeof fn !== 'function') return JSON.stringify({err: 'sampler missing'});
+            const n = 1000;
+            const xs = new Array(n);
+            for (let i = 0; i < n; i++) xs[i] = fn();
+            const mean = xs.reduce((a,b) => a + b, 0) / n;
+            const variance = xs.reduce((a,b) => a + (b - mean) ** 2, 0) / n;
+            const stddev = Math.sqrt(variance);
+            let mn = Infinity, mx = -Infinity;
+            for (const v of xs) { if (v < mn) mn = v; if (v > mx) mx = v; }
+            return JSON.stringify({mean, stddev, min: mn, max: mx, n});
+        })()
+        "#,
+    )
+    .await;
+    let v: serde_json::Value =
+        serde_json::from_str(&result).unwrap_or_else(|e| panic!("json: {e}; raw={result}"));
+    let mean = v["mean"].as_f64().unwrap();
+    let stddev = v["stddev"].as_f64().unwrap();
+    let max = v["max"].as_f64().unwrap();
+    let min = v["min"].as_f64().unwrap();
+    // Spec from EXECUTION_PLAN.md Fix 9.
+    assert!(
+        (mean - 16.67).abs() < 0.2,
+        "mean must track 16.67 ± 0.2 ms (got {mean}). raw={v}"
+    );
+    assert!(stddev > 0.2, "stddev too low: {stddev} ms. raw={v}");
+    assert!(max < 33.0, "max ≥ 33 ms (frame skip): {max} ms. raw={v}");
+    assert!(min >= 1.0, "min < 1 ms (clamp broke): {min} ms. raw={v}");
+}
+
+// ================================================================
 // v0.1.0-parity Fix 7 — performance.timeOrigin consistency
 // Per EXECUTION_PLAN.md + 40_TIMING_BEHAVIORAL.md §2.6: Kasada's
 // origin-skew probe checks `Math.abs((performance.timeOrigin +
