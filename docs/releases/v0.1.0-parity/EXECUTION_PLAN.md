@@ -340,7 +340,7 @@ These don't move the routed-Pass needle directly but raise per-profile quality +
 | Fix | Status | Owner | PR | 3-run pass impact | Notes |
 |---:|---|---|---|---|---|
 | 1 — WebGL prototype mask sweep | completed | claude | branch `fix/v0.1.0-fix1-webgl-mask-sweep` @ `06a515e` | pending (Fix 12) | audit 120→0 failures; +0 regressions |
-| 2 — WebGL per-profile snapshot | not started | — | — | — | — |
+| 2 — WebGL per-profile snapshot | engine-side complete; real-Chrome capture pending (R-FIX-2) | claude | branch `fix/v0.1.0-fix2-webgl-snapshot` @ `0b3cc22` | pending (Fix 12 sweep) | 3 new tests anchored on gpu_profile; surfaced preset/catalog drift bug |
 | 3 — Function.toString mass sweep | completed | claude | branch `fix/v0.1.0-fix3-function-tostring-mass` @ `51c8c75` | pending (Fix 12) | audit 270→0 across 67 prototypes; +0 regressions |
 | 4 — Canvas toDataURL parity | not started | — | — | — | — |
 | 5 — Wire keystroke generator | completed | claude | branch `fix/v0.1.0-fix5-keystroke-generator` @ `2d7dcf6` | pending (Fix 12 sweep) | rich op + focusin synthesis; new keystroke_schedule test; +0 regressions |
