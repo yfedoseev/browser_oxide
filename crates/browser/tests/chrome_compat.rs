@@ -5688,6 +5688,84 @@ async fn native_code_mask_audit() {
 }
 
 // ================================================================
+// v0.1.0-parity Fix 2 — WebGL per-profile golden snapshot (engine side)
+// Per EXECUTION_PLAN.md + 38_VISUAL_AUDIO_FINGERPRINTING.md §5.5:
+// each stealth profile must produce a CONSISTENT WebGL parameter set
+// matching its declared preset values. The comparison against captured
+// real-Chrome output is a separate test deferred to when
+// `crates/browser/tests/captures/*.webgl.json` is committed
+// (R-FIX-2 in 15_OPEN_QUESTIONS.md). This engine-side test catches
+// drift between the preset declaration and what `getParameter`
+// actually emits — a necessary precondition for the real-Chrome
+// comparison.
+// ================================================================
+
+async fn webgl_unmasked_for(profile: stealth::StealthProfile) -> serde_json::Value {
+    let mut page = Page::from_html(
+        "<!DOCTYPE html><html><head></head><body><canvas id='c'></canvas></body></html>",
+        Some(profile),
+    )
+    .await
+    .unwrap();
+    let result = page
+        .evaluate(
+            r#"(() => {
+                const c = document.getElementById('c');
+                const gl = c.getContext('webgl');
+                if (!gl) return JSON.stringify({err: 'no gl'});
+                return JSON.stringify({
+                    vendor: gl.getParameter(0x1F00),
+                    renderer: gl.getParameter(0x1F01),
+                    unmaskedVendor: gl.getParameter(0x9245),
+                    unmaskedRenderer: gl.getParameter(0x9246),
+                });
+            })()"#,
+        )
+        .unwrap();
+    serde_json::from_str(&result).unwrap_or_else(|e| panic!("json: {e}; raw={result}"))
+}
+
+// The engine reads from `gpu_profile.unmasked_*` (not `webgl_*`),
+// per canvas_bootstrap.js:409 (`s("webgl_unmasked_renderer")`).
+// Anchor the golden on `gpu_profile` to test what's actually emitted.
+// NOTE: A real-Chrome capture comparison (R-FIX-2 in
+// 15_OPEN_QUESTIONS.md) verifies the gpu_profile values themselves
+// match a real GPU — that step is deferred until captures land.
+
+#[tokio::test]
+async fn webgl_param_golden_snapshot_chrome_148_macos() {
+    let profile = stealth::presets::chrome_148_macos();
+    let want_v = profile.gpu_profile.unmasked_vendor.clone();
+    let want_r = profile.gpu_profile.unmasked_renderer.clone();
+    let v = webgl_unmasked_for(profile).await;
+    assert_eq!(v["unmaskedVendor"], want_v, "UNMASKED_VENDOR drift: {v}");
+    assert_eq!(
+        v["unmaskedRenderer"], want_r,
+        "UNMASKED_RENDERER drift: {v}"
+    );
+}
+
+#[tokio::test]
+async fn webgl_param_golden_snapshot_chrome_148_windows() {
+    let profile = stealth::presets::chrome_148_windows();
+    let want_v = profile.gpu_profile.unmasked_vendor.clone();
+    let want_r = profile.gpu_profile.unmasked_renderer.clone();
+    let v = webgl_unmasked_for(profile).await;
+    assert_eq!(v["unmaskedVendor"], want_v, "drift: {v}");
+    assert_eq!(v["unmaskedRenderer"], want_r, "drift: {v}");
+}
+
+#[tokio::test]
+async fn webgl_param_golden_snapshot_chrome_148_linux() {
+    let profile = stealth::presets::chrome_148_linux();
+    let want_v = profile.gpu_profile.unmasked_vendor.clone();
+    let want_r = profile.gpu_profile.unmasked_renderer.clone();
+    let v = webgl_unmasked_for(profile).await;
+    assert_eq!(v["unmaskedVendor"], want_v, "drift: {v}");
+    assert_eq!(v["unmaskedRenderer"], want_r, "drift: {v}");
+}
+
+// ================================================================
 // v0.1.0-parity Fix 5 — keystroke generator wiring
 // Per EXECUTION_PLAN.md + 40_TIMING_BEHAVIORAL.md §3.2 + 26_AKAMAI_BMP_DEEP.md §3:
 // the Rust CMU+Buffalo bigram-modulated keystroke generator existed
