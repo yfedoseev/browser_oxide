@@ -343,7 +343,7 @@ These don't move the routed-Pass needle directly but raise per-profile quality +
 | 2 — WebGL per-profile snapshot | not started | — | — | — | — |
 | 3 — Function.toString mass sweep | completed | claude | branch `fix/v0.1.0-fix3-function-tostring-mass` @ `51c8c75` | pending (Fix 12) | audit 270→0 across 67 prototypes; +0 regressions |
 | 4 — Canvas toDataURL parity | not started | — | — | — | — |
-| 5 — Wire keystroke generator | not started | — | — | — | — |
+| 5 — Wire keystroke generator | completed | claude | branch `fix/v0.1.0-fix5-keystroke-generator` @ `2d7dcf6` | pending (Fix 12 sweep) | rich op + focusin synthesis; new keystroke_schedule test; +0 regressions |
 | 6 — Wire two-level seed | completed | claude | branch `fix/v0.1.0-fix6-two-level-seed` @ `35db6fc` | pending (Fix 12 sweep) | 15 Math.random→_rand sites; new behavior_rand test passes; +0 regressions |
 | 7 — Wire performance.timeOrigin | completed | claude | branch `fix/v0.1.0-fix7-time-origin` @ `3532444` | pending (Fix 12 sweep) | drift 230→0.5 ms; new perf_origin_now_consistency test passes |
 | 8 — MessageChannel + MessagePort | not started | — | — | — | — |
