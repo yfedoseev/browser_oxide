@@ -339,7 +339,7 @@ These don't move the routed-Pass needle directly but raise per-profile quality +
 
 | Fix | Status | Owner | PR | 3-run pass impact | Notes |
 |---:|---|---|---|---|---|
-| 1 — WebGL prototype mask sweep | not started | — | — | — | — |
+| 1 — WebGL prototype mask sweep | completed | claude | branch `fix/v0.1.0-fix1-webgl-mask-sweep` @ `06a515e` | pending (Fix 12) | audit 120→0 failures; +0 regressions |
 | 2 — WebGL per-profile snapshot | not started | — | — | — | — |
 | 3 — Function.toString mass sweep | not started | — | — | — | — |
 | 4 — Canvas toDataURL parity | not started | — | — | — | — |
