@@ -123,6 +123,64 @@ pub fn op_human_typing_delays(#[string] text: &str, #[smi] base_wpm: i32) -> Vec
 }
 
 #[derive(Serialize)]
+pub struct KeystrokeSlot {
+    /// Printable key (e.g. "a", "A", "1", " ").
+    pub key: String,
+    /// W3C UI Events `KeyboardEvent.code` (e.g. "KeyA", "Digit1", "Space").
+    pub code: String,
+    /// Cumulative ms from schedule start when `keydown` should fire.
+    pub down_ms: f64,
+    /// Cumulative ms from schedule start when `keyup` should fire.
+    pub up_ms: f64,
+}
+
+fn char_to_code(c: char) -> String {
+    match c {
+        'a'..='z' | 'A'..='Z' => format!("Key{}", c.to_ascii_uppercase()),
+        '0'..='9' => format!("Digit{c}"),
+        ' ' => "Space".to_string(),
+        '\n' => "Enter".to_string(),
+        '\t' => "Tab".to_string(),
+        _ => "Unidentified".to_string(),
+    }
+}
+
+/// Rich keystroke schedule for `text`: per-char `keydown` + `keyup`
+/// timings as cumulative ms from start. Powered by the same
+/// `stealth::behavior::keystroke_timings` (CMU + Buffalo bigram-aware
+/// LogNormal) but exposes the dwell/flight split so JS can dispatch
+/// real `KeyboardEvent`s at the right wall-clock offsets — wiring the
+/// generator that already exists but had no consumer
+/// (40_TIMING_BEHAVIORAL.md §3.2 wiring gap). v0.1.0-parity Fix 5.
+#[op2]
+#[serde]
+pub fn op_human_keystroke_schedule(
+    #[string] text: &str,
+    #[smi] base_wpm: i32,
+) -> Vec<KeystrokeSlot> {
+    let mut profile = BehaviorProfile::default();
+    if base_wpm > 0 {
+        profile.typing_wpm_mean = base_wpm as f32;
+    }
+    let timings = stealth::behavior::keystroke_timings(text, &profile);
+    let mut acc = 0.0_f64;
+    let mut out = Vec::with_capacity(timings.len());
+    for k in timings {
+        acc += k.flight_ms as f64;
+        let down = acc;
+        let up = acc + k.dwell_ms as f64;
+        acc = up;
+        out.push(KeystrokeSlot {
+            key: k.ch.to_string(),
+            code: char_to_code(k.ch),
+            down_ms: down,
+            up_ms: up,
+        });
+    }
+    out
+}
+
+#[derive(Serialize)]
 pub struct MousePoint {
     pub x: f64,
     pub y: f64,
@@ -134,6 +192,7 @@ deno_core::extension!(
     ops = [
         op_human_mouse_path,
         op_human_typing_delays,
+        op_human_keystroke_schedule,
         op_behavior_random
     ],
 );

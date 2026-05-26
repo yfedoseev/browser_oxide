@@ -5688,6 +5688,56 @@ async fn native_code_mask_audit() {
 }
 
 // ================================================================
+// v0.1.0-parity Fix 5 — keystroke generator wiring
+// Per EXECUTION_PLAN.md + 40_TIMING_BEHAVIORAL.md §3.2 + 26_AKAMAI_BMP_DEEP.md §3:
+// the Rust CMU+Buffalo bigram-modulated keystroke generator existed
+// (behavior.rs:421-464) but humanize.js never called it. Fix 5 exposes
+// it via `Symbol.for('__browser_oxide_keystroke_schedule__')` and
+// humanize.js consumes it on input focusin.
+// ================================================================
+
+#[tokio::test]
+async fn keystroke_schedule_slot_installed_and_monotonic() {
+    let result = check(
+        r#"
+        (() => {
+            const fn = globalThis[Symbol.for('__browser_oxide_keystroke_schedule__')];
+            if (typeof fn !== 'function') return JSON.stringify({err: 'slot missing'});
+            const sch = fn('abc', 50);
+            if (!Array.isArray(sch) || sch.length === 0) return JSON.stringify({err: 'empty schedule', sch});
+            let monotonic = true;
+            let prevUp = 0;
+            for (const s of sch) {
+                if (!(s.down_ms >= prevUp - 0.0001 && s.up_ms > s.down_ms)) monotonic = false;
+                prevUp = s.up_ms;
+            }
+            return JSON.stringify({
+                length: sch.length,
+                first: sch[0],
+                last: sch[sch.length - 1],
+                monotonic,
+                codes: sch.map(s => s.code),
+            });
+        })()
+        "#,
+    )
+    .await;
+    let v: serde_json::Value =
+        serde_json::from_str(&result).unwrap_or_else(|e| panic!("json: {e}; raw={result}"));
+    assert_eq!(
+        v["length"].as_u64().unwrap(),
+        3,
+        "expected 3 entries: {result}"
+    );
+    assert_eq!(v["monotonic"], true, "schedule not monotonic: {result}");
+    assert_eq!(v["codes"][0], "KeyA");
+    assert_eq!(v["codes"][1], "KeyB");
+    assert_eq!(v["codes"][2], "KeyC");
+    let first_down = v["first"]["down_ms"].as_f64().unwrap();
+    assert!(first_down >= 0.0, "first down_ms must be ≥ 0: {first_down}");
+}
+
+// ================================================================
 // v0.1.0-parity Fix 6 — seeded random wired through Symbol-keyed slot
 // Per EXECUTION_PLAN.md + 40_TIMING_BEHAVIORAL.md §5: humanize.js was
 // using `Math.random()` per-page, making different visits look like

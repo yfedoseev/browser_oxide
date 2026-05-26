@@ -130,6 +130,27 @@
         }
     } catch (_e) {}
 
+    // v0.1.0-parity Fix 5 — expose CMU+Buffalo keystroke-schedule
+    // generator under a Symbol-keyed slot. humanize.js calls it on
+    // input focus to synthesize plausible per-char timings (LogNormal
+    // dwell + bigram-modulated flight). The Rust generator existed at
+    // crates/stealth/src/behavior.rs but had no JS consumer; this is
+    // the wiring (40_TIMING_BEHAVIORAL.md §3.2).
+    try {
+        const _ksOp = Deno && Deno.core && Deno.core.ops
+            && Deno.core.ops.op_human_keystroke_schedule;
+        if (typeof _ksOp === 'function') {
+            const _sym = Symbol.for('__browser_oxide_keystroke_schedule__');
+            Object.defineProperty(globalThis, _sym, {
+                value: function (text, wpm) {
+                    try { return _ksOp(text || '', (wpm | 0) || 0); }
+                    catch (_e) { return []; }
+                },
+                writable: false, configurable: true, enumerable: false,
+            });
+        }
+    } catch (_e) {}
+
     // BotD `eval_length.ts` detector: `eval.toString().length === 33` for Chromium.
     // V8 natively produces "function eval() { [native code] }" (33 chars), so this
     // is usually a no-op. We tag `eval` defensively so any V8 build drift is

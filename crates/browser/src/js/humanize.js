@@ -107,6 +107,52 @@
         target.dispatchEvent(event);
     }
 
+    // v0.1.0-parity Fix 5 — keystroke generator wiring. On the first
+    // focusin event for an input/textarea, synthesize a short typing
+    // burst using the Rust-side CMU+Buffalo bigram-modulated LogNormal
+    // schedule (40_TIMING_BEHAVIORAL.md §3.2). Populates _akRecKey for
+    // the Akamai sensor_data behavioral tap. Single-shot per element
+    // (avoid flooding pages that re-focus a field many times).
+    const _ksFn = globalThis[Symbol.for('__browser_oxide_keystroke_schedule__')];
+    if (typeof _ksFn === 'function') {
+        const _typedSym = Symbol.for('__browser_oxide_humanize_typed__');
+        document.addEventListener('focusin', function (e) {
+            try {
+                const t = e && e.target;
+                if (!t) return;
+                const tag = t.tagName;
+                if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+                if (t[_typedSym]) return;
+                t[_typedSym] = true;
+                // Short token — enough to populate the buffer with a
+                // plausible-shape sample, not enough to leak into the
+                // page's own input listeners on benign forms.
+                const schedule = _ksFn('hi', 50);
+                for (const slot of schedule) {
+                    const key = slot.key, code = slot.code;
+                    _sched(function () {
+                        try {
+                            const ev = new KeyboardEvent('keydown', {
+                                key, code, bubbles: true, cancelable: true,
+                            });
+                            _dispatch(t, ev);
+                            _akRecKey(code, 0);
+                        } catch (_) {}
+                    }, slot.down_ms | 0);
+                    _sched(function () {
+                        try {
+                            const ev = new KeyboardEvent('keyup', {
+                                key, code, bubbles: true, cancelable: true,
+                            });
+                            _dispatch(t, ev);
+                            _akRecKey(code, 1);
+                        } catch (_) {}
+                    }, slot.up_ms | 0);
+                }
+            } catch (_e) {}
+        }, true);
+    }
+
     // Box-Muller pair → standard normal sample. Used to draw lognormal
     // velocity-curve quantiles.
     function _gauss() {
