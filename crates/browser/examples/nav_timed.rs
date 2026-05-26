@@ -21,7 +21,9 @@ use std::time::Instant;
 async fn main() {
     let mut args = std::env::args().skip(1);
     let url = args.next().expect("usage: nav_timed <url> [profile]");
-    let profile_name = args.next().unwrap_or_else(|| "chrome_148_macos".to_string());
+    let profile_name = args
+        .next()
+        .unwrap_or_else(|| "chrome_148_macos".to_string());
 
     let profile = match profile_name.as_str() {
         "chrome_148_macos" => stealth::presets::chrome_148_macos(),

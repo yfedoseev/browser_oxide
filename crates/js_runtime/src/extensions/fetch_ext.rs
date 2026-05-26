@@ -1,8 +1,8 @@
 use crate::state::DomState;
 use deno_core::op2;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use url::Url;
 
 /// Per-page sync-fetch chain ceiling. Without this, sites like
@@ -46,22 +46,22 @@ impl FetchState {
     }
 }
 
-/// Per-thread fetch client, initialized from the stealth profile when a
-/// Page is constructed. Thread-local (not process-global) so concurrent
-/// `ParallelPager` workers don't clobber each other's HttpClient + cookie
-/// jar — each worker owns its own V8 isolate on a dedicated OS thread,
-/// and that's the natural scope for the fetch state too. Before this was
-/// a `OnceLock<HttpClient>`, two parallel workers caused the SECOND
-/// worker's JS `fetch()` to go through the FIRST worker's HttpClient
-/// (with the first site's cookies), which silently corrupted XHR-driven
-/// SPA hydration on yandex / reddit / amazon / zara / yandex-ru / etc.
+// Per-thread fetch client, initialized from the stealth profile when a
+// Page is constructed. Thread-local (not process-global) so concurrent
+// `ParallelPager` workers don't clobber each other's HttpClient + cookie
+// jar — each worker owns its own V8 isolate on a dedicated OS thread,
+// and that's the natural scope for the fetch state too. Before this was
+// a `OnceLock<HttpClient>`, two parallel workers caused the SECOND
+// worker's JS `fetch()` to go through the FIRST worker's HttpClient
+// (with the first site's cookies), which silently corrupted XHR-driven
+// SPA hydration on yandex / reddit / amazon / zara / yandex-ru / etc.
 thread_local! {
     static FETCH_CLIENT: RefCell<Option<net::HttpClient>> = const { RefCell::new(None) };
 }
 
-/// Per-thread active CSP policy + origin. Same thread-local rationale as
-/// FETCH_CLIENT: concurrent parallel workers were overwriting each other,
-/// so worker B's fetches were enforced against worker A's policy.
+// Per-thread active CSP policy + origin. Same thread-local rationale as
+// FETCH_CLIENT: concurrent parallel workers were overwriting each other,
+// so worker B's fetches were enforced against worker A's policy.
 thread_local! {
     static ACTIVE_CSP: RefCell<Option<ActiveCsp>> = const { RefCell::new(None) };
 }
@@ -264,7 +264,9 @@ pub async fn op_fetch(
     // origin here, but adblock's first-party rules degrade gracefully.
     let request_type = net::blocker::classify_request_type(
         &url,
-        headers.get("x-browser-oxide-request-type").map(|s| s.as_str()),
+        headers
+            .get("x-browser-oxide-request-type")
+            .map(|s| s.as_str()),
     );
     if net::blocker::should_block(&url, "", request_type) {
         return Ok(FetchResponse {

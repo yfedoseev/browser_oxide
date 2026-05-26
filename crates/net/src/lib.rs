@@ -149,7 +149,10 @@ pub fn shared_session() -> SharedSession {
             let initial_jar = if let Ok(path) = std::env::var("BROWSER_OXIDE_COOKIE_JAR") {
                 match CookieJar::load_from_file(&std::path::PathBuf::from(&path)) {
                     Ok(j) => {
-                        eprintln!("[cookies] shared session loaded persisted jar from {}", path);
+                        eprintln!(
+                            "[cookies] shared session loaded persisted jar from {}",
+                            path
+                        );
                         j
                     }
                     Err(e) => {

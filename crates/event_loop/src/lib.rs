@@ -90,7 +90,10 @@ fn dump_profile(label: &str, rows: &[TickRow], total: Duration, reason: IdleReas
     let stderr = std::io::stderr();
     let mut w = stderr.lock();
 
-    let _ = writeln!(w, "\n========== BROWSER_OXIDE EVENT-LOOP PROFILE ==========");
+    let _ = writeln!(
+        w,
+        "\n========== BROWSER_OXIDE EVENT-LOOP PROFILE =========="
+    );
     let _ = writeln!(w, "label              : {}", label);
     let _ = writeln!(w, "reason             : {:?}", reason);
     let _ = writeln!(w, "total wall (ms)    : {}", total.as_millis());

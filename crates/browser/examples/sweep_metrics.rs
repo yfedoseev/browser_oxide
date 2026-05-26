@@ -85,7 +85,9 @@ fn self_rss_mb() -> f64 {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let mut args = std::env::args().skip(1);
-    let profile_name = args.next().expect("usage: sweep_metrics <profile> <corpus.json> <out.json>");
+    let profile_name = args
+        .next()
+        .expect("usage: sweep_metrics <profile> <corpus.json> <out.json>");
     let corpus_path = args.next().expect("missing corpus.json");
     let out_path = args.next().expect("missing out.json");
 
@@ -102,8 +104,7 @@ async fn main() {
     let mode = if use_pool { "pool" } else { "cold" }.to_string();
 
     let corpus_bytes = fs::read(&corpus_path).expect("read corpus");
-    let corpus: Vec<Site> =
-        serde_json::from_slice(&corpus_bytes).expect("parse corpus");
+    let corpus: Vec<Site> = serde_json::from_slice(&corpus_bytes).expect("parse corpus");
     let total = corpus.len();
 
     let local = tokio::task::LocalSet::new();

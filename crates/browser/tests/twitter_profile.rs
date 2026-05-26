@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 #[tokio::test]
 #[ignore]
 async fn profile_twitter() {
-    let url = std::env::var("BROWSER_OXIDE_TARGET").unwrap_or_else(|_| "https://twitter.com/".into());
+    let url =
+        std::env::var("BROWSER_OXIDE_TARGET").unwrap_or_else(|_| "https://twitter.com/".into());
     let profile = stealth::presets::chrome_148_macos();
     let t0 = Instant::now();
     let result =
