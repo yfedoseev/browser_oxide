@@ -341,7 +341,7 @@ These don't move the routed-Pass needle directly but raise per-profile quality +
 |---:|---|---|---|---|---|
 | 1 — WebGL prototype mask sweep | completed | claude | branch `fix/v0.1.0-fix1-webgl-mask-sweep` @ `06a515e` | pending (Fix 12) | audit 120→0 failures; +0 regressions |
 | 2 — WebGL per-profile snapshot | not started | — | — | — | — |
-| 3 — Function.toString mass sweep | not started | — | — | — | — |
+| 3 — Function.toString mass sweep | completed | claude | branch `fix/v0.1.0-fix3-function-tostring-mass` @ `51c8c75` | pending (Fix 12) | audit 270→0 across 67 prototypes; +0 regressions |
 | 4 — Canvas toDataURL parity | not started | — | — | — | — |
 | 5 — Wire keystroke generator | not started | — | — | — | — |
 | 6 — Wire two-level seed | not started | — | — | — | — |
