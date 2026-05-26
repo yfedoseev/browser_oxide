@@ -1065,6 +1065,71 @@ impl Page {
         if resp.headers.contains_key("x-wbaas-token") {
             eprintln!("[vendor-detect] wbaas on {}", resp.url);
         }
+        // v0.1.0-parity Fix 10: extended vendor-detect markers per
+        // 18_ANTI_BOT_VENDOR_COOKBOOK.md §4.1. Pure observability —
+        // post-run analysis splits CHL outcomes by protocol.
+        if let Some(v) = resp.headers.get("cf-mitigated") {
+            eprintln!("[vendor-detect] cloudflare-mitigated {} on {}", v, resp.url);
+        }
+        if let Some(v) = resp.headers.get("cf-ray") {
+            if matches!(resp.status, 403 | 429 | 498 | 503) {
+                eprintln!(
+                    "[vendor-detect] cloudflare cf-ray={} status={} on {}",
+                    v, resp.status, resp.url
+                );
+            }
+        }
+        if let Some(v) = resp.headers.get("x-iinfo") {
+            eprintln!("[vendor-detect] imperva-incapsula {} on {}", v, resp.url);
+        }
+        if resp
+            .headers
+            .get("x-cdn")
+            .map(|v| v.to_ascii_lowercase().contains("imperva"))
+            .unwrap_or(false)
+        {
+            eprintln!("[vendor-detect] imperva-cdn on {}", resp.url);
+        }
+        if let Some(v) = resp.headers.get("x-perimeterx-id") {
+            eprintln!("[vendor-detect] perimeterx {} on {}", v, resp.url);
+        }
+        if let Some(v) = resp.headers.get("x-sucuri-id") {
+            eprintln!("[vendor-detect] sucuri {} on {}", v, resp.url);
+        }
+        if let Some(v) = resp.headers.get("x-akamai-transformed") {
+            eprintln!("[vendor-detect] akamai-edge {} on {}", v, resp.url);
+        }
+        if resp
+            .headers
+            .iter()
+            .any(|(k, _)| k.to_ascii_lowercase().starts_with("x-kpsdk"))
+        {
+            eprintln!("[vendor-detect] kasada (x-kpsdk-*) on {}", resp.url);
+        }
+        if let Some(v) = resp.headers.get("x-armor-shield-zone") {
+            eprintln!("[vendor-detect] reblaze {} on {}", v, resp.url);
+        }
+        if resp
+            .headers
+            .get("server")
+            .map(|v| v.to_ascii_lowercase().contains("cloudflare"))
+            .unwrap_or(false)
+            && !resp.headers.contains_key("cf-mitigated")
+            && !resp.headers.contains_key("cf-ray")
+        {
+            // Server: cloudflare with no cf-mitigated/ray = passive
+            // CF edge, not active bot management. Logged only when
+            // we don't already have a more specific signal.
+            eprintln!("[vendor-detect] cloudflare-edge on {}", resp.url);
+        }
+        if resp
+            .headers
+            .get("via")
+            .map(|v| v.to_ascii_lowercase().contains("varnish"))
+            .unwrap_or(false)
+        {
+            eprintln!("[vendor-detect] fastly (via: varnish) on {}", resp.url);
+        }
         // Collect response-header CSP value(s) before consuming `resp`.
         // CSP3 §3.2 allows the header to repeat (multiple Policy values
         // applied conjunctively); we keep each instance separate so the
@@ -2267,6 +2332,11 @@ impl Page {
                         // detect at the top of the loop is silently accepted
                         // here, breaking the retry chain. Caught for
                         // DataDome (yelp/etsy/leboncoin/wsj) on 2026-05-10.
+                        // v0.1.0-parity Fix 10: extended marker set per
+                        // 18_ANTI_BOT_VENDOR_COOKBOOK.md §4.2. Each new
+                        // string is the same one classify.rs already keys
+                        // on for the vendor — keeping this guard in sync
+                        // with the verdict logic.
                         let v8_html_is_real = !v8_html.is_empty()
                             && v8_html.len() > current_html.len()
                             && !v8_html.contains("/ips.js")
@@ -2277,7 +2347,18 @@ impl Page {
                             && !v8_html.contains("captcha-delivery.com")
                             && !v8_html.contains("dd-script")
                             && !v8_html.contains("dd_engagement")
-                            && !v8_html.contains("/cdn-cgi/challenge-platform/");
+                            && !v8_html.contains("/cdn-cgi/challenge-platform/")
+                            && !v8_html.contains("AwsWafIntegration")
+                            && !v8_html.contains("gokuProps")
+                            && !v8_html.contains("_Incapsula_Resource")
+                            && !v8_html.contains("visid_incap")
+                            && !v8_html.contains("reese84")
+                            && !v8_html.contains("_px3")
+                            && !v8_html.contains("_pxhd")
+                            && !v8_html.contains("px-captcha")
+                            && !v8_html.contains("press &amp; hold")
+                            && !v8_html.contains("sucuri_cloudproxy_js")
+                            && !v8_html.contains("Incapsula incident ID");
 
                         // Extract any challenge-engine session headers that
                         // scripts collected during solves. For Kasada: the
