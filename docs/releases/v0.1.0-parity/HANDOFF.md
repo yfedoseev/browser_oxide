@@ -1,5 +1,12 @@
 # v0.1.0-parity — Handoff (2026-05-26)
 
+> **Update 2026-05-27:** Fix 12 gate has been run end-to-end. Outcome: routed best-of-4 median = 107/126, below the 113 parity bar → **no tag**. Camoufox v150 (released 2026-05-11, beta-only) reaches 115 — that is the new bar. Full results, per-site head-to-head, gap analysis, and the next-developer handoff are in:
+> - [`VERIFICATION.md`](VERIFICATION.md) — the verification ledger
+> - [`FAILED_SITES_ANALYSIS.md`](FAILED_SITES_ANALYSIS.md) — per-site root cause + strata
+> - [`HANDOFF_v0.2.0_CLOSE_V150_GAP.md`](HANDOFF_v0.2.0_CLOSE_V150_GAP.md) — the v0.2.0 work-list to recover 107 → ≥115
+>
+> The text below is the original 2026-05-26 handoff that drove the gate run, preserved for historical context.
+
 Status: **9 fixes shipped end-to-end + 2 fixes engine-side complete + Fix 12 acceptance gate is the remaining gate-runner work**. Branches stack, build/clippy/fmt all green, 17 new chrome_compat tests pass, workspace test 1508 pass / 1 fail (pre-existing). The remaining work is *running* — not coding.
 
 If you have an hour, do §4 (verify) + §5 (run the gate) + §6 (decide).
