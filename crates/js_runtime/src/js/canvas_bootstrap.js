@@ -741,23 +741,63 @@
         constructor() { super(); this.maxChannelCount = 2; }
     }
 
-    // W3.4 — per-session randomization of AudioContext fingerprintable
-    // surface. Real Chrome's sampleRate is 44100 on most hardware and
-    // 48000 on some (~20% of laptops, ~50% of pro audio gear).
-    // baseLatency and outputLatency reflect hardware-buffer + scheduler
-    // jitter — pinning them to constants is the canonical headless tell.
-    // Seed once per page so reads stay stable (real Chrome doesn't
-    // change these mid-session either).
-    const _audioSampleRate = (Math.random() < 0.80) ? 44100 : 48000;
+    // W3.4 — AudioContext fingerprintable surface. Real Chrome reports a
+    // stable per-device value across page loads. Previously this used
+    // `Math.random()` per-IIFE which made sequential page loads in the
+    // same SharedSession return DIFFERENT sampleRates — AWS WAF +
+    // DataDome telemetry catch the inconsistency.
+    //
+    // Now: sampleRate reads from profile.audio_sample_rate (48000 on
+    // Apple Silicon, 44100 elsewhere). baseLatency + outputLatency are
+    // derived deterministically from `audio_seed` so they look like real
+    // hardware variation but stay stable across page loads.
+    //
+    // See `docs/releases/v0.1.0-parity/audit/03_HARDWARE_SPOOFING_DIFF.md`
+    // §FIX-C for the cross-page-load consistency analysis.
+    const _audioSampleRate = (() => {
+        try {
+            const has = ops.op_has_stealth_profile && ops.op_has_stealth_profile();
+            if (has) {
+                const raw = ops.op_get_profile_value("audio_sample_rate");
+                const v = parseInt(raw, 10);
+                // Stealth profile validate() restricts this to
+                // {44100, 48000, 96000, 192000}; we trust it here.
+                if (Number.isInteger(v) && v > 0) return v;
+            }
+        } catch (_) {}
+        return 44100;
+    })();
     const _audioBaseLatency = (() => {
         // Real Chrome reports baseLatency in [0.005, 0.030] sec range
-        // depending on output device. Quantize to 1ms granularity.
-        const v = 0.005 + Math.random() * 0.025;
+        // depending on output device. Derive deterministically from
+        // bits 0-9 of audio_seed so it's stable per profile.
+        let bits = 512; // mid-range fallback
+        try {
+            const has = ops.op_has_stealth_profile && ops.op_has_stealth_profile();
+            if (has) {
+                const raw = ops.op_get_profile_value("audio_seed");
+                if (raw) {
+                    bits = Number(BigInt(raw) & 0x3ffn); // 0..1023
+                }
+            }
+        } catch (_) {}
+        const v = 0.005 + (bits / 1023) * 0.025;
         return Math.round(v * 1000) / 1000;
     })();
     const _audioOutputLatency = (() => {
-        // outputLatency > baseLatency typically. Add 5-30ms on top.
-        const v = _audioBaseLatency + 0.005 + Math.random() * 0.025;
+        // outputLatency > baseLatency typically. Add 5-30ms on top,
+        // derived from bits 10-19 of audio_seed.
+        let bits = 512;
+        try {
+            const has = ops.op_has_stealth_profile && ops.op_has_stealth_profile();
+            if (has) {
+                const raw = ops.op_get_profile_value("audio_seed");
+                if (raw) {
+                    bits = Number((BigInt(raw) >> 10n) & 0x3ffn);
+                }
+            }
+        } catch (_) {}
+        const v = _audioBaseLatency + 0.005 + (bits / 1023) * 0.025;
         return Math.round(v * 1000) / 1000;
     })();
 

@@ -67,6 +67,12 @@ mime_types_count: 2
 # fingerprint while keeping it stable across page loads.
 canvas_seed: 12379813812177893520
 audio_seed: 686413622842519738
+# AudioContext.sampleRate. Apple Silicon Macs (M1+) report 48000 Hz native;
+# Intel-era Macs and most Windows/Linux desktops report 44100 Hz. Real
+# Chrome reads the value from the OS audio output device and returns it
+# stably across page loads — randomizing it per-load is a tell. See
+# `docs/releases/v0.1.0-parity/audit/03_HARDWARE_SPOOFING_DIFF.md` §FIX-C.
+audio_sample_rate: 48000
 
 # ---- WebAuthn / FedCM probe shape ----
 has_platform_authenticator: true

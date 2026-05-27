@@ -86,6 +86,7 @@ pub fn chrome_148_windows() -> StealthProfile {
 
         canvas_seed: 0x1234567890abcdef,
         audio_seed: 0xfedcba0987654321,
+        audio_sample_rate: 44100,
 
         has_platform_authenticator: true,
         conditional_mediation: true,
@@ -173,6 +174,11 @@ pub fn chrome_148_macos() -> StealthProfile {
 
         canvas_seed: 0xabcdef1234567890,
         audio_seed: 0x0987654321fedcba,
+        // Apple Silicon M3 reports 48000 Hz native; this is the value
+        // real Chrome on M3 returns from `new AudioContext().sampleRate`.
+        // See `docs/releases/v0.1.0-parity/audit/03_HARDWARE_SPOOFING_DIFF.md`
+        // §FIX-C for the cross-page-load consistency rationale.
+        audio_sample_rate: 48000,
 
         has_platform_authenticator: true,
         conditional_mediation: true,
@@ -246,6 +252,7 @@ pub fn chrome_148_linux() -> StealthProfile {
 
         canvas_seed: 0x1111222233334444,
         audio_seed: 0x5555666677778888,
+        audio_sample_rate: 44100,
 
         // Linux desktop has no platform authenticator (no Touch ID / Windows Hello).
         has_platform_authenticator: false,
@@ -303,6 +310,7 @@ pub fn chrome_148_ru() -> StealthProfile {
         connection_rtt: 100, connection_downlink: 8.0,
         pdf_viewer_enabled: true, plugins_count: 5, mime_types_count: 2,
         canvas_seed: 0xaaaa_bbbb_cccc_dddd, audio_seed: 0xdddd_cccc_bbbb_aaaa,
+        audio_sample_rate: 44100,
         has_platform_authenticator: true, conditional_mediation: true, allow_http3: false,
         prefers_color_scheme: "light".into(),
         color_gamut: "srgb".into(),
@@ -350,6 +358,7 @@ pub fn chrome_148_cn() -> StealthProfile {
         connection_rtt: 150, connection_downlink: 6.0,
         pdf_viewer_enabled: true, plugins_count: 5, mime_types_count: 2,
         canvas_seed: 0x1122_3344_5566_7788, audio_seed: 0x8877_6655_4433_2211,
+        audio_sample_rate: 44100,
         has_platform_authenticator: true, conditional_mediation: true, allow_http3: false,
         prefers_color_scheme: "light".into(),
         color_gamut: "srgb".into(),
@@ -473,6 +482,7 @@ pub fn firefox_135_macos() -> StealthProfile {
 
         canvas_seed: 0xff0011_ff0022_ff0033_u128 as u64,
         audio_seed: 0x88aa_bbcc_ddee_ff00,
+        audio_sample_rate: 44100,
 
         has_platform_authenticator: true,
         conditional_mediation: true,
@@ -548,6 +558,7 @@ pub fn firefox_135_windows() -> StealthProfile {
 
         canvas_seed: 0x1122_3344_5566_7788,
         audio_seed: 0x99aa_bbcc_ddee_ff00,
+        audio_sample_rate: 44100,
 
         has_platform_authenticator: true,
         conditional_mediation: true,
@@ -620,6 +631,7 @@ pub fn firefox_135_linux() -> StealthProfile {
 
         canvas_seed: 0xaaaa_bbbb_cccc_dddd,
         audio_seed: 0xdddd_cccc_bbbb_aaaa,
+        audio_sample_rate: 44100,
 
         has_platform_authenticator: false,
         conditional_mediation: true,
@@ -744,6 +756,7 @@ pub fn pixel_9_pro_chrome_148() -> StealthProfile {
 
         canvas_seed: 0xa5a5_d5d5_3c3c_e6e6,
         audio_seed: 0x9c9c_5e5e_4040_b1b1,
+        audio_sample_rate: 44100,
 
         // No Touch ID / Windows Hello on stock Android; Passkeys via Play
         // Services exist but isUserVerifyingPlatformAuthenticatorAvailable
@@ -851,6 +864,7 @@ pub fn iphone_15_pro_safari_18() -> StealthProfile {
 
         canvas_seed: 0xa1b2_c3d4_e5f6_0708,
         audio_seed: 0x0807_0605_0403_0201,
+        audio_sample_rate: 44100,
 
         // Touch ID / Face ID exists but isUserVerifyingPlatformAuthenticatorAvailable
         // returns false on a fresh iOS Safari profile (per Apple privacy default)

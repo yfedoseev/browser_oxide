@@ -104,6 +104,7 @@ pub fn op_get_profile_value(#[state] state: &StealthState, #[string] key: &str) 
             "os_version" => p.os_version.clone(),
             "media_devices" => serde_json::to_string(&p.media_devices).unwrap_or_default(),
             "audio_seed" => p.audio_seed.to_string(),
+            "audio_sample_rate" => p.audio_sample_rate.to_string(),
             "canvas_seed" => p.canvas_seed.to_string(),
             "cpu_architecture" => p.cpu_architecture.clone(),
             "cpu_bitness" => p.cpu_bitness.clone(),

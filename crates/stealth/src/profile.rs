@@ -119,6 +119,16 @@ pub struct StealthProfile {
     // === Fingerprint seeds ===
     pub canvas_seed: u64,
     pub audio_seed: u64,
+    /// AudioContext.sampleRate. Real Chrome reports a stable value tied to
+    /// the actual audio output device — 48000 Hz native on Apple Silicon
+    /// Macs and most iOS devices, 44100 Hz on most Intel-era hardware and
+    /// stock Windows/Linux setups. AWS WAF + DataDome challenge scripts
+    /// capture this value via `new AudioContext().sampleRate` and reject
+    /// when sequential page-loads in the same SharedSession report
+    /// different rates. Defaults to 44100 (the global majority); presets
+    /// for Apple Silicon profiles override to 48000.
+    #[serde(default = "default_audio_sample_rate")]
+    pub audio_sample_rate: u32,
 
     // === WebAuthn / FedCM probe shape ===
     //
@@ -203,6 +213,10 @@ fn default_cpu_architecture() -> String {
 
 fn default_cpu_bitness() -> String {
     "64".into()
+}
+
+fn default_audio_sample_rate() -> u32 {
+    44100
 }
 
 impl StealthProfile {
@@ -340,6 +354,20 @@ impl StealthProfile {
             errors.push(format!(
                 "ua_model='{}' on a desktop (max_touch_points=0) profile",
                 self.ua_model
+            ));
+        }
+        // AudioContext.sampleRate must be one of the values a real audio
+        // output device reports. Modern Macs / iOS = 48000; most Windows
+        // / Linux desktops + Android phones = 44100; pro audio = 96000;
+        // niche high-end = 192000. Reject anything else — a non-standard
+        // rate is a bot tell.
+        if !matches!(
+            self.audio_sample_rate,
+            44100 | 48000 | 96000 | 192000
+        ) {
+            errors.push(format!(
+                "audio_sample_rate must be one of {{44100, 48000, 96000, 192000}} (got {})",
+                self.audio_sample_rate
             ));
         }
 

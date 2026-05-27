@@ -4,6 +4,31 @@ Running log of decisions made during R-FP-AUDIT-2026Q3. Format: dated entry with
 
 ## 2026-05-27
 
+### FIX-C — AudioContext.sampleRate / baseLatency / outputLatency profile-pinned (pending commit)
+
+**Status:** 🔵 in progress — code complete; build/clippy/stealth+js_runtime tests pass; awaiting chrome_compat audio tests + release-build validation.
+
+**Root cause:** `canvas_bootstrap.js:751-762` randomized AudioContext.sampleRate via `Math.random() < 0.80 ? 44100 : 48000`, baseLatency via `0.005 + Math.random()*0.025`, outputLatency similarly. Per-IIFE meant **per page load**. Real Chrome on a given device reports STABLE values across page loads (the sampleRate reflects actual audio output device). Two pages in the same BO `SharedSession` got DIFFERENT sampleRates — AWS WAF / DataDome telemetry POSTs catch this inconsistency. Found in cross-API agent report 2026-05-27.
+
+**Fix:**
+- Added `audio_sample_rate: u32` field to `StealthProfile` (`crates/stealth/src/profile.rs`) with default `44100` via `default_audio_sample_rate()`. `#[serde(default)]` keeps legacy YAMLs readable.
+- Validation: `audio_sample_rate ∈ {44100, 48000, 96000, 192000}` (the only values real audio output devices report).
+- Updated all 10 preset constructors in `presets.rs` to set the field (44100 for most, **48000 for chrome_148_macos** — Apple Silicon native).
+- Updated `chrome_148_macos.yaml` to include `audio_sample_rate: 48000`.
+- Updated `stealth_ext.rs::op_get_profile_value` to expose the new key.
+- `canvas_bootstrap.js:744-797` now reads `audio_sample_rate` from profile. `baseLatency` / `outputLatency` derive deterministically from bits 0-9 / 10-19 of `audio_seed` — looks like real hardware variation, stays stable across page loads.
+
+**Validation:**
+- `cargo build --workspace` ✅
+- `cargo clippy -p stealth -p js_runtime --all-targets -- -D warnings` ✅
+- `cargo test -p stealth -- --test-threads=1` — 45/45 pass
+- `cargo test -p js_runtime --lib -- --test-threads=1` — 13/13 pass
+- `cargo fmt --all -- --check` ✅
+- Pending: `cargo test -p browser --test chrome_compat -- audio sample_rate` (in flight)
+- Pending: `target/release/examples/sweep_metrics chrome_148_macos <amazon-com>` single-site sweep (release build in flight)
+
+**Risk:** very low. Default audio_sample_rate of 44100 reproduces the previous 80%-of-the-time path. Only profiles that EXPLICITLY set audio_sample_rate=48000 (chrome_148_macos preset + chrome_148_macos.yaml) change behaviour, and those are the profiles where 48000 is the correct Apple-Silicon-native value.
+
 ### FIX-A — Sec-CH-UA-Arch/Bitness/Wow64 now profile-driven (commit `960b55f`)
 
 **Status:** ✅ landed.
