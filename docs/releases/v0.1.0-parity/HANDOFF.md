@@ -6,6 +6,31 @@ If you have an hour, do §4 (verify) + §5 (run the gate) + §6 (decide).
 
 ---
 
+## 0. What v0.1.0-parity is + why we're doing it
+
+**Goal**: ship the first browser_oxide release that **beats Camoufox 113 routed strict-pass** on the 126-site holistic corpus (the same corpus Camoufox publishes against). Per `docs/releases/v0.1.0-parity/00_README.md`:
+
+> **Target metric:** routed best-of-N strict-pass on 126-site holistic corpus
+> **Bar to clear:** ≥ 115 (Camoufox best measured = 113)
+
+"Strict pass" = the site responded with `tag == L3-RENDERED` AND `body length ≥ 15 KB`. "Routed best-of-4" = a site counts as passing if *any* of the 4 stealth profiles (chrome_148_macos / chrome_148_windows / iphone_15_pro_safari_18 / firefox_135_macos) strict-passes its 3-run median.
+
+**Why a 12-fix list (and not just one big "make it better" PR)**: the strategic gap-assessment doc (`43_STRATEGIC_GAP_ASSESSMENT.md`) and the cross-vendor holistic vision (`42_HOLISTIC_VISION.md`) identified that ~5 mechanical "wiring" gaps were leaving cross-vendor leverage on the table — the Rust generators existed (`crates/stealth/src/behavior.rs`) but the JS layer never called them, so 8+ vendors were uniformly scoring us as "no humanizer". Add a 1-day toString-mask sweep that 11 of 12 vendors fingerprint and you have most of the +5 in measured single-fixes per chapter 43 §2 ROI table. The remaining fixes (MessageChannel, reddit `HTMLFormElement.elements`, vendor markers, performance.timeOrigin) close known engine gaps that the per-cluster chapters (05/06/07/08/17/25/26) had documented but not yet wired.
+
+**What v0.1.0-parity is NOT**: it's NOT vendor-specific bypass code (AWS WAF / DataDome WASM / Akamai sensor_data / Kasada K2-DIFF). Those live in the **private** `vendor_solvers` repo per `CLAUDE.md` scope rules and `EXECUTION_PLAN.md §EXPLICIT DEFERS`. Touching them on the public engine breaks the open-source license stance.
+
+**Reading order for a developer picking this up cold**:
+
+1. **`docs/releases/v0.1.0-parity/00_README.md`** — index + success scorecard. The "What 'parity' means here" section (lines 11-17) defines pass-rate / per-profile / memory / throughput / stability targets in one page.
+2. **`docs/releases/v0.1.0-parity/EXECUTION_PLAN.md`** — the canonical working checklist. The §Tracking table at the bottom shows per-fix status with branch + commit + measured impact. The 12-fix execution sequence (lines 42-296) has file:line pointers, commands, expected diff, validation for each fix.
+3. **`docs/releases/v0.1.0-parity/02_GAP_ANALYSIS.md`** — per-site root cause for the 10 Camoufox-only-pass sites this release is targeting.
+4. **`docs/releases/v0.1.0-parity/14_TESTING_VALIDATION.md`** — L1-L5 validation layers. §L5 ("3-run aggregated sweep") explains why we use the median (single-run noise floor is ±5 sites per `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md`).
+5. **`docs/releases/v0.1.0-parity/15_OPEN_QUESTIONS.md`** — research backlog + the four blockers this work surfaced (R-FIX-2 / R-FIX-4 / R-FIX-12 / R-V8-TERM / R-FIX-WINDOWS-RTX). Read these before assuming anything is "mysteriously broken."
+
+If you only have 30 min: chapters **00, 01, 02, 42, 43** (per the 00_README navigation table). If you only have 10 min: this handoff + `EXECUTION_PLAN.md §Tracking`.
+
+---
+
 ## 1. Branch stack — 11 fixes ready for merge
 
 All branches are local-only on this machine, unpushed. Each is one PR's worth of change. They are **chained** — each branched off the previous, so `fix/v0.1.0-fix4-canvas-parity` already contains the entire stack and doubles as the integration / release-candidate branch.
