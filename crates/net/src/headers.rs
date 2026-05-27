@@ -311,11 +311,17 @@ fn chrome_headers_impl(
             .to_string(),
         ));
         // sec-ch-device-memory — DataDome's accept-ch demands it
-        // (yelp/leboncoin/etsy/wsj). Chrome 147 reports a quantized
-        // value (typically "8" for ≥8GB systems, "4" for 4GB).
-        // Per the W3 spec the value is a number (0.25, 0.5, 1, 2, 4, 8).
-        let dm = (profile.device_memory as f64).clamp(0.25, 8.0);
-        headers.push(("sec-ch-device-memory".to_string(), format!("{dm}")));
+        // (yelp/leboncoin/etsy/wsj). Per the W3 Device Memory spec
+        // (https://www.w3.org/TR/device-memory/) the value MUST be one of
+        // {0.25, 0.5, 1, 2, 4, 8}. Chrome's GetApproximateDeviceMemory
+        // (third_party/blink/renderer/core/frame/navigator_device_memory.cc)
+        // rounds the OS's reported RAM DOWN to the largest spec value ≤
+        // the reported amount (so 16 GB → 8; 6 GB → 4; 0.7 GB → 0.5).
+        // Sending an unquantized value (e.g. "6" or "16") is a tell.
+        headers.push((
+            "sec-ch-device-memory".to_string(),
+            format!("{}", quantize_device_memory(profile.device_memory as f64)),
+        ));
     }
 
     // 4. upgrade-insecure-requests
@@ -350,6 +356,24 @@ fn chrome_headers_impl(
     headers.push(("priority".to_string(), "u=0, i".to_string()));
 
     headers
+}
+
+/// Quantize a RAM value (in GB) to the W3 Device Memory spec set
+/// `{0.25, 0.5, 1, 2, 4, 8}` GB. Returns the largest spec value
+/// that is ≤ `gb` (matches Chrome's `GetApproximateDeviceMemory`).
+/// `gb` below 0.25 quantizes to 0.25 (the spec floor).
+fn quantize_device_memory(gb: f64) -> f64 {
+    const SPEC: [f64; 6] = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
+    if gb < SPEC[0] {
+        return SPEC[0];
+    }
+    let mut out = SPEC[0];
+    for &v in &SPEC {
+        if v <= gb {
+            out = v;
+        }
+    }
+    out
 }
 
 /// Chrome platform-version string for `Sec-CH-UA-Platform-Version`.
@@ -1057,6 +1081,51 @@ mod tests {
         assert_eq!(chrome_platform_version("Windows", "11"), "11.0.0");
         assert_eq!(chrome_platform_version("macOS", "15.2"), "15.2.0");
         assert_eq!(chrome_platform_version("Linux", "anything"), "");
+    }
+
+    #[test]
+    fn device_memory_quantizes_to_w3_spec_set() {
+        // Spec values must round-trip exactly
+        assert_eq!(quantize_device_memory(8.0), 8.0);
+        assert_eq!(quantize_device_memory(4.0), 4.0);
+        assert_eq!(quantize_device_memory(2.0), 2.0);
+        assert_eq!(quantize_device_memory(1.0), 1.0);
+        assert_eq!(quantize_device_memory(0.5), 0.5);
+        assert_eq!(quantize_device_memory(0.25), 0.25);
+        // Above 8 quantizes down to 8 (Chrome caps at 8 even on 16/32 GB)
+        assert_eq!(quantize_device_memory(16.0), 8.0);
+        assert_eq!(quantize_device_memory(32.0), 8.0);
+        // Non-spec intermediate values round DOWN to the next spec value
+        assert_eq!(quantize_device_memory(6.0), 4.0);
+        assert_eq!(quantize_device_memory(3.0), 2.0);
+        assert_eq!(quantize_device_memory(1.5), 1.0);
+        assert_eq!(quantize_device_memory(0.7), 0.5);
+        assert_eq!(quantize_device_memory(0.3), 0.25);
+        // Below spec floor → spec floor (Chrome reports 0.25 on a 256MB device)
+        assert_eq!(quantize_device_memory(0.1), 0.25);
+        assert_eq!(quantize_device_memory(0.0), 0.25);
+    }
+
+    #[test]
+    fn sec_ch_device_memory_emits_quantized_value() {
+        let mut profile = stealth::chrome_148_macos();
+        profile.device_memory = 16; // common Apple Silicon spec
+        let headers = chrome_headers_with_accept_ch(&profile);
+        let dm = headers
+            .iter()
+            .find(|(k, _)| k == "sec-ch-device-memory")
+            .expect("sec-ch-device-memory present in accept-ch variant");
+        // 16 GB → quantized to 8
+        assert_eq!(dm.1, "8");
+
+        profile.device_memory = 6; // pretend mid-range
+        let headers = chrome_headers_with_accept_ch(&profile);
+        let dm = headers
+            .iter()
+            .find(|(k, _)| k == "sec-ch-device-memory")
+            .unwrap();
+        // 6 GB → quantized DOWN to 4 (Chrome rounds down to nearest spec value)
+        assert_eq!(dm.1, "4");
     }
 
     #[test]

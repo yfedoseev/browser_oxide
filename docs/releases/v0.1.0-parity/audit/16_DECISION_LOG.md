@@ -4,7 +4,19 @@ Running log of decisions made during R-FP-AUDIT-2026Q3. Format: dated entry with
 
 ## 2026-05-27
 
-### FIX-C — AudioContext.sampleRate / baseLatency / outputLatency profile-pinned (pending commit)
+### FIX-F — Sec-CH-Device-Memory W3-spec quantization (pending commit)
+
+**Status:** 🔵 in progress — code complete; net tests pass.
+
+**Root cause:** `headers.rs:317` used `(profile.device_memory as f64).clamp(0.25, 8.0)`. That correctly capped above-spec values (16 → 8) but **emitted unquantized intermediate values** — a profile with `device_memory = 6` produced `sec-ch-device-memory: 6`, which is NOT in the W3 spec set `{0.25, 0.5, 1, 2, 4, 8}`. Real Chrome's `GetApproximateDeviceMemory` rounds DOWN to the largest spec value ≤ device RAM (6 GB → 4; 3 GB → 2; 0.7 GB → 0.5). Sending a non-spec value is a fingerprint tell.
+
+**Fix:** new `quantize_device_memory(gb: f64) -> f64` helper that does the spec-rounding. `headers.rs:325-329` calls it before emitting the header. Two new tests: `device_memory_quantizes_to_w3_spec_set` (function unit test, 14 cases) and `sec_ch_device_memory_emits_quantized_value` (integration test: 16 GB → "8", 6 GB → "4").
+
+**Validation:** `cargo test -p net --lib -- --test-threads=1 device_memory` — 2/2 pass.
+
+**Risk:** zero for all currently-shipped presets (BO's presets use 0/8/16 — all already quantize correctly). Defensive against future presets that accidentally specify non-spec values.
+
+### FIX-C — AudioContext.sampleRate / baseLatency / outputLatency profile-pinned (commit `93c8ed4`)
 
 **Status:** 🔵 in progress — code complete; build/clippy/stealth+js_runtime tests pass; awaiting chrome_compat audio tests + release-build validation.
 
@@ -28,6 +40,26 @@ Running log of decisions made during R-FP-AUDIT-2026Q3. Format: dated entry with
 - Pending: `target/release/examples/sweep_metrics chrome_148_macos <amazon-com>` single-site sweep (release build in flight)
 
 **Risk:** very low. Default audio_sample_rate of 44100 reproduces the previous 80%-of-the-time path. Only profiles that EXPLICITLY set audio_sample_rate=48000 (chrome_148_macos preset + chrome_148_macos.yaml) change behaviour, and those are the profiles where 48000 is the correct Apple-Silicon-native value.
+
+### FIX-A + FIX-C combined validation sweep — 1/3 AWS WAF sites flipped
+
+**Sweep:** `target/release/examples/sweep_metrics chrome_148_macos` against `[amazon-com, imdb, amazon-de]` single-run, post-`93c8ed4`.
+
+**Result:**
+- amazon-com: L3-RENDERED **2011 bytes** (still blocked at AWS WAF stub)
+- imdb: L3-RENDERED **1995 bytes** (still blocked at AWS WAF stub)
+- **amazon-de: L3-RENDERED 855,735 bytes (FLIPPED)** ✅
+
+**Interpretation:**
+- amazon-de PASS at full content is a real, encouraging signal.
+- Single-run, no pre-fix baseline run on the same IP/window — could be WAF-state noise per `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md` (±5 sites variability).
+- amazon-com + imdb identical-byte stubs reproduce the prior block exactly — those WAF endpoints have stricter probes than amazon-de.
+- The fixes are CORRECTNESS fixes regardless of single-run yield: cross-realm Sec-CH-UA arch/bitness inconsistency was objectively wrong; AudioContext.sampleRate per-load randomization was objectively wrong. They ship.
+
+**Next:**
+- Continue with FIX-F + FIX-D to address amazon-com / imdb stricter probes.
+- Hold full-gate (3-run × 4-profile) validation for the v0.2.0-rc1 tag decision after ~3 more fixes ship.
+- Treat single-run sweeps as directional; never claim a site flipped on 1-trial alone.
 
 ### FIX-A — Sec-CH-UA-Arch/Bitness/Wow64 now profile-driven (commit `960b55f`)
 
