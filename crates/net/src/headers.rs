@@ -249,11 +249,24 @@ fn chrome_headers_impl(
     if include_high_entropy {
         // High-entropy hints. Order matches Chrome 147's actual emission
         // order observed via tls.peet.ws + browserleaks.com captures.
+        //
+        // Arch and bitness MUST come from profile fields, not be derived
+        // from `platform`. `navigator.platform` is "MacIntel" on both
+        // Intel Macs (arch=x86) and Apple Silicon Macs (arch=arm) — a
+        // legacy fossil. Real Chrome on M3 reports `Sec-CH-UA-Arch: arm`
+        // while keeping `navigator.platform: MacIntel`. Deriving from
+        // platform here would emit "x86" and contradict the JS-side
+        // `navigator.userAgentData.getHighEntropyValues({hints:['architecture']})`
+        // which reads `profile.cpu_architecture` directly — AWS WAF's
+        // challenge.js cross-checks these and rejects on mismatch.
         headers.push((
             "sec-ch-ua-arch".to_string(),
-            format!("\"{}\"", cpu_arch_for(&profile.platform)),
+            format!("\"{}\"", profile.cpu_architecture),
         ));
-        headers.push(("sec-ch-ua-bitness".to_string(), "\"64\"".to_string()));
+        headers.push((
+            "sec-ch-ua-bitness".to_string(),
+            format!("\"{}\"", profile.cpu_bitness),
+        ));
         headers.push((
             "sec-ch-ua-full-version-list".to_string(),
             build_sec_ch_ua_full_version_list(profile),
@@ -281,7 +294,10 @@ fn chrome_headers_impl(
                 chrome_platform_version(&profile.os_name, &profile.os_version)
             ),
         ));
-        headers.push(("sec-ch-ua-wow64".to_string(), "?0".to_string()));
+        headers.push((
+            "sec-ch-ua-wow64".to_string(),
+            if profile.ua_wow64 { "?1" } else { "?0" }.to_string(),
+        ));
         // sec-ch-ua-form-factors: Chrome 130+ added this hint. "Mobile"
         // on phones, "Desktop" on PC. Lacks for older Chrome but landing
         // it for Chrome 147+ is correct.
@@ -334,21 +350,6 @@ fn chrome_headers_impl(
     headers.push(("priority".to_string(), "u=0, i".to_string()));
 
     headers
-}
-
-/// CPU architecture string for `Sec-CH-UA-Arch`.
-/// Derived from the StealthProfile's `platform` field (`Win32`, `MacIntel`,
-/// `Linux x86_64`, `Linux aarch64`, etc.).
-fn cpu_arch_for(platform: &str) -> &'static str {
-    let p = platform.to_ascii_lowercase();
-    if p.contains("arm") || p.contains("aarch") {
-        "arm"
-    } else {
-        // Win32 / MacIntel / Linux x86_64 all report "x86" for the arch hint.
-        // Chrome reports "x86" (not "x86_64") — the separate `bitness` hint
-        // carries the 32-vs-64 distinction.
-        "x86"
-    }
 }
 
 /// Chrome platform-version string for `Sec-CH-UA-Platform-Version`.
@@ -1059,12 +1060,48 @@ mod tests {
     }
 
     #[test]
-    fn cpu_arch_recognizes_arm() {
-        assert_eq!(cpu_arch_for("arm64"), "arm");
-        assert_eq!(cpu_arch_for("Linux aarch64"), "arm");
-        assert_eq!(cpu_arch_for("Win32"), "x86");
-        assert_eq!(cpu_arch_for("MacIntel"), "x86");
-        assert_eq!(cpu_arch_for("Linux x86_64"), "x86");
+    fn sec_ch_ua_arch_reads_profile_cpu_architecture() {
+        // Apple Silicon macOS: platform="MacIntel" (legacy fossil) but
+        // cpu_architecture="arm". Real Chrome on M3 emits
+        // `sec-ch-ua-arch: "arm"`, NOT "x86" — and the JS-side
+        // `navigator.userAgentData.architecture` reads profile.cpu_architecture
+        // directly. The HTTP header must agree with JS or AWS WAF rejects.
+        let mut profile = stealth::chrome_148_macos();
+        profile.cpu_architecture = "arm".into();
+        let headers = chrome_headers_with_accept_ch(&profile);
+        let arch = headers
+            .iter()
+            .find(|(k, _)| k == "sec-ch-ua-arch")
+            .expect("sec-ch-ua-arch present in accept-ch variant");
+        assert_eq!(
+            arch.1, "\"arm\"",
+            "arch must reflect profile.cpu_architecture"
+        );
+
+        // Intel Mac path:
+        profile.cpu_architecture = "x86".into();
+        let headers = chrome_headers_with_accept_ch(&profile);
+        let arch = headers.iter().find(|(k, _)| k == "sec-ch-ua-arch").unwrap();
+        assert_eq!(arch.1, "\"x86\"");
+    }
+
+    #[test]
+    fn sec_ch_ua_bitness_reads_profile_cpu_bitness() {
+        let mut profile = stealth::chrome_148_windows();
+        profile.cpu_bitness = "32".into();
+        // wow64 only valid when cpu_bitness=32 + os=Windows.
+        profile.ua_wow64 = true;
+        let headers = chrome_headers_with_accept_ch(&profile);
+        let bitness = headers
+            .iter()
+            .find(|(k, _)| k == "sec-ch-ua-bitness")
+            .unwrap();
+        assert_eq!(bitness.1, "\"32\"");
+        let wow = headers
+            .iter()
+            .find(|(k, _)| k == "sec-ch-ua-wow64")
+            .unwrap();
+        assert_eq!(wow.1, "?1", "wow64 hint must reflect profile.ua_wow64");
     }
 
     // ============================================================
