@@ -56,10 +56,22 @@ Running log of decisions made during R-FP-AUDIT-2026Q3. Format: dated entry with
 - amazon-com + imdb identical-byte stubs reproduce the prior block exactly — those WAF endpoints have stricter probes than amazon-de.
 - The fixes are CORRECTNESS fixes regardless of single-run yield: cross-realm Sec-CH-UA arch/bitness inconsistency was objectively wrong; AudioContext.sampleRate per-load randomization was objectively wrong. They ship.
 
-**Next:**
-- Continue with FIX-F + FIX-D to address amazon-com / imdb stricter probes.
-- Hold full-gate (3-run × 4-profile) validation for the v0.2.0-rc1 tag decision after ~3 more fixes ship.
-- Treat single-run sweeps as directional; never claim a site flipped on 1-trial alone.
+**Round 2 sweep (post-FIX-F, single-run) against `[amazon-com, imdb, amazon-fr, amazon-in]`:**
+- amazon-com: 2014 bytes stub
+- imdb: 1995 bytes stub
+- amazon-fr: 2011 bytes stub
+- amazon-in: 2011 bytes stub
+- All 4 stuck at AWS WAF challenge.js bailout. **Round 1's amazon-de flip did NOT reproduce — almost certainly WAF state noise**, consistent with `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md` (±5 sites variance per single sweep).
+
+**Honest read:** FIX-A + FIX-C + FIX-F address real correctness bugs but are **not sufficient** to flip the 7 AWS WAF sites in single-trial sweeps. The cross-realm Sec-CH-UA bug, the AudioContext.sampleRate randomization, and the device-memory quantization were all wrong and worth fixing — but AWS WAF's challenge.js has additional discrimination logic these fixes don't reach.
+
+**What's still on the table:**
+- FIX-D — GpuProfile params (MAX_TEXTURE_SIZE etc.) validation against real Chrome capture. AWS WAF challenge.js reads ~10 WebGL parameters; if our values don't match real Chrome on M3 specifically (vs the common_params_desktop() shared baseline that all 4 GPU presets use), that's the next candidate.
+- Canvas noise (FIX-G) — Camoufox v150 disabled it (commit `e4528a2`). Decision pending — research the actual detection vector before deciding.
+- Behavioral signal (mouse/keyboard) — out of this audit's scope, but possibly the missing dimension.
+- Per-site AWS WAF challenge.js capture (`R-AWSWAF-OFFLINE-PROBE`) — best ROI is probably to just capture amazon-com's actual challenge.js, instrument it, and see which conditional bails. That's the offline-oracle work in the v0.2.0 handoff §1.7.
+
+**Next:** FIX-D (GpuProfile validation) OR pivot to R-AWSWAF-OFFLINE-PROBE for a precise diagnosis. Decision pending after a fresh round of source survey.
 
 ### FIX-A — Sec-CH-UA-Arch/Bitness/Wow64 now profile-driven (commit `960b55f`)
 
