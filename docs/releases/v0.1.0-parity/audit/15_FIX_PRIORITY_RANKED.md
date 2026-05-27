@@ -1,6 +1,6 @@
 # 15 — Fix priority ranked (yield × effort)
 
-**Last updated:** 2026-05-27 after FIX-A landed.
+**Last updated:** 2026-05-27 after FIX-A + FIX-C + FIX-F landed.
 
 Order is **what to do next** for the v0.2.0 routed-median 107 → ≥115 push. Yield = number of the 11 target sites this fix is hypothesized to flip. Effort = wall-clock work estimate.
 
@@ -9,11 +9,11 @@ Order is **what to do next** for the v0.2.0 routed-median 107 → ≥115 push. Y
 | # | Tag | Issue | Yield (sites) | Effort | Status | File |
 |--:|-----|-------|--------------|--------|--------|------|
 | 1 | **FIX-A** | Sec-CH-UA-Arch/Bitness/Wow64 read profile, not platform | 0-7 (AWS WAF cluster) | 30 min | ✅ commit `960b55f` | `crates/net/src/headers.rs` |
-| 2 | **FIX-B** | Capture amazon-com BO response BEFORE/AFTER FIX-A — confirm site flip | (validation, not a fix) | 30 min | ⬜ next | sweep_metrics single-site |
-| 3 | **FIX-C** | AudioContext.sampleRate / baseLatency / outputLatency seed from `audio_seed`, not `Math.random()` | 0-7 (telemetry consistency) | 30 min | ⬜ | `canvas_bootstrap.js:751-762` |
-| 4 | **FIX-D** | Verify chrome_148_macos GpuProfile params (MAX_*, extensions list) match real Chrome capture | 0-7 (cross-API correlation) | 1 day | ⬜ | `crates/stealth/src/gpu.rs` |
+| 2 | **FIX-B** | Single-site sweep (amazon-com / imdb / amazon-de) post-FIX-A+C | (validation) | 30 min | ✅ amazon-de FLIPPED 855KB; amazon-com + imdb still 2011/1995-byte stubs. Single-run; could be noise. | `target/release/examples/sweep_metrics` |
+| 3 | **FIX-C** | AudioContext.sampleRate / baseLatency / outputLatency seed from `audio_seed`, not `Math.random()` | 0-7 (telemetry consistency) | 30 min | ✅ commit `93c8ed4` | `canvas_bootstrap.js:751-762`, profile.rs, presets.rs |
+| 4 | **FIX-D** | Verify chrome_148_macos GpuProfile params (MAX_*, extensions list) match real Chrome capture | 0-7 (cross-API correlation) | 1 day | ⬜ NEXT | `crates/stealth/src/gpu.rs` |
 | 5 | **FIX-E** | Replace BO's single chrome_148_macos preset with a 4-8-preset sampler (profile pool) | 0-3 (IP-clustering defence) | 1 week | ⬜ | `crates/stealth/src/presets.rs` |
-| 6 | **FIX-F** | Sec-CH-Device-Memory quantization: spec says `{0.25, 0.5, 1, 2, 4, 8}` only; verify `profile.device_memory` quantizes correctly | 0-2 (DataDome) | 1 hour | ⬜ | `crates/net/src/headers.rs:300-302` |
+| 6 | **FIX-F** | Sec-CH-Device-Memory quantization: spec says `{0.25, 0.5, 1, 2, 4, 8}` only; quantize correctly | 0-2 (DataDome) | 1 hour | ✅ commit `8d8c067` | `crates/net/src/headers.rs:317-329` |
 | 7 | **FIX-G** | Decide canvas-noise policy: keep 5% PCG32 jitter, disable, or make opt-in | 0-3 (cross-vendor) | 1 day | ⏸️ research | `crates/canvas/src/canvas2d.rs`, `webgl_render.rs` |
 | 8 | **OPEN-1** | Sec-CH-UA brand-order randomization: HTTP fixed vs JS shuffled — verify real Chrome | (validation) | 4 hours | 🔵 in progress | capture real Chrome |
 | 9 | **OPEN-2** | WebGL extension list validation against real Chrome 148 macOS capture | (validation) | 2 hours | 🔵 | capture real Chrome |

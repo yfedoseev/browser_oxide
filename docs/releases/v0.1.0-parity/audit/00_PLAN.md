@@ -138,19 +138,26 @@ Same as `16_STEALTH_FINGERPRINT_AUDIT.md §7` plus:
 | § | File | Status |
 |---|------|--------|
 | 00 | 00_PLAN.md | ✅ |
-| 01 | 01_BO_BASELINE.md | ⬜ |
-| 02 | 02_CAMOUFOX_V150_OVERVIEW.md | ⬜ |
-| 03 | 03_HARDWARE_SPOOFING_DIFF.md | ⬜ |
-| 04 | 04_NAVIGATOR_DIFF.md | ⬜ |
-| 05 | 05_SCREEN_WINDOW_DIFF.md | ⬜ |
-| 06 | 06_WEBGL_DIFF.md | ⬜ |
-| 07 | 07_AUDIO_DIFF.md | ⬜ |
-| 08 | 08_CANVAS2D_DIFF.md | ⬜ |
+| 01 | 01_BO_BASELINE.md | ✅ |
+| 02 | 02_CAMOUFOX_V150_OVERVIEW.md | ✅ |
+| 03 | 03_HARDWARE_SPOOFING_DIFF.md | ✅ |
+| 04 | 04_NAVIGATOR_DIFF.md | ⬜ (covered in 01 + 12) |
+| 05 | 05_SCREEN_WINDOW_DIFF.md | ⬜ (covered in 03) |
+| 06 | 06_WEBGL_DIFF.md | ⬜ next (FIX-D) |
+| 07 | 07_AUDIO_DIFF.md | ⬜ (FIX-C addressed; full doc pending) |
+| 08 | 08_CANVAS2D_DIFF.md | ⏸️ research (canvas noise decision) |
 | 09 | 09_PERFORMANCE_TIMING_DIFF.md | ⬜ |
 | 10 | 10_FONTS_DIFF.md | ⬜ |
 | 11 | 11_MEDIA_DEVICES_DIFF.md | ⬜ |
-| 12 | 12_CLIENT_HINTS_DIFF.md | ⬜ |
-| 13 | 13_CROSS_CORRELATION.md | ⬜ |
+| 12 | 12_CLIENT_HINTS_DIFF.md | ⬜ (FIX-A + FIX-F addressed; full doc pending) |
+| 13 | 13_CROSS_CORRELATION.md | ⬜ (initial findings in 03) |
 | 14 | 14_AWS_WAF_CORRELATION.md | ⬜ |
-| 15 | 15_FIX_PRIORITY_RANKED.md | ⬜ |
-| 16 | 16_DECISION_LOG.md | ⬜ |
+| 15 | 15_FIX_PRIORITY_RANKED.md | ✅ |
+| 16 | 16_DECISION_LOG.md | ✅ (live; FIX-A/FIX-C/FIX-F entries + validation outcome) |
+
+## Shipped this audit cycle
+
+- **FIX-A** (commit `960b55f`): Sec-CH-UA-Arch/Bitness/Wow64 now read from profile fields instead of being derived from `platform` (which had the MacIntel ↔ arm/x86 ambiguity bug). +3 net tests.
+- **FIX-C** (commit `93c8ed4`): AudioContext.sampleRate now profile-pinned (`audio_sample_rate` field, 48000 on Apple Silicon presets); baseLatency / outputLatency derive deterministically from `audio_seed` bits. Stable across page loads in the same SharedSession.
+- **FIX-F** (commit `8d8c067`): Sec-CH-Device-Memory now quantizes RAM values to the W3 spec set `{0.25, 0.5, 1, 2, 4, 8}` rather than emitting any clamped float. +2 net tests including the helper unit.
+- **Validation:** single-run 3-site sweep post-fixes (`amazon-com`, `imdb`, `amazon-de`): **amazon-de flipped from blocked → 855KB L3-RENDERED** ✅; amazon-com + imdb still at AWS WAF stub bodies (2011 / 1995 bytes). Single-trial; could be WAF state noise per `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md`.
