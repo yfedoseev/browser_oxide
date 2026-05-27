@@ -81,19 +81,43 @@ Both engine-side tests run from the `fix/v0.1.0-fix4-canvas-parity` integration 
 
 ---
 
-## 3. Still on the runner — Fix 12 (the gate)
+## 3. Fix 12 (the acceptance gate) — **THIS IS THE LAST BLOCKING TASK**
 
-`EXECUTION_PLAN.md §Acceptance gate` — green requires:
-- 3-run × 4-profile sweep of the 126-corpus
-- Aggregated **routed best-of-4 median Pass ≥ 115**
-- At least one single profile median ≥ 110
-- Zero functional regressions
+The release cannot be tagged without this. Per `EXECUTION_PLAN.md §Acceptance gate`:
+- 3 runs × 4 profiles × 126-site corpus (so **12 sweeps**)
+- Aggregate per-(profile, site) median; then routed best-of-4 across profiles
+- Required: **routed best-of-4 median Pass ≥ 115** (the 115 bar — Camoufox's measured 113 + 2)
+- Required: **at least one single-profile median ≥ 110**
+- Required: zero functional regressions
 
-There's an in-flight queue running right now under PID `b51rsayeq` (background task) that drives all 12 sweeps with a 50-min wall-clock cap per sweep (mitigation for **R-V8-TERM**, see §7). Output lands in `/tmp/fix12_gate/<profile>_run<n>.{json,log}`. Look at `/tmp/fix12_gate.log` for the queue's own progress line per sweep.
+**Why this hasn't been finished in-session**: two reasons combined.
+1. Wall-clock: 12 sweeps × ~30-50 min each ≈ 6-10 h. Not in-session feasible.
+2. The discovered **R-V8-TERM** bug (§7 — `terminate_execution returned true` but JS keeps burning CPU): one site can hang a sweep for hours, requiring an external wall-clock kill. The queue script in §5 caps each sweep at 50 min as the mitigation. Multiple session attempts here OOM-killed or scheduler-starved out of progress when the box was contended by other rustc compiles.
 
-If that queue dies (box load, OOM, kernel signal) before finishing, just rerun it — it has skip-if-exists resume logic on the JSON files.
+**Partial data so far** (from in-session attempts, parsed from log lines on `fix/v0.1.0-fix4-canvas-parity` integration branch):
 
-After the queue finishes, see §5 for aggregation + decision.
+| profile | run | sites visible in log | strict-pass count | status |
+|---|--:|--:|--:|---|
+| chrome_148_macos | 1 | 119 / 126 | (extractable, JSON missing — hit 50-min cap) | partial |
+| pixel_9_pro_chrome_148 | 1 | ~20 / 126 | (extractable) | died |
+| (other 10 sweeps) | | 0 | 0 | not run |
+
+Strict extraction from logs (when JSON is missing):
+```bash
+grep "^sweep: \[" /tmp/fix12_gate/<file>.log | python3 -c "
+import sys, re
+strict = 0
+for line in sys.stdin:
+    m = re.match(r'sweep: \[\d+/126\]\s+\S+\s+\S+\s+(\S+)\s+len=(\d+)', line)
+    if m and m.group(1) == 'L3-RENDERED' and int(m.group(2)) >= 15000:
+        strict += 1
+print(strict)
+"
+```
+
+**To finish the gate** — see §5 for the queue script. **Pre-condition: machine must NOT be running other heavy CPU workloads** (rustc compiles, Gradle daemon, headless Chrome render farms). The R-V8-TERM watchdog escape is most likely triggered by V8's microtask scheduler being CPU-starved by competing workloads — quiesce the box first.
+
+After the queue finishes (all 12 JSONs present in `/tmp/fix12_gate/`), see §6 for aggregation + the tag decision.
 
 ---
 
