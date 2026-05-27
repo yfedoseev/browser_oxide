@@ -1,0 +1,50 @@
+# 15 — Fix priority ranked (yield × effort)
+
+**Last updated:** 2026-05-27 after FIX-A landed.
+
+Order is **what to do next** for the v0.2.0 routed-median 107 → ≥115 push. Yield = number of the 11 target sites this fix is hypothesized to flip. Effort = wall-clock work estimate.
+
+## Stack rank
+
+| # | Tag | Issue | Yield (sites) | Effort | Status | File |
+|--:|-----|-------|--------------|--------|--------|------|
+| 1 | **FIX-A** | Sec-CH-UA-Arch/Bitness/Wow64 read profile, not platform | 0-7 (AWS WAF cluster) | 30 min | ✅ commit `960b55f` | `crates/net/src/headers.rs` |
+| 2 | **FIX-B** | Capture amazon-com BO response BEFORE/AFTER FIX-A — confirm site flip | (validation, not a fix) | 30 min | ⬜ next | sweep_metrics single-site |
+| 3 | **FIX-C** | AudioContext.sampleRate / baseLatency / outputLatency seed from `audio_seed`, not `Math.random()` | 0-7 (telemetry consistency) | 30 min | ⬜ | `canvas_bootstrap.js:751-762` |
+| 4 | **FIX-D** | Verify chrome_148_macos GpuProfile params (MAX_*, extensions list) match real Chrome capture | 0-7 (cross-API correlation) | 1 day | ⬜ | `crates/stealth/src/gpu.rs` |
+| 5 | **FIX-E** | Replace BO's single chrome_148_macos preset with a 4-8-preset sampler (profile pool) | 0-3 (IP-clustering defence) | 1 week | ⬜ | `crates/stealth/src/presets.rs` |
+| 6 | **FIX-F** | Sec-CH-Device-Memory quantization: spec says `{0.25, 0.5, 1, 2, 4, 8}` only; verify `profile.device_memory` quantizes correctly | 0-2 (DataDome) | 1 hour | ⬜ | `crates/net/src/headers.rs:300-302` |
+| 7 | **FIX-G** | Decide canvas-noise policy: keep 5% PCG32 jitter, disable, or make opt-in | 0-3 (cross-vendor) | 1 day | ⏸️ research | `crates/canvas/src/canvas2d.rs`, `webgl_render.rs` |
+| 8 | **OPEN-1** | Sec-CH-UA brand-order randomization: HTTP fixed vs JS shuffled — verify real Chrome | (validation) | 4 hours | 🔵 in progress | capture real Chrome |
+| 9 | **OPEN-2** | WebGL extension list validation against real Chrome 148 macOS capture | (validation) | 2 hours | 🔵 | capture real Chrome |
+| 10 | **FIX-H** | screen.orientation per-profile (currently hard-coded) | 0 (no current target needs it) | 2 hours | ⬜ low priority | `window_bootstrap.js` |
+
+## What this means for the v0.2.0 budget
+
+**Smallest set to hit 115:**
+
+If FIX-A flips 3-4 AWS WAF sites + FIX-C flips 1-2 more + FIX-D + FIX-F flip 1-2: that's 5-8 sites recovered. Combined with the existing 107 routed median: **est. 112-115.**
+
+**Bigger leverage:**
+
+FIX-E (profile sampler, 1 week) is a structural change that helps with the IP-clustering ceiling. Without it, even with perfect-fingerprint, hitting the same AWS WAF endpoint from the same datacenter IP with identical fingerprints is a reliability hazard. **Recommended for v0.2.x point release, not v0.2.0.**
+
+## Decision rule
+
+After each FIX commits:
+1. Run single-site sweep against THE site we expect to flip
+2. If it flipped, move on
+3. If it didn't, dig into the response shape with `RUST_LOG=net=trace`
+4. Update `16_DECISION_LOG.md` with the actual outcome
+
+After every 3 FIXes:
+1. Run the full 3-run × 4-profile gate
+2. Confirm routed median is climbing
+3. If not, halt and re-examine the assumptions in `03_HARDWARE_SPOOFING_DIFF.md`
+
+## What this list does NOT include
+
+- Per-vendor solvers (WASM PoW for AWS WAF/DataDome/Kasada) — `vendor_solvers` scope.
+- Kasada frontier (canadagoose/hyatt/realtor) — deferred per `R-KASADA-FRONTIER`.
+- DataDome WASM-iframe daily-key — `R-DATADOME-DAILY-KEY`, mixed scope.
+- Behavioral signals — out of scope for this audit, see `humanize.js` / R-BESTBUY-AKAMAI for the visit-behaviour cluster.
