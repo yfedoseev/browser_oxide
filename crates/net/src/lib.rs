@@ -324,17 +324,36 @@ impl HttpClient {
     /// previously-persisted file (preserved from the legacy `new()`
     /// path).
     pub fn shared(profile: &StealthProfile) -> Result<Self, NetError> {
+        // A/B toggles for the SharedSession-bleed hypothesis on x-com
+        // (THIN-BODY 69 mid-sweep, L3-RENDERED 274KB in isolation):
+        //   BROWSER_OXIDE_NO_SHARED_SESSION=1     — fully isolated client
+        //   BROWSER_OXIDE_NO_SHARED_COOKIES=1     — isolated cookies, shared accept_ch
+        //   BROWSER_OXIDE_NO_SHARED_ACCEPT_CH=1   — shared cookies, isolated accept_ch
+        // See `docs/releases/v0.1.0-parity/VERIFICATION.md §6d-bis` + R-SHAREDSESSION-X-COM.
+        if std::env::var("BROWSER_OXIDE_NO_SHARED_SESSION").is_ok() {
+            return Self::new(profile);
+        }
+        let s = shared_session();
+        let cookies = if std::env::var("BROWSER_OXIDE_NO_SHARED_COOKIES").is_ok() {
+            Arc::new(Mutex::new(CookieJar::new()))
+        } else {
+            s.cookies
+        };
+        let accept_ch = if std::env::var("BROWSER_OXIDE_NO_SHARED_ACCEPT_CH").is_ok() {
+            Arc::new(Mutex::new(HashSet::new()))
+        } else {
+            s.accept_ch
+        };
         // Share the cookie jar and the Accept-CH origin set, but keep
         // DNS cache and Alt-Svc cache per-client. Real browsers share
         // cookies and Client-Hints opt-ins across tabs but DNS / Alt-Svc
         // are connection-level state that can leak per-IP routing across
         // unrelated origins (DataDome flagged leboncoin when a shared
         // Alt-Svc cache routed us to a previously-throttled CDN node).
-        let s = shared_session();
         Self::new_with_shared_state(
             profile,
-            s.cookies,
-            s.accept_ch,
+            cookies,
+            accept_ch,
             tcp::DnsCache::new(),
             AltSvcCache::new(),
         )
