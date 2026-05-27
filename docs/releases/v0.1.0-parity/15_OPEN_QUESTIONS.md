@@ -199,9 +199,35 @@ EXECUTION_PLAN.md Fix 4 step 1: "Capture real Chrome 148 canvas output for the F
 
 EXECUTION_PLAN.md Fix 12 needs ~12 h sweep wall-clock (3 runs × 4 profiles × 126 sites in pool mode). Cannot run in-session for time + the need to merge Fixes 1, 3, 5-11 to a single branch before sweeping. **Suggested next steps**:
   1. Cherry-pick / merge all `fix/v0.1.0-fixN-*` branches onto a single `release/v0.1.0-parity` branch.
-  2. Run the sweep command listed in EXECUTION_PLAN.md Fix 12.
+  2. Run the sweep command listed in EXECUTION_PLAN.md Fix 12 **wrapped in a per-site wall-clock watchdog** (see R-V8-TERM below).
   3. Aggregate per 14_TESTING_VALIDATION.md §L5; compare to the 2026-05-24 internal baseline.
   4. If median routed best-of-4 ≥ 115: tag `v0.1.0-parity-rc1`. If 113-114: tag `v0.1.0-parity`.
+
+**Partial in-session sweep data** (single profile, single run on `fix/v0.1.0-fix4-canvas-parity`, killed mid-sweep at site 73 by R-V8-TERM): 57 / 73 strict-pass (78% on first 73 sites). 4 CHL: etsy/homedepot/tripadvisor/skyscanner (all known-hard). Extrapolation to 126 is unsafe — the unhit second half is enriched for easy SaaS/news/reference sites, but also contains the canadagoose/hyatt/realtor Kasada cluster. Anchor decisions on the full re-run.
+
+### R-V8-TERM — V8 `terminate_execution` returning `true` but JS continuing for hours
+
+Discovered while running the partial Fix 12 sweep on `fix/v0.1.0-fix4-canvas-parity` (2026-05-26): after `[73/126] travel skyscanner PerimeterX-CHL`, the engine entered uber.com (site 74). The log shows `[V8DeadlineWatcher] deadline 25000ms expired — firing terminate_execution / terminate_execution returned true` then `[op_net_fetch_sync] fetched 2 bytes from https://tags.tiqcdn.com/utag/uber/main/prod/utag.v.js?...`, then **3.5 hours of 94% CPU with zero log output** before being killed externally. The sweep_metrics output JSON was never written.
+
+V8's `terminate_execution` is documented as "may not have effect until the next V8 entry point" — but our V8DeadlineWatcher already reports it returned `true`. The hang reproduced on uber-alone-x2 once during initial diagnosis but did NOT reproduce on three subsequent retries on the same binary, so it's transient — likely Tealium's `utag.v.js` returning a degenerate response (the 2-byte fetch is suspicious) that V8 enters an uninterruptible native-op spin on.
+
+**Reproducer recipe** (not always-fires):
+```bash
+# Build the v0.1.0-parity union branch
+cargo build --release -p browser --example sweep_metrics
+# Run uber twice in a row — sometimes hangs on the second nav
+echo '[{"cat":"travel","name":"uber","url":"https://www.uber.com/"},{"cat":"travel","name":"uber","url":"https://www.uber.com/"}]' > /tmp/u2.json
+target/release/examples/sweep_metrics chrome_148_macos /tmp/u2.json /tmp/u2_out.json
+```
+
+**Mitigations / next steps**:
+  1. Wrap sweep_metrics in an external watchdog that kills the process if a single site exceeds N minutes (e.g., 3× the per-site budget). Recommended for any unattended Fix 12 run.
+  2. Investigate which native op is blocking the V8 deadline — candidates: synchronous fetch (`op_net_fetch_sync`), CSS layout, or DOM mutation in the V8DeadlineWatcher's "after-terminate" path.
+  3. Predates the v0.1.0 work — present in `main` HEAD `385d70a`. The 11 landed fixes neither caused nor cure it; just want to surface it as a load-bearing gap for the Fix 12 gate.
+
+### R-FIX-WINDOWS-RTX — chrome_148_windows preset drift
+
+The Fix 2 engine-side test (`webgl_param_golden_snapshot_chrome_148_windows`) surfaced an existing preset/catalog drift: `crates/stealth/src/presets.rs:65` declares `webgl_renderer: "...RTX 3080..."` but `:106` selects `gpu_profile: nvidia_rtx_3060_windows()`. The engine reads from `gpu_profile` so the user-facing `webgl_renderer` declaration is dead in this code path; tests anchor on `gpu_profile.unmasked_*`. Fix is a one-line `webgl_renderer` correction OR removal of the dead field — defer until owner decision on which is canonical.
 
 ### R-FIX-pre — Pre-flight HEAD breakage at `385d70a`
 
