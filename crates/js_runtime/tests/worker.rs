@@ -83,3 +83,53 @@ fn worker_addeventlistener_roundtrip() {
     let out = drive_runtime(code, 2000);
     assert_eq!(out, "{\"type\":\"reply\",\"n\":42}");
 }
+
+/// R-DUO-WORKER: `self.location` must be populated from the URL the
+/// worker was constructed with. Recaptcha enterprise's webworker reads
+/// `self.location.origin` to verify it was loaded from a trusted
+/// recaptcha.net URL; an undefined/missing location bails the token flow.
+///
+/// Uses a blob: URL so the worker source is deterministic across runs;
+/// the `URL.createObjectURL` registers a real `blob:` scheme URL, which
+/// `op_worker_self_url` echoes back, and `new URL(blob:…)` parses it
+/// into origin/protocol/etc.
+#[test]
+fn worker_self_location_populated_from_construction_url() {
+    let code = r#"
+        const src = `
+            self.onmessage = function(e) {
+                self.postMessage(JSON.stringify({
+                    has_location: typeof self.location === 'object' && self.location !== null,
+                    href: self.location && self.location.href,
+                    protocol: self.location && self.location.protocol,
+                    origin: self.location && self.location.origin,
+                    toString_works: self.location && (self.location + '') === self.location.href,
+                }));
+            };
+        `;
+        const blob = new Blob([src], { type: 'text/javascript' });
+        const url = URL.createObjectURL(blob);
+        const w = new Worker(url);
+        w.onmessage = function(e) {
+            document.querySelector('#out').textContent = e.data;
+            w.terminate();
+        };
+        setTimeout(() => w.postMessage('go'), 20);
+    "#;
+    let out = drive_runtime(code, 2000);
+    let v: serde_json::Value =
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("invalid JSON: {e}; raw={out}"));
+    assert_eq!(v["has_location"], true, "self.location must exist: {out}");
+    assert!(
+        v["href"].as_str().unwrap_or("").starts_with("blob:"),
+        "href must echo the blob: URL: {out}"
+    );
+    // Load-bearing for recaptcha-class probes: location.toString() === href.
+    // Note: BO's URL polyfill currently returns empty .protocol and "null"
+    // .origin for blob: URLs — real Chrome returns "blob:" / "null". That's
+    // a separate URL polyfill bug; not blocking for R-DUO-WORKER.
+    assert_eq!(
+        v["toString_works"], true,
+        "location toString must equal href: {out}"
+    );
+}

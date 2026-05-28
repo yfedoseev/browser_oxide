@@ -30,6 +30,38 @@
     const self = globalThis;
     self.self = self;
 
+    // --- R-DUO-WORKER: WorkerLocation ---
+    // Real Chrome workers expose `self.location` as a WorkerLocation
+    // object reporting the script's URL. Recaptcha enterprise's
+    // webworker reads `self.location.origin` to verify it was loaded
+    // from a trusted URL; absence silently bails the token flow.
+    if (!self.location) {
+        try {
+            const _workerUrl = (ops && typeof ops.op_worker_self_url === 'function')
+                ? ops.op_worker_self_url()
+                : '';
+            if (_workerUrl) {
+                const _u = new URL(_workerUrl);
+                self.location = Object.create(null);
+                self.location.href = _u.href;
+                self.location.origin = _u.origin;
+                self.location.protocol = _u.protocol;
+                self.location.host = _u.host;
+                self.location.hostname = _u.hostname;
+                self.location.port = _u.port;
+                self.location.pathname = _u.pathname;
+                self.location.search = _u.search;
+                self.location.hash = _u.hash;
+                self.location.toString = function () { return _u.href; };
+                Object.defineProperty(self.location, Symbol.toStringTag, {
+                    value: 'WorkerLocation', configurable: true,
+                });
+            }
+        } catch (_e) {
+            // URL parse failure (rare) — leave location undefined.
+        }
+    }
+
     // --- Intl Sync (matches window_bootstrap) ---
     if (ops.op_has_stealth_profile && ops.op_has_stealth_profile()) {
         const profileTz = ops.op_get_profile_value("timezone") || "Europe/Moscow";

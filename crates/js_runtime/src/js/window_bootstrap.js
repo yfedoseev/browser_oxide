@@ -1908,7 +1908,12 @@
                     return;
                 }
 
-                this._id = _wops.op_worker_spawn(script, this._name, isModule);
+                // R-DUO-WORKER: pass the resolved script URL so the
+                // worker realm can install `self.location` consistent
+                // with real Chrome's WorkerLocation. Recaptcha and
+                // similar workers read `self.location.origin` to
+                // gate execution; empty location silently bails.
+                this._id = _wops.op_worker_spawn(script, this._name, isModule, this._url);
                 if (this._id <= 0) {
                     this._id = 0;
                     return;

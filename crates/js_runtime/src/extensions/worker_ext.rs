@@ -199,6 +199,13 @@ struct WorkerSelf {
     /// signals after every send so the parent's awaiting promise wakes
     /// up without polling.
     notify_parent: Arc<Notify>,
+    /// URL the worker was constructed with (`new Worker(url)`). Drives
+    /// `self.location.href` in the worker realm via `op_worker_self_url`.
+    /// Recaptcha enterprise's webworker reads `self.location.origin`
+    /// to verify it was loaded from a trusted recaptcha.net URL; an
+    /// empty / missing `self.location` is one cause of duolingo's
+    /// stuck-at-13.5KB residual (R-DUO-WORKER).
+    url: String,
 }
 
 thread_local! {
@@ -218,6 +225,7 @@ pub fn op_worker_spawn(
     #[string] script: String,
     #[string] _name: String,
     is_module: bool,
+    #[string] url: String,
 ) -> i32 {
     // Prefer StealthState.profile (always set from BrowserRuntimeOptions) over
     // DomState.stealth_profile (historically always None in the main runtime).
@@ -262,6 +270,7 @@ pub fn op_worker_spawn(
                     to_parent: to_parent_tx,
                     from_parent: to_worker_rx,
                     notify_parent: notify_parent.clone(),
+                    url,
                 });
             });
 
@@ -512,6 +521,25 @@ pub fn op_worker_self_recv() -> String {
     })
 }
 
+/// R-DUO-WORKER: return the URL the current worker was constructed
+/// with (`new Worker(url)`). Used by `worker_bootstrap.js` to install
+/// `self.location` — real Chrome's `WorkerLocation` reports the
+/// worker script's URL, and recaptcha enterprise's webworker reads
+/// `self.location.origin` to verify it was loaded from a trusted
+/// recaptcha.net URL. Empty `self.location` (BO pre-fix) bails the
+/// worker silently.
+#[op2]
+#[string]
+pub fn op_worker_self_url() -> String {
+    WORKER_SELF.with(|w| {
+        if let Some(s) = w.borrow().as_ref() {
+            s.url.clone()
+        } else {
+            String::new()
+        }
+    })
+}
+
 deno_core::extension!(
     worker_extension,
     ops = [
@@ -526,6 +554,7 @@ deno_core::extension!(
         op_worker_await_message,
         op_worker_terminate,
         op_worker_self_post,
+        op_worker_self_url,
         op_worker_self_recv,
     ],
 );
