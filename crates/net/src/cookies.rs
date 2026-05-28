@@ -129,6 +129,24 @@ impl CookieJar {
         let bytes = std::fs::read(path)?;
         serde_json::from_slice(&bytes).map_err(std::io::Error::other)
     }
+
+    /// Remove all stored cookies whose stored-domain key is a host-
+    /// suffix-match of `target_domain` (i.e. the cookie belongs to
+    /// `target_domain` itself or any of its subdomains).
+    ///
+    /// Used for the x.com / twitter.com rebrand-collision band-aid
+    /// (Sprint 2.3 Path 3 / R-SHAREDSESSION-X-COM-COOKIES): clearing
+    /// `twitter.com` before a fresh `x.com` nav prevents the
+    /// cross-identity cookie poisoning that triggers x.com's WAF.
+    /// Returns the number of (domain → cookie-map) buckets evicted —
+    /// useful for the call-site to log when the band-aid fired.
+    pub fn clear_for_domain(&mut self, target_domain: &str) -> usize {
+        let target = target_domain.trim_start_matches('.').to_ascii_lowercase();
+        let before = self.cookies.len();
+        self.cookies
+            .retain(|stored, _| !domain_matches(stored, &target));
+        before - self.cookies.len()
+    }
 }
 
 /// Extract the base domain for cookie storage.
@@ -345,5 +363,64 @@ mod tests {
         assert!(!domain_matches("mail.ru", "e.mail.ru")); // wrong direction
         assert!(!domain_matches("evilmail.ru", "mail.ru")); // not a suffix at boundary
         assert!(!domain_matches("mail.ru", "evil.com"));
+    }
+
+    // ===== Sprint 2.3 Path 3 — clear_for_domain =====
+
+    #[test]
+    fn clear_for_domain_evicts_exact_and_subdomains() {
+        let mut jar = CookieJar::new();
+        let twitter = url::Url::parse("https://twitter.com/").unwrap();
+        let mobile_twitter = url::Url::parse("https://mobile.twitter.com/").unwrap();
+        let x = url::Url::parse("https://x.com/").unwrap();
+        let other = url::Url::parse("https://example.com/").unwrap();
+
+        jar.set_cookies(
+            &twitter,
+            &["guest_id=v1%3A123; Domain=.twitter.com".to_string()],
+        );
+        jar.set_cookies(&mobile_twitter, &["mobile_pref=dark".to_string()]);
+        jar.set_cookies(&x, &["ct0=xyz".to_string()]);
+        jar.set_cookies(&other, &["session=abc".to_string()]);
+
+        let evicted = jar.clear_for_domain("twitter.com");
+
+        // 2 stored-domain buckets had to go: ".twitter.com" (set via
+        // Domain= attr) and "mobile.twitter.com" (host-only).
+        assert_eq!(evicted, 2);
+        // x.com and example.com cookies survive.
+        assert!(jar.cookies_for(&x).is_some());
+        assert!(jar.cookies_for(&other).is_some());
+        // Twitter cookies gone — across both subdomains.
+        assert!(jar.cookies_for(&twitter).is_none());
+        assert!(jar.cookies_for(&mobile_twitter).is_none());
+    }
+
+    #[test]
+    fn clear_for_domain_no_match_returns_zero() {
+        let mut jar = CookieJar::new();
+        let twitter = url::Url::parse("https://twitter.com/").unwrap();
+        jar.set_cookies(
+            &twitter,
+            &["guest_id=v1%3A123; Domain=.twitter.com".to_string()],
+        );
+        // Clearing an unrelated domain should leave the jar untouched.
+        let evicted = jar.clear_for_domain("example.com");
+        assert_eq!(evicted, 0);
+        assert!(jar.cookies_for(&twitter).is_some());
+    }
+
+    #[test]
+    fn clear_for_domain_ignores_leading_dot_and_case() {
+        let mut jar = CookieJar::new();
+        let twitter = url::Url::parse("https://twitter.com/").unwrap();
+        jar.set_cookies(
+            &twitter,
+            &["guest_id=v1%3A123; Domain=.twitter.com".to_string()],
+        );
+        // `.TWITTER.COM` (leading dot + uppercase) must still match.
+        let evicted = jar.clear_for_domain(".TWITTER.COM");
+        assert_eq!(evicted, 1);
+        assert!(jar.cookies_for(&twitter).is_none());
     }
 }

@@ -1357,6 +1357,17 @@ impl HttpClient {
         jar.set_cookies(url, &[raw.to_string()]);
     }
 
+    /// Drop every cookie whose stored-domain is a host-suffix match of
+    /// `target_domain`. Returns the number of (domain → cookie-map)
+    /// buckets evicted. Used for the x.com / twitter.com rebrand-
+    /// collision band-aid (Sprint 2.3 Path 3 /
+    /// R-SHAREDSESSION-X-COM-COOKIES) where a fresh nav to one
+    /// identity must NOT inherit cookies from the sister identity.
+    pub async fn clear_cookies_for_domain(&self, target_domain: &str) -> usize {
+        let mut jar = self.cookies.lock().await;
+        jar.clear_for_domain(target_domain)
+    }
+
     /// Build a Response from HTTP/2 response parts and body.
     async fn build_response(
         &self,

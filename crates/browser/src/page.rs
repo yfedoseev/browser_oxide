@@ -1085,6 +1085,61 @@ impl Page {
         let client = net::HttpClient::shared(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
 
+        // Sprint 2.3 Path 3 band-aid (R-SHAREDSESSION-X-COM-COOKIES):
+        // twitter.com → x.com rebrand collision. A process that visits
+        // twitter.com triggers a redirect chain to x.com, populating
+        // cookie jar buckets for BOTH eTLD+1 identities (verified by
+        // `crates/browser/examples/_xcom_probe.rs`: twitter.com nav
+        // leaves 379-byte jar contents under both keys with DIFFERENT
+        // guest_id values). On the next explicit x.com nav, x.com's
+        // WAF reads the inherited `guest_id` + Cloudflare `__cf_bm` as
+        // "previously-issued session" and serves a 69-byte stub.
+        //
+        // The band-aid scrubs BOTH identities (twitter + x) on entry,
+        // but ONLY when the JAR ALREADY HOLDS cookies for both —
+        // mirroring the "second-visit poisoning" condition. A first
+        // twitter nav with an empty jar doesn't fire (probe.rs confirms
+        // the redirect populates both AFTER the doc lands). A
+        // single-identity workflow that navigates twitter→twitter
+        // repeatedly without ever touching x.com keeps its session.
+        //
+        // Verified 2026-05-27 audit/16 §R-SHAREDSESSION-X-COM-COOKIES.
+        // Opt-out via BROWSER_OXIDE_NO_XCOM_ISOLATION=1.
+        if std::env::var("BROWSER_OXIDE_NO_XCOM_ISOLATION").is_err() {
+            if let Ok(parsed) = url::Url::parse(url) {
+                if let Some(host) = parsed.host_str() {
+                    let h = host.to_ascii_lowercase();
+                    let is_collision_target = h == "x.com"
+                        || h.ends_with(".x.com")
+                        || h == "twitter.com"
+                        || h.ends_with(".twitter.com");
+                    if is_collision_target {
+                        // Probe representative URLs for either identity.
+                        // Non-empty == jar has cookies host-suffix-matching.
+                        let t_url = url::Url::parse("https://twitter.com/").ok();
+                        let x_url = url::Url::parse("https://x.com/").ok();
+                        let has_twitter = matches!(
+                            &t_url,
+                            Some(u) if client.cookies_for_url(u).await.is_some()
+                        );
+                        let has_x = matches!(
+                            &x_url,
+                            Some(u) if client.cookies_for_url(u).await.is_some()
+                        );
+                        if has_twitter && has_x {
+                            let e_t = client.clear_cookies_for_domain("twitter.com").await;
+                            let e_x = client.clear_cookies_for_domain("x.com").await;
+                            tracing::debug!(
+                                evicted_twitter = e_t,
+                                evicted_x = e_x,
+                                "x.com / twitter.com cookie isolation fired"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         // Share the HTTP client with JS fetch() so scripts running inside
         // the V8 isolate hit the same cookie jar as the Rust driver.
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
