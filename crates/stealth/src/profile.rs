@@ -361,10 +361,7 @@ impl StealthProfile {
         // / Linux desktops + Android phones = 44100; pro audio = 96000;
         // niche high-end = 192000. Reject anything else — a non-standard
         // rate is a bot tell.
-        if !matches!(
-            self.audio_sample_rate,
-            44100 | 48000 | 96000 | 192000
-        ) {
+        if !matches!(self.audio_sample_rate, 44100 | 48000 | 96000 | 192000) {
             errors.push(format!(
                 "audio_sample_rate must be one of {{44100, 48000, 96000, 192000}} (got {})",
                 self.audio_sample_rate

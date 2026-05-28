@@ -6165,3 +6165,85 @@ async fn form_elements_collection() {
     assert!(v["iterCount"].as_u64().unwrap() >= 5, "iteration count low");
     assert!(v["missing"].is_null(), "namedItem('nope') should be null");
 }
+
+// ================================================================
+// v0.2.0 FIX-J — FileReader.readAsDataURL / readAsArrayBuffer / readAsText
+// were no-op stubs returning empty strings/buffers. AWS WAF challenge.js
+// calls readAsDataURL(blob) to base64-encode its encrypted fingerprint
+// payload before POSTing to /verify; an empty result bailed challenge.js
+// with "challenge data URL was malformed". See
+// `docs/releases/v0.1.0-parity/audit/16_DECISION_LOG.md` §FIX-J + the
+// R-AWSWAF-OFFLINE-PROBE diagnostic that found this.
+// ================================================================
+
+// FileReader's readAsX methods set `result` synchronously (the spec only
+// requires the `onload` event to fire on the microtask queue). Production
+// AWS WAF challenge.js code reads `reader.result` from inside the onload
+// callback, but tests can read it immediately after the call returns.
+
+#[tokio::test]
+async fn file_reader_read_as_data_url_encodes_blob_bytes() {
+    // 'Hello!' → base64 'SGVsbG8h'
+    let js = r#"
+        (() => {
+            const blob = new Blob([new Uint8Array([72,101,108,108,111,33])], { type: 'text/plain' });
+            const r = new FileReader();
+            r.readAsDataURL(blob);
+            return JSON.stringify({ result: r.result, state: r.readyState });
+        })()
+    "#;
+    let raw = check(js).await;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("json: {e}; raw={raw}"));
+    assert_eq!(
+        v["result"], "data:text/plain;base64,SGVsbG8h",
+        "readAsDataURL must base64-encode blob bytes with the blob's MIME type: {raw}"
+    );
+    assert_eq!(v["state"], 2, "readyState must be DONE after read");
+}
+
+#[tokio::test]
+async fn file_reader_read_as_data_url_default_mime() {
+    // No blob type → default 'application/octet-stream' (FileReader spec).
+    // 0xff 0x00 0x42 → base64 '/wBC'.
+    let js = r#"
+        (() => {
+            const blob = new Blob([new Uint8Array([0xff, 0x00, 0x42])]);
+            const r = new FileReader();
+            r.readAsDataURL(blob);
+            return r.result;
+        })()
+    "#;
+    assert_eq!(check(js).await, "data:application/octet-stream;base64,/wBC");
+}
+
+#[tokio::test]
+async fn file_reader_read_as_array_buffer_copies_blob_bytes() {
+    let js = r#"
+        (() => {
+            const blob = new Blob([new Uint8Array([1,2,3,4,5,6,7,8])]);
+            const r = new FileReader();
+            r.readAsArrayBuffer(blob);
+            const view = new Uint8Array(r.result);
+            return JSON.stringify({ len: view.byteLength, bytes: Array.from(view) });
+        })()
+    "#;
+    let raw = check(js).await;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("json: {e}; raw={raw}"));
+    assert_eq!(v["len"], 8);
+    assert_eq!(v["bytes"], serde_json::json!([1, 2, 3, 4, 5, 6, 7, 8]));
+}
+
+#[tokio::test]
+async fn file_reader_read_as_text_decodes_utf8() {
+    let js = r#"
+        (() => {
+            const blob = new Blob(['héllo'], { type: 'text/plain' });
+            const r = new FileReader();
+            r.readAsText(blob);
+            return r.result;
+        })()
+    "#;
+    assert_eq!(check(js).await, "héllo");
+}

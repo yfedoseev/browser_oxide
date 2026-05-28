@@ -4,6 +4,52 @@ Running log of decisions made during R-FP-AUDIT-2026Q3. Format: dated entry with
 
 ## 2026-05-27
 
+### FIX-J — FileReader.readAsDataURL real implementation (pending commit)
+
+**Status:** 🔵 in progress — code complete; 4/4 new chrome_compat tests pass; probe oracle confirmed the bailout error changed; live sweep shows 1/8 AWS WAF sites flipped (amazon-ca 227KB).
+
+**Root cause (R-AWSWAF-OFFLINE-PROBE finding):** Built `crates/browser/examples/awswaf_probe.rs` — a V8-based oracle that loads a captured AWS WAF challenge HTML, wraps `navigator` / `screen` / `document` / `window.chrome` with logging Proxies, and dumps the property-access trace. First run revealed:
+- `AwsWafIntegration` installed 7 methods ✅
+- `saveReferrer()` succeeded ✅
+- `forceRefreshToken()` REJECTED with `"Error: challenge data URL was malformed: data:application/octet-stream;base64,"`
+
+Tracing the error string in BO source identified `crates/js_runtime/src/js/shared_apis_bootstrap.js:553` and `crates/js_runtime/src/js/window_bootstrap.js:2112`:
+
+```js
+readAsDataURL(blob) { this.readyState = 2; this.result = "data:application/octet-stream;base64,"; if (this.onload) setTimeout(...); }
+```
+
+**`FileReader.readAsDataURL` was a NO-OP STUB** that returned `"data:application/octet-stream;base64,"` (empty body) regardless of input. Plus `readAsArrayBuffer` returned a 0-byte `ArrayBuffer`, `readAsText` returned `""`, `readAsBinaryString` returned `""`.
+
+AWS WAF challenge.js flow:
+1. Compute fingerprint (probes navigator/screen/document — 92 accesses captured by probe)
+2. Encrypt fingerprint via `crypto.subtle` ✅ (BO has this)
+3. Wrap encrypted bytes in `Blob`
+4. Call `FileReader.readAsDataURL(blob)` to base64-encode for the verify POST
+5. BO returned EMPTY data URL → challenge.js validation: "malformed" → reject
+6. challenge.js never POSTs `/verify` → AWS WAF serves the 2011-byte stub on the original request
+
+**This is THE bug for the 7 AWS WAF sites** (amazon-com / imdb / amazon-ca / amazon-fr / amazon-in / amazon-jp / amazon-com-au) at AWS WAF stub bodies.
+
+**Fix:** real implementations of all 4 FileReader read methods in BOTH bootstrap files (shared_apis_bootstrap.js + window_bootstrap.js, since both contain `if (!globalThis.FileReader)` stubs):
+- `readAsDataURL`: base64-encode `blob._data` via `btoa(binary-string)` (chunked for large blobs), prepend `data:<mime or octet-stream>;base64,`. Set `result` synchronously; dispatch `load` + `loadend` events asynchronously.
+- `readAsArrayBuffer`: copy `blob._data` into a fresh `ArrayBuffer` and return.
+- `readAsText`: decode `blob._data` as UTF-8 via `TextDecoder` (or supplied encoding).
+- `readAsBinaryString`: convert `blob._data` to a binary string via `String.fromCharCode`.
+- `abort`: dispatch `abort` + `loadend`.
+
+**Validation:**
+- 4 new chrome_compat tests (`file_reader_read_as_data_url_encodes_blob_bytes`, `_default_mime`, `read_as_array_buffer_copies_blob_bytes`, `read_as_text_decodes_utf8`) — all pass.
+- Probe re-run post-FIX-J: bailout error changed from `"challenge data URL was malformed"` (BO bug) → `"Network response was not ok"` (expected — captured gokuProps is stale for offline replay; in live operation it would POST against real AWS WAF backend).
+- Live 8-site AWS WAF sweep: **amazon-ca flipped from 2011-byte stub → 227,417-byte L3-RENDERED** ✅. Other 7 sites still stub on this single trial (could be IP-clustering, could need round-2 retry, could be different WAF region with stricter probes).
+- `cargo clippy -p js_runtime -p browser --all-targets -- -D warnings` ✅
+- `cargo fmt --all -- --check` ✅
+- `cargo test -p js_runtime --lib -- --test-threads=1` — 13/13 pass.
+
+**Risk:** very low. Real Chrome's FileReader API is well-spec'd and this implementation matches the WHATWG File API spec. The only behaviour change is "FileReader actually returns blob contents" vs "FileReader returns empty result" — that's a strict subset of correctness.
+
+**Infrastructure:** new `crates/browser/examples/awswaf_probe.rs` (~95 lines) provides the reusable oracle. Capture a challenge HTML, inject a probe snippet (see `/tmp/awswaf_probe/probe_inject.js` for template; will be cleaned up into a fixture later), run `awswaf_probe <html> <url> [out.json]`. Reusable for diagnosing any future vendor-script bailout.
+
 ### FIX-D validation sweep — 5/5 AWS WAF sites still stub
 
 **Sweep:** `target/release/examples/sweep_metrics chrome_148_macos` against `[amazon-com, imdb, amazon-fr, amazon-in, amazon-de]` single-run, post-`a8cc691`.

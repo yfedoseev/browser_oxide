@@ -546,14 +546,81 @@
     // Shared Web APIs Part 3.
     // ================================================================
     if (!globalThis.FileReader) {
+        // Real FileReader. Previously a no-op stub that returned empty
+        // strings/buffers — AWS WAF challenge.js calls readAsDataURL(blob)
+        // to base64-encode its encrypted fingerprint payload before POSTing
+        // to /verify; an empty result caused challenge.js to bail with
+        // "challenge data URL was malformed", which the AWS WAF backend
+        // then served as the 2011-byte stub. See
+        // `docs/releases/v0.1.0-parity/audit/16_DECISION_LOG.md` §FIX-J.
+        const _readerEncode = (bytes) => {
+            // Manual base64 over Uint8Array via btoa(binary-string). btoa
+            // is fine on UTF-8-clean ranges (0-255); we feed it raw bytes
+            // mapped through String.fromCharCode.
+            let bin = '';
+            // Chunk to avoid blowing the call stack on large blobs.
+            const CHUNK = 0x8000;
+            for (let i = 0; i < bytes.length; i += CHUNK) {
+                bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+            }
+            return btoa(bin);
+        };
+        const _readerDispatch = (self, name) => {
+            const ev = { target: self, type: name };
+            if (self['on' + name]) setTimeout(() => self['on' + name](ev), 0);
+        };
         globalThis.FileReader = class FileReader extends EventTarget {
             static EMPTY = 0; static LOADING = 1; static DONE = 2;
-            constructor() { super(); this.readyState = 0; this.result = null; this.error = null; this.onload = null; this.onloadstart = null; this.onloadend = null; this.onprogress = null; this.onerror = null; this.onabort = null; }
-            readAsText(blob) { this.readyState = 2; this.result = ""; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
-            readAsDataURL(blob) { this.readyState = 2; this.result = "data:application/octet-stream;base64,"; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
-            readAsArrayBuffer(blob) { this.readyState = 2; this.result = new ArrayBuffer(0); if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
-            readAsBinaryString(blob) { this.readyState = 2; this.result = ""; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
-            abort() { this.readyState = 2; }
+            constructor() {
+                super();
+                this.readyState = 0; this.result = null; this.error = null;
+                this.onload = null; this.onloadstart = null; this.onloadend = null;
+                this.onprogress = null; this.onerror = null; this.onabort = null;
+            }
+            readAsText(blob, encoding) {
+                try {
+                    const bytes = (blob && blob._data) ? blob._data : new Uint8Array(0);
+                    const dec = new TextDecoder(encoding || 'utf-8');
+                    this.result = dec.decode(bytes);
+                } catch (e) { this.error = e; this.result = null; }
+                this.readyState = 2;
+                _readerDispatch(this, 'load'); _readerDispatch(this, 'loadend');
+            }
+            readAsDataURL(blob) {
+                try {
+                    const bytes = (blob && blob._data) ? blob._data : new Uint8Array(0);
+                    const b64 = _readerEncode(bytes);
+                    const mime = (blob && blob.type) || 'application/octet-stream';
+                    this.result = `data:${mime};base64,${b64}`;
+                } catch (e) { this.error = e; this.result = null; }
+                this.readyState = 2;
+                _readerDispatch(this, 'load'); _readerDispatch(this, 'loadend');
+            }
+            readAsArrayBuffer(blob) {
+                try {
+                    const bytes = (blob && blob._data) ? blob._data : new Uint8Array(0);
+                    // Copy into a fresh ArrayBuffer matching the blob exactly
+                    const buf = new ArrayBuffer(bytes.byteLength);
+                    new Uint8Array(buf).set(bytes);
+                    this.result = buf;
+                } catch (e) { this.error = e; this.result = null; }
+                this.readyState = 2;
+                _readerDispatch(this, 'load'); _readerDispatch(this, 'loadend');
+            }
+            readAsBinaryString(blob) {
+                try {
+                    const bytes = (blob && blob._data) ? blob._data : new Uint8Array(0);
+                    let bin = '';
+                    const CHUNK = 0x8000;
+                    for (let i = 0; i < bytes.length; i += CHUNK) {
+                        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+                    }
+                    this.result = bin;
+                } catch (e) { this.error = e; this.result = null; }
+                this.readyState = 2;
+                _readerDispatch(this, 'load'); _readerDispatch(this, 'loadend');
+            }
+            abort() { this.readyState = 2; _readerDispatch(this, 'abort'); _readerDispatch(this, 'loadend'); }
         };
         _maskAsNative(globalThis.FileReader);
     }

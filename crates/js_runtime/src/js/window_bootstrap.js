@@ -2092,6 +2092,21 @@
     // ================================================================
 
     if (!globalThis.FileReader) {
+        // Real FileReader — see shared_apis_bootstrap.js for the canonical
+        // doc + rationale (FIX-J). This is the secondary install path used
+        // when shared_apis hasn't run first.
+        const _readerEncode2 = (bytes) => {
+            let bin = '';
+            const CHUNK = 0x8000;
+            for (let i = 0; i < bytes.length; i += CHUNK) {
+                bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+            }
+            return btoa(bin);
+        };
+        const _readerDispatch2 = (self, name) => {
+            const ev = { target: self, type: name };
+            if (self['on' + name]) setTimeout(() => self['on' + name](ev), 0);
+        };
         globalThis.FileReader = class FileReader extends EventTarget {
             static EMPTY = 0;
             static LOADING = 1;
@@ -2108,11 +2123,49 @@
                 this.onerror = null;
                 this.onabort = null;
             }
-            readAsText(blob) { this.readyState = 2; this.result = ""; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
-            readAsDataURL(blob) { this.readyState = 2; this.result = "data:application/octet-stream;base64,"; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
-            readAsArrayBuffer(blob) { this.readyState = 2; this.result = new ArrayBuffer(0); if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
-            readAsBinaryString(blob) { this.readyState = 2; this.result = ""; if (this.onload) setTimeout(() => this.onload({ target: this }), 0); }
-            abort() { this.readyState = 2; }
+            readAsText(blob, encoding) {
+                try {
+                    const bytes = (blob && blob._data) ? blob._data : new Uint8Array(0);
+                    const dec = new TextDecoder(encoding || 'utf-8');
+                    this.result = dec.decode(bytes);
+                } catch (e) { this.error = e; this.result = null; }
+                this.readyState = 2;
+                _readerDispatch2(this, 'load'); _readerDispatch2(this, 'loadend');
+            }
+            readAsDataURL(blob) {
+                try {
+                    const bytes = (blob && blob._data) ? blob._data : new Uint8Array(0);
+                    const b64 = _readerEncode2(bytes);
+                    const mime = (blob && blob.type) || 'application/octet-stream';
+                    this.result = `data:${mime};base64,${b64}`;
+                } catch (e) { this.error = e; this.result = null; }
+                this.readyState = 2;
+                _readerDispatch2(this, 'load'); _readerDispatch2(this, 'loadend');
+            }
+            readAsArrayBuffer(blob) {
+                try {
+                    const bytes = (blob && blob._data) ? blob._data : new Uint8Array(0);
+                    const buf = new ArrayBuffer(bytes.byteLength);
+                    new Uint8Array(buf).set(bytes);
+                    this.result = buf;
+                } catch (e) { this.error = e; this.result = null; }
+                this.readyState = 2;
+                _readerDispatch2(this, 'load'); _readerDispatch2(this, 'loadend');
+            }
+            readAsBinaryString(blob) {
+                try {
+                    const bytes = (blob && blob._data) ? blob._data : new Uint8Array(0);
+                    let bin = '';
+                    const CHUNK = 0x8000;
+                    for (let i = 0; i < bytes.length; i += CHUNK) {
+                        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+                    }
+                    this.result = bin;
+                } catch (e) { this.error = e; this.result = null; }
+                this.readyState = 2;
+                _readerDispatch2(this, 'load'); _readerDispatch2(this, 'loadend');
+            }
+            abort() { this.readyState = 2; _readerDispatch2(this, 'abort'); _readerDispatch2(this, 'loadend'); }
         };
     }
 
