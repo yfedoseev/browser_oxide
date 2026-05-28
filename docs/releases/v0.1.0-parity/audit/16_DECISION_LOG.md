@@ -50,6 +50,76 @@ AWS WAF challenge.js flow:
 
 **Infrastructure:** new `crates/browser/examples/awswaf_probe.rs` (~95 lines) provides the reusable oracle. Capture a challenge HTML, inject a probe snippet (see `/tmp/awswaf_probe/probe_inject.js` for template; will be cleaned up into a fixture later), run `awswaf_probe <html> <url> [out.json]`. Reusable for diagnosing any future vendor-script bailout.
 
+### FIX-E — chrome_148_macos_sampled() per-Page profile sampler (pending commit)
+
+**Status:** 🔵 in progress — code complete; 3 new tests pass; validation shows NEUTRAL/NEGATIVE single-IP impact; shipped as opt-in.
+
+**Single-IP validation:**
+
+| Trial | Sampler | amazon-com / imdb / amazon-fr / amazon-in / amazon-de / amazon-com-au / amazon-ca / amazon-jp | flips |
+|-------|---------|--------------------|------|
+| Round 1 (post-FIX-J) | OFF | 2011 / 1995 / 2011 / 2011 / 2011 / 2011 / **227,417** / 2011 | 1 (ca) |
+| Round 2 (post-FIX-J) | OFF | 2014 / 1995 / 2011 / 2014 / 2011 / **917,051** / 2014 / 2014 | 1 (com-au) |
+| Round 3 (FIX-E try 1, 5-config sampler) | ON | 2011 / 1995 / 2011 / 2014 / 2014 / 2014 / 2011 / 2011 | **0** |
+| Round 4 (FIX-E tightened to M3-only, 2 trials) | ON | (both trials 0/8) | **0** |
+| Round 5 (control, sampler OFF) | OFF | 2011 / 1995 / 2011 / 2011 / 2011 / **988,892** / 2011 / 2011 | 1 (com-au) |
+
+**Interpretation:** sampler is value-neutral or slightly negative for SINGLE-IP debug sweeps. Hypothesis: each per-Page sampled fingerprint presents differently to AWS WAF, defeating the per-IP "I've seen this fingerprint before, it has a token cookie" caching. For multi-IP production deployments (rotating proxies), sampler IS the right infrastructure (defeats per-fingerprint clustering across IPs). For our single-IP gate sweeps, prefer sampler OFF.
+
+**Iteration history:**
+- v1 (5-config, varying cores 8/10/12/14/16): 0/8 — produced cross-API-inconsistent samples (12-core CPU claimed with "Apple M3" GPU which is 8-core)
+- v2 (2-config M3-only, cores fixed at 8): tests pass + cross-API consistent; still 0/8 single-trial (matches v1 — consistency wasn't the differential)
+
+**Conclusion:** ship FIX-E as **opt-in** infrastructure. `BROWSER_OXIDE_SAMPLE_PROFILE=1` enables it; default off so single-IP debug sweeps + benchmarks continue to behave as before. Add a follow-up `FIX-E2` for per-chip GPU profile variants (M3 Pro / Max) that would widen the sampler pool while keeping cross-API consistency — that may give the multi-IP fleet diversity that justifies the sampler in production.
+
+### FIX-E try 1 — 0/8 with overly-wide sampler (regression from inconsistent samples)
+
+**Status:** ❌ rolled back, replaced with tightened v2 sampler.
+
+**Root cause:** The first sampler version varied `cpu_cores` ∈ {8, 10, 12, 14, 16} independently of `gpu_profile.unmasked_renderer` (still always "Apple M3"). Apple M3 base ships 8c CPU; varying cores to 12 while keeping the M3 GPU string is detectable as inconsistent — AWS WAF's challenge.js cross-checks `navigator.hardwareConcurrency` against WEBGL_UNMASKED_RENDERER as a fingerprint-consistency probe.
+
+**Empirical:** sampler v1 sweep gave 0/8 flips. Control sweep without sampler the same hour gave 1/8 (amazon-com-au). Tightened to M3-only sampler (cores fixed at 8, varying only screen + RAM + seeds within M3-base ranges) — still 0/8 single-trial but at least cross-API-consistent.
+
+**Why:** AWS WAF IP-clustering. BO ships ONE chrome_148_macos preset, so every request from BO's datacenter IP carries the SAME fingerprint. Camoufox v150 ships 67 macOS variants via BrowserForge — each navigate gets a fresh, plausibly-real sample. The FIX-J round-2 evidence (different sites flip on different trials but never both at once) is consistent with AWS WAF clustering on fingerprint+IP and rate-limiting accordingly.
+
+**Fix:**
+- `crates/stealth/src/presets.rs::chrome_148_macos_sampled()` — returns a `chrome_148_macos` profile with screen geometry, core count, RAM, and canvas/audio seeds sampled from realistic Apple-Silicon distributions:
+  - **Screen pool:** 4 configs covering 13.6" MBA, 14" MBP, 14" Pro, 16" Pro
+  - **CPU cores pool:** `{8, 10, 12, 14, 16}` covering M-series base / Pro / Max
+  - **RAM (GB) pool:** `{8, 16, 24, 36}` covering shipping Apple Silicon configs
+  - **canvas_seed / audio_seed:** fully random per call
+- Companion `chrome_148_macos_sampled_with_rng(rng)` for deterministic tests
+- Fixed invariants per Apple Silicon: device_pixel_ratio=2.0, audio_sample_rate=48000, cpu_architecture=arm, platform=MacIntel
+- `debug_assert!(p.validate().is_ok())` — any sampled value violating an invariant introduced elsewhere fails loudly
+- `crates/browser/examples/sweep_metrics.rs` opts in via `BROWSER_OXIDE_SAMPLE_PROFILE=1` env var (gated on `profile_name == "chrome_148_macos"`). Each navigate gets a fresh sample.
+
+**Tests (passing):**
+- `macos_sampler_produces_valid_profiles` (100 samples, every one must validate + values stay in pool)
+- `macos_sampler_produces_diverse_fingerprints` (8 samples → ≥3 distinct tuples + ≥14 unique seeds in 16 trials)
+
+**Risk:** low. Sampler is opt-in via env var; default behaviour unchanged. The pool values are conservative — every entry is a real Apple Silicon hardware config so AWS WAF shouldn't reject a sample for being unrealistic.
+
+### FIX-K — humanize.js already engaged (investigated, no action)
+
+**Status:** ✅ closed — investigation only.
+
+**Finding:** `crates/js_runtime/src/runtime.rs:286` explicitly comments:
+> "Run caller-provided init scripts after built-in cleanup. **These run in order before any &lt;script&gt; tags parsed from HTML.**"
+
+`crates/browser/src/page.rs:950` shows `Page::navigate` already includes `humanize.js` as an init script. So humanize fires BEFORE challenge.js parses the HTML. By the time AWS WAF's challenge.js runs:
+- `__akamai_events.mouse` is pre-populated with ~14 historical mouse points (sigma-lognormal trajectory from `crates/stealth/src/behavior.rs::mouse_trajectory`)
+- A synchronous mousemove + pointermove has been dispatched on `window` + `document` + `body` with `isTrusted=true`
+- The first `runCycle()` has fired focus + visibilitychange events
+
+The FIX-J round-2 evidence (amazon-ca + amazon-com-au flipping post-fix vs zero pre-fix) confirms humanize is providing ENOUGH behavioural signal for at least 2 WAF regions to accept BO. The remaining 5-6 sites still failing are more likely IP-clustering (→ FIX-E) or per-region-stricter probes than behavioural.
+
+Possible future improvements to humanize (deferred):
+- Longer historical trajectory (more pre-page-load events)
+- Per-element MutationObserver-driven event dispatch (real users move cursor toward new content)
+- Better `MouseEvent.detail` / `screenX,Y` matching (some sensors check the bias)
+
+None of these are blocking — humanize is sufficient for the current round.
+
 ### FIX-J validation round 2 — different site flipped (amazon-com-au 917KB)
 
 **Sweep:** same 8-site set as round 1, post-`ef4f561` (FIX-J).

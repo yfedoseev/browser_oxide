@@ -103,6 +103,15 @@ async fn main() {
     let use_pool = std::env::var("BROWSER_OXIDE_SWEEP_POOL").is_ok();
     let mode = if use_pool { "pool" } else { "cold" }.to_string();
 
+    // FIX-E: per-site profile sampling for IP-clustering defence.
+    // When `BROWSER_OXIDE_SAMPLE_PROFILE=1` is set AND the base profile
+    // is chrome_148_macos, each navigate() gets a freshly-sampled variant
+    // (screen / cores / RAM / canvas+audio seeds vary). For non-macos
+    // profiles this currently no-ops — extend to other-OS samplers as
+    // they ship.
+    let sample_per_site =
+        std::env::var("BROWSER_OXIDE_SAMPLE_PROFILE").is_ok() && profile_name == "chrome_148_macos";
+
     let corpus_bytes = fs::read(&corpus_path).expect("read corpus");
     let corpus: Vec<Site> = serde_json::from_slice(&corpus_bytes).expect("parse corpus");
     let total = corpus.len();
@@ -139,9 +148,15 @@ async fn main() {
             for (i, site) in corpus.iter().enumerate() {
                 let t0 = Instant::now();
                 let mut err: Option<String> = None;
+                // Per-site profile (sampled or shared)
+                let site_profile = if sample_per_site {
+                    stealth::presets::chrome_148_macos_sampled()
+                } else {
+                    profile.clone()
+                };
                 let (tag, body_len): (String, usize) = if use_pool {
                     let pool = pool.as_ref().unwrap();
-                    match pool.navigate(&site.url, profile.clone()).await {
+                    match pool.navigate(&site.url, site_profile.clone()).await {
                         Ok(mut page) => {
                             let body = page.content();
                             let ec = browser::engine_classify(&body);
@@ -155,7 +170,7 @@ async fn main() {
                         }
                     }
                 } else {
-                    match browser::Page::navigate(&site.url, profile.clone(), 3).await {
+                    match browser::Page::navigate(&site.url, site_profile, 3).await {
                         Ok(mut page) => {
                             let body = page.content();
                             let ec = browser::engine_classify(&body);
