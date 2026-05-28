@@ -4,7 +4,30 @@ Running log of decisions made during R-FP-AUDIT-2026Q3. Format: dated entry with
 
 ## 2026-05-27
 
-### FIX-D — apple_m3_macos GpuProfile aligned to captured Chrome 147 M3 fixture (pending commit)
+### FIX-D validation sweep — 5/5 AWS WAF sites still stub
+
+**Sweep:** `target/release/examples/sweep_metrics chrome_148_macos` against `[amazon-com, imdb, amazon-fr, amazon-in, amazon-de]` single-run, post-`a8cc691`.
+
+**Result:**
+- amazon-com: 2014 bytes stub
+- imdb: 1995 bytes stub
+- amazon-fr: 2011 bytes stub
+- amazon-in: 2011 bytes stub
+- amazon-de: **2011 bytes stub** (was 855KB on round 1 — confirms round 1 was WAF state noise)
+
+**Honest read:** FIX-A + FIX-C + FIX-D + FIX-F shipped (all correctness fixes — cross-realm Sec-CH-UA consistency, AudioContext sampleRate pinning, device-memory quantization, M3 GpuProfile fixture alignment). **0/5 AWS WAF sites flipped.** The 2011-byte stub is the AWS WAF response when challenge.js was SERVED but bailed during execution — `getToken()` never called. So:
+- challenge.js loaded fine ✅
+- challenge.js ran some of its probes ✅
+- challenge.js detected SOMETHING fingerprint-wise and bailed BEFORE issuing a token ❌
+- AWS WAF serves the 2011-byte stub when no token POST arrives
+
+The four fixes shipped this session address objectively-wrong values, but apparently NONE of those values is the specific conditional challenge.js bails on. **More speculative fixes are not the right next step** — we need to KNOW which conditional bails.
+
+**Pivot: R-AWSWAF-OFFLINE-PROBE.** Handoff §1.7 spec'd this exact task: capture challenge.js once, spin up in BO's V8 with stubbed navigator/window, instrument every code path leading to `getToken()`. Provides a deterministic fingerprint→decision oracle without burning live IP probes.
+
+This is the right next move. Continuing to ship blind fixes against AWS WAF will keep hitting the same 2011-byte wall.
+
+### FIX-D — apple_m3_macos GpuProfile aligned to captured Chrome 147 M3 fixture (commit `a8cc691`)
 
 **Status:** 🔵 in progress — code complete; 29 chrome_compat webgl tests + new snapshot test pass.
 

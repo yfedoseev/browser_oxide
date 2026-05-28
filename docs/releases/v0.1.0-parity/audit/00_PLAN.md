@@ -143,7 +143,7 @@ Same as `16_STEALTH_FINGERPRINT_AUDIT.md §7` plus:
 | 03 | 03_HARDWARE_SPOOFING_DIFF.md | ✅ |
 | 04 | 04_NAVIGATOR_DIFF.md | ⬜ (covered in 01 + 12) |
 | 05 | 05_SCREEN_WINDOW_DIFF.md | ⬜ (covered in 03) |
-| 06 | 06_WEBGL_DIFF.md | ⬜ next (FIX-D) |
+| 06 | 06_WEBGL_DIFF.md | 🔵 FIX-D shipped (apple_m3_macos); FIX-D2 (webgl/webgl2 context conflation) + FIX-D3 (per-non-macos GPU validation) deferred |
 | 07 | 07_AUDIO_DIFF.md | ⬜ (FIX-C addressed; full doc pending) |
 | 08 | 08_CANVAS2D_DIFF.md | ⏸️ research (canvas noise decision) |
 | 09 | 09_PERFORMANCE_TIMING_DIFF.md | ⬜ |
@@ -160,4 +160,5 @@ Same as `16_STEALTH_FINGERPRINT_AUDIT.md §7` plus:
 - **FIX-A** (commit `960b55f`): Sec-CH-UA-Arch/Bitness/Wow64 now read from profile fields instead of being derived from `platform` (which had the MacIntel ↔ arm/x86 ambiguity bug). +3 net tests.
 - **FIX-C** (commit `93c8ed4`): AudioContext.sampleRate now profile-pinned (`audio_sample_rate` field, 48000 on Apple Silicon presets); baseLatency / outputLatency derive deterministically from `audio_seed` bits. Stable across page loads in the same SharedSession.
 - **FIX-F** (commit `8d8c067`): Sec-CH-Device-Memory now quantizes RAM values to the W3 spec set `{0.25, 0.5, 1, 2, 4, 8}` rather than emitting any clamped float. +2 net tests including the helper unit.
+- **FIX-D** (commit `a8cc691`): `apple_m3_macos` GpuProfile aligned to captured Chrome 147 M3 fixture — WebGL 2 strings, clean 36-entry extension list (was 40-mix), per-GPU `MAX_VIEWPORT_DIMS=[16384,16384]` and `ALIASED_POINT_SIZE_RANGE=[1,511]` overrides (vs the wrong `[32767,32767]` / `[1,8190]` shared baseline). +1 snapshot test that locks the preset to the fixture.
 - **Validation:** single-run 3-site sweep post-fixes (`amazon-com`, `imdb`, `amazon-de`): **amazon-de flipped from blocked → 855KB L3-RENDERED** ✅; amazon-com + imdb still at AWS WAF stub bodies (2011 / 1995 bytes). Single-trial; could be WAF state noise per `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md`.
