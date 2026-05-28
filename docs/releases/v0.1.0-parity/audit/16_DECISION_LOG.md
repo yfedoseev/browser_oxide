@@ -50,6 +50,121 @@ AWS WAF challenge.js flow:
 
 **Infrastructure:** new `crates/browser/examples/awswaf_probe.rs` (~95 lines) provides the reusable oracle. Capture a challenge HTML, inject a probe snippet (see `/tmp/awswaf_probe/probe_inject.js` for template; will be cleaned up into a fixture later), run `awswaf_probe <html> <url> [out.json]`. Reusable for diagnosing any future vendor-script bailout.
 
+### R-SHAREDSESSION-X-COM-COOKIES — reproduction confirmed; fix path = per-tab cookie partitioning
+
+**Status:** 🔵 reproduction confirmed; full fix scoped but deferred (multi-day).
+
+**Reproduction this session** (release sweep_metrics, post-FIX-J):
+
+| Run | env | twitter | x-com |
+|-----|-----|---------|-------|
+| Default (cookies shared) | (none) | L3-RENDERED 273921 ✅ | **THIN-BODY 69** ❌ |
+| Cookies isolated | `BROWSER_OXIDE_NO_SHARED_COOKIES=1` | L3-RENDERED 273921 ✅ | **L3-RENDERED 273921 ✅** |
+
+Cookie partition fully reproduces the prior session's verdict (VERIFICATION.md §6d-bis): with cookies isolated, x-com PASSES; with cookies shared, x-com gets the 69-byte stub. **Confirmed: cookie state set during the twitter visit poisons the subsequent explicit x-com nav.**
+
+Worth noting from the RUST_LOG trace: the "twitter" visit ACTUALLY lands on `x.com` (twitter.com → x.com 30x redirect). So the "shared session" sequence is `x.com (from twitter redirect)` → `x.com (explicit)`. Same eTLD+1, BO's `SharedSession` correctly carries the cookies forward. x.com's WAF detects the second-visit shape (fresh nav with already-issued cookies) and bails.
+
+**Fix paths (ranked):**
+1. **Per-`Page` cookie jar** (the cleanest match to Chrome's tab model). Replace BO's process-wide `SharedSession.cookies` with per-Page-instance jars; cookies set on tab A don't bleed into tab B. Multi-day refactor (touches `crates/net/src/lib.rs::SharedSession`, `HttpClient::shared`, every Page::navigate path, the cookie-jar load/save persistence).
+2. **Storage Partitioning model** (Chrome's evolution). Cookies are partitioned by `(top-level eTLD+1, third-party origin)` tuple. Even more complex but matches real Chrome 2024+ behaviour.
+3. **eTLD+1-collision band-aid** specifically for x.com↔twitter.com (and any future re-brand collisions). Smallest change. Tracks a per-origin "fresh-session" flag; clears cookies on explicit reset.
+
+**Tooling already landed** (commit `197a2da`, prior session): the env-var toggles `BROWSER_OXIDE_NO_SHARED_SESSION / _COOKIES / _ACCEPT_CH` make this a 1-line diagnostic for any future cookie-bleed report.
+
+**Scope decision:** **DEFER to v0.2.x or v0.3.0**. The clean fix is per-Page cookie jars (path 1), which is multi-day refactor touching the cookie persistence machinery. The env-var toggle is the workaround for now; production deployments that need x-com can set `BROWSER_OXIDE_NO_SHARED_COOKIES=1`.
+
+**Sites in scope:** x-com (1).
+
+### R-BESTBUY-AKAMAI — classify as edge-tier-blocked; Chromium-only passing
+
+**Status:** ✅ classified.
+
+**Captured probe (this session):**
+- `curl https://www.bestbuy.com/` with Chrome 148 UA, HTTP/2: **stream 1 reset by server (error 0x2 INTERNAL_ERROR)** — connection-level refusal.
+- Retry with `--http1.1`: **30s timeout, 0 bytes**. Server actively refuses our datacenter IP at the TLS / HTTP edge.
+- BO's measured behaviour (per prior audit): receives a **7 KB SPA shell** body. That's the same Chrome-impersonating TLS + headers BO ships getting through where naked curl doesn't.
+- Patchright (real Chromium): **PASS 1246 k** per HANDOFF §1.8.
+
+**Classification:**
+- **Stratum B** (single site Patchright passes but neither BO nor Camoufox v150 pass).
+- Edge-tier hard block on naked-curl-class requests; BO's chrome_147 TLS impersonation gets PAST the edge but the SPA never hydrates → 7 KB shell.
+- Akamai is the likely edge gatekeeper (bestbuy uses Akamai per public DNS), and the differential between Patchright (passing) and BO (7 KB shell) is most likely:
+  1. TLS or HTTP/2 SETTINGS-frame subtleness (BO `chrome_147` impersonation may have a fingerprint delta from real Chrome 148)
+  2. Behavioural-signal gap inside the SPA bootstrap (BO's humanize.js fires standard mouse/key events; Akamai BMP behavioural-analytics may want something more)
+  3. Specific JS API the SPA reads where BO's value differs from real Chrome on macOS
+
+**Engine-addressable assessment:**
+- HIGH potential — Patchright passes, so it IS Chromium-engine-reachable.
+- HIGH cost — no challenge.js / single-script bailout to instrument. The SPA is a full React app; identifying the bailout requires deeper instrumentation (Akamai sensor_data POST trace, MutationObserver / React-hydration logging).
+
+**Scope decision:** **DEFER to v0.2.x or later.** The right next step is to capture BO's 7 KB SPA shell + the Akamai sensor_data POST trace, identify what BO writes there that Patchright doesn't — same diagnostic shape as R-AWSWAF-OFFLINE-PROBE but for the Akamai BMP sensor flow. That's 1-2 days of work and out of this session's budget.
+
+**Sites in scope:** bestbuy (1).
+
+### R-WBAAS-WILDBERRIES — classify as out-of-scope custom antibot + likely geo-gating
+
+**Status:** ✅ classified.
+
+**Captured probe (this session):**
+- `https://www.wildberries.ru/` returns **HTTP 498, 1447 bytes**
+- Body: minimal HTML with `<title>Почти готово...</title>` ("Almost ready") + a single `<script type="module" src="/__wbaas/challenges/antibot/__static/v1/index-DQJ0L4Mq.js">` + `data-site-key="7400bd5df8b843b28254659f10915f31"`
+- The `index-DQJ0L4Mq.js` bundle: **70 KB obfuscated** ES module
+- Plaintext markers in the bundle: `toString` (11×), `navigator.userAgent` (2×), `fetch` (1×). Very light surface compared to AWS WAF's 1.37 MB challenge.js.
+
+**Classification:**
+- Custom site-specific antibot (Wildberries' in-house `wbaas`), NOT a third-party vendor (no AWS WAF / DataDome / Kasada / Akamai / Cloudflare branding in the response).
+- Likely **geo-gated**: Wildberries is the Russian Amazon-equivalent; from a US/CA datacenter IP the antibot probably fails the geo/IP check regardless of fingerprint. The page's `data-req-ip` header echoed our datacenter IPv6 — they DO see our IP and route accordingly.
+- HTTP 498 is non-standard ("Network authentication required" in some implementations). Distinctive marker for this antibot.
+
+**Engine-addressable?** Minimal. The bundle's plaintext surface is small (just toString masking + UA). If we render the page correctly and the bundle runs, it could plausibly self-solve. The lack of self-solve in measurements is more likely IP/geo than fingerprint.
+
+**Scope decision:** **OUT OF SCOPE for v0.2.0 + likely for v0.3.0**. Per CLAUDE.md, per-vendor solving is out of scope for the public engine, and wbaas is even more niche (single-site custom antibot). At best belongs to `vendor_solvers` private repo. Captured artifacts saved at `/tmp/wbaas_probe/` for any future investigator.
+
+**Sites in scope:** wildberries (1). v150 + Patchright + BO all fail.
+
+### R-AKAMAI-SECCPT-FLAKE — bisect deferred; regression is the public/private boundary
+
+**Status:** 🔵 analysis; bisect not run.
+
+**Finding:** the `b623d5d` "Inc 7" fix added the sec-cpt suppression at
+`Page::navigate`'s built-in `page.handle_akamai_flow(&client)` call (the
+single-source-of-truth Akamai BMP path baked into the public engine).
+Since then, the engine has been refactored to the `ChallengeSolver`
+trait + `Page::navigate_with_solvers` hook per `CLAUDE.md` —
+**concrete Akamai/Kasada/DataDome/Cloudflare implementations now live
+in the private `vendor_solvers` companion crate.** `default_solvers()`
+returns an empty `Arc<[_]>` (page.rs:848).
+
+The sec-cpt guard is preserved in the public engine at page.rs:2162
+(`if s.name() == "akamai-bmp" && started_as_seccpt_challenge`) — it
+sets `sub_kind="sec-cpt"` so a vendor-loaded Akamai solver short-
+circuits. But for the SWEEP test path (`Page::navigate` →
+`default_solvers()` → no solvers registered), the loop is a no-op and
+the sec-cpt path is left entirely to the bundle's self-solve.
+
+So the regression isn't a single commit to revert. Two plausible
+sub-causes:
+1. The bundle itself needs a public-engine PRIMITIVE that was removed
+   in the refactor (cookie observation, fetch interception, iframe
+   materialization) — same shape as R-DATADOME-DAILY-KEY's "3 public-
+   engine primitives" residual.
+2. Bundle self-solve depends on a stealth surface that drifted between
+   b623d5d and HEAD (canvas noise / WebGL params / sampleRate / etc.
+   — exactly the surfaces R-FP-AUDIT-2026Q3 has been auditing).
+
+**Next step (R-AKAMAI-SECCPT-FLAKE follow-up):** instead of git-bisect,
+capture the homedepot sec-cpt challenge HTML + the `/Wjv3…` bundle
+and run them through the `awswaf_probe`-class oracle harness. The
+trace will show which globals the bundle reads and where it bails —
+same diagnosis path that found FIX-J. Once we have the bailout
+signature, decide whether the gap is a public primitive (fix in
+public engine) or a vendor mechanism (defer to `vendor_solvers`).
+
+**Sites in scope:** homedepot. v150 + BO both fail today; Patchright
+passes — confirms it's an engine-addressable cross-Chromium
+difference, not a universal hard frontier.
+
 ### FIX-E — chrome_148_macos_sampled() per-Page profile sampler (pending commit)
 
 **Status:** 🔵 in progress — code complete; 3 new tests pass; validation shows NEUTRAL/NEGATIVE single-IP impact; shipped as opt-in.
