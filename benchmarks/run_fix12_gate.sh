@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
-# Fix-12-style gate v2: 3 trials × 4 profiles × 126 sites, single-IP serial.
+# Fix-12-style gate v3: 3 trials × 4 profiles × 126 sites, single-IP serial.
 #
-# Improvements over v1:
-# - Per-run **shuffled corpus** (different seed per run) so per-IP per-vendor
-#   rate-limiting doesn't see the same sequential cluster (8 amazon TLDs
-#   back-to-back) on every run.
-# - **Atomic-checkpoint `.partial` files** written per-site by sweep_metrics
-#   (post-rebuild). If the 50-min cap fires before 126/126 completes, the
-#   .partial captures the per-site verdicts the run DID get. Aggregator
-#   below reconstructs a summary from .partial if the main .json is missing.
+# Improvements over v2 (HANDOFF_2026_05_27 Sprint 1.1):
+# - **Vendor-aware spacing pass** after random shuffle: ensures no two
+#   consecutive sites share an antibot vendor tag (AWS WAF / DataDome /
+#   Akamai / Kasada / Twitter), which removes the dominant per-IP
+#   token-clustering bias from the same-IP serial sweep. See
+#   `benchmarks/corpus_vendor_map.py` for the tag map + algorithm.
+#
+# Carried over from v2:
+# - Per-run shuffled corpus (different seed per run).
+# - Atomic-checkpoint `.partial` files written per-site by sweep_metrics.
+#   If the 50-min cap fires before 126/126 completes, the .partial
+#   captures the per-site verdicts the run DID get. Aggregator below
+#   reconstructs a summary from .partial if the main .json is missing.
 #
 # Total wall ~10 h.
 # Output: /tmp/fix12_gate/<profile>_run{1,2,3}.{json,log,partial}
@@ -22,6 +27,10 @@ RUNS=(1 2 3)
 
 CORPUS=/tmp/corpus.json
 BIN=target/release/examples/sweep_metrics
+# Sprint 1.2 + 1.3 wrapper: per-vendor sub-process isolation + same-vendor
+# cool-down. Set BO_GATE_ISOLATE_DISABLE=1 to fall back to the direct
+# sweep_metrics path (useful for A/B verification of the isolation lift).
+WRAPPER=benchmarks/run_sweep_isolated.py
 
 if [[ ! -f $CORPUS ]]; then
   echo "missing $CORPUS — run benchmarks/build_corpus_json.py first" >&2
@@ -29,6 +38,10 @@ if [[ ! -f $CORPUS ]]; then
 fi
 if [[ ! -x $BIN ]]; then
   echo "missing $BIN — run cargo build --release -p browser --example sweep_metrics" >&2
+  exit 1
+fi
+if [[ ! -f $WRAPPER ]]; then
+  echo "missing $WRAPPER — benchmarks/run_sweep_isolated.py" >&2
   exit 1
 fi
 
@@ -42,18 +55,29 @@ for profile in "${PROFILES[@]}"; do
     partial=/tmp/fix12_gate/${profile}_run${run}.json.partial
     shuffled=/tmp/fix12_gate/corpus_shuffled_${profile}_run${run}.json
 
-    # Per-run shuffle: same corpus, different order. Seed = profile-run
-    # hash so the shuffle is reproducible from the seed if needed.
-    python3 -c "
+    # Per-run shuffle + vendor-aware spacing pass. Seed = profile-run
+    # hash so the order is reproducible. The spacing pass ensures no two
+    # consecutive sites share an antibot vendor (AWS WAF / DataDome /
+    # Akamai / Kasada / Twitter) — see benchmarks/corpus_vendor_map.py.
+    PYTHONPATH=/home/yfedoseev/projects/browser_oxide python3 -c "
 import json, random
+from benchmarks.corpus_vendor_map import space_by_vendor, vendor_run_summary
 c = json.load(open('$CORPUS'))
 random.seed('${profile}-run${run}')
 random.shuffle(c)
+before = vendor_run_summary(c)
+c = space_by_vendor(c)
+after = vendor_run_summary(c)
+print(f'[shuffle] ${profile}-run${run} vendor-adjacent clashes before={before} after={after}')
 json.dump(c, open('$shuffled', 'w'))
 " || { echo "shuffle failed"; exit 1; }
 
-    echo "[gate] === ${profile} run ${run} (shuffled) ==="
-    timeout 50m "$BIN" "$profile" "$shuffled" "$out" > "$log" 2>&1
+    echo "[gate] === ${profile} run ${run} (shuffled, vendor-isolated) ==="
+    # Sprint 1.2/1.3: drive sweep_metrics through the isolation wrapper.
+    # Vendor-tagged sites run in fresh sweep_metrics children (one site
+    # per process); untagged sites batch. Same-vendor consecutive chunks
+    # get a BO_GATE_VENDOR_COOLDOWN_S (default 45 s) sleep between them.
+    timeout 90m python3 "$WRAPPER" "$profile" "$shuffled" "$out" > "$log" 2>&1
     rc=$?
     elapsed=$(( $(date +%s) - T0 ))
 

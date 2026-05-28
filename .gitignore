@@ -4,6 +4,8 @@
 .DS_Store
 *.log
 *.pid
+__pycache__/
+*.pyc
 .idea/
 .vscode/
 *.iml
