@@ -4,7 +4,37 @@ Running log of decisions made during R-FP-AUDIT-2026Q3. Format: dated entry with
 
 ## 2026-05-27
 
-### FIX-F — Sec-CH-Device-Memory W3-spec quantization (pending commit)
+### FIX-D — apple_m3_macos GpuProfile aligned to captured Chrome 147 M3 fixture (pending commit)
+
+**Status:** 🔵 in progress — code complete; 29 chrome_compat webgl tests + new snapshot test pass.
+
+**Root cause:** `crates/stealth/src/gpu.rs::apple_m3_macos()` was inconsistent — it claimed WebGL 1.0 version + GLSL ES 1.0 SLV strings, but the 40-entry extension list MIXED WebGL 1 extensions (ANGLE_instanced_arrays, EXT_blend_minmax, OES_element_index_uint, etc. — all built-in to WebGL 2) with WebGL 2 extensions (WEBGL_blend_func_extended, WEBGL_polygon_mode, WEBGL_multi_draw, etc.). Plus the shared `common_params_desktop()` baseline returned `MAX_VIEWPORT_DIMS=[32767,32767]` and `ALIASED_POINT_SIZE_RANGE=[1,8190]` — but real Chrome 147 on M3 returns `[16384,16384]` and `[1,511]` respectively (captured ground truth: `tests/fixtures/chrome147/captured_macos_arm64.json`).
+
+The fixture was committed but `apple_m3_macos` was never validated against it. `chrome_compat.rs::webgl_param_golden_snapshot_chrome_148_macos` only checked unmasked vendor/renderer strings; everything else drifted.
+
+**Fix:**
+- Updated `apple_m3_macos` to be a clean WebGL 2 catalog:
+  - `version = "WebGL 2.0 (OpenGL ES 3.0 Chromium)"` (was 1.0)
+  - `shading_language_version = "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)"` (was 1.0)
+  - `extensions = [...]` — captured 36-entry WebGL 2 list (replacing 40-entry mix)
+- New `apple_m3_params()` helper applies M3-specific overrides on top of `common_params_desktop()`:
+  - `MAX_VIEWPORT_DIMS (0x0D3A) = [16384, 16384]`
+  - `ALIASED_POINT_SIZE_RANGE (0x846D) = [1.0, 511.0]`
+- New snapshot test `apple_m3_matches_captured_chrome_147_fixture` asserts identity strings + extension count + M3-specific param overrides + shader precision. Any drift between preset and fixture will fail the test.
+- Doc comment on the preset explicitly notes the WebGL 1 vs WebGL 2 distinction and the canvas_bootstrap.js `getContext("webgl") == getContext("webgl2")` conflation as a follow-up (FIX-D2).
+
+**Validation:**
+- `cargo test -p stealth -- --test-threads=1 apple` — 2/2 pass (new snapshot test + existing apple_profile_has_astc_extension)
+- `cargo test -p stealth -- --test-threads=1` — 46/46 pass
+- `cargo clippy -p stealth -- -D warnings` ✅
+- `cargo test -p browser --test chrome_compat -- --test-threads=1 webgl gpu` — 29/29 pass (no regression)
+- `cargo build -p stealth -p browser --example sweep_metrics` ✅
+
+**Risk:**
+- Other GPU presets (nvidia_rtx_3060_windows, apple_m2_pro_macos, intel_uhd_630_linux) STILL use the unmodified `common_params_desktop()` with the wrong M3-shaped overrides. Their VIEWPORT_DIMS / POINT_SIZE_RANGE may also be wrong per-GPU. Same fixture-validation work needs to happen for them (FIX-D3 across non-macos profiles).
+- The webgl1 vs webgl2 context-type conflation in canvas_bootstrap.js means sites requesting `getContext("webgl")` see WebGL 2 values returned — that's an existing bug, not introduced by FIX-D, but worth flagging for FIX-D2.
+
+### FIX-F — Sec-CH-Device-Memory W3-spec quantization (commit `8d8c067`)
 
 **Status:** 🔵 in progress — code complete; net tests pass.
 

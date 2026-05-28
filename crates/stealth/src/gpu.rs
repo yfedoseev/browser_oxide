@@ -108,42 +108,58 @@ pub fn nvidia_rtx_3060_windows() -> GpuProfile {
 /// (`.playwright-mcp/captures/probe_mcp.json`). 39 extensions in the
 /// exact registration order Chromium emits via
 /// `WebGLRenderingContextBase::getSupportedExtensions()`.
+/// Chrome 147+ on macOS 15 with Apple M3.
+///
+/// Values aligned to the WebGL 2 surface captured from a real Chrome 147 on
+/// M3 (`tests/fixtures/chrome147/captured_macos_arm64.json`). The 36-entry
+/// extensions list and the M3-specific parameter overrides
+/// (`MAX_VIEWPORT_DIMS=[16384,16384]`, `ALIASED_POINT_SIZE_RANGE=[1,511]`)
+/// differ from the generic `common_params_desktop()` baseline that most
+/// other presets use; both diverge from real Apple Silicon values and
+/// AWS WAF's challenge.js cross-checks them. See
+/// `docs/releases/v0.1.0-parity/audit/16_DECISION_LOG.md` §FIX-D.
+///
+/// Note: this preset is the WebGL 2 surface (version "WebGL 2.0", SLV
+/// "GLSL ES 3.00"). Modern fingerprinters request `getContext("webgl2")`
+/// by default. `canvas_bootstrap.js::HTMLCanvasElement::getContext`
+/// currently returns the same `WebGLRenderingContext` for both `"webgl"`
+/// and `"webgl2"` so a WebGL 1 request would also see these values —
+/// fixing that conflation is a separate follow-up (FIX-D2).
 pub fn apple_m3_macos() -> GpuProfile {
     GpuProfile {
         vendor: "WebKit".into(),
         renderer: "WebKit WebGL".into(),
-        version: "WebGL 1.0 (OpenGL ES 2.0 Chromium)".into(),
-        shading_language_version: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)".into(),
+        version: "WebGL 2.0 (OpenGL ES 3.0 Chromium)".into(),
+        shading_language_version: "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)".into(),
         unmasked_vendor: "Google Inc. (Apple)".into(),
         unmasked_renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)"
             .into(),
+        // Captured WebGL 2 extension list, alphabetically sorted to match
+        // Chrome's emission order (which is the WebIDL declaration order
+        // for the registered extensions on this driver).
         extensions: vec![
-            "ANGLE_instanced_arrays".into(),
-            "EXT_blend_minmax".into(),
             "EXT_clip_control".into(),
+            "EXT_color_buffer_float".into(),
             "EXT_color_buffer_half_float".into(),
+            "EXT_conservative_depth".into(),
             "EXT_depth_clamp".into(),
-            "EXT_disjoint_timer_query".into(),
+            "EXT_disjoint_timer_query_webgl2".into(),
             "EXT_float_blend".into(),
-            "EXT_frag_depth".into(),
             "EXT_polygon_offset_clamp".into(),
-            "EXT_shader_texture_lod".into(),
+            "EXT_render_snorm".into(),
             "EXT_texture_compression_bptc".into(),
             "EXT_texture_compression_rgtc".into(),
             "EXT_texture_filter_anisotropic".into(),
             "EXT_texture_mirror_clamp_to_edge".into(),
-            "EXT_sRGB".into(),
+            "EXT_texture_norm16".into(),
             "KHR_parallel_shader_compile".into(),
-            "OES_element_index_uint".into(),
-            "OES_fbo_render_mipmap".into(),
-            "OES_standard_derivatives".into(),
-            "OES_texture_float".into(),
+            "NV_shader_noperspective_interpolation".into(),
+            "OES_draw_buffers_indexed".into(),
+            "OES_sample_variables".into(),
+            "OES_shader_multisample_interpolation".into(),
             "OES_texture_float_linear".into(),
-            "OES_texture_half_float".into(),
-            "OES_texture_half_float_linear".into(),
-            "OES_vertex_array_object".into(),
             "WEBGL_blend_func_extended".into(),
-            "WEBGL_color_buffer_float".into(),
+            "WEBGL_clip_cull_distance".into(),
             "WEBGL_compressed_texture_astc".into(),
             "WEBGL_compressed_texture_etc".into(),
             "WEBGL_compressed_texture_etc1".into(),
@@ -152,15 +168,37 @@ pub fn apple_m3_macos() -> GpuProfile {
             "WEBGL_compressed_texture_s3tc_srgb".into(),
             "WEBGL_debug_renderer_info".into(),
             "WEBGL_debug_shaders".into(),
-            "WEBGL_depth_texture".into(),
-            "WEBGL_draw_buffers".into(),
             "WEBGL_lose_context".into(),
             "WEBGL_multi_draw".into(),
             "WEBGL_polygon_mode".into(),
+            "WEBGL_provoking_vertex".into(),
+            "WEBGL_render_shared_exponent".into(),
+            "WEBGL_stencil_texturing".into(),
         ],
-        params: common_params_desktop(),
+        params: apple_m3_params(),
         shader_precision: standard_shader_precision(),
     }
+}
+
+/// `getParameter()` overrides specific to Apple M3.
+///
+/// Diverges from `common_params_desktop()` on:
+/// - `MAX_VIEWPORT_DIMS`  = `[16384, 16384]` (common says `[32767, 32767]`)
+/// - `ALIASED_POINT_SIZE_RANGE` = `[1, 511]` (common says `[1, 8190]`)
+///
+/// Source: `tests/fixtures/chrome147/captured_macos_arm64.json`.
+fn apple_m3_params() -> Vec<(u32, serde_json::Value)> {
+    use serde_json::json;
+    let mut params = common_params_desktop();
+    // Replace the GPU-specific entries that diverge from common.
+    for (pname, value) in params.iter_mut() {
+        match *pname {
+            0x0D3A => *value = json!([16384, 16384]), // MAX_VIEWPORT_DIMS
+            0x846D => *value = json!([1.0, 511.0]),   // ALIASED_POINT_SIZE_RANGE
+            _ => {}
+        }
+    }
+    params
 }
 
 /// Chrome 131 on macOS 15 with Apple M2 Pro.
@@ -412,5 +450,82 @@ mod tests {
         assert_ne!(nvidia.unmasked_renderer, apple.unmasked_renderer);
         assert_ne!(apple.unmasked_renderer, intel.unmasked_renderer);
         assert_ne!(nvidia.unmasked_renderer, intel.unmasked_renderer);
+    }
+
+    /// Snapshot: `apple_m3_macos` MUST match the WebGL 2 fingerprint
+    /// captured from a real Chrome 147 on M3
+    /// (`tests/fixtures/chrome147/captured_macos_arm64.json`). Any
+    /// drift between this preset and the captured ground truth is a
+    /// FIX-D regression — AWS WAF's challenge.js cross-checks these
+    /// fields and rejects on mismatch.
+    #[test]
+    fn apple_m3_matches_captured_chrome_147_fixture() {
+        let gpu = apple_m3_macos();
+        // Identity strings
+        assert_eq!(gpu.vendor, "WebKit");
+        assert_eq!(gpu.renderer, "WebKit WebGL");
+        assert_eq!(gpu.version, "WebGL 2.0 (OpenGL ES 3.0 Chromium)");
+        assert_eq!(
+            gpu.shading_language_version,
+            "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)"
+        );
+        assert_eq!(gpu.unmasked_vendor, "Google Inc. (Apple)");
+        assert_eq!(
+            gpu.unmasked_renderer,
+            "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)"
+        );
+        // Extension count exactly matches the fixture
+        assert_eq!(
+            gpu.extensions.len(),
+            36,
+            "Apple M3 WebGL 2 extension list must be exactly 36 (captured fixture). \
+             Add to or remove from the preset only with an updated capture."
+        );
+        // Spot-check a couple of WebGL 2-specific entries that
+        // distinguish the surface from WebGL 1
+        for required in &[
+            "EXT_disjoint_timer_query_webgl2",
+            "WEBGL_clip_cull_distance",
+            "WEBGL_provoking_vertex",
+        ] {
+            assert!(
+                gpu.extensions.iter().any(|e| e == required),
+                "missing WebGL 2 extension {required}"
+            );
+        }
+        // Per-GPU param overrides
+        let viewport_dims = gpu
+            .params
+            .iter()
+            .find(|(k, _)| *k == 0x0D3A)
+            .expect("MAX_VIEWPORT_DIMS present")
+            .1
+            .clone();
+        assert_eq!(
+            viewport_dims,
+            serde_json::json!([16384, 16384]),
+            "Apple M3 MAX_VIEWPORT_DIMS must be [16384, 16384], not the \
+             common_params_desktop [32767, 32767] default"
+        );
+        let point_size = gpu
+            .params
+            .iter()
+            .find(|(k, _)| *k == 0x846D)
+            .expect("ALIASED_POINT_SIZE_RANGE present")
+            .1
+            .clone();
+        assert_eq!(
+            point_size,
+            serde_json::json!([1.0, 511.0]),
+            "Apple M3 ALIASED_POINT_SIZE_RANGE must be [1, 511]"
+        );
+        // The high_float shader precision in the fixture
+        let high_float = gpu
+            .shader_precision
+            .iter()
+            .find(|(s, p, _)| *s == 0x8B30 && *p == 0x8DF2)
+            .expect("FRAGMENT_SHADER HIGH_FLOAT present")
+            .2;
+        assert_eq!(high_float, [127, 127, 23]);
     }
 }
