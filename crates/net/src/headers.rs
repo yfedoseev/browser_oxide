@@ -22,6 +22,106 @@ pub fn nav_headers(profile: &StealthProfile, accept_ch_upgraded: bool) -> Vec<(S
     }
 }
 
+/// URL-aware nav header dispatch (Sprint 2.1 — R-AWSWAF accept-language
+/// per-region). Same as `nav_headers` plus an `accept-language` override
+/// when the target host's TLD has a well-known regional language
+/// expectation (e.g. amazon-fr expects `fr-FR,fr;q=0.9,en-US;q=0.8`).
+///
+/// The override fires ONLY for TLDs in `region_languages_for_url`; for
+/// TLDs without an entry (most), the profile's default accept-language is
+/// preserved unchanged. The q-step matches the profile's browser family
+/// (Chrome / Safari q=0.9; Firefox q=0.5).
+pub fn nav_headers_for_url(
+    profile: &StealthProfile,
+    url: &str,
+    accept_ch_upgraded: bool,
+) -> Vec<(String, String)> {
+    let mut hdrs = nav_headers(profile, accept_ch_upgraded);
+    apply_region_accept_language(&mut hdrs, url, &profile.browser_name);
+    hdrs
+}
+
+/// Replace `accept-language` in `hdrs` with the region-appropriate value
+/// for `url`, using the browser family's q-step convention. No-op if the
+/// URL's TLD has no regional override registered.
+pub fn apply_region_accept_language(
+    hdrs: &mut [(String, String)],
+    url: &str,
+    browser_name: &str,
+) {
+    let Some(langs) = region_languages_for_url(url) else {
+        return;
+    };
+    let value = match browser_name {
+        "Firefox" => build_firefox_accept_language(&langs),
+        "Safari" => build_safari_accept_language(&langs),
+        _ => build_accept_language(&langs),
+    };
+    for (k, v) in hdrs.iter_mut() {
+        if k.eq_ignore_ascii_case("accept-language") {
+            *v = value;
+            return;
+        }
+    }
+}
+
+/// Per-TLD regional language list. Returns the language preference list
+/// AWS WAF / DataDome / Akamai customers in that region expect to see.
+///
+/// Source of truth: real-Chrome captures from each region (e.g.
+/// amazon.fr from a French Chrome installation sends
+/// `fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7`). Returning `None` means the
+/// TLD has no override — fall back to the profile's `languages` field.
+///
+/// English-language TLDs (.com, .net, .org, .uk, .com.au, .ca, etc.) are
+/// intentionally NOT in this map: their visitors typically send the same
+/// `en-US`-derived preference the profile already has, so overriding would
+/// be a no-op at best and a profile-inconsistency at worst.
+pub fn region_languages_for_url(url: &str) -> Option<Vec<String>> {
+    let parsed = url::Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    let host = host.trim_start_matches("www.");
+    // Compound suffixes first (longest match wins).
+    let tld = if host.ends_with(".co.jp") {
+        ".co.jp"
+    } else if host.ends_with(".com.br") {
+        ".com.br"
+    } else if host.ends_with(".com.mx") {
+        ".com.mx"
+    } else if host.ends_with(".com.tr") {
+        ".com.tr"
+    } else if host.ends_with(".com.cn") {
+        ".com.cn"
+    } else {
+        let dot = host.rfind('.')?;
+        &host[dot..]
+    };
+    let langs: &[&str] = match tld {
+        ".fr" => &["fr-FR", "fr", "en-US", "en"],
+        ".de" => &["de-DE", "de", "en-US", "en"],
+        ".co.jp" | ".jp" => &["ja-JP", "ja", "en-US", "en"],
+        ".it" => &["it-IT", "it", "en-US", "en"],
+        ".es" => &["es-ES", "es", "en-US", "en"],
+        ".nl" => &["nl-NL", "nl", "en-US", "en"],
+        ".pl" => &["pl-PL", "pl", "en-US", "en"],
+        ".se" => &["sv-SE", "sv", "en-US", "en"],
+        ".no" => &["nb-NO", "no", "en-US", "en"],
+        ".dk" => &["da-DK", "da", "en-US", "en"],
+        ".fi" => &["fi-FI", "fi", "en-US", "en"],
+        ".pt" => &["pt-PT", "pt", "en-US", "en"],
+        ".com.br" => &["pt-BR", "pt", "en-US", "en"],
+        ".com.mx" => &["es-MX", "es", "en-US", "en"],
+        ".com.tr" | ".tr" => &["tr-TR", "tr", "en-US", "en"],
+        ".com.cn" | ".cn" => &["zh-CN", "zh", "en-US", "en"],
+        ".ru" => &["ru-RU", "ru", "en-US", "en"],
+        ".kr" => &["ko-KR", "ko", "en-US", "en"],
+        ".tw" => &["zh-TW", "zh", "en-US", "en"],
+        ".vn" => &["vi-VN", "vi", "en-US", "en"],
+        _ => return None,
+    };
+    Some(langs.iter().map(|s| s.to_string()).collect())
+}
+
 /// Browser-aware reload nav header dispatch.
 pub fn nav_headers_reload(
     profile: &StealthProfile,
@@ -36,16 +136,25 @@ pub fn nav_headers_reload(
 }
 
 /// Browser-aware fetch (XHR/`window.fetch`) header dispatch.
+///
+/// Sprint 2.1: accept-language override applies for sub-resource fetches
+/// using the **parent doc's origin** when provided (real Chrome sends one
+/// accept-language per session, not per-URL — keying sub-resources off
+/// the origin keeps a French amazon.fr session consistent on its CDN
+/// fetches too).
 pub fn nav_headers_fetch(
     profile: &StealthProfile,
     target_url: &str,
     origin: Option<&str>,
 ) -> Vec<(String, String)> {
-    match profile.browser_name.as_str() {
+    let mut hdrs = match profile.browser_name.as_str() {
         "Firefox" => firefox_headers_fetch(profile, target_url, origin),
         "Safari" => safari_headers_fetch(profile, target_url, origin),
         _ => chrome_headers_fetch(profile, target_url, origin),
-    }
+    };
+    let key_url = origin.unwrap_or(target_url);
+    apply_region_accept_language(&mut hdrs, key_url, &profile.browser_name);
+    hdrs
 }
 
 /// Build ordered Chrome browser headers from a stealth profile.
@@ -1274,5 +1383,71 @@ mod tests {
         let major = profile.browser_version.split('.').next().unwrap();
         assert!(sec_ch_ua.contains(major));
         assert!(fvl.contains(&profile.browser_version));
+    }
+
+    // ===== Sprint 2.1 — per-region accept-language =====
+
+    #[test]
+    fn region_languages_amazon_fr() {
+        let langs = region_languages_for_url("https://www.amazon.fr/").unwrap();
+        assert_eq!(langs, vec!["fr-FR", "fr", "en-US", "en"]);
+    }
+
+    #[test]
+    fn region_languages_amazon_jp_compound_tld() {
+        let langs = region_languages_for_url("https://www.amazon.co.jp/").unwrap();
+        assert_eq!(langs, vec!["ja-JP", "ja", "en-US", "en"]);
+    }
+
+    #[test]
+    fn region_languages_amazon_com_no_override() {
+        // .com has no regional override — profile's default carries.
+        assert!(region_languages_for_url("https://www.amazon.com/").is_none());
+    }
+
+    #[test]
+    fn region_languages_amazon_co_uk_no_override() {
+        // English-language TLDs intentionally omitted — they share en-US.
+        assert!(region_languages_for_url("https://www.amazon.co.uk/").is_none());
+    }
+
+    #[test]
+    fn nav_headers_for_url_overrides_amazon_fr() {
+        let profile = stealth::chrome_148_macos();
+        let hdrs = nav_headers_for_url(&profile, "https://www.amazon.fr/", false);
+        let al = hdrs
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("accept-language"))
+            .expect("accept-language present");
+        assert_eq!(al.1, "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7");
+    }
+
+    #[test]
+    fn nav_headers_for_url_overrides_amazon_de_with_firefox_q_step() {
+        let profile = stealth::firefox_135_macos();
+        let hdrs = nav_headers_for_url(&profile, "https://www.amazon.de/", false);
+        let al = hdrs
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("accept-language"))
+            .expect("accept-language present");
+        // Firefox q-step: 0.5, 0.3, 0.1 — verified `build_firefox_accept_language`.
+        assert_eq!(al.1, "de-DE,de;q=0.5,en-US;q=0.3,en;q=0.1");
+    }
+
+    #[test]
+    fn nav_headers_for_url_no_change_on_amazon_com() {
+        let profile = stealth::chrome_148_macos();
+        let hdrs = nav_headers_for_url(&profile, "https://www.amazon.com/", false);
+        let al = hdrs
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("accept-language"))
+            .expect("accept-language present");
+        // Profile default — must match what nav_headers produces directly.
+        let baseline = nav_headers(&profile, false);
+        let baseline_al = baseline
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("accept-language"))
+            .unwrap();
+        assert_eq!(al.1, baseline_al.1);
     }
 }

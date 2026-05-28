@@ -751,9 +751,11 @@ impl HttpClient {
 
         // Browser-aware nav headers. For Chrome, may upgrade to high-entropy
         // Client Hints if this origin has sent Accept-CH. Firefox profiles
-        // skip the upgrade (Firefox has no Client Hints).
+        // skip the upgrade (Firefox has no Client Hints). Sprint 2.1:
+        // `nav_headers_for_url` swaps in a regional `accept-language` when
+        // the host's TLD has a documented expectation (amazon-fr → fr-FR…).
         let accept_ch_upgraded = self.has_accept_ch(host).await;
-        let mut hdrs = headers::nav_headers(&self.profile, accept_ch_upgraded);
+        let mut hdrs = headers::nav_headers_for_url(&self.profile, url, accept_ch_upgraded);
         merge_headers(&mut hdrs, extra_headers);
 
         // Add cookies (unless caller already supplied one)
@@ -1223,8 +1225,9 @@ impl HttpClient {
 
         // Browser-aware nav headers (Chrome may upgrade with high-entropy
         // Client Hints if origin sent Accept-CH; Firefox profiles skip).
+        // Sprint 2.1: regional accept-language override per target TLD.
         let accept_ch_upgraded = self.has_accept_ch(host).await;
-        let mut hdrs = headers::nav_headers(&self.profile, accept_ch_upgraded);
+        let mut hdrs = headers::nav_headers_for_url(&self.profile, url, accept_ch_upgraded);
         merge_headers(&mut hdrs, extra_headers);
 
         // Env-gated POST body dump (for sensor-payload diffing). Writes one

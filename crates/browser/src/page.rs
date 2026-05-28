@@ -1459,7 +1459,11 @@ impl Page {
                 let profile = profile.clone();
                 let referer = resp_url.clone();
                 Some(async move {
-                    let mut hdrs = net::headers::nav_headers(&profile, false);
+                    // Sprint 2.1: script fetches inherit the parent doc's
+                    // regional accept-language (real Chrome sends one
+                    // accept-language per session, not per-URL — keyed off
+                    // the doc URL keeps sub-resource requests consistent).
+                    let mut hdrs = net::headers::nav_headers_for_url(&profile, &referer, false);
                     hdrs.push(("referer".to_string(), referer));
                     hdrs.push(("accept".to_string(), "*/*".to_string()));
                     hdrs.push(("sec-fetch-dest".to_string(), "script".to_string()));
@@ -3021,7 +3025,9 @@ impl Page {
                 let client = client.clone();
                 let profile = profile.clone();
                 Some(async move {
-                    let mut hdrs = net::headers::nav_headers(&profile, false);
+                    // Sprint 2.1: script fetches inherit parent doc's
+                    // regional accept-language (see lib.rs::get_with_headers).
+                    let mut hdrs = net::headers::nav_headers_for_url(&profile, &url, false);
                     hdrs.push(("referer".to_string(), url.to_string()));
                     hdrs.push(("accept".to_string(), "*/*".to_string()));
                     hdrs.push(("sec-fetch-dest".to_string(), "script".to_string()));
