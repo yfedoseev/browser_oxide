@@ -165,6 +165,15 @@ async fn main() {
 
             let mut results: Vec<SiteResult> = Vec::with_capacity(total);
             let mut rss_peak: f64 = 0.0;
+            // Atomic-checkpoint writer: every site appends to
+            // `<out_path>.partial` so a cap-truncated kill (SIGTERM /
+            // SIGKILL from a wrapping `timeout 50m` per HANDOFF §6.1)
+            // leaves a per-site log readable by the aggregator. The
+            // final summary still writes `out_path` atomically on
+            // 126/126 completion.
+            let partial_path = format!("{out_path}.partial");
+            // Clear any stale partial from a prior crashed run.
+            let _ = fs::remove_file(&partial_path);
             for (i, site) in corpus.iter().enumerate() {
                 let t0 = Instant::now();
                 let mut err: Option<String> = None;
@@ -220,7 +229,7 @@ async fn main() {
                     err.as_ref().map(|e| format!(" err={}", e)).unwrap_or_default()
                 );
                 println!("{}", line);
-                results.push(SiteResult {
+                let sr = SiteResult {
                     cat: site.cat.clone(),
                     name: site.name.clone(),
                     url: site.url.clone(),
@@ -229,7 +238,20 @@ async fn main() {
                     ms,
                     rss_mb: (rss * 10.0).round() / 10.0,
                     err,
-                });
+                };
+                // Checkpoint to `<out>.partial` (one JSON line per site)
+                // so cap-truncated runs leave a usable result trace.
+                if let Ok(json_line) = serde_json::to_string(&sr) {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&partial_path)
+                    {
+                        let _ = writeln!(f, "{json_line}");
+                    }
+                }
+                results.push(sr);
             }
 
             let wall_total_ms = sweep_t0.elapsed().as_millis() as u64;
