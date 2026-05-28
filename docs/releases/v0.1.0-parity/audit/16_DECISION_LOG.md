@@ -50,6 +50,50 @@ AWS WAF challenge.js flow:
 
 **Infrastructure:** new `crates/browser/examples/awswaf_probe.rs` (~95 lines) provides the reusable oracle. Capture a challenge HTML, inject a probe snippet (see `/tmp/awswaf_probe/probe_inject.js` for template; will be cleaned up into a fixture later), run `awswaf_probe <html> <url> [out.json]`. Reusable for diagnosing any future vendor-script bailout.
 
+### R-SPA-DOUYIN-SIG — confirmed signature-class; deep RE required, deferred
+
+**Status:** ⏸️ deferred (1-2 week open-ended research).
+
+**Captured this session:** `curl https://www.douyin.com/` returns HTTP 200, 72,914 bytes — a regular SPA shell, not a vendor antibot challenge. No `awswaf` / `datadome` / `kasada` / `akamai` / `captcha-delivery` markers in the body.
+
+**Confirms HANDOFF §1.6:** douyin's bot detection happens via the SPA's own `__ac_signature` computation, not a third-party vendor stack. Camoufox (Firefox base) passes; Patchright (Chromium base) fails — Firefox-only solve. The signature is computed in obfuscated JS that reads `crypto.getRandomValues` + AudioContext + UA + screen — BO's V8 produces a value douyin's server-side verifier rejects.
+
+**Why not in this session:** signature reverse-engineering is open-ended (the obfuscated JS rotates daily; even mapping the inputs requires sustained AST walking). HANDOFF §1.6 budgets 1-2 weeks. The marginal value vs other items (DataDome primitives, cookie partitioning, GPU oracle work) is low — douyin is one site, Firefox-only solve, doesn't unblock a vendor cluster.
+
+**Sites in scope:** douyin (1). Deferred to v0.3.0 or later.
+
+### R-KASADA-FRONTIER — vendor_solvers scope per CLAUDE.md, deferred
+
+**Status:** ⏸️ deferred (out of public-engine scope).
+
+Per `CLAUDE.md`: "Per-vendor challenge solving is out of scope here. The engine exposes a `browser::ChallengeSolver` trait + `Page::navigate_with_solvers` hook; the concrete Akamai/Kasada/DataDome/Cloudflare implementations live in the private `vendor_solvers` companion crate."
+
+The prior session (memory: `state_2026_05_16_phase0_rebaseline.md` §Phase 2 Outcome A) CLOSED the realm/sentinel/identity hunt as not-the-bug — all 4 global paths in BO's Kasada-relevant V8 are byte-identical to Chrome invariants. The residual is "holistic ML tail, no single lever" — three sites (canadagoose, hyatt, realtor) that Camoufox v150's hardware-spoofing also failed to flip.
+
+The R-FP-AUDIT-2026Q3 work this session (FIX-A/C/D/F/J/E/E2/W + DataDome primitives) addresses general fingerprint surface + AWS WAF / DataDome / recaptcha-worker primitives. None of those target Kasada's holistic classifier specifically — confirms the cluster is appropriately scoped out of the public engine.
+
+**Sites in scope:** canadagoose, hyatt, realtor (3). Public-engine: no work to do. `vendor_solvers` companion repo retains its existing Kasada research lineage.
+
+### R-SPA-BOOKING-FETCH-CHAIN — RECLASSIFIED as AWS WAF self-hosted; FIX-J should apply
+
+**Status:** ✅ reclassified; subsumed by FIX-J + the existing AWS WAF cluster.
+
+**Captured this session:** `curl https://www.booking.com/` with Chrome 148 UA returns:
+- **HTTP 202** (Accepted)
+- **8415 bytes** — matches BO's measured 8473 ±60 byte spread
+- Body opens with `getAjaxObject()` JS helper (XMLHttpRequest construction)
+- Includes nonce-protected scripts + `<script src="https://www.booking.com/__challenge_h78IRKX3kpQxScCExxShBNwRUlb/.../challenge.js">`
+
+The `__challenge_` path-prefix on the customer's own domain is the **AWS WAF self-hosted deployment mode** (challenge.js proxied through customer infra instead of token.awswaf.com). The challenge.js itself is the SAME 1.37 MB obfuscated bundle as amazon.com's, just served from a different origin.
+
+**Implication:** booking.com is NOT a SPA-hydration issue. It's the same AWS WAF cluster as amazon-com / amazon-ca / imdb / etc. **FIX-J (FileReader.readAsDataURL real impl) should help booking.com too** — the bundle uses the same crypto.subtle → Blob → readAsDataURL chain found in R-AWSWAF-OFFLINE-PROBE.
+
+The HANDOFF §1.4's "SPA bootstrap fetch chain fails" premise was wrong (or stale from v135 era when booking served a different shape). The actual response shape on 2026-05-27 is an AWS WAF self-hosted challenge.
+
+**Next:** the running gate (`/tmp/run_fix12_gate.sh`, started 19:22 PDT) will measure FIX-J's impact on booking.com along with the 7 amazon-* sites. Expect booking to flip on the same conditions as amazon-com-au + amazon-ca did in the single-trial sweeps (with the per-region noise pattern observed there).
+
+**Sites in scope:** booking (1). Reclassified into the AWS WAF Stratum-A cluster.
+
 ### R-SHAREDSESSION-X-COM-COOKIES — reproduction confirmed; fix path = per-tab cookie partitioning
 
 **Status:** 🔵 reproduction confirmed; full fix scoped but deferred (multi-day).
