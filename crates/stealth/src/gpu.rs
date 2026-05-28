@@ -111,12 +111,7 @@ pub fn nvidia_rtx_3060_windows() -> GpuProfile {
 /// Chrome 147+ on macOS 15 with Apple M3.
 ///
 /// Values aligned to the WebGL 2 surface captured from a real Chrome 147 on
-/// M3 (`tests/fixtures/chrome147/captured_macos_arm64.json`). The 36-entry
-/// extensions list and the M3-specific parameter overrides
-/// (`MAX_VIEWPORT_DIMS=[16384,16384]`, `ALIASED_POINT_SIZE_RANGE=[1,511]`)
-/// differ from the generic `common_params_desktop()` baseline that most
-/// other presets use; both diverge from real Apple Silicon values and
-/// AWS WAF's challenge.js cross-checks them. See
+/// M3 (`tests/fixtures/chrome147/captured_macos_arm64.json`). See
 /// `docs/releases/v0.1.0-parity/audit/16_DECISION_LOG.md` §FIX-D.
 ///
 /// Note: this preset is the WebGL 2 surface (version "WebGL 2.0", SLV
@@ -126,17 +121,49 @@ pub fn nvidia_rtx_3060_windows() -> GpuProfile {
 /// and `"webgl2"` so a WebGL 1 request would also see these values —
 /// fixing that conflation is a separate follow-up (FIX-D2).
 pub fn apple_m3_macos() -> GpuProfile {
+    apple_m3_family_profile("Apple M3")
+}
+
+/// Chrome 147+ on macOS 15 with Apple M3 Pro.
+///
+/// Same ANGLE Metal Renderer driver stack as `apple_m3_macos()` — extension
+/// list, params, and shader precision are byte-identical (the driver is
+/// shared across the M3 chip family). Only the `unmasked_renderer` string
+/// differs. Use with [`presets::chrome_148_macos_sampled`]-class samplers
+/// that vary `cpu_cores` ∈ {10, 12} to stay cross-API-consistent with the
+/// chip's actual core count. See `docs/releases/v0.1.0-parity/audit/
+/// 16_DECISION_LOG.md` §FIX-E2.
+pub fn apple_m3_pro_macos() -> GpuProfile {
+    apple_m3_family_profile("Apple M3 Pro")
+}
+
+/// Chrome 147+ on macOS 15 with Apple M3 Max.
+///
+/// Same ANGLE Metal Renderer driver stack as `apple_m3_macos()`. Use with
+/// samplers that vary `cpu_cores` ∈ {14, 16} (M3 Max ships in 14-core and
+/// 16-core variants).
+pub fn apple_m3_max_macos() -> GpuProfile {
+    apple_m3_family_profile("Apple M3 Max")
+}
+
+/// Shared GpuProfile constructor for the M3 chip family (base / Pro / Max).
+/// All three share the ANGLE Metal Renderer stack — same extension list,
+/// same getParameter values, same shader precision. Only the
+/// `unmasked_renderer` string differs per chip.
+fn apple_m3_family_profile(chip_name: &str) -> GpuProfile {
     GpuProfile {
         vendor: "WebKit".into(),
         renderer: "WebKit WebGL".into(),
         version: "WebGL 2.0 (OpenGL ES 3.0 Chromium)".into(),
         shading_language_version: "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)".into(),
         unmasked_vendor: "Google Inc. (Apple)".into(),
-        unmasked_renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)"
-            .into(),
+        unmasked_renderer: format!(
+            "ANGLE (Apple, ANGLE Metal Renderer: {chip_name}, Unspecified Version)"
+        ),
         // Captured WebGL 2 extension list, alphabetically sorted to match
-        // Chrome's emission order (which is the WebIDL declaration order
-        // for the registered extensions on this driver).
+        // Chrome's emission order (the WebIDL declaration order on this
+        // driver). Identical across M3 / M3 Pro / M3 Max — they share the
+        // ANGLE Metal driver stack.
         extensions: vec![
             "EXT_clip_control".into(),
             "EXT_color_buffer_float".into(),

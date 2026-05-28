@@ -728,36 +728,74 @@ pub fn chrome_148_macos_sampled() -> StealthProfile {
 /// **Cross-API consistency.** Sampled values MUST stay self-consistent
 /// because anti-bot fingerprinters cross-check related surfaces:
 /// `navigator.hardwareConcurrency` is expected to match the chip
-/// claimed by `WEBGL_UNMASKED_RENDERER`. The chrome_148_macos preset
-/// uses the `apple_m3_macos` GpuProfile which advertises Apple M3
-/// (8-core base — 4 P-cores + 4 E-cores). So the sampler must keep
-/// `cpu_cores = 8` even though Pro / Max variants exist — varying it
-/// without also varying the GPU profile produces detectable
-/// inconsistency. Verified empirically: an earlier sampler version
-/// that varied cores independently of GPU regressed an 8-site AWS WAF
-/// sweep from 1/8 flips → 0/8.
+/// claimed by `WEBGL_UNMASKED_RENDERER`. So the sampler picks ONE chip
+/// per call (M3 base / M3 Pro / M3 Max) and constrains `cpu_cores`,
+/// `device_memory`, screen geometry, and the GpuProfile to match that
+/// chip's shipping configurations.
 ///
-/// Diversity comes from the orthogonal axes:
-/// - **Screen** (2-config pool covering both M3-base hardware classes:
-///   13.6" MBA and 14" MBP base both ship M3 8-core)
-/// - **RAM** (8/16/24 GB — the shipping M3 base options)
-/// - **canvas_seed / audio_seed** (fully random per call → distinct
-///   canvas hash + AudioContext DynamicsCompressor output per instance)
+/// Verified empirically: an earlier sampler version that varied cores
+/// independently of GPU regressed an 8-site AWS WAF sweep from
+/// 1/8 flips → 0/8. The narrower M3-only fix passed cross-API checks.
+/// FIX-E2 widens the pool again by adding `apple_m3_pro_macos()` /
+/// `apple_m3_max_macos()` GpuProfile variants that match the chip
+/// variant being sampled.
 ///
-/// Future work (`FIX-E2`): per-chip GPU profile variants (M3 Pro / Max
-/// with matching renderer strings + correct core/RAM ranges) would
-/// enable a much wider sampler pool without breaking cross-API
-/// consistency.
+/// Per-chip pool (5 screen × 6 core × 5 RAM × 64-bit seeds):
+///
+/// | Chip       | cpu_cores | RAM (GB) | Screens                                  |
+/// |------------|-----------|----------|------------------------------------------|
+/// | M3         | 8         | 8/16/24  | 13.6" MBA, 14" MBP base                  |
+/// | M3 Pro     | 11/12     | 18/36    | 14" MBP Pro, 16" MBP Pro                 |
+/// | M3 Max     | 14/16     | 36/48    | 14" MBP Max, 16" MBP Max                 |
 pub fn chrome_148_macos_sampled_with_rng(rng: &mut impl rand::RngExt) -> StealthProfile {
     let mut p = chrome_148_macos();
 
-    // M3-base-compatible screen pool. Both 13.6" MBA and 14" MBP base
-    // ship Apple M3 (8c CPU); their dimensions differ slightly.
-    // avail_height = height - 33 (macOS menu bar).
-    let screens: [(u32, u32, u32); 2] = [
-        (1512, 982, 949),   // 13.6" MBA / 13.6" MBP base
-        (1728, 1117, 1010), // 14" MBP M3 base
-    ];
+    // Pick a chip variant first; everything else is constrained by it.
+    type ChipConfig = (
+        &'static [u8],              // cores_pool
+        &'static [u8],              // ram_pool (GB)
+        &'static [(u32, u32, u32)], // screens (width, height, avail_height)
+        crate::gpu::GpuProfile,     // matching GpuProfile
+    );
+    let chip_idx = rng.random_range(0..3);
+    let (cores_pool, ram_pool, screens, gpu): ChipConfig = match chip_idx {
+        // M3 base — 8c, 8/16/24 GB, 13.6"-14" MBP base hardware.
+        0 => (
+            &[8],
+            &[8, 16, 24],
+            &[
+                (1512, 982, 949),   // 13.6" MBA / 13.6" MBP base
+                (1728, 1117, 1010), // 14" MBP M3 base
+            ],
+            crate::gpu::apple_m3_macos(),
+        ),
+        // M3 Pro — 11c (4P+6E binned) or 12c (6P+6E), 18/36 GB.
+        // 14" and 16" MBP Pro both ship M3 Pro.
+        1 => (
+            &[11, 12],
+            &[18, 36],
+            &[
+                (1800, 1169, 1100), // 14" MBP M3 Pro
+                (2056, 1329, 1253), // 16" MBP M3 Pro
+            ],
+            crate::gpu::apple_m3_pro_macos(),
+        ),
+        // M3 Max — 14c (10P+4E) or 16c (12P+4E), 36/48 GB (lower
+        // shipping configs; BTO goes up to 128 GB but rare).
+        _ => (
+            &[14, 16],
+            &[36, 48],
+            &[
+                (1800, 1169, 1100), // 14" MBP M3 Max
+                (2056, 1329, 1253), // 16" MBP M3 Max
+            ],
+            crate::gpu::apple_m3_max_macos(),
+        ),
+    };
+
+    p.cpu_cores = cores_pool[rng.random_range(0..cores_pool.len())];
+    p.device_memory = ram_pool[rng.random_range(0..ram_pool.len())];
+
     let (w, h, ah) = screens[rng.random_range(0..screens.len())];
     p.screen_width = w;
     p.screen_height = h;
@@ -769,13 +807,12 @@ pub fn chrome_148_macos_sampled_with_rng(rng: &mut impl rand::RngExt) -> Stealth
     p.outer_width = w;
     p.outer_height = h;
 
-    // cpu_cores HELD FIXED at 8 to stay consistent with the M3 GPU
-    // renderer string — see doc comment above.
-    p.cpu_cores = 8;
-
-    // M3-base RAM options (8/16/24 GB) per Apple's shipping configs.
-    let ram_pool: [u8; 3] = [8, 16, 24];
-    p.device_memory = ram_pool[rng.random_range(0..ram_pool.len())];
+    // Per-chip GPU profile so navigator.hardwareConcurrency,
+    // WEBGL_UNMASKED_RENDERER, and RAM all describe one real device.
+    p.gpu_profile = gpu;
+    // Mirror the renderer onto the legacy single-field `webgl_renderer`
+    // so JS-side reads via op_get_profile_value("webgl_renderer") agree.
+    p.webgl_renderer = p.gpu_profile.unmasked_renderer.clone();
 
     // Fully randomize the canvas + audio fingerprint seeds so two
     // instances of this sampler produce distinct canvas / DynamicsCompressor
@@ -1142,27 +1179,26 @@ mod tests {
 
     #[test]
     fn macos_sampler_produces_valid_profiles() {
-        // 100 samples — every one must pass validate() and stay within the
-        // declared Apple-Silicon-M3-coherent pools.
-        for _ in 0..100 {
+        // 200 samples — every one must pass validate() and stay within the
+        // declared Apple-Silicon M3-family pools.
+        for _ in 0..200 {
             let p = chrome_148_macos_sampled();
             p.validate()
                 .unwrap_or_else(|e| panic!("invalid sampled profile: {e:?}"));
 
             assert!(
-                matches!(p.screen_width, 1512 | 1728),
-                "screen_width {} not in M3-base pool",
+                matches!(p.screen_width, 1512 | 1728 | 1800 | 2056),
+                "screen_width {} not in M3-family pool",
                 p.screen_width
             );
-            // cpu_cores HELD FIXED at 8 (M3 base) to stay consistent with
-            // the unmasked_renderer string "Apple M3".
-            assert_eq!(
-                p.cpu_cores, 8,
-                "cpu_cores must stay 8 to match Apple M3 GPU profile (cross-API consistency)"
+            assert!(
+                matches!(p.cpu_cores, 8 | 11 | 12 | 14 | 16),
+                "cpu_cores {} not in M3-family pool",
+                p.cpu_cores
             );
             assert!(
-                matches!(p.device_memory, 8 | 16 | 24),
-                "device_memory {} not in M3-base pool",
+                matches!(p.device_memory, 8 | 16 | 18 | 24 | 36 | 48),
+                "device_memory {} not in M3-family pool",
                 p.device_memory
             );
             // Apple Silicon Retina invariants
@@ -1177,46 +1213,73 @@ mod tests {
 
     #[test]
     fn macos_sampler_produces_diverse_fingerprints() {
-        // 12 samples should cover both screens and ≥2 of 3 RAM options
-        // — proves the sampler hits its pool diversity.
+        // 30 samples should hit ≥3 chip variants × multiple configs.
+        // Statistically: P(missing one chip in 30 trials) = (2/3)^30 ≈ 5e-6.
         use std::collections::HashSet;
+        let mut chips = HashSet::new();
         let mut tuples = HashSet::new();
         let mut seeds = HashSet::new();
-        for _ in 0..12 {
+        for _ in 0..30 {
             let p = chrome_148_macos_sampled();
-            tuples.insert((p.screen_width, p.device_memory));
+            chips.insert(p.cpu_cores);
+            tuples.insert((p.screen_width, p.cpu_cores, p.device_memory));
             seeds.insert(p.canvas_seed);
             seeds.insert(p.audio_seed);
         }
         assert!(
-            tuples.len() >= 3,
-            "expected ≥3 distinct (screen, mem) tuples in 12 samples, got {}: {:?}",
-            tuples.len(),
-            tuples
+            chips.len() >= 3,
+            "expected ≥3 distinct cpu_cores values in 30 samples (M3/Pro/Max), got {chips:?}"
         );
-        // Seeds are u64 — 12 calls = 24 seed values; collisions should be ~impossible
         assert!(
-            seeds.len() >= 22,
-            "canvas/audio seeds should be near-fully-distinct, got {} unique of 24",
+            tuples.len() >= 6,
+            "expected ≥6 distinct (screen, cores, mem) tuples in 30 samples, got {}: {tuples:?}",
+            tuples.len()
+        );
+        // Seeds are u64 — 30 calls = 60 seed values; collisions should be ~impossible
+        assert!(
+            seeds.len() >= 58,
+            "canvas/audio seeds should be near-fully-distinct, got {} unique of 60",
             seeds.len()
         );
     }
 
     #[test]
-    fn macos_sampler_keeps_cross_api_consistency() {
-        // The whole point of FIX-E's narrowing: every sample's cpu_cores
-        // must agree with the chip claimed by gpu_profile.unmasked_renderer
-        // ("Apple M3" = 8 P+E cores). An earlier wider sampler that varied
-        // cores independently regressed an 8-site AWS WAF sweep from
+    fn macos_sampler_keeps_per_chip_cross_api_consistency() {
+        // FIX-E2 invariant: every sample's (cpu_cores, gpu_renderer,
+        // device_memory) tuple must describe ONE real Apple Silicon
+        // device. An earlier sampler version that varied cores
+        // independently of GPU regressed an 8-site AWS WAF sweep from
         // 1/8 → 0/8.
-        for _ in 0..20 {
+        for _ in 0..50 {
             let p = chrome_148_macos_sampled();
-            assert_eq!(p.cpu_cores, 8);
-            assert!(
-                p.gpu_profile.unmasked_renderer.contains("Apple M3"),
-                "GPU profile must claim M3 to stay consistent with 8 cores; got '{}'",
-                p.gpu_profile.unmasked_renderer
-            );
+            let r = &p.gpu_profile.unmasked_renderer;
+            match p.cpu_cores {
+                8 => {
+                    assert!(
+                        r.contains("Apple M3,"),
+                        "8 cores must pair with 'Apple M3' renderer; got '{r}'"
+                    );
+                    assert!(matches!(p.device_memory, 8 | 16 | 24));
+                }
+                11 | 12 => {
+                    assert!(
+                        r.contains("Apple M3 Pro"),
+                        "11-12 cores must pair with 'Apple M3 Pro' renderer; got '{r}'"
+                    );
+                    assert!(matches!(p.device_memory, 18 | 36));
+                }
+                14 | 16 => {
+                    assert!(
+                        r.contains("Apple M3 Max"),
+                        "14-16 cores must pair with 'Apple M3 Max' renderer; got '{r}'"
+                    );
+                    assert!(matches!(p.device_memory, 36 | 48));
+                }
+                other => panic!("unexpected cpu_cores {other} from sampler"),
+            }
+            // webgl_renderer (legacy single-field) MUST mirror gpu_profile
+            // so JS-side reads of either path agree.
+            assert_eq!(p.webgl_renderer, *r);
         }
     }
 }
