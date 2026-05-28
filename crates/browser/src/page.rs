@@ -188,6 +188,40 @@ fn body_has_challenge_marker(body: &str) -> bool {
         .is_challenge()
 }
 
+/// Public-engine DataDome interstitial detector (R-DATADOME-DAILY-KEY).
+///
+/// Identifies a `rt:'i'` DataDome interstitial document by the
+/// `captcha-delivery.com` substring — DD's CDN that serves the daily-
+/// rotated WASM challenge bundle. The interstitial is small (typically
+/// 1-5 KB) and loads `captcha-delivery.com` as a `<script src=…>`; a
+/// rendered real page mentioning the CDN in passing would be much
+/// larger. The 50 KB size gate guards against that false positive while
+/// safely covering every shipped DD interstitial.
+///
+/// Used at three navigate-loop points to make the engine's DD-aware
+/// behaviour (CSP relaxation, iframe materialization, solved-cookie
+/// retry) fire on ANY DD challenge document, not just navs where a
+/// registered `DataDomeSolver` claims the response. Per `CLAUDE.md`,
+/// the WASM solver itself stays in `vendor_solvers`; these three
+/// defensive primitives are public-engine scope (they enable the
+/// bundle's OWN self-solve flow to run).
+fn is_datadome_challenge(html: &str) -> bool {
+    html.len() < 50_000 && html.contains("captcha-delivery.com")
+}
+
+/// Public-engine DataDome solve detector (R-DATADOME-DAILY-KEY).
+///
+/// A genuine solve = the cookie jar has `datadome=` AND the current
+/// body is no longer a DataDome interstitial (post-solve body is the
+/// real page content, not the captcha-delivery.com challenge document).
+/// Per FP-D3: a `datadome=` cookie is set on EVERY DD nav including
+/// the failing 403, so the cookie alone is not a solve marker — the
+/// body-shape transition is what differentiates "still bouncing on the
+/// interstitial" from "passed through".
+fn is_datadome_solved(cookies: &str, body: &str) -> bool {
+    cookies.contains("datadome=") && !is_datadome_challenge(body)
+}
+
 /// A browser page. Owns a DOM, JS runtime, and event loop.
 ///
 /// # Example
@@ -1644,7 +1678,13 @@ impl Page {
             // suspended for this nav (DataDomeSolver does this for
             // `rt:'i'` interstitials so i.js can reach
             // captcha-delivery.com). Empty solver list ⇒ never relaxed.
-            let relax_csp = solvers.iter().any(|s| s.relax_response_csp(&html));
+            // R-DATADOME-DAILY-KEY: relax CSP on any DataDome interstitial,
+            // not just when a registered solver claims it. The interstitial
+            // loads `captcha-delivery.com` scripts that the origin's own
+            // CSP refuses; without relaxation the bundle never runs and
+            // the daily-key WASM never gets a chance to land `datadome=`.
+            let relax_csp =
+                solvers.iter().any(|s| s.relax_response_csp(&html)) || is_datadome_challenge(&html);
             let enforce = profile.enforce_csp && !env_bypass && !relax_csp;
             if relax_csp && debug_nav {
                 eprintln!("[solver] origin CSP not enforced for this challenge document");
@@ -1687,7 +1727,15 @@ impl Page {
         // skip the pending-nav poll + cookie-diff retry before i.js
         // lands `datadome=`.) Reuses `relax_response_csp` as the
         // "is this my challenge doc" signal. Empty solver list ⇒ false.
-        let started_as_dd_challenge = solvers.iter().any(|s| s.relax_response_csp(&html));
+        //
+        // R-DATADOME-DAILY-KEY public-engine primitive: also fire on a
+        // raw DataDome interstitial shape (i.e. a small body that loads
+        // a `captcha-delivery.com` script) so the iframe-materialization
+        // poll runs even without a registered DataDomeSolver. The bundle
+        // is the actor; the engine just needs to NOT interfere and to
+        // re-fetch the original URL once `datadome=` is in the jar.
+        let started_as_dd_challenge =
+            solvers.iter().any(|s| s.relax_response_csp(&html)) || is_datadome_challenge(&html);
         // Akamai sec-cpt analog (master plan §4 Phase 3 / §8.5): homedepot
         // serves the rotating-obfuscated-bundle sec-cpt variant
         // (`<div id="sec-if-cpt-container">` + `<script src="/Wjv3…">`).
@@ -2070,8 +2118,15 @@ impl Page {
                             // `datadome_handler::datadome_solved` call;
                             // DataDomeSolver.solved_signal internally calls
                             // the same fn so behaviour is preserved.
+                            //
+                            // R-DATADOME-DAILY-KEY public primitive: also
+                            // break on the engine-side `is_datadome_solved`
+                            // check so the cookie-diff retry fires even
+                            // without a registered DataDomeSolver.
                             let body = page.content();
-                            if solvers.iter().any(|s| s.solved_signal(&now, &body)) {
+                            if solvers.iter().any(|s| s.solved_signal(&now, &body))
+                                || is_datadome_solved(&now, &body)
+                            {
                                 break;
                             }
                         }
@@ -3621,6 +3676,55 @@ impl Page {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R-DATADOME-DAILY-KEY: `is_datadome_challenge` must catch a typical
+    /// `rt:'i'` interstitial (small body + captcha-delivery.com script).
+    #[test]
+    fn datadome_challenge_detects_interstitial() {
+        let interstitial = r#"<html><head><script src="https://geo.captcha-delivery.com/c"></script></head><body></body></html>"#;
+        assert!(is_datadome_challenge(interstitial));
+    }
+
+    /// Legitimate page that mentions captcha-delivery.com in a benign
+    /// context (e.g. CSP report-uri or text content) must NOT be flagged.
+    /// We rely on the 50 KB size gate to differentiate the small
+    /// interstitial from a full rendered page.
+    #[test]
+    fn datadome_challenge_size_gates_false_positive() {
+        let mut big = String::from("<html><body>");
+        // 60 KB filler text containing the substring
+        big.push_str(&"x".repeat(60_000));
+        big.push_str("captcha-delivery.com (mentioned in passing)");
+        big.push_str("</body></html>");
+        assert!(!is_datadome_challenge(&big));
+    }
+
+    /// A vanilla rendered page with no DD substring is not a challenge.
+    #[test]
+    fn datadome_challenge_rejects_non_dd_body() {
+        let html =
+            r#"<html><head><title>Real Site</title></head><body><h1>Welcome</h1></body></html>"#;
+        assert!(!is_datadome_challenge(html));
+    }
+
+    /// `is_datadome_solved` requires BOTH the `datadome=` cookie AND a
+    /// body that is no longer a DD interstitial. The cookie alone is
+    /// not a solve marker (FP-D3: DD sets the cookie on every nav incl.
+    /// the failing 403).
+    #[test]
+    fn datadome_solved_requires_cookie_and_clean_body() {
+        let real_body = "<html><body><h1>Real Page</h1></body></html>";
+        let interstitial = r#"<html><body><script src="https://geo.captcha-delivery.com/c"></script></body></html>"#;
+
+        // Cookie + real body → solved.
+        assert!(is_datadome_solved("datadome=abc123", real_body));
+
+        // Cookie + interstitial body → NOT solved (still on the challenge).
+        assert!(!is_datadome_solved("datadome=abc123", interstitial));
+
+        // No cookie + real body → NOT solved (we never saw a token).
+        assert!(!is_datadome_solved("session=x; other=y", real_body));
+    }
 
     /// Regression: a JS-side `location.href = 'about:blank'` (or any
     /// other special-scheme URL) must NOT cause the navigate loop to
