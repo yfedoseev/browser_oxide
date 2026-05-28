@@ -222,6 +222,30 @@ fn is_datadome_solved(cookies: &str, body: &str) -> bool {
     cookies.contains("datadome=") && !is_datadome_challenge(body)
 }
 
+/// Public-engine Akamai sec-cpt solve detector
+/// (R-AKAMAI-SECCPT-FLAKE Sprint 2.4).
+///
+/// The sec-cpt cookie carries a state segment between two `~` delimiters
+/// — the engine considers the challenge SOLVED only when:
+///   1. The cookie jar holds `sec_cpt=`
+///   2. The value contains the documented `~3~` success marker
+///   3. The current body is no longer the sec-cpt challenge page
+///      (no `sec-if-cpt-container` / `sec-cpt-if` markers — those
+///      transition out post-solve when Akamai serves the real homepage)
+///
+/// Mirrors `is_datadome_solved`'s shape. Wired into the navigate loop's
+/// `solved_signal` check so the public engine breaks out of the
+/// poll-and-retry once the bundle's self-solve completes, EVEN WITHOUT
+/// an `AkamaiSolver` registered (default_solvers is empty). The WASM /
+/// signature computation stays in the bundle itself; this helper just
+/// recognizes the success state.
+fn is_seccpt_solved(cookies: &str, body: &str) -> bool {
+    cookies.contains("sec_cpt=")
+        && cookies.contains("~3~")
+        && !body.contains("sec-if-cpt-container")
+        && !body.contains("sec-cpt-if")
+}
+
 /// A browser page. Owns a DOM, JS runtime, and event loop.
 ///
 /// # Example
@@ -2151,9 +2175,16 @@ impl Page {
                         if let Some(p) = parsed_current.as_ref() {
                             let now = client.cookies_for_url(p).await.unwrap_or_default();
                             // E2 trait dispatch: AkamaiSolver.solved_signal
-                            // delegates to sec_cpt::sec_cpt_solved.
+                            // delegates to sec_cpt::sec_cpt_solved. Public-
+                            // engine fallback `is_seccpt_solved` recognizes
+                            // the documented `~3~` cookie marker even when
+                            // no AkamaiSolver is registered (Sprint 2.4 /
+                            // R-AKAMAI-SECCPT-FLAKE) — mirrors FIX-DD's
+                            // is_datadome_solved shape.
                             let body = page.content();
-                            if solvers.iter().any(|s| s.solved_signal(&now, &body)) {
+                            if solvers.iter().any(|s| s.solved_signal(&now, &body))
+                                || is_seccpt_solved(&now, &body)
+                            {
                                 if debug_nav {
                                     eprintln!(
                                         "[solver] solved_signal fired (likely sec-cpt ~3~) — breaking poll"
@@ -3730,6 +3761,40 @@ mod tests {
 
         // No cookie + real body → NOT solved (we never saw a token).
         assert!(!is_datadome_solved("session=x; other=y", real_body));
+    }
+
+    /// R-AKAMAI-SECCPT-FLAKE Sprint 2.4: `is_seccpt_solved` requires
+    /// (a) the `sec_cpt=` cookie, (b) the `~3~` success-state marker
+    /// inside the cookie, AND (c) a body that has TRANSITIONED out of
+    /// the sec-cpt challenge page (real homepage, no
+    /// `sec-if-cpt-container` / `sec-cpt-if` markers).
+    #[test]
+    fn seccpt_solved_requires_marker_and_clean_body() {
+        let challenge_body =
+            r#"<html><body><div id="sec-if-cpt-container"></div><script src="/qjBo8d0vY/..."></script></body></html>"#;
+        let real_body = "<html><body><h1>The Home Depot</h1>main content</body></html>";
+
+        // Solved cookie + real body → SOLVED.
+        assert!(is_seccpt_solved(
+            "sec_cpt=ABC123~3~XYZ; AKA_A2=A",
+            real_body
+        ));
+
+        // Solved cookie BUT still-on-challenge body → NOT solved.
+        assert!(!is_seccpt_solved(
+            "sec_cpt=ABC123~3~XYZ",
+            challenge_body
+        ));
+
+        // Cookie missing `~3~` marker (state ~1~ or ~2~) → NOT solved.
+        assert!(!is_seccpt_solved("sec_cpt=ABC123~1~XYZ", real_body));
+        assert!(!is_seccpt_solved("sec_cpt=ABC123~0~XYZ", real_body));
+
+        // No `sec_cpt=` cookie → NOT solved.
+        assert!(!is_seccpt_solved("session=x; other=~3~", real_body));
+
+        // Empty cookies + real body → NOT solved.
+        assert!(!is_seccpt_solved("", real_body));
     }
 
     /// Regression: a JS-side `location.href = 'about:blank'` (or any
