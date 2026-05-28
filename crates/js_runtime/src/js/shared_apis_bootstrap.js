@@ -274,6 +274,27 @@
                     else if (full.startsWith('/')) { const m = b.match(/^([a-z]+:\/\/[^/]+)/i); full = m ? m[1] + full : full; }
                     else { full = b.replace(/[^/]*$/, '') + full; }
                 }
+                // Opaque-scheme handling (WHATWG URL spec: blob, data,
+                // javascript, about). Real Chrome returns the scheme + ":"
+                // as `.protocol` and "null" for `.origin`; our http-style
+                // regex below would emit "" for both. vNext/10.
+                const _opaqueMatch = full.match(/^(blob|data|javascript|about):/i);
+                if (_opaqueMatch) {
+                    const scheme = _opaqueMatch[1].toLowerCase();
+                    this.protocol = scheme + ':';
+                    this.href = full;
+                    this.pathname = full.slice(scheme.length + 1);
+                    this.search = '';
+                    this.hash = '';
+                    this.host = '';
+                    this.hostname = '';
+                    this.port = '';
+                    this.origin = 'null';
+                    this.username = '';
+                    this.password = '';
+                    this.searchParams = new URLSearchParams('');
+                    return;
+                }
                 const m = full.match(/^([a-z]+):\/\/([^/:]+)(?::(\d+))?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/i);
                 if (m) {
                     this.protocol = m[1].toLowerCase() + ':'; this.hostname = m[2]; this.port = m[3] || '';

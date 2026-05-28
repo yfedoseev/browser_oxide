@@ -125,11 +125,19 @@ fn worker_self_location_populated_from_construction_url() {
         "href must echo the blob: URL: {out}"
     );
     // Load-bearing for recaptcha-class probes: location.toString() === href.
-    // Note: BO's URL polyfill currently returns empty .protocol and "null"
-    // .origin for blob: URLs — real Chrome returns "blob:" / "null". That's
-    // a separate URL polyfill bug; not blocking for R-DUO-WORKER.
     assert_eq!(
         v["toString_works"], true,
         "location toString must equal href: {out}"
+    );
+    // vNext/10 URL polyfill blob: fix — real Chrome on a blob:null/uuid URL
+    // returns `.protocol === "blob:"` and `.origin === "null"`. Pre-fix
+    // the polyfill emitted "" for protocol; post-fix it matches Chrome.
+    assert_eq!(
+        v["protocol"], "blob:",
+        "blob: URL must report protocol=\"blob:\": {out}"
+    );
+    assert_eq!(
+        v["origin"], "null",
+        "blob: URL must report origin=\"null\": {out}"
     );
 }

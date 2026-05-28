@@ -325,3 +325,80 @@ fn no_profile_uses_defaults() {
         ua
     );
 }
+
+// ===== vNext/10 — URL polyfill opaque-scheme handling =====
+
+/// Real Chrome on `new URL("blob:null/uuid").protocol` returns `"blob:"`.
+/// Pre-fix, BO's URL polyfill emitted `""`. Caught during R-DUO-WORKER and
+/// fixed in commit (this commit).
+#[test]
+fn url_blob_scheme_protocol_and_origin() {
+    let mut rt = create_test_runtime();
+    let proto = rt
+        .execute_script(r#"new URL("blob:null/7aeb61c9-deadbeef").protocol"#, None)
+        .unwrap();
+    assert_eq!(proto, "blob:");
+    let origin = rt
+        .execute_script(r#"new URL("blob:null/7aeb61c9-deadbeef").origin"#, None)
+        .unwrap();
+    assert_eq!(origin, "null");
+    let href = rt
+        .execute_script(r#"new URL("blob:null/7aeb61c9-deadbeef").href"#, None)
+        .unwrap();
+    assert_eq!(href, "blob:null/7aeb61c9-deadbeef");
+}
+
+/// `data:` URLs are opaque per WHATWG URL spec: protocol="data:",
+/// origin="null". Real Chrome behavior.
+#[test]
+fn url_data_scheme_protocol_and_origin() {
+    let mut rt = create_test_runtime();
+    let proto = rt
+        .execute_script(r#"new URL("data:text/html,<p>hi</p>").protocol"#, None)
+        .unwrap();
+    assert_eq!(proto, "data:");
+    let origin = rt
+        .execute_script(r#"new URL("data:text/html,<p>hi</p>").origin"#, None)
+        .unwrap();
+    assert_eq!(origin, "null");
+}
+
+/// `javascript:` URLs are also opaque.
+#[test]
+fn url_javascript_scheme_protocol() {
+    let mut rt = create_test_runtime();
+    let proto = rt
+        .execute_script(r#"new URL("javascript:void(0)").protocol"#, None)
+        .unwrap();
+    assert_eq!(proto, "javascript:");
+}
+
+/// `about:` URLs (about:blank, about:srcdoc) are opaque.
+#[test]
+fn url_about_scheme_protocol() {
+    let mut rt = create_test_runtime();
+    let proto = rt
+        .execute_script(r#"new URL("about:blank").protocol"#, None)
+        .unwrap();
+    assert_eq!(proto, "about:");
+}
+
+/// Regression: http(s) URLs must still parse correctly — the opaque-scheme
+/// branch is added BEFORE the http regex, so it must not divert non-opaque
+/// schemes.
+#[test]
+fn url_https_still_parses_after_opaque_branch() {
+    let mut rt = create_test_runtime();
+    let proto = rt
+        .execute_script(r#"new URL("https://example.com/foo?a=1#b").protocol"#, None)
+        .unwrap();
+    assert_eq!(proto, "https:");
+    let host = rt
+        .execute_script(r#"new URL("https://example.com/foo?a=1#b").host"#, None)
+        .unwrap();
+    assert_eq!(host, "example.com");
+    let origin = rt
+        .execute_script(r#"new URL("https://example.com/foo?a=1#b").origin"#, None)
+        .unwrap();
+    assert_eq!(origin, "https://example.com");
+}
