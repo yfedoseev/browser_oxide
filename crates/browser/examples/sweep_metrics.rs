@@ -27,6 +27,16 @@ struct Site {
     cat: String,
     name: String,
     url: String,
+    /// True iff this site exists in the corpus as a DIAGNOSTIC probe — i.e.
+    /// it's INTENDED to fail (e.g. `areyouheadless` returns
+    /// "Chrome Headless detected" by design). Diagnostic probes drag the
+    /// raw pass-rate down equally on every engine; reporting them
+    /// separately lets the project make honest "% of real sites we can
+    /// browse" claims without methodology games. See
+    /// `docs/releases/v0.1.0-parity/audit/16_DECISION_LOG.md` §R-CORPUS-DIAGNOSTIC-FLAG.
+    /// Defaults to false via serde so existing corpus JSONs keep working.
+    #[serde(default)]
+    diagnostic: bool,
 }
 
 #[derive(Serialize)]
@@ -53,6 +63,16 @@ struct Summary {
     thin_body: usize,
     error: usize,
     pass_pct: f64,
+    /// Sites in the corpus tagged `diagnostic: true` (intended to fail).
+    /// e.g. `areyouheadless`.
+    diagnostic_n: usize,
+    /// Sites NOT marked diagnostic = real-browsable sites.
+    /// `production_n = n - diagnostic_n`.
+    production_n: usize,
+    /// Passes among non-diagnostic sites only.
+    production_pass: usize,
+    /// production_pass / production_n × 100.
+    production_pass_pct: f64,
     t_launch_ms: u64,
     t_first_page_ready_ms: u64,
     rss_peak_mb: f64,
@@ -232,6 +252,26 @@ async fn main() {
                 .filter(|r| r.tag != "L3-RENDERED" && r.len < 1000 && r.err.is_none())
                 .count();
             let error = results.iter().filter(|r| r.err.is_some()).count();
+
+            // Dual-metric: production (non-diagnostic) sites only.
+            // Diagnostic probes (`areyouheadless` etc.) are INTENDED to fail
+            // and drag every engine's pass-rate down equally; the production
+            // metric is the honest "% of real sites we can browse" number.
+            let diagnostic_n = corpus.iter().filter(|s| s.diagnostic).count();
+            let production_n = total - diagnostic_n;
+            let production_pass = corpus
+                .iter()
+                .zip(results.iter())
+                .filter(|(s, r)| {
+                    !s.diagnostic && r.tag == "L3-RENDERED" && r.len >= 15000
+                })
+                .count();
+            let production_pass_pct = if production_n > 0 {
+                (100.0 * production_pass as f64 / production_n as f64 * 10.0).round() / 10.0
+            } else {
+                0.0
+            };
+
             let mut timings: Vec<u64> = results.iter().map(|r| r.ms).collect();
             timings.sort_unstable();
             let ms_median = timings.get(timings.len() / 2).copied().unwrap_or(0);
@@ -266,6 +306,10 @@ async fn main() {
                 thin_body,
                 error,
                 pass_pct: (100.0 * pass_count as f64 / total as f64 * 10.0).round() / 10.0,
+                diagnostic_n,
+                production_n,
+                production_pass,
+                production_pass_pct,
                 t_launch_ms,
                 t_first_page_ready_ms,
                 rss_peak_mb: (rss_peak * 10.0).round() / 10.0,
@@ -285,12 +329,15 @@ async fn main() {
                 .expect("write out.json");
 
             eprintln!(
-                "\n=== browser_oxide [{} / {}]: pass={}/{} ({}%) wall={}s rss_peak={}MB median={}ms p95={}ms ===",
+                "\n=== browser_oxide [{} / {}]: pass={}/{} ({}%) | production={}/{} ({}%) wall={}s rss_peak={}MB median={}ms p95={}ms ===",
                 profile_name,
                 mode,
                 summary.pass,
                 summary.n,
                 summary.pass_pct,
+                summary.production_pass,
+                summary.production_n,
+                summary.production_pass_pct,
                 wall_total_ms / 1000,
                 summary.rss_peak_mb,
                 summary.ms_median,
