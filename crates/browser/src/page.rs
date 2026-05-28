@@ -3113,7 +3113,7 @@ impl Page {
                 Some(async move {
                     // Sprint 2.1: script fetches inherit parent doc's
                     // regional accept-language (see lib.rs::get_with_headers).
-                    let mut hdrs = net::headers::nav_headers_for_url(&profile, &url, false);
+                    let mut hdrs = net::headers::nav_headers_for_url(&profile, url, false);
                     hdrs.push(("referer".to_string(), url.to_string()));
                     hdrs.push(("accept".to_string(), "*/*".to_string()));
                     hdrs.push(("sec-fetch-dest".to_string(), "script".to_string()));
