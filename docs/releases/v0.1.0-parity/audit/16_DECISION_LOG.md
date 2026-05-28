@@ -50,6 +50,36 @@ AWS WAF challenge.js flow:
 
 **Infrastructure:** new `crates/browser/examples/awswaf_probe.rs` (~95 lines) provides the reusable oracle. Capture a challenge HTML, inject a probe snippet (see `/tmp/awswaf_probe/probe_inject.js` for template; will be cleaned up into a fixture later), run `awswaf_probe <html> <url> [out.json]`. Reusable for diagnosing any future vendor-script bailout.
 
+### FIX-J validation round 2 — different site flipped (amazon-com-au 917KB)
+
+**Sweep:** same 8-site set as round 1, post-`ef4f561` (FIX-J).
+
+**Result:**
+- amazon-com: 2014 stub
+- imdb: 1995 stub
+- amazon-fr: 2011 stub
+- amazon-in: 2014 stub
+- amazon-de: 2011 stub
+- **amazon-com-au: 917,051 bytes L3-RENDERED ✅** (was 2011 stub on round 1)
+- **amazon-ca: 2014 stub** (was 227KB on round 1 — round 2 went back to stub)
+- amazon-jp: 2014 stub
+
+**Pattern:** different sites flip on different trials.
+- Round 1 (post-FIX-J trial 1): amazon-ca PASS, others stub
+- Round 2 (post-FIX-J trial 2): amazon-com-au PASS, others stub
+- Round 0 (PRE-FIX-J): 0/8 EVER flipped in any single trial
+
+**Hypothesis:** FIX-J unblocked the bailout chain. Each AWS WAF region (ca/com-au/de/in/jp/fr/com) does an independent challenge.js execution + IP-clustering check. Per-trial, ONE region's clustering happens to let BO through (or it's first request from BO's IP this session and bypasses the cluster); other regions still flag based on shared/cumulative state.
+
+This is INCONSISTENT with "FIX-J does nothing" (which would predict 0 flips always). It's CONSISTENT with "FIX-J unblocked the bailout but AWS WAF still applies IP-clustering / rate-limiting / behavioural-signal checks downstream that BO doesn't yet pass."
+
+**Conclusion:** FIX-J is shipped (commit `ef4f561`). Single-trial AWS WAF sweeps are too noisy to claim a definite multi-site flip; the full 3-run × 4-profile gate (handoff §2.4) will produce the authoritative routed-median delta. The qualitative evidence (probe oracle showing the bailout error CHANGED, two different sites flipping post-fix vs zero pre-fix) is strong enough to assert FIX-J unblocks the bailout chain.
+
+**Next levers** (likely needed for the remaining 5-7 AWS WAF sites):
+- Behavioural signal (mouse / keyboard / scroll humanization) — already in `humanize.js` but may not engage in BO's `navigate()` for headless pages
+- Per-page profile variation (FIX-E profile sampler) so amazon-com / amazon-jp / amazon-fr don't all hit the same WAF cluster with identical fingerprint within a session
+- WebGL `getContextAttributes()` shape match (the captured fixture has `webGl:contextAttributes` and BO doesn't currently expose them per-pname — FIX-D2 / FIX-D3 follow-up)
+
 ### FIX-D validation sweep — 5/5 AWS WAF sites still stub
 
 **Sweep:** `target/release/examples/sweep_metrics chrome_148_macos` against `[amazon-com, imdb, amazon-fr, amazon-in, amazon-de]` single-run, post-`a8cc691`.
