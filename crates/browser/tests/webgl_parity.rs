@@ -13,6 +13,75 @@ async fn evaluate(js: &str) -> String {
     page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
 }
 
+/// Same, but with the chrome_148_macos stealth profile active so WebGL reads
+/// the real apple_m3 surfaces (incl. the FIX-D2 WebGL 1 surface).
+async fn evaluate_macos(js: &str) -> String {
+    let mut page = Page::from_html(
+        "<!DOCTYPE html><html><body><canvas id='c' width='100' height='100'></canvas></body></html>",
+        Some(stealth::presets::chrome_148_macos()),
+    )
+    .await
+    .unwrap();
+    page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"))
+}
+
+/// FIX-D2: `getContext("webgl")` must NOT return the WebGL 2 surface. Pre-fix,
+/// a WebGL 1 context reported the WebGL 2 version string and advertised
+/// WebGL-2-only extensions (e.g. EXT_color_buffer_float) — a deterministic
+/// cross-API bot tell. Guards version strings, distinct classes, and the
+/// extension-set delta on both the no-profile fallback and the macOS profile.
+#[tokio::test]
+async fn webgl1_webgl2_surfaces_are_distinct_fix_d2() {
+    let probe = "
+        const gl1 = document.createElement('canvas').getContext('webgl');
+        const gl2 = document.createElement('canvas').getContext('webgl2');
+        const e1 = gl1.getSupportedExtensions();
+        JSON.stringify({
+            v1: gl1.getParameter(gl1.VERSION),
+            v2: gl2.getParameter(gl2.VERSION),
+            classes_distinct: WebGLRenderingContext !== WebGL2RenderingContext,
+            ctor1: gl1.constructor.name,
+            ctor2: gl2.constructor.name,
+            gl1_has_webgl2_only: e1.includes('EXT_color_buffer_float') || e1.includes('OES_draw_buffers_indexed'),
+            gl1_has_webgl1_only: e1.includes('OES_texture_float') && e1.includes('ANGLE_instanced_arrays'),
+            tag2: Object.prototype.toString.call(gl2),
+        })
+    ";
+    for (label, r) in [
+        ("no-profile", evaluate(probe).await),
+        ("macos", evaluate_macos(probe).await),
+    ] {
+        let v: serde_json::Value = serde_json::from_str(&r)
+            .unwrap_or_else(|_| panic!("{label}: probe returned non-JSON: {r}"));
+        assert_eq!(
+            v["v1"], "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+            "{label}: webgl1 VERSION must be WebGL 1.0"
+        );
+        assert_eq!(
+            v["v2"], "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+            "{label}: webgl2 VERSION must be WebGL 2.0"
+        );
+        assert_eq!(
+            v["classes_distinct"], true,
+            "{label}: WebGLRenderingContext must != WebGL2RenderingContext"
+        );
+        assert_eq!(v["ctor1"], "WebGLRenderingContext", "{label}: webgl1 ctor");
+        assert_eq!(v["ctor2"], "WebGL2RenderingContext", "{label}: webgl2 ctor");
+        assert_eq!(
+            v["gl1_has_webgl2_only"], false,
+            "{label}: webgl1 must NOT advertise WebGL-2-only extensions (the bot tell)"
+        );
+        assert_eq!(
+            v["gl1_has_webgl1_only"], true,
+            "{label}: webgl1 must advertise WebGL-1 core-promoted extensions"
+        );
+        assert_eq!(
+            v["tag2"], "[object WebGL2RenderingContext]",
+            "{label}: webgl2 Symbol.toStringTag"
+        );
+    }
+}
+
 const GL_SETUP: &str = "
 const c = document.getElementById('c');
 const gl = c.getContext('webgl2') || c.getContext('webgl');

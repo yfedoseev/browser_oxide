@@ -45,6 +45,29 @@ pub struct GpuProfile {
     /// where shader_type is VERTEX_SHADER (0x8B31) or FRAGMENT_SHADER (0x8B30)
     /// and precision_type is {LOW,MEDIUM,HIGH}_{FLOAT,INT} (0x8DF0-0x8DF5).
     pub shader_precision: Vec<(u32, u32, [i32; 3])>,
+    /// WebGL **1.0** surface, distinct from the fields above (which describe
+    /// the WebGL **2.0** surface for this profile). FIX-D2: `getContext("webgl")`
+    /// must return the WebGL 1 version string + extension list, NOT the WebGL 2
+    /// one. A WebGL 1 context advertising WebGL-2-only extensions (e.g.
+    /// `EXT_color_buffer_float`) or the `WebGL 2.0` version string is a
+    /// deterministic cross-API fingerprint tell (AWS WAF / DataDome / creepjs).
+    /// `None` = legacy behaviour (the shared fields are used for both contexts).
+    #[serde(default)]
+    pub webgl1: Option<WebGL1Surface>,
+}
+
+/// The WebGL 1.0 surface of a [`GpuProfile`]. Carried separately so a
+/// `getContext("webgl")` request returns version-correct strings + the
+/// WebGL-1 extension set (extensions promoted to core in WebGL 2 reappear
+/// here; WebGL-2-only extensions are absent). See FIX-D2.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebGL1Surface {
+    /// `getParameter(VERSION)` for a WebGL 1 context.
+    pub version: String,
+    /// `getParameter(SHADING_LANGUAGE_VERSION)` for a WebGL 1 context.
+    pub shading_language_version: String,
+    /// `getSupportedExtensions()` for a WebGL 1 context.
+    pub extensions: Vec<String>,
 }
 
 /// Chrome 131 on Windows 10 with NVIDIA GeForce RTX 3060.
@@ -98,6 +121,7 @@ pub fn nvidia_rtx_3060_windows() -> GpuProfile {
         ],
         params: common_params_desktop(),
         shader_precision: standard_shader_precision(),
+        webgl1: None,
     }
 }
 
@@ -114,12 +138,10 @@ pub fn nvidia_rtx_3060_windows() -> GpuProfile {
 /// M3 (`tests/fixtures/chrome147/captured_macos_arm64.json`). See
 /// `docs/releases/v0.1.0-parity/audit/16_DECISION_LOG.md` §FIX-D.
 ///
-/// Note: this preset is the WebGL 2 surface (version "WebGL 2.0", SLV
-/// "GLSL ES 3.00"). Modern fingerprinters request `getContext("webgl2")`
-/// by default. `canvas_bootstrap.js::HTMLCanvasElement::getContext`
-/// currently returns the same `WebGLRenderingContext` for both `"webgl"`
-/// and `"webgl2"` so a WebGL 1 request would also see these values —
-/// fixing that conflation is a separate follow-up (FIX-D2).
+/// Note: the top-level fields are the WebGL 2 surface (version "WebGL 2.0",
+/// SLV "GLSL ES 3.00"). FIX-D2 (done): the `webgl1` field carries the distinct
+/// WebGL 1 surface so `getContext("webgl")` no longer leaks the WebGL 2 version
+/// string + WebGL-2-only extensions. See `apple_m3_webgl1_surface`.
 pub fn apple_m3_macos() -> GpuProfile {
     apple_m3_family_profile("Apple M3")
 }
@@ -204,6 +226,68 @@ fn apple_m3_family_profile(chip_name: &str) -> GpuProfile {
         ],
         params: apple_m3_params(),
         shader_precision: standard_shader_precision(),
+        webgl1: Some(apple_m3_webgl1_surface()),
+    }
+}
+
+/// The WebGL **1.0** surface for the Apple M3 family (ANGLE Metal Renderer).
+///
+/// Derived from the WebGL 2 extension list in `apple_m3_family_profile` by the
+/// spec-defined WebGL1↔WebGL2 delta: extensions promoted to *core* in WebGL 2
+/// (e.g. `OES_texture_float`, `ANGLE_instanced_arrays`, `WEBGL_depth_texture`)
+/// reappear as WebGL-1 extensions, and WebGL-2-only extensions (e.g.
+/// `EXT_color_buffer_float`, `OES_draw_buffers_indexed`) are removed. The
+/// `EXT_disjoint_timer_query_webgl2` form is replaced by its WebGL-1 form
+/// `EXT_disjoint_timer_query`, and `WEBGL_color_buffer_float` is the WebGL-1
+/// counterpart to WebGL 2's `EXT_color_buffer_float`. The delta set was
+/// cross-checked against the Camoufox `webgl_data.db` Apple row's
+/// `webGl:` vs `webGl2:` supportedExtensions. Alphabetically ordered to match
+/// the WebGL 2 list's convention. 39 extensions.
+fn apple_m3_webgl1_surface() -> WebGL1Surface {
+    WebGL1Surface {
+        version: "WebGL 1.0 (OpenGL ES 2.0 Chromium)".into(),
+        shading_language_version: "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)".into(),
+        extensions: vec![
+            "ANGLE_instanced_arrays".into(),
+            "EXT_blend_minmax".into(),
+            "EXT_clip_control".into(),
+            "EXT_color_buffer_half_float".into(),
+            "EXT_depth_clamp".into(),
+            "EXT_disjoint_timer_query".into(),
+            "EXT_float_blend".into(),
+            "EXT_frag_depth".into(),
+            "EXT_polygon_offset_clamp".into(),
+            "EXT_sRGB".into(),
+            "EXT_shader_texture_lod".into(),
+            "EXT_texture_compression_bptc".into(),
+            "EXT_texture_compression_rgtc".into(),
+            "EXT_texture_filter_anisotropic".into(),
+            "EXT_texture_mirror_clamp_to_edge".into(),
+            "KHR_parallel_shader_compile".into(),
+            "OES_element_index_uint".into(),
+            "OES_fbo_render_mipmap".into(),
+            "OES_standard_derivatives".into(),
+            "OES_texture_float".into(),
+            "OES_texture_float_linear".into(),
+            "OES_texture_half_float".into(),
+            "OES_texture_half_float_linear".into(),
+            "OES_vertex_array_object".into(),
+            "WEBGL_blend_func_extended".into(),
+            "WEBGL_color_buffer_float".into(),
+            "WEBGL_compressed_texture_astc".into(),
+            "WEBGL_compressed_texture_etc".into(),
+            "WEBGL_compressed_texture_etc1".into(),
+            "WEBGL_compressed_texture_pvrtc".into(),
+            "WEBGL_compressed_texture_s3tc".into(),
+            "WEBGL_compressed_texture_s3tc_srgb".into(),
+            "WEBGL_debug_renderer_info".into(),
+            "WEBGL_debug_shaders".into(),
+            "WEBGL_depth_texture".into(),
+            "WEBGL_draw_buffers".into(),
+            "WEBGL_lose_context".into(),
+            "WEBGL_multi_draw".into(),
+            "WEBGL_polygon_mode".into(),
+        ],
     }
 }
 
@@ -280,6 +364,7 @@ pub fn apple_m2_pro_macos() -> GpuProfile {
         ],
         params: common_params_desktop(),
         shader_precision: standard_shader_precision(),
+        webgl1: None,
     }
 }
 
@@ -330,6 +415,7 @@ pub fn intel_uhd_630_linux() -> GpuProfile {
         ],
         params: common_params_desktop(),
         shader_precision: standard_shader_precision(),
+        webgl1: None,
     }
 }
 
@@ -400,6 +486,56 @@ fn standard_shader_precision() -> Vec<(u32, u32, [i32; 3])> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIX-D2: apple_m3 must carry a distinct WebGL 1 surface whose extension
+    /// set is the spec-correct delta of the WebGL 2 list — no WebGL-2-only
+    /// extensions (the cross-API bot tell), and the core-promoted WebGL-1-only
+    /// extensions present.
+    #[test]
+    fn apple_m3_webgl1_surface_is_spec_correct() {
+        let gpu = apple_m3_macos();
+        let w1 = gpu
+            .webgl1
+            .as_ref()
+            .expect("apple_m3 must have a webgl1 surface");
+        assert_eq!(w1.version, "WebGL 1.0 (OpenGL ES 2.0 Chromium)");
+        assert_eq!(
+            w1.shading_language_version,
+            "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)"
+        );
+        // WebGL-2-only extensions must be ABSENT from the WebGL 1 surface.
+        for banned in [
+            "EXT_color_buffer_float",
+            "OES_draw_buffers_indexed",
+            "EXT_disjoint_timer_query_webgl2",
+            "WEBGL_clip_cull_distance",
+            "WEBGL_provoking_vertex",
+        ] {
+            assert!(
+                !w1.extensions.iter().any(|e| e == banned),
+                "WebGL 1 surface must not expose WebGL-2-only ext {banned}"
+            );
+        }
+        // Core-promoted WebGL-1-only extensions must be PRESENT.
+        for required in [
+            "OES_texture_float",
+            "ANGLE_instanced_arrays",
+            "WEBGL_depth_texture",
+            "EXT_disjoint_timer_query",
+            "WEBGL_color_buffer_float",
+        ] {
+            assert!(
+                w1.extensions.iter().any(|e| e == required),
+                "WebGL 1 surface must expose core-promoted ext {required}"
+            );
+        }
+        // The WebGL 1 and WebGL 2 surfaces must NOT be identical.
+        assert_ne!(
+            w1.extensions, gpu.extensions,
+            "webgl1 must differ from webgl2"
+        );
+        assert_ne!(w1.version, gpu.version);
+    }
 
     #[test]
     fn nvidia_profile_has_many_extensions() {

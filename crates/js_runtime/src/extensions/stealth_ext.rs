@@ -94,6 +94,26 @@ pub fn op_get_profile_value(#[state] state: &StealthState, #[string] key: &str) 
             "webgl_extensions" => {
                 serde_json::to_string(&p.gpu_profile.extensions).unwrap_or_default()
             }
+            // WebGL 1.0 surface (FIX-D2). Empty string = no distinct WebGL 1
+            // surface for this profile → JS keeps legacy shared-surface behaviour.
+            "webgl1_version" => p
+                .gpu_profile
+                .webgl1
+                .as_ref()
+                .map(|w| w.version.clone())
+                .unwrap_or_default(),
+            "webgl1_shading_language_version" => p
+                .gpu_profile
+                .webgl1
+                .as_ref()
+                .map(|w| w.shading_language_version.clone())
+                .unwrap_or_default(),
+            "webgl1_extensions" => p
+                .gpu_profile
+                .webgl1
+                .as_ref()
+                .map(|w| serde_json::to_string(&w.extensions).unwrap_or_default())
+                .unwrap_or_default(),
             "webgl_params" => serde_json::to_string(&p.gpu_profile.params).unwrap_or_default(),
             "webgl_shader_precision" => {
                 serde_json::to_string(&p.gpu_profile.shader_precision).unwrap_or_default()

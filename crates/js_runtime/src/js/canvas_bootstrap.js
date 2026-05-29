@@ -440,8 +440,55 @@
             };
             return WebGLRenderingContext._gpuCache;
         }
+        // FIX-D2: the WebGL **1.0** surface. `_g()` above is the WebGL **2.0**
+        // surface; a `getContext("webgl")` context must NOT report the WebGL 2
+        // version string or expose WebGL-2-only extensions (e.g.
+        // `EXT_color_buffer_float`) — that cross-API mismatch is a deterministic
+        // bot tell (AWS WAF / DataDome / creepjs). Derived from the active
+        // profile's `webgl1_*` values; falls back to `_g()` when the profile has
+        // no distinct WebGL 1 surface (legacy profiles) → no behaviour change.
+        static _g1() {
+            if (WebGLRenderingContext._gpuCache1) return WebGLRenderingContext._gpuCache1;
+            const base = WebGLRenderingContext._g();
+            // Start from the base surface, then downgrade the version strings to
+            // WebGL 1 whenever base describes a WebGL 2 surface (the apple_m3
+            // default + the no-profile fallback). Legacy profiles whose shared
+            // field already holds WebGL 1 data (e.g. nvidia) or masked Firefox
+            // keep their base strings. Extensions: an empty list defers to
+            // getSupportedExtensions()'s own WebGL-1 fallback.
+            let version = base.version;
+            let shadingLang = base.shadingLang;
+            let extensions = base.extensions;
+            if (/^WebGL 2/.test(version)) {
+                version = "WebGL 1.0 (OpenGL ES 2.0 Chromium)";
+                shadingLang = "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)";
+            }
+            try {
+                if (ops.op_has_stealth_profile()) {
+                    const v = ops.op_get_profile_value("webgl1_version");
+                    const sl = ops.op_get_profile_value("webgl1_shading_language_version");
+                    const extJson = ops.op_get_profile_value("webgl1_extensions");
+                    if (v) version = v;
+                    if (sl) shadingLang = sl;
+                    if (extJson) {
+                        try { const e = JSON.parse(extJson); if (e && e.length) extensions = e; } catch {}
+                    }
+                }
+            } catch {}
+            WebGLRenderingContext._gpuCache1 = { ...base, version, shadingLang, extensions };
+            return WebGLRenderingContext._gpuCache1;
+        }
+        // Per-instance surface selector. `_isWebGL2 === false` only for a
+        // context handed back by `getContext("webgl"/"experimental-webgl")`.
+        // Anything else (incl. `getParameter.call(notACtx)`) → WebGL 2 surface,
+        // preserving the pre-FIX-D2 default.
+        static _surfaceFor(ctx) {
+            return (ctx && ctx._isWebGL2 === false)
+                ? WebGLRenderingContext._g1()
+                : WebGLRenderingContext._g();
+        }
         getParameter(pname) {
-            const gpu = WebGLRenderingContext._g();
+            const gpu = WebGLRenderingContext._surfaceFor(this);
             // String-valued parameters
             if (pname === 0x1F00) return gpu.vendor;                // VENDOR
             if (pname === 0x1F01) return gpu.renderer;              // RENDERER
@@ -456,11 +503,32 @@
             return null;
         }
         getSupportedExtensions() {
-            const gpu = WebGLRenderingContext._g();
+            const gpu = WebGLRenderingContext._surfaceFor(this);
             // Fallback if the catalog is empty (no profile active).
-            // Captured from real Chrome 147 on macOS arm64 — 36 extensions, exact list.
-            // See tests/fixtures/chrome147/captured_macos_arm64.json.
+            // Captured from real Chrome 147 on macOS arm64. WebGL 1 contexts get
+            // the WebGL-1 list (extensions promoted to core in WebGL 2 reappear;
+            // WebGL-2-only ones absent); WebGL 2 contexts get the 36-ext list.
             if (!gpu.extensions.length) {
+                if (this && this._isWebGL2 === false) {
+                    return [
+                        "ANGLE_instanced_arrays","EXT_blend_minmax","EXT_clip_control",
+                        "EXT_color_buffer_half_float","EXT_depth_clamp","EXT_disjoint_timer_query",
+                        "EXT_float_blend","EXT_frag_depth","EXT_polygon_offset_clamp","EXT_sRGB",
+                        "EXT_shader_texture_lod","EXT_texture_compression_bptc",
+                        "EXT_texture_compression_rgtc","EXT_texture_filter_anisotropic",
+                        "EXT_texture_mirror_clamp_to_edge","KHR_parallel_shader_compile",
+                        "OES_element_index_uint","OES_fbo_render_mipmap","OES_standard_derivatives",
+                        "OES_texture_float","OES_texture_float_linear","OES_texture_half_float",
+                        "OES_texture_half_float_linear","OES_vertex_array_object",
+                        "WEBGL_blend_func_extended","WEBGL_color_buffer_float",
+                        "WEBGL_compressed_texture_astc","WEBGL_compressed_texture_etc",
+                        "WEBGL_compressed_texture_etc1","WEBGL_compressed_texture_pvrtc",
+                        "WEBGL_compressed_texture_s3tc","WEBGL_compressed_texture_s3tc_srgb",
+                        "WEBGL_debug_renderer_info","WEBGL_debug_shaders","WEBGL_depth_texture",
+                        "WEBGL_draw_buffers","WEBGL_lose_context","WEBGL_multi_draw",
+                        "WEBGL_polygon_mode",
+                    ];
+                }
                 return [
                     "EXT_clip_control","EXT_color_buffer_float","EXT_color_buffer_half_float",
                     "EXT_conservative_depth","EXT_depth_clamp","EXT_disjoint_timer_query_webgl2",
@@ -486,8 +554,11 @@
             if (name === "WEBGL_debug_renderer_info") return { UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246 };
             // Any supported extension gets a non-null stub. Fingerprinters
             // call getExtension(name) after getSupportedExtensions to verify.
-            const gpu = WebGLRenderingContext._g();
-            if (gpu.extensions.includes(name)) return {};
+            // Must agree with this context's getSupportedExtensions() surface —
+            // a WebGL 1 ctx returning {} for a WebGL-2-only ext would contradict
+            // its own extension list.
+            const exts = this.getSupportedExtensions();
+            if (exts && exts.includes(name)) return {};
             return null;
         }
         // getContextAttributes — returns the WebGLContextAttributes used at
@@ -577,6 +648,17 @@
         deleteRenderbuffer() {}
         isContextLost() { return false; }
     }
+
+    // FIX-D2: WebGL2RenderingContext is a SEPARATE constructor from
+    // WebGLRenderingContext (real Chrome: `WebGLRenderingContext !==
+    // WebGL2RenderingContext`, and a webgl2 ctx has its own constructor +
+    // "[object WebGL2RenderingContext]" tag). Pre-FIX-D2 we aliased the two,
+    // so `WebGLRenderingContext === WebGL2RenderingContext` was a one-line bot
+    // tell. The class shares all method bodies via inheritance; instances
+    // carry `_isWebGL2 = true` (set in getContext) so the surface selector
+    // returns the WebGL 2 surface. Static `_g/_g1/_surfaceFor/_gpuCache*` are
+    // inherited and resolve to the same shared caches.
+    class WebGL2RenderingContext extends WebGLRenderingContext {}
 
     // AudioContext + OfflineAudioContext
     // Simulates the pipeline used by CreepJS/FingerprintJS for audio fingerprinting:
@@ -965,7 +1047,12 @@
         getContext(type) {
             if (type === "2d") return new CanvasRenderingContext2D(this.#canvasId);
             if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
-                const gl = new WebGLRenderingContext();
+                // FIX-D2: webgl2 → WebGL2RenderingContext (distinct class +
+                // WebGL 2 surface); webgl/experimental-webgl → WebGLRenderingContext
+                // with the WebGL 1 surface (_isWebGL2 = false).
+                const isV2 = (type === "webgl2");
+                const gl = isV2 ? new WebGL2RenderingContext() : new WebGLRenderingContext();
+                gl._isWebGL2 = isV2;
                 gl.canvas = this;
                 gl.drawingBufferWidth = this.width;
                 gl.drawingBufferHeight = this.height;
@@ -1034,10 +1121,20 @@
             value: "WebGLRenderingContext",
             configurable: true,
         });
-        // Also expose WebGL2RenderingContext class with its own toStringTag,
-        // even though our implementation uses the same backing class.
+        // FIX-D2: WebGL2RenderingContext is its own class now — give it its own
+        // toStringTag so `Object.prototype.toString.call(gl2)` returns
+        // "[object WebGL2RenderingContext]" (own prop shadows the inherited one).
+        Object.defineProperty(WebGL2RenderingContext.prototype, Symbol.toStringTag, {
+            value: "WebGL2RenderingContext",
+            configurable: true,
+        });
         Object.defineProperty(WebGLRenderingContext.prototype, 'constructor', {
             value: WebGLRenderingContext,
+            configurable: true,
+            writable: true,
+        });
+        Object.defineProperty(WebGL2RenderingContext.prototype, 'constructor', {
+            value: WebGL2RenderingContext,
             configurable: true,
             writable: true,
         });
@@ -1047,7 +1144,7 @@
             writable: true,
         });
     } catch {}
-    globalThis.WebGL2RenderingContext = WebGLRenderingContext;
+    globalThis.WebGL2RenderingContext = WebGL2RenderingContext;
     globalThis.AudioContext = AudioContext;
     globalThis.OfflineAudioContext = OfflineAudioContext;
     globalThis.BaseAudioContext = BaseAudioContext;
@@ -1130,7 +1227,12 @@
                 ) {
                     const w = parseInt(this.getAttribute("width")) || 300;
                     const h = parseInt(this.getAttribute("height")) || 150;
-                    const gl = new WebGLRenderingContext(this._canvasId, w, h);
+                    // FIX-D2: distinct class + surface per requested version.
+                    const isV2 = (type === "webgl2");
+                    const gl = isV2
+                        ? new WebGL2RenderingContext(this._canvasId, w, h)
+                        : new WebGLRenderingContext(this._canvasId, w, h);
+                    gl._isWebGL2 = isV2;
                     gl.canvas = this;
                     return gl;
                 }
