@@ -110,7 +110,24 @@ same-run competitor sweep needs: `playwright install chromium`,
 `pip install patchright && patchright install chromium`, a launcher/browser-
 matched camoufox (v135 *and* a v150-matched python package), and driver-
 stability (e.g. relaunch-per-site). Harnesses are ready
-(`benchmarks/run_camoufox_min.py`, `bench_corpus_v2.py`, `run_full_gate.sh`).
+(`benchmarks/run_camoufox_min.py`, `run_camoufox_isolated.py`, `run_full_gate.sh`).
+
+**Live competitor re-run attempt (2026-05-29) — outcome:**
+- **camoufox v150** — *uninstallable here*: the venv's `camoufox` python pkg is
+  0.4.11, which only fetches the **v135** browser; the cached v150 binary is
+  launcher-incompatible (crashes every `new_page`). No v150-matched launcher
+  exists in this env.
+- **camoufox v135** — ran per-site-isolated → **82/125, but INVALID for
+  comparison**: 27 of 43 "fails" are `ERROR` (the camoufox/playwright driver
+  still crashes on many sites even per-site) + short 3 s settle + fresh-visitor
+  (no browsing history) vs BO's full per-site nav budget. Camoufox's *true*
+  number under the proper harness is ~108 (its docs baseline). The 82 is a
+  driver-instability/under-settle floor, **not** a like-for-like figure.
+
+⇒ **The fair comparison is BO 115 (fresh, full budget) vs the documented v150
+~112-113 / v135 ~108 baselines** (same corpus, same proper harness). A
+like-for-like live competitor sweep is blocked on this environment's broken
+playwright/patchright installs + unstable camoufox driver, not on engine merit.
 
 ## Caveats
 
