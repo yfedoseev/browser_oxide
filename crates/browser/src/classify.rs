@@ -78,11 +78,23 @@ pub struct EngineClass {
 /// any-size structural signal that catches the large udemy CF shell
 /// `/cdn-cgi/challenge-platform/` alone cannot — that JSD URL also
 /// stays on *passed* CF pages, so it is deliberately NOT used here).
+/// INVERSE-CHL (parity-workflows M-1 guard): `gokuprops` and
+/// `awswafcookiedomainlist` are AWS-WAF token-challenge envelope variables
+/// emitted **only** on the unsolved challenge stub. They are gone the
+/// moment the PoW worker posts the `aws-waf-token` and the reload serves
+/// real Amazon/IMDb content. Adding them here (any-size, like the CF/DD
+/// structural tokens) means the M-1 async-drain refactor cannot grow a
+/// still-unsolved AWS shell past the 30 KB `INTERSTITIAL_MAX_BYTES` gate
+/// and have it false-PASS as `L3-RENDERED` — an unsolved AWS body stays a
+/// challenge at every size. Mirrors the inline `AwsWafIntegration` /
+/// `gokuProps` guard at `page.rs:2521-2522`.
 const UNAMBIGUOUS: &[(&str, &str)] = &[
     ("cf-browser-verification", "Cloudflare-CHL"),
     ("_cf_chl_opt", "Cloudflare-CHL"),
     ("/_sec/cp_challenge", "Akamai-sec-cpt-CHL"),
     ("ddcaptchaencoded", "DataDome-CHL"),
+    ("gokuprops", "AWS-WAF-CHL"),
+    ("awswafcookiedomainlist", "AWS-WAF-CHL"),
 ];
 
 /// English-phrase interstitial markers — these CAN appear in normal page
@@ -587,5 +599,81 @@ mod tests {
         }
         assert!(big.len() >= SENSOR_SPLIT_BYTES);
         assert_eq!(engine_classify(&big).verdict, ChallengeVerdict::SensorFail);
+    }
+
+    // INVERSE-CHL regression (parity-workflows M-1 guard): an AWS-WAF token
+    // challenge body must classify as a challenge at EVERY size, so the
+    // live-nav async-drain refactor can never grow an unsolved AWS shell
+    // into a false `Pass`. A solved Amazon page (no AWS envelope vars)
+    // must still be a clean `Pass`.
+    #[test]
+    fn inverse_chl_awswaf_never_passes_unsolved() {
+        // The real ~2 KB AWS-WAF stub shape (amazon/imdb).
+        let stub = r#"<html><head><script type="text/javascript">
+            window.awsWafCookieDomainList = [];
+            window.gokuProps = {"key":"AQ==","iv":"A6==","context":"gl=="};
+            </script><script src="https://x.token.awswaf.com/x/challenge.js"></script></head>
+            <body><script>AwsWafIntegration.checkForceRefresh().then(()=>{});</script></body></html>"#;
+        let s = engine_classify(stub);
+        assert_eq!(s.tag, "AWS-WAF-CHL");
+        assert!(s.verdict.is_challenge(), "unsolved AWS stub is a challenge");
+        assert_ne!(s.verdict, ChallengeVerdict::Pass);
+
+        // The core guard: even if the body is grown past the 30 KB / 50 KB
+        // gates (e.g. a partial-solve refactor artifact) while still
+        // carrying the AWS envelope vars, it must NOT false-PASS.
+        let mut grown = String::from(
+            r#"<script>window.gokuProps={"key":"AQ=="};window.awsWafCookieDomainList=[];</script>"#,
+        );
+        for _ in 0..3000 {
+            grown.push_str("<div>partially rendered challenge shell padding here</div>");
+        }
+        assert!(grown.len() >= SENSOR_SPLIT_BYTES);
+        let g = engine_classify(&grown);
+        assert_eq!(g.tag, "AWS-WAF-CHL");
+        assert!(g.verdict.is_challenge());
+        assert_ne!(g.verdict, ChallengeVerdict::Pass);
+
+        // No false positive: a solved Amazon product page (no AWS envelope
+        // vars) is a normal large rendered Pass.
+        let mut solved = String::from("<html><body>");
+        for _ in 0..2000 {
+            solved.push_str("<div class=\"product-card\">real amazon product listing</div>");
+        }
+        solved.push_str("</body></html>");
+        assert!(solved.len() >= THIN_SHELL_MAX_BYTES);
+        let v = engine_classify(&solved);
+        assert_eq!(v.tag, "L3-RENDERED");
+        assert_eq!(v.verdict, ChallengeVerdict::Pass);
+    }
+
+    // TAIL-PIN regression (parity-workflows guard): the known small "pass"
+    // shells must stay `ThinShell` (not over-counted as full passes) so the
+    // M-1 drain work can't manufacture a measurement-artifact win by simply
+    // growing a shell a few KB. duolingo (~13 KB) sits just under the 15 KB
+    // floor — the case DUOLINGO-ASSERT protects.
+    #[test]
+    fn tail_pin_known_thin_shells_stay_thinshell() {
+        // duolingo "browser not supported" shell ~13.3 KB, invisible v3 only.
+        let mut duo = String::from(
+            r#"<html><head><style>.grecaptcha-badge{display:none}</style></head><body>"#,
+        );
+        while duo.len() < 13_000 {
+            duo.push_str("<div class=\"_2it2\">duolingo unsupported-browser shell</div>");
+        }
+        duo.push_str("</body></html>");
+        assert!(
+            duo.len() > THIN_BODY_MAX_BYTES && duo.len() < THIN_SHELL_MAX_BYTES,
+            "duolingo shell must sit under the 15 KB ThinShell floor (len={})",
+            duo.len()
+        );
+        let d = engine_classify(&duo);
+        assert_eq!(d.tag, "L3-RENDERED", "ledger tag unchanged");
+        assert_eq!(
+            d.verdict,
+            ChallengeVerdict::ThinShell,
+            "duolingo shell must NOT count as a full Pass"
+        );
+        assert!(!d.verdict.is_challenge());
     }
 }
