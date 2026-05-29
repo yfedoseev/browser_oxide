@@ -54,6 +54,46 @@ isolates) accumulate per-nav resources that aren't fully reaped on `Page` drop.
 Per-site process isolation is therefore both **necessary** (sidesteps the leak)
 and **cheap** (fast V8 restore) — a happy accident.
 
+## 3b. Why BO "init" is 1.5 s even though we're not a real browser — and the fix
+
+Measured per-site init (`BROWSER_OXIDE_BUILD_PROFILE=1`, example.com):
+
+```
+[bp]    0ms  parse_html + find_scripts + find_stylesheets
+[bp] 1543ms  BrowserJsRuntime::with_options (V8 isolate + bootstrap)   <-- ALL of it
+[bp]    0ms  everything else (location, cookies, scripts, drains)
+```
+
+**1543 ms is not a browser launch — it's building the V8 snapshot at RUNTIME.**
+`with_options` (`runtime.rs:51`) sets `startup_snapshot = Some(snapshot::get_snapshot())`,
+and `get_snapshot()` (`snapshot.rs`) **executes all 12 JS bootstraps**
+(console/stealth/interfaces/shared_apis/instances/fetch/timer/dom/event/canvas/
+window/streams) into a `JsRuntimeForSnapshot` and serializes it — caching the
+bytes in a process-local `static OnceLock<RUNTIME_SNAPSHOT>`.
+
+The gate runs a **fresh process per site**, so that `OnceLock` is empty every
+time → **the snapshot is rebuilt from scratch on every one of the 126 sites
+(1.5 s each)**. We pay a real-browser-sized startup for a reason a real browser
+doesn't have: regenerating the JS environment per process.
+
+**Fix — build the snapshot at COMPILE time (standard deno_core pattern):**
+- Add a `build.rs` that calls the existing `snapshot.rs` creation path, writes
+  the blob to `$OUT_DIR/RUNTIME_SNAPSHOT.bin`.
+- `get_snapshot()` becomes `include_bytes!(concat!(env!("OUT_DIR"), "/RUNTIME_SNAPSHOT.bin"))`
+  — every process *restores* the embedded blob (**~50-100 ms**) instead of
+  *building* it (1.5 s). ~15× faster cold init.
+
+**Impact:**
+- **Production cold-start:** every first page-load drops from ~1.5 s → ~0.1 s
+  (the bigger win — this is latency on *every* fresh BO instance, not just the gate).
+- **Gate:** per-site init 1.5 s → ~0.1 s ⇒ ~3 min/profile saved (modest — BO is
+  nav-bound), but it compounds with pool reuse and parallelism below.
+
+Caveat: the snapshot bakes the bootstraps as of build time; per-nav dynamic
+state (profile values, `__keepLongTimersRefed`, etc.) is still applied live
+post-restore (already the design — `cleanup_bootstrap.js` runs even when
+restoring), so a compile-time snapshot is safe.
+
 ## 4. The lever that DOES speed up the BO gate: parallelism across vendors
 
 BO's bottleneck is nav-time × 126, run **sequentially**. The win is to run
@@ -94,13 +134,26 @@ shared-process fast path), and (b) cut steady-state RSS for long-lived
 deployments. Until then, **per-site isolation + parallelism (§4)** is the
 gate-speed answer.
 
-## 6. Action items
+## 6. Action items (ranked)
 
-1. Add `--parallel N` + vendor-aware scheduler to `run_bo_isolated.py`
-   (≥150 s same-vendor spacing) → ~4 h → ~1 h for the 4-profile BO gate.
-2. (Independent) root-cause the per-nav resource leak (worker/timer/isolate
-   reaping on `Page` drop) → enables a shared-process path + lowers prod RSS.
-3. Keep Chromium on shared-browser `bench_corpus_v2`; keep camoufox on per-site
+1. **Compile-time V8 snapshot** (`build.rs` → `include_bytes!`) — cuts cold init
+   ~1.5 s → ~0.1 s. **Biggest production win** (every fresh BO instance pays this
+   today), plus ~3 min/profile in the gate. High ROI, self-contained.
+2. **`run_bo_isolated.py --parallel N`** + vendor-aware scheduler (≥150 s
+   same-vendor spacing) → BO 4-profile gate ~4 h → ~1 h. Uses idle cores; AWS/
+   DataDome/Akamai/Kasada serialize within-vendor, everything else parallelizes.
+3. **Root-cause the per-nav resource leak** (worker/timer/isolate reaping on
+   `Page` drop) → enables a shared-process fast path (pay init once, reuse across
+   navs — the true "reuse" the user asked for) + lowers steady-state RSS for
+   long-lived production deployments.
+4. Keep Chromium on shared-browser `bench_corpus_v2`; keep camoufox on per-site
    relaunch + retry.
+
+**The "reuse" the user asked for, precisely:** (1) makes per-process init cheap
+(snapshot restore); (3) lets one process serve many navs without the runaway
+(pool/`navigate_warm` already implements the reuse path — it's just blocked by
+the leak today). Together they give BO the equivalent of Chromium's shared-
+browser speedup, and BO *should* end up faster than any real browser because its
+"launch" is a memcpy-grade snapshot restore, not a process+renderer spin-up.
 
 — 2026-05-29
