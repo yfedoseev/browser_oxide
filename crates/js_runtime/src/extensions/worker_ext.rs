@@ -51,6 +51,15 @@ pub fn op_blob_register(
     #[buffer] data: &[u8],
     #[string] content_type: String,
 ) {
+    // parity-workflows task #2 instrumentation: trace blob registration so
+    // the AWS-WAF blob-worker path (URL.createObjectURL(blob) -> new
+    // Worker(blobUrl)) is observable just before the spawn.
+    tracing::debug!(
+        url = %url,
+        bytes = data.len(),
+        content_type = %content_type,
+        "op_blob_register"
+    );
     let mut reg = blob_registry().lock().unwrap_or_else(|e| e.into_inner());
     reg.blobs.insert(
         url,
@@ -252,6 +261,20 @@ pub fn op_worker_spawn(
     let terminate = Arc::new(AtomicBool::new(false));
     let notify_parent = Arc::new(Notify::new());
     let worker_id = NEXT_WORKER_ID.fetch_add(1, Ordering::Relaxed);
+    // parity-workflows task #2 instrumentation: op_worker_spawn previously
+    // logged only on failure, so a missing spawn and a silent spawn were
+    // indistinguishable when diagnosing the AWS-WAF PoW-worker path. Trace
+    // every spawn (module/classic, secure-context, url) so the live-nav
+    // self-solve flow is observable under
+    // RUST_LOG=js_runtime::extensions::worker_ext=debug.
+    tracing::debug!(
+        worker_id,
+        is_module,
+        is_secure_context,
+        url = %url,
+        script_len = script.len(),
+        "op_worker_spawn"
+    );
 
     {
         let mut reg = worker_registry().lock().unwrap_or_else(|e| e.into_inner());
