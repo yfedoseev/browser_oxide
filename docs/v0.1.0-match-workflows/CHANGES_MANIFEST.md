@@ -92,6 +92,33 @@ even vendor_solvers can't pass). See frontier 03/04/02.
 
 ---
 
+## TRACK E — Behavioral + isTrusted + full-API (pass as a real browser)
+
+Why (user directive): a real Chrome opens bestbuy/yelp/ozon/wildberries from a
+given IP → holding IP constant, the gap is **API completeness + behavioral
+simulation + isTrusted authenticity**, not IP. Full analysis:
+**`../v0.1.0-behavioral-workflows/`** (01-08). **L1 is the foundation — nothing
+behavioral works until isTrusted is unforgeable + input events dispatch trusted.**
+
+| ID | Change | File:line | Why (gap) | Unblocks | Effort | Doc |
+|---|---|---|---|---|---|---|
+| 🔬 E1 (L1) isTrusted unforgeable | Replace own-data `isTrusted` with a **native-masked prototype accessor** backed by a **module-private WeakSet** (closure, NOT `Symbol.for`); add closed-over `_markTrusted`; drop the global `Symbol.for('__bo_trusted__')` grant | `event_bootstrap.js:7,19`; flip `behavioral_polish.rs:114` to expect false | `Symbol.for` is the GLOBAL registry → **any page can forge isTrusted**; own-data prop is detectable vs real proto-accessor | every behavioral vendor (Akamai/DataDome/Kasada/PerimeterX) | 0.5d | behavioral 04 |
+| 🔬 E2 (L1) op_dispatch_trusted_event | ~30 LOC op + closed-over `__bo_internal_dispatch` (captured `EventTarget.prototype.dispatchEvent`); delete the 3 `humanize.js` `defineProperty(isTrusted)` re-stamps | `input_ext.rs`, `cleanup_bootstrap.js`, `humanize.js:105,429,441` | mint trusted events from Rust outside page JS = the structural moat no CDP tool has | all behaviorally-scored vendors | 0.5-1d | behavioral 04 |
+| 🔬 E3 (L1) input-event prototype accessors | Convert Mouse/Pointer/Keyboard/Wheel/Touch/Input/Focus/Drag event props from own-data to prototype accessor getters (code-gen field table); back `getModifierState` + US keyCode table | input-event `*_bootstrap.js`, `input_ext.rs:137,155` | own-data props detectable; missing keyCode/getModifierState | bmak key channel (booking/imdb), DataDome key buffer | 1-2d | behavioral 02 |
+| 🔬 E4 (L2) wire behavioral engine | Route live mouse through `op_behavior_mouse_trajectory` (delete `_lerp`/`_gauss` hot path); wire the unused Rust keystroke generator; add scroll/idle/focus; profile-derived session seed | `humanize.js:292-336`, `stealth_ext.rs:185`, `input_ext.rs:35-41` | Sigma-Lambda math is SHIPPED but NOT wired → behavioral entropy is synthetic/linear (efficiency≈1.0 = #1 DataDome tell) | bestbuy, Kasada, DataDome mouse vector | 1-2d | behavioral 03 |
+| 🔬 E5 (L4) sensor/devicemotion + RTC | Add `ondevicemotion`/`ondeviceorientation` Window handlers; `sensor_bootstrap.js` (Sensor + subclasses, mobile-gated); real `RTCPeerConnection` (getConfiguration/getStats/icecandidate) | `interfaces_bootstrap.js:117,42-58`, `window_bootstrap.js:5186` | Window-shape + WebRTC presence tells on Akamai bmak/BotD/CreepJS | broad fingerprint coherence | 1-2d | behavioral 01,05 |
+| 🔬 E6 per-site behavioral | bestbuy bmak entropy stream; yelp **Path A** (earn rt:'i' silent device-check via D4 child-iframe cookie + worker inheritance + Sigma-Lambda mouse + no-CDP trust — NOT the slider) | (gated on E1-E4 + D4) | behavioral payloads need the L1/L2 foundation first | bestbuy, yelp, etsy/tripadvisor | gated | behavioral 05,06 |
+
+**Honest scope (behavioral 07,08):** E1-E4 are correctness/stealth hardening +
+the v0.2.0 prerequisite — **no single E fix flips a *current* corpus site alone**
+(the present corpus blockers were AWS/SPA, already fixed this session); they are
+the lever for bestbuy/yelp/Kasada/PerimeterX, validated **same-IP via the no-CDP
+oracle (D0)**. Genuinely IP/geo: ozon (RU IP, mark diagnostic), wildberries
+trust-half. Unwinnable public: yelp *shown* slider (rt:'c' CV + daily key =
+vendor_solvers; v150 also fails).
+
+---
+
 ## Execution order (recommended)
 
 1. **B1 (compile-time snapshot)** — self-contained, big production win, fast.
