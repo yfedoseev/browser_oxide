@@ -181,6 +181,43 @@ addressable; unifies AWS WAF + duolingo.
 (`BROWSER_OXIDE_DEBUG_NAV`), matching the existing `dd_trace`/`sc_trace` pattern.
 `BROWSER_OXIDE_SC_TRACE=1` already logs every external-script fetch.
 
+## §3c — Worker realm: secure-context gap found + fixed; deeper blocker pinpointed
+
+Probed BO's worker realm directly (deterministic, `awswaf_probe` + a worker-caps
+probe — avoids challenge.js's flaky offline async chain):
+
+**Gap found + FIXED (commit `5216336`):** a Worker is a secure context iff its
+owner is (HTML spec), but `create_worker_runtime` defaulted
+`StealthState.is_secure_context=false`, so `cleanup_bootstrap.js` stripped
+**`crypto.subtle` + `crypto.randomUUID` in EVERY worker**. A worker doing SHA-256
+PoW (`crypto.subtle.digest`) threw `Cannot read properties of undefined (reading
+digest)`. Fix: `op_worker_spawn` inherits the parent's `is_secure_context` →
+`create_worker_runtime` → `new_with_flags`. Verified: worker on a blob:https page
+now has `crypto.subtle` (digest 32B) + `randomUUID` + `isSecureContext=true`.
+worker.rs tests 3/3, no regression. **Correct prerequisite for any worker-PoW
+site (AWS WAF, reCAPTCHA/duolingo).**
+
+**But it did NOT flip imdb or duolingo** (still 1995 / 13327). The worker fix
+isn't even reached in the live path, because:
+
+**Deeper blocker (next lever):** challenge.js executes its async self-solve in
+the **offline oracle** (`from_html_with_url` + `run_until_idle(5s)` → defines
+AwsWafIntegration, calls `forceRefreshToken`) but produces **ZERO async progress
+in the live navigate path** — fetched ×3 (200, 1.37 MB) yet **no worker spawn, no
+token POST, no fetch** (verbose `worker_ext`/`fetch_ext` trace). So challenge.js's
+`checkForceRefresh().then(...)` chain never advances live. The difference is the
+execution/drain model: `build_page_with_scripts_init_and_storage` runs external
+scripts with a **50 ms inter-script `run_until_idle`** (page.rs:~3535) then hands
+to the outer nav loop, vs the oracle's single 5 s idle drain. Hypothesis: the
+prefetched-external-script async continuation (challenge.js's promise chain /
+its deferred worker creation) is not drained before the nav loop re-fetches the
+stub. **Next step:** instrument challenge.js execution in build_page (does it
+throw? does checkForceRefresh's promise resolve? how long does the page actually
+drain before the iter re-fetches?) — and/or give AWS-WAF-challenge pages a longer
+post-script drain so the self-solve completes. This is the remaining
+engine-addressable AWS/duolingo lever; the worker secure-context fix is a
+prerequisite already in place.
+
 ## §4 — Artifacts
 
 - Harness: `benchmarks/run_delta_headtohead.py`
