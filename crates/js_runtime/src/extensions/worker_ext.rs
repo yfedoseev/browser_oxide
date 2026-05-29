@@ -127,10 +127,11 @@ pub fn op_blob_revoke(#[string] url: String) {
 #[op2]
 #[string]
 pub fn op_worker_sync_fetch(#[string] url: String) -> String {
-    // Clone the process-global fetch client so the helper thread
-    // inherits profile + cookie state. Falls back to a default
-    // chrome_148_linux client if no profile was wired (matches the
-    // main-thread fetch_ext fallback).
+    // Clone this worker thread's fetch client (seeded by op_worker_spawn
+    // from the page's profile + shared cookie jar — F3) so the helper
+    // thread inherits the correct identity + cookies. The chrome_148_linux
+    // fallback is now only reached if the worker was spawned with no
+    // profile at all (it used to be the common case, leaking a Linux UA).
     let client = match crate::extensions::fetch_ext::fetch_client() {
         Some(c) => c,
         None => match net::HttpClient::new(&stealth::chrome_148_linux()) {
@@ -238,6 +239,14 @@ pub fn op_worker_spawn(
     // crypto.subtle / crypto.randomUUID when spawned from an https/blob:https
     // page — required by SHA-256 proof-of-work workers (AWS WAF, reCAPTCHA).
     let is_secure_context = stealth.is_secure_context;
+    // F3 (parity-workflows): capture the page's fetch client (correct
+    // profile + shared cookie jar) on the MAIN thread so the worker thread
+    // can seed its own thread-local FETCH_CLIENT with it. Without this,
+    // `op_worker_sync_fetch` runs on the worker thread where the
+    // thread-local is None and falls back to `chrome_148_linux()` — a Linux
+    // UA leak on a macOS/Windows page, and a window<->worker fetch-identity
+    // mismatch that DataDome / CreepJS / Kasada worker probes flag.
+    let parent_fetch_client = crate::extensions::fetch_ext::fetch_client();
     let (to_worker_tx, to_worker_rx) = std::sync::mpsc::channel::<String>();
     let (to_parent_tx, to_parent_rx) = std::sync::mpsc::channel::<String>();
     let terminate = Arc::new(AtomicBool::new(false));
@@ -278,6 +287,18 @@ pub fn op_worker_spawn(
                     url,
                 });
             });
+
+            // F3: seed THIS worker thread's fetch client so
+            // `op_worker_sync_fetch` inherits the page's profile + shared
+            // cookie jar. Falls back to building from the worker's own
+            // profile, and only to chrome_148_linux() if no profile exists
+            // at all (matching the historic last-resort, but now reached
+            // far less often).
+            let seed_client = parent_fetch_client
+                .or_else(|| profile.as_ref().and_then(|p| net::HttpClient::new(p).ok()));
+            if let Some(c) = seed_client {
+                crate::extensions::fetch_ext::set_fetch_client(c);
+            }
 
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
