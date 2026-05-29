@@ -888,6 +888,13 @@
             };
             return new Proxy([], {
                 get(target, prop) {
+                    // MASK-4 (parity-workflows): real Chrome reports
+                    // Object.prototype.toString.call(el.attributes) ===
+                    // "[object NamedNodeMap]". The Proxy target is [], so
+                    // without this it leaked "[object Array]" (an Akamai BMP +
+                    // CreepJS attribute-audit tell). @@toStringTag (a string)
+                    // overrides the array builtin tag per spec step 5.
+                    if (prop === Symbol.toStringTag) return "NamedNodeMap";
                     if (prop === "length") return namesOf().length;
                     if (prop === "getNamedItem") return (name) => itemFor(String(name));
                     if (prop === "item") return (i) => {
