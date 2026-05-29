@@ -39,6 +39,42 @@ the concrete reference values to build it.
 
 ---
 
+> **✅ LIVE-CONFIRMED + ⚠️ IMPLEMENTATION BLOCKER (2026-05-29).** A live
+> `tls.peet.ws` capture (`crates/net/tests/tls_fingerprint.rs::capture_profiles_ja4`)
+> **confirms the diagnosis exactly**: `firefox_135_macos` emits
+> `ja4 = t13d1516h2_8daaf6152771_d8a2da3f94cd` — **byte-identical to
+> `chrome_148_macos`** — and `ja4h = 1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p`,
+> also identical to Chrome. So the firefox profile is 100% Chrome on the wire at
+> BOTH the TLS and HTTP/2 layers. `tls.rs::chrome_connector` branches only on
+> `device_class` (firefox = `Desktop` → Chrome); the discriminator for a Firefox
+> branch would be `profile.tls_impersonate.starts_with("firefox")`.
+>
+> **Authoritative Firefox 135 reference** (lexiforest `firefox_135.0.1_linux.yaml`,
+> TLS is OS-independent): ciphers `4865,4867,4866,49195,49199,52393,52392,49196,49200,49162,49161,49171,49172,156,157,47,53`
+> (17, CHACHA before AES256, **no 3DES**); extensions incl. **delegated_credentials
+> (0x22), record_size_limit (0x1c), real ECH (0xfe0d), session_ticket**, **no
+> GREASE, no padding**; curves `4588(MLKEM768),29,23,24,25,256(ffdhe2048),257(ffdhe3072)`;
+> H2 SETTINGS `1:65536;2:0;4:131072;5:16384` (**no ID3**), WINDOW_UPDATE 12517377,
+> pseudo-order **m,p,a,s**, + `priority`/`te` headers.
+>
+> **BLOCKER:** a faithful Firefox ClientHello needs `delegated_credentials`,
+> `record_size_limit`, real ECH, FFDHE groups, and **GREASE/padding suppression**.
+> BO's Chrome/Safari `*_EXTENSION_PERMUTATION` tables don't reference those
+> extensions, and boring2 4.15.15's safe builder API (as used in `tls.rs`) doesn't
+> expose them — so their kExtensions indices are unknown and may be absent. A
+> *partial* Firefox JA4 (right ciphers, Chrome-ish extensions) is a **novel,
+> near-zero-corpus fingerprint — WORSE than the current high-corpus Chrome JA4**
+> (the §2.1 rarity principle that drove the iphone #26 fix). Therefore the TLS
+> layer is **all-or-nothing** and must NOT be shipped partially.
+>
+> **Turnkey next step (when unblocked):** locate boring2 4.15.15's kExtensions
+> table indices for `delegated_credentials`/`record_size_limit`/`ECH`/`FFDHE`
+> (or use raw ClientHello injection like the deferred padding work), build the
+> Firefox branch, then iterate JA4 against `tls.peet.ws` (IP-safe) until it equals
+> the real Firefox 135 JA4 BEFORE any anti-bot site test. The H2 layer
+> (`h2_client.rs`) is independently achievable (BO owns its H2 stack) and safe to
+> ship: Firefox SETTINGS (no ID3, window 12517377) + pseudo-order m,p,a,s.
+
 ## 1. The data signature (why this is the wire layer, not JS)
 
 From `docs/v0.1.0-match-workflows/00_DATA_per_profile_matrix.md`:
