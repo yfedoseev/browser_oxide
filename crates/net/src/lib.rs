@@ -176,6 +176,33 @@ pub fn shared_session() -> SharedSession {
         .clone()
 }
 
+/// Synchronously write a `document.cookie`-style raw cookie string into the
+/// process-wide shared-session jar (parity-workflows FIX-COOKIE-SYNC).
+///
+/// The nav loop's reload/refetch reads cookies from a `shared()` client (the
+/// global session jar), but a `document.cookie` write from JS lands in the
+/// per-thread `FETCH_CLIENT`, which can diverge from the global jar — so the
+/// token a challenge deposits via `document.cookie` (e.g. AWS-WAF
+/// `aws-waf-token`) never reached the reload. Writing here too guarantees the
+/// session jar (and thus the reload GET) sees it. Honors deletions via
+/// [`CookieJar::set_cookies`]. No-op under `BROWSER_OXIDE_NO_SHARED_SESSION`.
+/// Uses `try_lock` (the jar is never held across an await during synchronous
+/// JS execution); returns `false` only under genuine contention.
+pub fn set_shared_cookie_sync(url: &Url, raw: &str) -> bool {
+    if std::env::var("BROWSER_OXIDE_NO_SHARED_SESSION").is_ok() {
+        return false;
+    }
+    let cookies = shared_session().cookies;
+    let wrote = match cookies.try_lock() {
+        Ok(mut jar) => {
+            jar.set_cookies(url, &[raw.to_string()]);
+            true
+        }
+        Err(_) => false,
+    };
+    wrote
+}
+
 #[derive(Clone)]
 pub struct HttpClient {
     tls_connector: Arc<SslConnector>,

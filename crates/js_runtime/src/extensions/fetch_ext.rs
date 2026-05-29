@@ -417,10 +417,33 @@ pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
 #[op2(fast)]
 pub fn op_cookie_set_sync(#[string] url: String, #[string] cookie: String) {
     let Some(client) = FETCH_CLIENT.with(|c| c.borrow().clone()) else {
+        tracing::debug!("op_cookie_set_sync: no FETCH_CLIENT");
         return;
     };
-    let Ok(parsed) = Url::parse(&url) else { return };
-    if !client.set_cookie_str_sync(&parsed, &cookie) {
+    let Ok(parsed) = Url::parse(&url) else {
+        tracing::debug!(url = %url, "op_cookie_set_sync: bad url");
+        return;
+    };
+    let synced = client.set_cookie_str_sync(&parsed, &cookie);
+    // Also write to the process-wide shared-session jar: the nav reload/refetch
+    // reads cookies from a shared() client, which can diverge from this
+    // per-thread FETCH_CLIENT — without this the token a challenge deposits via
+    // document.cookie never reached the reload (the AWS-WAF imdb residual).
+    let shared_synced = net::set_shared_cookie_sync(&parsed, &cookie);
+    if std::env::var("BROWSER_OXIDE_COOKIE_TRACE").is_ok() {
+        let for_url = net::shared_session()
+            .cookies
+            .try_lock()
+            .ok()
+            .and_then(|j| j.cookies_for(&parsed))
+            .unwrap_or_default();
+        eprintln!(
+            "[cookie-set-sync] url={url} synced={synced} shared={shared_synced} shared_for_url='{}' cookie={}",
+            for_url.chars().take(60).collect::<String>(),
+            cookie.chars().take(50).collect::<String>()
+        );
+    }
+    if !synced {
         // Rare contention path: don't lose the write — defer to the async op.
         tokio::task::spawn(async move {
             client.set_cookie_str(&parsed, &cookie).await;
