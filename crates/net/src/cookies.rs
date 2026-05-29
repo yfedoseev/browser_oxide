@@ -35,6 +35,11 @@ impl CookieJar {
         Self::default()
     }
 
+    /// Total cookie count across all domains (diagnostics — FIX-COOKIE-SYNC).
+    pub fn cookie_count(&self) -> usize {
+        self.cookies.values().map(|m| m.len()).sum()
+    }
+
     /// Parse and store cookies from Set-Cookie response headers.
     ///
     /// Honors the `Domain=` attribute when present so subdomain → parent-
@@ -49,6 +54,7 @@ impl CookieJar {
             None => return,
         };
 
+        let now = unix_now().max(0) as u64;
         for header in set_cookie_headers {
             if let Some(cookie) = parse_set_cookie(header, &request_domain, url.path()) {
                 // Use the cookie's domain (Domain= attribute) if it's a
@@ -58,6 +64,21 @@ impl CookieJar {
                     Some(d) if domain_matches(&request_domain, d) => d.clone(),
                     _ => request_domain.clone(),
                 };
+                // FIX-COOKIE-DELETE: a Set-Cookie whose expiry is in the past
+                // is a DELETION (RFC 6265 §5.3 step 11) — remove the matching
+                // cookie instead of storing an empty-value entry. Without
+                // this, AWS-WAF's `aws-waf-token=; expires=1970` deletes left
+                // an empty `aws-waf-token=` in the Cookie header that AWS read
+                // before the real token → 202 stub on every reload.
+                if cookie.expires.is_some_and(|e| e <= now) {
+                    if let Some(bucket) = self.cookies.get_mut(&store_domain) {
+                        bucket.remove(&cookie.name);
+                        if bucket.is_empty() {
+                            self.cookies.remove(&store_domain);
+                        }
+                    }
+                    continue;
+                }
                 self.cookies
                     .entry(store_domain)
                     .or_default()
@@ -165,8 +186,40 @@ fn domain_matches(request_domain: &str, cookie_domain: &str) -> bool {
     r == c || r.ends_with(&format!(".{c}"))
 }
 
+/// Current unix timestamp in seconds (signed so arithmetic with Max-Age
+/// deltas can't underflow before the `.max(0)` clamp).
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Parse a cookie `Expires=` HTTP-date into a unix timestamp. Handles the
+/// RFC 1123 / RFC 850 / asctime-ish forms browsers actually emit (incl. the
+/// `… GMT` and `-` dotted-month deletion form). Returns `None` if unparseable
+/// — an unparseable Expires is treated as "no expiry" (session cookie), never
+/// as a deletion, so a parse miss can't silently drop a live cookie.
+fn parse_http_date(s: &str) -> Option<u64> {
+    let s = s.trim();
+    const FORMATS: &[&str] = &[
+        "%a, %d %b %Y %H:%M:%S GMT",
+        "%a, %d-%b-%Y %H:%M:%S GMT",
+        "%A, %d-%b-%y %H:%M:%S GMT",
+        "%a %b %e %H:%M:%S %Y",
+    ];
+    for f in FORMATS {
+        if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, f) {
+            return Some(ndt.and_utc().timestamp().max(0) as u64);
+        }
+    }
+    chrono::DateTime::parse_from_rfc2822(s)
+        .ok()
+        .map(|dt| dt.timestamp().max(0) as u64)
+}
+
 /// Parse a Set-Cookie header value into a Cookie. Honors `Domain=`,
-/// `Path=`, `Secure`, and `HttpOnly` attributes.
+/// `Path=`, `Secure`, `HttpOnly`, `Max-Age`, and `Expires` attributes.
 fn parse_set_cookie(header: &str, request_domain: &str, default_path: &str) -> Option<Cookie> {
     let mut parts = header.split(';');
 
@@ -184,7 +237,14 @@ fn parse_set_cookie(header: &str, request_domain: &str, default_path: &str) -> O
     let mut domain: Option<String> = None;
     let mut secure = false;
     let mut http_only = false;
-    let expires = None;
+    // FIX-COOKIE-DELETE (parity-workflows): parse Max-Age / Expires so the
+    // jar can HONOR deletions. AWS-WAF's challenge.js deletes stale tokens
+    // via `aws-waf-token=; expires=Thu, 01 Jan 1970 …` before setting the
+    // real one; without parsing expiry we stored those as empty-value
+    // cookies, poisoning the Cookie header (`aws-waf-token=; aws-waf-token=…`)
+    // so AWS read an empty token and re-served the 202 stub. Verified on imdb.
+    let mut max_age: Option<i64> = None;
+    let mut expires_str: Option<String> = None;
 
     for attr in parts {
         let attr = attr.trim();
@@ -197,6 +257,16 @@ fn parse_set_cookie(header: &str, request_domain: &str, default_path: &str) -> O
             "path" => {
                 if let Some(v) = attr_value {
                     path = v.to_string();
+                }
+            }
+            "max-age" => {
+                if let Some(v) = attr_value {
+                    max_age = v.parse::<i64>().ok();
+                }
+            }
+            "expires" => {
+                if let Some(v) = attr_value {
+                    expires_str = Some(v.to_string());
                 }
             }
             "domain" => {
@@ -223,6 +293,18 @@ fn parse_set_cookie(header: &str, request_domain: &str, default_path: &str) -> O
             _ => {}
         }
     }
+
+    // Max-Age takes precedence over Expires (RFC 6265 §5.3). Resolve to an
+    // absolute unix timestamp; `set_cookies` treats a past timestamp as a
+    // deletion.
+    let now = unix_now();
+    let expires: Option<u64> = if let Some(ma) = max_age {
+        Some((now + ma).max(0) as u64)
+    } else if let Some(es) = &expires_str {
+        parse_http_date(es)
+    } else {
+        None
+    };
 
     Some(Cookie {
         name,
@@ -422,5 +504,53 @@ mod tests {
         let evicted = jar.clear_for_domain(".TWITTER.COM");
         assert_eq!(evicted, 1);
         assert!(jar.cookies_for(&twitter).is_none());
+    }
+
+    // FIX-COOKIE-DELETE regression (parity-workflows): an Expires-in-the-past
+    // Set-Cookie deletes the cookie instead of storing an empty-value entry.
+    // This is the AWS-WAF imdb bug: challenge.js deletes stale `aws-waf-token`
+    // before setting the real one; the empty `aws-waf-token=` poisoned the
+    // Cookie header so AWS read an empty token and re-served the 202 stub.
+    #[test]
+    fn expired_set_cookie_deletes_instead_of_storing_empty() {
+        let imdb = url::Url::parse("https://www.imdb.com/").unwrap();
+        let mut jar = CookieJar::new();
+        // Mirror AWS-WAF's exact flow: DELETE stale tokens across several
+        // domain variants FIRST (jar empty), then SET the real token. The
+        // deletes must NOT create empty `aws-waf-token=` entries.
+        jar.set_cookies(
+            &imdb,
+            &[
+                "aws-waf-token=; Path=/; Domain=www.imdb.com; Expires=Thu, 01 Jan 1970 00:00:01 GMT".to_string(),
+                "aws-waf-token=; Path=/; Domain=imdb.com; Expires=Thu, 01 Jan 1970 00:00:01 GMT".to_string(),
+                "aws-waf-token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT".to_string(),
+            ],
+        );
+        assert!(
+            jar.cookies_for(&imdb).is_none(),
+            "deletes on an empty jar must not create empty entries, got {:?}",
+            jar.cookies_for(&imdb)
+        );
+        // Now the real set.
+        jar.set_cookies(&imdb, &["aws-waf-token=REALTOKEN123; Path=/".to_string()]);
+        let hdr = jar.cookies_for(&imdb).unwrap_or_default();
+        assert_eq!(
+            hdr, "aws-waf-token=REALTOKEN123",
+            "header must carry ONLY the real token (no empty-token poison): '{hdr}'"
+        );
+
+        // Max-Age=0 deletes the live token.
+        jar.set_cookies(&imdb, &["aws-waf-token=; Path=/; Max-Age=0".to_string()]);
+        assert!(
+            jar.cookies_for(&imdb).is_none(),
+            "Max-Age=0 must remove the cookie entirely"
+        );
+
+        // A future Expires keeps the cookie.
+        jar.set_cookies(
+            &imdb,
+            &["sess=keepme; Path=/; Expires=Tue, 01 Jan 2999 00:00:01 GMT".to_string()],
+        );
+        assert_eq!(jar.cookies_for(&imdb).as_deref(), Some("sess=keepme"));
     }
 }
