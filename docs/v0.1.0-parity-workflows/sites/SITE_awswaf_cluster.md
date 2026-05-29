@@ -395,3 +395,38 @@ real token. Keep these in the private `vendor_solvers::AwsWafSolver` as
   corrected main-thread-PoW + classifier-gap root cause.
 
 — Research agent, 2026-05-28 (AWS-WAF cluster deep-dive, evidence in `/tmp/awswaf/`)
+
+---
+
+## ADDENDUM — Live validation 2026-05-28 (implementation session)
+
+Implemented M-2 (`is_awswaf_challenge`/`is_awswaf_solved` + `started_as_awswaf_challenge`
++ poll/retry wiring), M-3 (refed timers on challenge navs), M-4 (25s budget tier),
+F3 (worker-thread fetch identity), INVERSE-CHL classifier guard, and env-gated
+worker/blob instrumentation. Commits `6e35f42`, `12c074a`, `f3276a8`, `42dea01`,
+`7598fe3`.
+
+**Live re-measure on imdb (chrome_148_macos), imdb actively serving the AWS
+challenge (HTTP 202):**
+
+- ✅ M-4 works — `V8DeadlineWatcher with ~23s remaining` (budget bumped to 25s tier).
+- ✅ M-2 works — `started_as_awswaf_challenge` arms the cookie-diff retry (3 iters);
+  INVERSE-CHL now tags imdb `AWS-WAF-CHL` (was silently `ThinShell` at 1995 B).
+- ✅ challenge.js loads — `script fetch OK …token.awswaf.com/…/challenge.js status=200
+  bytes=1370004` every iteration.
+- ❌ **NOT flipped** — in-V8 refetch returns `status=202` (the stub again); token unsolved.
+
+**DEFINITIVE root cause (corrects this doc's earlier drain hypothesis):** with the
+new instrumentation, challenge.js loads + executes but emits **ZERO `op_blob_register`
+and ZERO `op_worker_spawn`**. It bails inside the stub's trailing
+`AwsWafIntegration.checkForceRefresh().then(fr => fr ? forceRefreshToken() : getToken())`
+chain **before the blob PoW worker is ever created**. So this is **NOT** a live-nav
+async-drain gap (M-1) — a longer drain has nothing to drain. The offline oracle DID
+reach getToken (handoff §4), so the difference is environment/execution inside
+challenge.js's own logic.
+
+**Next lever (task #21):** inject an instrumentation init_script into a live AWS nav
+wrapping `Worker` / `URL.createObjectURL` / `AwsWafIntegration.*` + capturing
+`__scriptErrors` to learn whether `checkForceRefresh()` resolves/rejects, which branch
+runs, and whether an internal fetch (token/report endpoint) fails. M-1's drain idea is
+deprioritized for AWS (still possibly relevant to booking SPA hydration).
