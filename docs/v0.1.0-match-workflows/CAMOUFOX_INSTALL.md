@@ -56,7 +56,43 @@ PY
 Run the corpus per-site isolated (driver is unstable in a sustained loop —
 relaunch per site): `benchmarks/run_camoufox_isolated.py`.
 
-## 3. camoufox v150 — why it isn't pip-installable (yet) and the options
+## 3b. camoufox v150 — THE WORKING TRICK (confirmed 2026-05-29)
+
+v150 **does run** — the only blocker was a version-string constraint bug, not a
+driver incompatibility. Root cause: the v150 release is tagged `v150.0.2-beta.25`
+on GitHub but its **asset filename uses `alpha.26`**
+(`camoufox-150.0.2-alpha.26-lin.x86_64.zip`). The 0.4.11 launcher's
+`CONSTRAINTS.MIN_VERSION = 'beta.19'` rejects it because the release comparator
+sorts `'alpha' < 'beta'` (`ord('a') < ord('b')`), so `alpha.26 < beta.19` →
+`is_supported()` == False → `camoufox fetch` silently skips v150 and falls back
+to v135. The 0.4.11 playwright-firefox driver **does** drive the v150 binary
+(smoke test passed: `new_page` + `goto` returns content).
+
+**Working recipe (separate venv + cache so it can't clobber v135):**
+```bash
+# 1. venv with the launcher (ships the matching playwright firefox driver)
+python3 -m venv /tmp/cfv150
+/tmp/cfv150/bin/pip install -U "camoufox[geoip]" playwright
+
+# 2. lower the MIN_VERSION constraint so the alpha.* asset is accepted
+VF=$(/tmp/cfv150/bin/python -c "import camoufox.__version__ as v;print(v.__file__)")
+sed -i "s/MIN_VERSION = 'beta.19'/MIN_VERSION = 'alpha.1'/" "$VF"
+
+# 3. download + extract the v150 lin.x86_64 asset into a SEPARATE cache
+mkdir -p /tmp/cf150_cache/camoufox
+curl -sSL -o /tmp/cf150.zip \
+  https://github.com/daijro/camoufox/releases/download/v150.0.2-beta.25/camoufox-150.0.2-alpha.26-lin.x86_64.zip
+( cd /tmp/cf150_cache/camoufox && unzip -oq /tmp/cf150.zip )
+printf '{"version":"150.0.2","release":"alpha.26"}' > /tmp/cf150_cache/camoufox/version.json
+
+# 4. run with XDG_CACHE_HOME pointed at the v150 cache (platformdirs honors it)
+XDG_CACHE_HOME=/tmp/cf150_cache /tmp/cfv150/bin/python benchmarks/run_camoufox_isolated.py \
+  /tmp/corpus.json out_v150.json camoufox_v150
+```
+Pick the asset for your platform from the release (mac.arm64/x86_64,
+lin.arm64/x86_64). The macOS asset is `alpha.25`, linux-x86_64 is `alpha.26`.
+
+## 3. camoufox v150 — why the *stable pip path* can't get it (yet) and the options
 
 Per the project (camoufox.com / GitHub issue #613): **v150.0.2 is a *preview*
 github release**, marked production-ready *"once extended testing is completed,
