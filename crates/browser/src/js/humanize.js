@@ -306,36 +306,65 @@
         try { _dispatch(window, new Event('focus', { bubbles: false })); } catch (e) {}
         try { _dispatch(document, new Event('visibilitychange', { bubbles: true })); } catch (e) {}
 
-        // 2) Mouse motion — sigma-lognormal velocity, 2-stroke
-        const anchors = [
-            [100 + _rand() * 200,   200 + _rand() * 300],
-            [600 + _rand() * 300,   100 + _rand() * 400],
-            [1000 + _rand() * 200,  300 + _rand() * 300],
-        ];
-        const strokeDurations = [800 + _rand() * 300, 600 + _rand() * 300];
-        const samplesPerStroke = 15;
-        const microPause = 50 + _rand() * 100;
-
-        let mouseT = 50; 
+        // 2) Mouse motion — route through the Rust Σ-Λ generator (behavioral
+        //    E4 / FIX-A). The previous linear `_lerp` interpolation produced
+        //    path-efficiency ≈ 1.0 + white tremor + an impulse-velocity
+        //    discontinuity at each anchor — the #1 mouse tell that
+        //    DataDome/Castle/HUMAN classifiers catch (~98%). `op_behavior_
+        //    mouse_trajectory` (crates/stealth/src/behavior.rs, Plamondon
+        //    Kinematic Theory: curved 2-7 strokes, pink tremor, smoothstep
+        //    terminal decel, ~8 ms cadence) is the SAME generator the
+        //    historical-seed path already uses — the live cycle just wasn't
+        //    calling it. Sampling at 8 ms over multi-second motion also pushes
+        //    the per-cycle mousemove count from ~30 to ~100-250.
+        const _vw = (window.innerWidth || 1920);
+        const _vh = (window.innerHeight || 1080);
+        const _ops = (typeof Deno !== 'undefined' && Deno.core && Deno.core.ops) || null;
+        // Persistent cursor position across cycles (seeded by the historical
+        // path at __akamai_events._lastPos; falls back to viewport centre).
+        let _from = (globalThis.__akamai_events
+            && Array.isArray(globalThis.__akamai_events._lastPos)
+            && globalThis.__akamai_events._lastPos.length === 2)
+            ? globalThis.__akamai_events._lastPos.slice()
+            : [_vw * 0.5, _vh * 0.45];
+        const _nAnchors = 2 + (_rand() < 0.5 ? 0 : 1); // 2-3 inter-target strokes
+        let mouseT = 40 + _rand() * 40;
         let prev = null;
-        for (let s = 0; s < anchors.length - 1; s++) {
-            const a = anchors[s];
-            const b = anchors[s + 1];
-            const dur = strokeDurations[s];
-            const taus = _sigmaLognormalTimes(samplesPerStroke);
-            for (let i = 0; i < taus.length; i++) {
-                const tau = taus[i];
-                const [x, y] = _lerp(a, b, tau);
-                const jx = _gauss() * 0.8;
-                const jy = _gauss() * 0.8;
-                const at = mouseT + Math.round(tau * dur);
-                const px = x + jx, py = y + jy;
+        for (let s = 0; s < _nAnchors; s++) {
+            const toX = 60 + _rand() * (_vw - 120);
+            const toY = 60 + _rand() * (_vh - 120);
+            const targetW = 28 + _rand() * 48;
+            let traj = [];
+            try {
+                if (_ops && typeof _ops.op_behavior_mouse_trajectory === 'function') {
+                    const raw = _ops.op_behavior_mouse_trajectory(_from[0], _from[1], toX, toY, targetW);
+                    traj = JSON.parse(raw || '[]');
+                }
+            } catch (_) {}
+            if (!Array.isArray(traj) || traj.length === 0) {
+                // Degenerate fallback so live motion is never empty.
+                traj = [];
+                const n = 10;
+                for (let i = 0; i < n; i++) {
+                    const u = i / (n - 1);
+                    traj.push({ t_ms: u * 700, x: _from[0] + (toX - _from[0]) * u, y: _from[1] + (toY - _from[1]) * u });
+                }
+            }
+            const base = mouseT;
+            for (let i = 0; i < traj.length; i++) {
+                const p = traj[i];
+                const px = p.x, py = p.y;
+                const at = base + Math.round(p.t_ms || 0);
                 const prevSnapshot = prev ? prev.slice() : null;
                 _sched(() => _fireMove(px, py, prevSnapshot), at);
                 prev = [px, py];
             }
-            mouseT += dur + microPause;
+            const total = traj.length > 0 ? (traj[traj.length - 1].t_ms || 700) : 700;
+            mouseT = base + Math.round(total) + (50 + _rand() * 120); // inter-target pause
+            _from = [toX, toY];
         }
+        // Persist final cursor position for the next cycle's starting point.
+        if (globalThis.__akamai_events) globalThis.__akamai_events._lastPos = _from.slice();
 
         // 3) Scroll-down
         const scStartT = mouseT + 100;
