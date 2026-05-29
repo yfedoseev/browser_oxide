@@ -488,6 +488,24 @@
                 'Event', 'CustomEvent', 'MediaStream', 'MediaStreamTrack',
                 'MediaRecorder', 'DOMRect', 'DOMRectReadOnly', 'DOMPoint',
                 'DOMPointReadOnly', 'DOMQuad',
+                // MASK-3 (parity-workflows): the WebGL/Canvas context
+                // constructor OBJECTS themselves. Their prototype methods are
+                // masked by the universal sweep, but String(WebGLRenderingContext)
+                // is enumerated by AWS-WAF + CreepJS and must be `[native code]`.
+                'WebGLRenderingContext', 'WebGL2RenderingContext',
+                'CanvasRenderingContext2D', 'WebGLContextEvent',
+                // MASK-2 (parity-workflows): Event-subclass constructor
+                // objects. event_bootstrap.js defines them as JS classes, so
+                // String(MouseEvent) leaked `class MouseEvent extends ...`
+                // (a canonical Kasada `sdt` tell). Masking sets `[native code]`
+                // + the correct own `.name`. Real Chrome: every one is native.
+                'UIEvent', 'MouseEvent', 'KeyboardEvent', 'InputEvent',
+                'FocusEvent', 'PointerEvent', 'WheelEvent', 'MessageEvent',
+                'ErrorEvent', 'ProgressEvent', 'AnimationEvent',
+                'TransitionEvent', 'ClipboardEvent', 'PopStateEvent',
+                'HashChangeEvent', 'StorageEvent', 'PageTransitionEvent',
+                'BeforeUnloadEvent', 'DragEvent', 'SecurityPolicyViolationEvent',
+                'CompositionEvent', 'DeviceMotionEvent', 'DeviceOrientationEvent',
             ];
             for (const _e of _sfcNames) {
                 try {
