@@ -246,6 +246,35 @@ fn is_seccpt_solved(cookies: &str, body: &str) -> bool {
         && !body.contains("sec-cpt-if")
 }
 
+/// Public-engine AWS-WAF token-challenge detector (parity-workflows M-2).
+///
+/// The AWS-WAF "Challenge" / "Captcha" action serves a small (~2 KB) stub
+/// that defines `window.gokuProps = {key,iv,context}` +
+/// `window.awsWafCookieDomainList`, loads `challenge.js` from
+/// `*.token.awswaf.com`, and calls
+/// `AwsWafIntegration.checkForceRefresh().then(() => getToken())`. The PoW
+/// runs in a blob-URL Web Worker; on success `getToken()` POSTs the
+/// solution, sets the `aws-waf-token` cookie, and reloads. Mirrors
+/// [`is_datadome_challenge`]'s shape so the navigate loop arms the same
+/// poll + cookie-diff retry primitives for AWS as it already does for
+/// DataDome / sec-cpt / Cloudflare. Per `CLAUDE.md` the token solver
+/// itself is out of scope here — these are the public-engine primitives
+/// that let challenge.js's OWN self-solve run to completion (the M-1
+/// live-nav drain is what gives it the wall-clock to do so).
+fn is_awswaf_challenge(html: &str) -> bool {
+    html.len() < 4096 && html.contains("AwsWafIntegration") && html.contains("gokuProps")
+}
+
+/// Public-engine AWS-WAF solve detector (parity-workflows M-2).
+///
+/// A genuine solve = the jar holds the `aws-waf-token` cookie AND the
+/// current body is no longer the AWS challenge stub (challenge.js posted
+/// the PoW token and the reload served real content). Mirrors
+/// [`is_datadome_solved`] / [`is_seccpt_solved`].
+fn is_awswaf_solved(cookies: &str, body: &str) -> bool {
+    cookies.contains("aws-waf-token=") && !is_awswaf_challenge(body)
+}
+
 /// A browser page. Owns a DOM, JS runtime, and event loop.
 ///
 /// # Example
@@ -1869,6 +1898,16 @@ impl Page {
         // existing detector at `handle_cloudflare_flow`. Narrow ⇒ false
         // for every non-CF site ⇒ §4 gate unaffected.
         let started_as_cf_challenge = crate::classify::is_cf_challenge_doc(&html);
+        // parity-workflows M-2: AWS-WAF analog. The ~2 KB stub mutates
+        // itself (challenge.js rewrites the body once the PoW worker posts
+        // the token + reloads), so — exactly like DD / sec-cpt / CF — the
+        // post-exec `is_anti_bot_challenge()` can flip false while
+        // `aws-waf-token` was never issued, silently slipping the poll +
+        // cookie-diff retry gate. Capture it from the INITIAL response so
+        // those primitives stay armed for the whole AWS self-solve. Narrow
+        // (len<4096 + both envelope markers) ⇒ false for every non-AWS
+        // site ⇒ zero §4-gate regression.
+        let started_as_awswaf_challenge = is_awswaf_challenge(&html);
         let mut current_html = html;
         let mut current_url = resp_url;
         let mut current_storage: Option<
@@ -1947,6 +1986,20 @@ impl Page {
                 25_000
             }
             _ => 15_000,
+        };
+        // parity-workflows M-4: an AWS-WAF challenge nav (amazon.* / imdb /
+        // any *.token.awswaf.com-fronted host) needs PoW-worker compute +
+        // token POST + reload to fit. The 15 s default is half-consumed by
+        // the build phase, so the worker never finishes before the budget
+        // expires. Give it the Akamai-BMP 25 s tier. Gated on the AWS
+        // challenge flag (not the host) so it generalizes across all amazon
+        // TLDs and never fires for a benign nav. The M-1 drain still
+        // early-exits the instant the reload sets nav_pending, so this is a
+        // ceiling, not a fixed wait.
+        let host_budget_default_ms = if started_as_awswaf_challenge {
+            host_budget_default_ms.max(25_000)
+        } else {
+            host_budget_default_ms
         };
         let mut nav_budget = Duration::from_millis(
             std::env::var("BROWSER_OXIDE_NAV_BUDGET_MS")
@@ -2176,7 +2229,8 @@ impl Page {
                 && (page.is_anti_bot_challenge()
                     || started_as_dd_challenge
                     || started_as_seccpt_challenge
-                    || started_as_cf_challenge)
+                    || started_as_cf_challenge
+                    || started_as_awswaf_challenge)
             {
                 let deadline = std::time::Instant::now() + Duration::from_secs(90);
                 while std::time::Instant::now() < deadline {
@@ -2274,6 +2328,30 @@ impl Page {
                             }
                         }
                     }
+                    // parity-workflows M-2: AWS-WAF analog of the DD /
+                    // sec-cpt breaks above. challenge.js's blob-URL PoW
+                    // worker posts the `aws-waf-token` and reloads WITHOUT
+                    // necessarily setting a JS pending-nav we observe, so
+                    // break the instant the token cookie lands + the body
+                    // is no longer the stub, letting the cookie-diff retry
+                    // re-issue the original URL. Gated on
+                    // `started_as_awswaf_challenge` ⇒ zero non-AWS impact.
+                    if started_as_awswaf_challenge {
+                        if let Some(p) = parsed_current.as_ref() {
+                            let now = client.cookies_for_url(p).await.unwrap_or_default();
+                            let body = page.content();
+                            if solvers.iter().any(|s| s.solved_signal(&now, &body))
+                                || is_awswaf_solved(&now, &body)
+                            {
+                                if debug_nav {
+                                    eprintln!(
+                                        "[awswaf] aws-waf-token landed + stub gone — breaking poll"
+                                    );
+                                }
+                                break;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -2357,6 +2435,7 @@ impl Page {
                     || started_as_dd_challenge
                     || started_as_seccpt_challenge
                     || started_as_cf_challenge
+                    || started_as_awswaf_challenge
                     || (last_accept_ch_upgrade && !accept_ch_retry_done))
                     && iter + 1 < iterations
                 {
@@ -3871,6 +3950,39 @@ mod tests {
 
         // Empty cookies + real body → NOT solved.
         assert!(!is_seccpt_solved("", real_body));
+    }
+
+    /// parity-workflows M-2: the AWS-WAF challenge/solve predicates that
+    /// arm the navigate-loop poll + cookie-diff retry. The stub must be
+    /// recognized as a challenge; a solve requires both the
+    /// `aws-waf-token` cookie AND a body that is no longer the stub.
+    #[test]
+    fn awswaf_challenge_and_solve_predicates() {
+        let stub = r#"<html><head><script>window.awsWafCookieDomainList=[];window.gokuProps={"key":"AQ=="};</script><script src="https://x.token.awswaf.com/x/challenge.js"></script></head><body><script>AwsWafIntegration.checkForceRefresh().then(()=>{});</script></body></html>"#;
+        let real_body = "<html><body><h1>Amazon.com</h1>product listings here</body></html>";
+
+        // The ~2 KB stub is a challenge.
+        assert!(is_awswaf_challenge(stub));
+        // Real content (no envelope vars) is not.
+        assert!(!is_awswaf_challenge(real_body));
+        // A large body carrying the markers is NOT matched by the <4096
+        // gate (that grown-shell case is INVERSE-CHL's job in classify.rs).
+        let mut grown = String::from(stub);
+        while grown.len() < 5000 {
+            grown.push_str("<div>padding</div>");
+        }
+        assert!(!is_awswaf_challenge(&grown));
+
+        // Solve = token cookie present AND body no longer the stub.
+        assert!(is_awswaf_solved(
+            "aws-waf-token=abc.def.ghi; other=1",
+            real_body
+        ));
+        // Token cookie but still on the stub → NOT solved.
+        assert!(!is_awswaf_solved("aws-waf-token=abc.def.ghi", stub));
+        // No token cookie → NOT solved.
+        assert!(!is_awswaf_solved("session=x", real_body));
+        assert!(!is_awswaf_solved("", real_body));
     }
 
     /// Regression: a JS-side `location.href = 'about:blank'` (or any
