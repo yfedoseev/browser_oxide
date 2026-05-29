@@ -14,13 +14,69 @@ use crate::extensions::worker_ext::worker_extension;
 use crate::state::DomState;
 use deno_core::{JsRuntimeForSnapshot, RuntimeOptions};
 use dom::Dom;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 static RUNTIME_SNAPSHOT: OnceLock<Box<[u8]>> = OnceLock::new();
 
-/// Get or create the cached V8 snapshot.
+/// Path to the on-disk snapshot cache, keyed by the **current executable's**
+/// size + mtime so it auto-invalidates whenever the binary is rebuilt (any JS
+/// bootstrap change is `include_str!`d, forcing a recompile → a new exe →
+/// a new key). This is the multi-process analog of a compile-time
+/// `include_bytes!`: the gate spawns a fresh process per site, so without a
+/// cache each of the 126 processes *rebuilds* the 1.5 s snapshot from scratch.
+/// With it, the first process builds (1.5 s) and every sibling *restores*
+/// (~50-100 ms). V8 snapshots are position-independent and tied to the V8
+/// build, so a blob produced by one process restores safely in any sibling
+/// built from the same binary — exactly the include_bytes! contract.
+///
+/// Returns `None` (→ in-memory build, no caching) when
+/// `BROWSER_OXIDE_NO_SNAPSHOT_CACHE` is set or the exe metadata is
+/// unavailable. Override the cache directory with
+/// `BROWSER_OXIDE_SNAPSHOT_CACHE` (defaults to the system temp dir).
+fn snapshot_cache_path() -> Option<PathBuf> {
+    if std::env::var_os("BROWSER_OXIDE_NO_SNAPSHOT_CACHE").is_some() {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let meta = std::fs::metadata(&exe).ok()?;
+    let len = meta.len();
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::var_os("BROWSER_OXIDE_SNAPSHOT_CACHE")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    Some(dir.join(format!("bo_v8_snapshot_{len}_{mtime}.bin")))
+}
+
+/// Get or create the V8 snapshot. Within a process the result is cached in a
+/// `OnceLock`; across sibling processes it is cached on disk (see
+/// [`snapshot_cache_path`]) so per-site gate processes and production worker
+/// pools pay the ~1.5 s build cost once instead of every spawn.
 pub fn get_snapshot() -> &'static [u8] {
     RUNTIME_SNAPSHOT.get_or_init(|| {
+        let cache_path = snapshot_cache_path();
+
+        // Fast path: restore a previously-built blob from the disk cache.
+        // The cache file only ever appears via an atomic rename (below), so a
+        // concurrent build in a sibling process can never expose a partial read.
+        if let Some(ref path) = cache_path {
+            if let Ok(bytes) = std::fs::read(path) {
+                if !bytes.is_empty() {
+                    tracing::info!(
+                        "Restored V8 snapshot from cache ({} bytes): {}",
+                        bytes.len(),
+                        path.display()
+                    );
+                    return bytes.into_boxed_slice();
+                }
+            }
+        }
+
         tracing::info!("Creating cold V8 snapshot");
 
         let mut runtime = JsRuntimeForSnapshot::new(RuntimeOptions {
@@ -98,6 +154,24 @@ pub fn get_snapshot() -> &'static [u8] {
             .execute_script("<anonymous>", BOOTSTRAP_JS)
             .expect("snapshot bootstrap failed");
 
-        runtime.snapshot()
+        let snapshot = runtime.snapshot();
+
+        // Persist for sibling processes. Write to a per-PID temp file then
+        // atomically rename into place, so concurrent builders (parallel gate)
+        // never expose a half-written blob and last-writer-wins is harmless
+        // (all blobs from the same binary are equivalent).
+        if let Some(ref path) = cache_path {
+            let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+            if std::fs::write(&tmp, &snapshot).is_ok() {
+                if let Err(e) = std::fs::rename(&tmp, path) {
+                    tracing::debug!("snapshot cache rename failed: {e}");
+                    let _ = std::fs::remove_file(&tmp);
+                } else {
+                    tracing::info!("Cached V8 snapshot to {}", path.display());
+                }
+            }
+        }
+
+        snapshot
     })
 }
