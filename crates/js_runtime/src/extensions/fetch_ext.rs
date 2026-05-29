@@ -406,6 +406,28 @@ pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
     client.set_cookie_str(&parsed, &cookie).await;
 }
 
+/// Synchronous `document.cookie` write (parity-workflows FIX-COOKIE-SYNC).
+/// The async `op_cookie_set` was called fire-and-forget by the
+/// `document.cookie` setter, so a write issued in the last microtasks before
+/// `location.reload()` (e.g. AWS-WAF's `aws-waf-token`) was torn down before
+/// its future ran — the jar stayed empty and the reload re-fetched the stub.
+/// This sync op persists immediately via `try_lock` (the jar is never held
+/// across an await during synchronous JS execution); under genuine contention
+/// it falls back to spawning the async write so nothing is lost.
+#[op2(fast)]
+pub fn op_cookie_set_sync(#[string] url: String, #[string] cookie: String) {
+    let Some(client) = FETCH_CLIENT.with(|c| c.borrow().clone()) else {
+        return;
+    };
+    let Ok(parsed) = Url::parse(&url) else { return };
+    if !client.set_cookie_str_sync(&parsed, &cookie) {
+        // Rare contention path: don't lose the write — defer to the async op.
+        tokio::task::spawn(async move {
+            client.set_cookie_str(&parsed, &cookie).await;
+        });
+    }
+}
+
 /// Synchronous fetch op. Blocks the V8 thread until the request completes.
 /// Used by document.write and appendChild(script) when synchronous execution
 /// is required.
@@ -703,6 +725,7 @@ deno_core::extension!(
         op_fetch,
         op_cookie_get,
         op_cookie_set,
+        op_cookie_set_sync,
         op_net_fetch_sync,
         op_net_xhr_sync,
         op_drain_csp_violations

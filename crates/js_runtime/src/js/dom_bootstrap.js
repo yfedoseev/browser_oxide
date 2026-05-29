@@ -1566,8 +1566,18 @@
                 if (!url || url === "about:blank" || url === "javascript:;" || url === "") {
                     url = globalThis.__browser_oxide && globalThis.__browser_oxide._baseUrl;
                 }
-                if (url && ops.op_cookie_set) {
-                    ops.op_cookie_set(url, String(val));
+                if (url) {
+                    // FIX-COOKIE-SYNC (parity-workflows): persist into the Rust
+                    // jar SYNCHRONOUSLY. The async op_cookie_set was
+                    // fire-and-forget, so a cookie set in the last microtasks
+                    // before location.reload() (e.g. AWS-WAF aws-waf-token) was
+                    // lost — the reload re-fetched the stub. op_cookie_set_sync
+                    // writes immediately (try_lock) with an async fallback.
+                    if (ops.op_cookie_set_sync) {
+                        ops.op_cookie_set_sync(url, String(val));
+                    } else if (ops.op_cookie_set) {
+                        ops.op_cookie_set(url, String(val));
+                    }
                 }
             } catch (e) { /* ignore */ }
         }

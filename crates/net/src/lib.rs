@@ -1357,6 +1357,28 @@ impl HttpClient {
         jar.set_cookies(url, &[raw.to_string()]);
     }
 
+    /// Synchronous cookie write (parity-workflows FIX-COOKIE-SYNC). The
+    /// `document.cookie` setter must persist into the jar SYNCHRONOUSLY:
+    /// challenge.js deposits the `aws-waf-token` via `document.cookie` in the
+    /// last microtasks before `location.reload()`, and the previous
+    /// fire-and-forget async `op_cookie_set` future was torn down before it
+    /// ran — so the reload re-fetched without the token (verified on imdb:
+    /// document.cookie had the token but the shared jar was empty → 202 stub).
+    ///
+    /// The jar mutex is never held across an await during synchronous JS
+    /// execution, so `try_lock` succeeds in the common case. Returns `false`
+    /// only under genuine contention, where the caller falls back to the
+    /// async op. No new blocking in the async runtime.
+    pub fn set_cookie_str_sync(&self, url: &Url, raw: &str) -> bool {
+        match self.cookies.try_lock() {
+            Ok(mut jar) => {
+                jar.set_cookies(url, &[raw.to_string()]);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     /// Drop every cookie whose stored-domain is a host-suffix match of
     /// `target_domain`. Returns the number of (domain → cookie-map)
     /// buckets evicted. Used for the x.com / twitter.com rebrand-
