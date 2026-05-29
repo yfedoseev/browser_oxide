@@ -1398,6 +1398,20 @@ impl Page {
                 if (g.__jsCookies) g.__jsCookies = {};
             })();"#,
         );
+        // Reap Workers the OUTGOING page spawned but never terminated. The
+        // warm path reuses this isolate across navs, so — unlike the cold
+        // `Page::drop` path, which already calls this — orphan Workers would
+        // otherwise accumulate (64 MB stack + child JsRuntime EACH), driving
+        // the single-process pool runaway (GATE_PERFORMANCE §5: 1.7 GB RSS,
+        // stuck ~site 104). Mirrors the Drop reaper so warm reuse holds steady
+        // RSS across hundreds of navigations. Timers (`__cancelAllTimers` +
+        // `replace_dom` TimerState reset) and child isolates (`children.clear`)
+        // are already handled on the warm path; Workers were the gap.
+        {
+            let op_state = self.event_loop.runtime_mut().op_state();
+            let mut state = op_state.borrow_mut();
+            js_runtime::extensions::worker_ext::drain_owned_workers(&mut state);
+        }
     }
 
     /// Navigate this *warm* Page to a new URL by reusing its V8 isolate
@@ -1959,7 +1973,11 @@ impl Page {
                     || h.ends_with("yandex.ru")
                     || h.ends_with("hm.com")
                     || h.ends_with("khanacademy.org")
-                    || h.ends_with("spotify.com") =>
+                    || h.ends_with("spotify.com")
+                    // uber.com is a heavy React SPA whose hydration exceeds the
+                    // 15s default → TIMEOUT on chrome/firefox/pixel
+                    // (match-workflows cluster 04). Give it the SPA tier.
+                    || h.ends_with("uber.com") =>
             {
                 90_000
             }
