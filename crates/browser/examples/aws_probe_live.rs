@@ -54,6 +54,24 @@ async fn main() {
             });
         } catch(_){}
         try {
+            const _dproto = (globalThis.Document && Document.prototype) || Object.getPrototypeOf(globalThis.document);
+            const _cd = Object.getOwnPropertyDescriptor(_dproto, 'cookie');
+            if (_cd && _cd.set) {
+                const _os = _cd.set, _og = _cd.get;
+                Object.defineProperty(_dproto, 'cookie', {
+                    configurable: true,
+                    get() { return _og ? _og.call(this) : ''; },
+                    set(v) {
+                        _push('document.cookie SET: ' + String(v).slice(0,140) +
+                            ' || location.href=' + (globalThis.location && globalThis.location.href));
+                        return _os.call(this, v);
+                    },
+                });
+            } else {
+                _push('document.cookie descriptor: no setter found');
+            }
+        } catch(e) { _push('cookie-wrap-err: ' + String(e)); }
+        try {
             const _of = globalThis.fetch;
             if (_of) {
                 globalThis.fetch = function(u, o) {

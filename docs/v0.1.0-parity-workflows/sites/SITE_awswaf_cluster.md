@@ -430,3 +430,43 @@ wrapping `Worker` / `URL.createObjectURL` / `AwsWafIntegration.*` + capturing
 `__scriptErrors` to learn whether `checkForceRefresh()` resolves/rejects, which branch
 runs, and whether an internal fetch (token/report endpoint) fails. M-1's drain idea is
 deprioritized for AWS (still possibly relevant to booking SPA hydration).
+
+---
+
+## ADDENDUM 2 — task #21 executed (`aws_probe_live`, live imdb, 2026-05-28)
+
+Built `crates/browser/examples/aws_probe_live.rs` (init_script wrapping `Worker`,
+`URL.createObjectURL`, `fetch`, the `document.cookie` setter, and
+`AwsWafIntegration.*`). Findings:
+
+1. **The AWS self-solve WORKS.** `AwsWafIntegration` is defined with all methods;
+   `checkForceRefresh()` → `true`; `forceRefreshToken()` GETs + POSTs the verify
+   endpoint (`*.token.awswaf.com`, **status 200**) and **resolves with a real
+   `aws-waf-token`**, deposited via `document.cookie`. `hasToken()` → `true`.
+   **No blob worker is needed** (zero `op_blob_register`/`op_worker_spawn`) — the
+   PoW path computes inline. So the earlier "bails before blob-worker" inference
+   was wrong; challenge.js runs to completion.
+
+2. **Two real cookie bugs found + fixed (both verified, regression-tested):**
+   - **FIX-COOKIE-SYNC** (`ec895b6`): the `document.cookie` setter called
+     `op_cookie_set` (`#[op2(async)]`) **fire-and-forget**; a cookie written in the
+     last microtasks before `location.reload()` had its future torn down before it
+     ran. Added `op_cookie_set_sync` (`try_lock`, async fallback). Affected EVERY
+     late JS-set cookie, not just AWS.
+   - **FIX-COOKIE-DELETE** (`5de1a9a`): `CookieJar` never parsed `Expires`/`Max-Age`
+     (`parse_set_cookie` hard-coded `expires=None`), so AWS's delete-stale-token
+     (`aws-waf-token=; Expires=Thu, 01 Jan 1970 …` across www/`.`imdb domains) was
+     STORED as empty-value entries → `cookies_for()` emitted
+     `aws-waf-token=; aws-waf-token=<real>`; AWS read the empty token first → 202.
+     Now honors deletion; `cookies_for_url` is **clean** (`aws-waf-token=<real>`).
+
+3. **RESIDUAL (not flipped — imdb still 202):** the clean token lands in
+   `FETCH_CLIENT`'s jar (`cookie-set-sync … jar_count=1 cookies_for_url='aws-waf-token=<real>'`),
+   but the nav RELOAD's Rust-side GET reads a jar that appears empty (the global
+   `shared()` jar). This is a **jar-identity disconnect**: `FETCH_CLIENT` (where
+   `document.cookie` writes land) diverges from the reload client's jar despite both
+   nominally being `HttpClient::shared()`. Plus possible AWS token-validity rejection
+   on reload. **NEXT:** unify the `document.cookie`/op jar with the nav reload client
+   jar (so the reload GET sends the token), then re-measure. imdb may also be
+   IP/probabilistic (amazon-com/ca fail in v150 too). Repro:
+   `BROWSER_OXIDE_COOKIE_TRACE=1 target/release/examples/aws_probe_live https://www.imdb.com/`.
