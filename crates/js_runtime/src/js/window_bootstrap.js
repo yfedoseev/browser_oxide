@@ -960,8 +960,14 @@
     // Scalar getters — read from stealth profile each call (idempotent).
     _defNav('userAgent', () => _p("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
     _defNav('platform', () => _p("platform", "Win32"));
-    _defNav('vendor', () => "Google Inc.");
-    _defNav('vendorSub', () => "");
+    // NAV-2 (parity-workflows): read vendor/vendorSub from the profile
+    // (default "Google Inc."/"") instead of hard-coding. The worker realm
+    // already reads `_p("vendor")` (worker_bootstrap.js:152), so hard-coding
+    // here leaked vendor="Google Inc." under a firefox_135_* preset (a
+    // 100% impersonation breaker) AND mismatched the worker. No-op for
+    // chrome presets (profile vendor == "Google Inc.").
+    _defNav('vendor', () => _p("vendor", "Google Inc."));
+    _defNav('vendorSub', () => _p("vendor_sub", ""));
     _defNav('productSub', () => "20030107");
     _defNav('appVersion', () => _p("user_agent", "").replace("Mozilla/", ""));
     _defNav('appCodeName', () => "Mozilla");
@@ -976,7 +982,13 @@
     // data:/http:/about:blank. Phase 7. Skip entirely on iOS (real
     // Safari has no NavigatorDeviceMemory interface).
     if (!_isMobileIOS()) {
-        _defNav('deviceMemory', () => _secure() ? _pInt("device_memory", 8) : undefined);
+        // NAV-1 (parity-workflows): real Chrome clamps navigator.deviceMemory
+        // to a max of 8 (spec: one of 0.25/0.5/1/2/4/8). Some presets carry
+        // device_memory=16 (for the Sec-CH-Device-Memory header + physical
+        // coherence), which leaked a JS value Chrome never reports — a
+        // deterministic tell. Clamp the JS getter to <=8 while leaving the
+        // header/physical value intact.
+        _defNav('deviceMemory', () => _secure() ? Math.min(_pInt("device_memory", 8), 8) : undefined);
     }
     _defNav('maxTouchPoints', () => _pInt("max_touch_points", 0));
     _defNav('pdfViewerEnabled', () => true);
@@ -1430,7 +1442,18 @@
 
     // screen — prototype-backed so own-descriptor probe returns undefined.
     const _ScreenProto = Screen.prototype;
-    const _screenOrientation = { type: "landscape-primary", angle: 0, onchange: null };
+    // NAV-3 (parity-workflows): derive orientation from the profile's screen
+    // geometry instead of hard-coding landscape-primary. A portrait mobile
+    // preset (iPhone: height > width) previously reported landscape-primary —
+    // a screen/orientation contradiction CreepJS and mobile-aware vendors
+    // flag. Desktop presets (width >= height) keep landscape-primary.
+    const _scrW0 = _pInt("screen_width", 1920);
+    const _scrH0 = _pInt("screen_height", 1080);
+    const _screenOrientation = {
+        type: _scrH0 > _scrW0 ? "portrait-primary" : "landscape-primary",
+        angle: 0,
+        onchange: null,
+    };
     // ScreenOrientation is its own interface in Chrome, so expose it too.
     const _ScreenOrientationProto = ScreenOrientation.prototype;
 
