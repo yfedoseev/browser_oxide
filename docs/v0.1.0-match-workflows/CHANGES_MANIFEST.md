@@ -69,6 +69,29 @@ Why: fair, fast, reproducible same-IP measurement. Docs: `CAMOUFOX_INSTALL.md`,
 
 ---
 
+## TRACK D — Frontier (pass-everything via the no-CDP moat)
+
+Why: the "frontier 10" are NOT all out of scope. **5-6 are engine-addressable**
+in the public engine on this IP, leveraging BO's no-CDP advantage (proven:
+no-CDP real Chrome passes Kasada from this IP; CDP Playwright gets 429 same IP).
+Full analysis: **`../v0.1.0-frontier-workflows/`** (01-08).
+
+| ID | Change | File:line | Why (gap) | Site(s) | Effort | Doc |
+|---|---|---|---|---|---|---|
+| 🔬 D0 no-CDP oracle | Build `nocdp_oracle.rs`/`nocdp_capture.rs` (from awswaf_probe/aws_capture) + move nocdp.sh/tl_capture to `tools/oracle/`; the capture+diff enabler for all frontier work | `crates/browser/examples/` | can't fix what we can't see a passing trace of; Playwright/MCP are CDP-detected (invalid oracle) | ALL | 1-2d | frontier 06 |
+| 🔬 D1 moat guardrail | Gate `crates/protocol` CDP server behind an **off-by-default `cdp-server` Cargo feature**; standing rebrowser-bot-detector test (clean by construction; FAIL if CdpServer bound) | `crates/browser/Cargo.toml:36`, `crates/protocol` | the no-CDP moat is conditional — CDP server is a dep, must never reach the navigate path | ALL (protects moat) | 0.5d | frontier 07 |
+| 🔬 D2 Kasada child-realm | Populate the near-empty iframe child global (document/navigator/constructors/timers/fetch/storage, realm-distinct) | `js_runtime/src/extensions/dom_ext.rs:1217-1247` | child realm only has Window/self/globals → Kasada `contentWindow` probe (bot1225) hard-fails | hyatt/canadagoose/realtor | 2-4d | frontier 01 |
+| 🔬 D3 Kasada K2-DIFF | In-VM `/tl` plaintext dump (hook fetch/XHR pre-XOR, env-gated) + field-diff vs no-CDP real `/tl` | `js_runtime/src/js/fetch_bootstrap.js` | bounds the Kasada residual to a named field list | Kasada×3 | 3-5d | frontier 01 |
+| 🔬 D4 DataDome cookie-jar | `ChildIframe::from_url` child V8 must use the **shared** session jar, not a fresh isolated one | `net/lib.rs:308` vs `363-368`, `runtime.rs:84-90`, `page.rs:2474` | child-iframe DataDome clearance cookie never reaches parent → etsy/tripadvisor stay CHL | etsy, tripadvisor (+CF Turnstile) | 1-2d | frontier 02 |
+| 🔬 D5 douyin probe | R1 offline acrawler trace (sign() throws vs returns-rejected) → R2 builtin-integrity diff vs no-CDP real Chrome (fix via `_maskAsNative`) | `stealth_bootstrap.js:25-104` | reclassified UP from Firefox-only — may be a fixable Chrome integrity leak | douyin | 1-2d | frontier 05 |
+
+**Genuinely NOT engine-addressable (do not chase as engine bugs):** bestbuy
+(IP/ASN — datacenter can't reach Favorable `_abck`; no passing reference engine),
+ozon + wildberries-trust (need RU/residential IP), yelp (human slider captcha —
+even vendor_solvers can't pass). See frontier 03/04/02.
+
+---
+
 ## Execution order (recommended)
 
 1. **B1 (compile-time snapshot)** — self-contained, big production win, fast.
