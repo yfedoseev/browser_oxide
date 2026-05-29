@@ -253,6 +253,16 @@
         //   "s:<text>"   — plain UTF-8 string body
         //   "b:<base64>" — base64-encoded binary body
         const rawBody = init.body;
+        // When the body is a FormData, the browser ALWAYS serializes it to
+        // multipart/form-data with an auto-generated boundary and sets its
+        // own Content-Type (a manually-set Content-Type is ignored for
+        // FormData). Track the boundary so we can force the header below.
+        let multipartBoundary = null;
+        let urlencodedBody = false;
+        const _isFormData =
+            typeof FormData !== "undefined" && rawBody instanceof FormData;
+        const _isUSP =
+            typeof URLSearchParams !== "undefined" && rawBody instanceof URLSearchParams;
         if (rawBody == null) {
             body = "";
         } else if (typeof rawBody === "string") {
@@ -267,6 +277,38 @@
             let bin = "";
             for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
             body = "b:" + btoa(bin);
+        } else if (_isFormData) {
+            // FIX-FORMDATA (parity-workflows): serialize FormData → multipart
+            // with a generated boundary. AWS-WAF's challenge.js POSTs its proof
+            // as FormData; without this we sent the literal "[object FormData]"
+            // and AWS rejected the POST with 400 "Invalid boundary for
+            // multipart/form-data request" — blocking the amazon-TLD cluster.
+            multipartBoundary =
+                "----browserOxideFormBoundary" +
+                Math.random().toString(36).slice(2) +
+                Math.random().toString(36).slice(2);
+            let mp = "";
+            rawBody.forEach((value, name) => {
+                mp += "--" + multipartBoundary + "\r\n";
+                if (typeof Blob !== "undefined" && value instanceof Blob) {
+                    const fn = value.name || "blob";
+                    const ct = value.type || "application/octet-stream";
+                    mp +=
+                        'Content-Disposition: form-data; name="' + name +
+                        '"; filename="' + fn + '"\r\n';
+                    mp += "Content-Type: " + ct + "\r\n\r\n";
+                    mp += String(value) + "\r\n";
+                } else {
+                    mp += 'Content-Disposition: form-data; name="' + name + '"\r\n\r\n';
+                    mp += String(value) + "\r\n";
+                }
+            });
+            mp += "--" + multipartBoundary + "--\r\n";
+            body = "s:" + mp;
+        } else if (_isUSP) {
+            // URLSearchParams → application/x-www-form-urlencoded.
+            body = "s:" + rawBody.toString();
+            urlencodedBody = true;
         } else if (typeof Blob !== "undefined" && rawBody instanceof Blob) {
             // Blobs — best effort; we don't have a sync read, use toString.
             body = "s:" + String(rawBody);
@@ -274,6 +316,16 @@
             body = "s:" + String(rawBody);
         }
         headers = _flattenHeaders(init.headers);
+
+        // FIX-FORMDATA: a FormData body's Content-Type is browser-controlled —
+        // FORCE our generated boundary, overriding any (boundaryless)
+        // Content-Type the page set, exactly as Chrome does.
+        if (multipartBoundary) {
+            headers["content-type"] =
+                "multipart/form-data; boundary=" + multipartBoundary;
+        } else if (urlencodedBody && !headers["content-type"]) {
+            headers["content-type"] = "application/x-www-form-urlencoded;charset=UTF-8";
+        }
 
         // Auto-set Content-Type for POSTs with a body (mirrors Chrome fetch default)
         if (body && !headers["content-type"] && (method === "POST" || method === "PUT" || method === "PATCH")) {
