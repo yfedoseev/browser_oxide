@@ -48,13 +48,30 @@ weights), plus a separate **nav-reliability** track. All fixes are
 | 05 | `05_HOMEDEPOT_SECCPT_CONSISTENCY.md` | homedepot passes chrome only; Akamai-CHL on the other 3 | pixel, iphone, firefox | challenge-aware drain + Firefox wire |
 | 06 | `06_AMAZONCA_GATE_CLUSTERING.md` | amazon-ca chrome-only fail = AWS-WAF token-clustering measurement artifact | chrome | harness spacing policy (no engine code) |
 | 07 | `07_PRESET_COHERENCE_AUDIT.md` | cross-cutting coherence audit: D1/D2/D3 unify clusters 01/02 | all | the unifying root cause |
-| 08 | `08_MASTER_CONSISTENCY_ROADMAP.md` | the consolidated ROI-ranked roadmap + phased plan + projections | all | **start here for the plan** |
+| 08 | `08_MASTER_CONSISTENCY_ROADMAP.md` | the consolidated ROI-ranked roadmap + phased plan + projections | all | **start here for the consistency plan** |
+| ★ | `CHANGES_MANIFEST.md` | **single execute-later checklist** of ALL changes across 3 tracks (consistency + performance + harness) with gap→change→file→why→impact | all | **the master to-do** |
+| ⚡ | `GATE_PERFORMANCE.md` | engine perf: 1.5s init = runtime snapshot rebuild → compile-time snapshot fix; per-nav leak; gate parallelism | all | startup + gate speed |
+| 🦊 | `CAMOUFOX_INSTALL.md` | correct camoufox v135 install + the working v150 trick (alpha/beta MIN_VERSION bug) + launcher↔browser pin | — | competitor reproducibility |
 
 ---
 
 ## Quick read order
 
-1. `00_DATA_per_profile_matrix.md` — see exactly which site fails which profile.
-2. `08_MASTER_CONSISTENCY_ROADMAP.md` — the ranked plan and per-phase projections.
-3. `07_PRESET_COHERENCE_AUDIT.md` — why the gaps share a small set of root causes.
-4. The individual cluster docs (01–06) for code-level detail per cluster.
+1. `CHANGES_MANIFEST.md` — **the complete list of every gap + what to change + why** (the to-do).
+2. `00_DATA_per_profile_matrix.md` — see exactly which site fails which profile.
+3. `08_MASTER_CONSISTENCY_ROADMAP.md` — the ranked consistency plan + per-phase projections.
+4. `07_PRESET_COHERENCE_AUDIT.md` — why the gaps share a small set of root causes.
+5. `GATE_PERFORMANCE.md` — why init is 1.5s + the reuse/parallelism speedups.
+6. The individual cluster docs (01–06) for code-level detail per cluster.
+
+## Coverage confirmation (every gap is documented)
+
+- **Per-profile consistency** (20 gap sites): clusters 01–06 (root cause + fix),
+  07 (unifying audit), 08 (ranked table). ✅
+- **Performance** (1.5s init, per-nav leak, serial gate): GATE_PERFORMANCE. ✅
+- **Harness/methodology** (AWS spacing, parallelism, camoufox v135/v150 install,
+  Chromium-vs-camoufox harness): CAMOUFOX_INSTALL + GATE_PERFORMANCE + 06. ✅
+- **Frontier (out of scope here):** the 10 fail-all sites — see
+  `../v0.1.0-parity-workflows/` (Kasada/DataDome/geo/Firefox-only). ✅
+- **All consolidated** in `CHANGES_MANIFEST.md` with execution order. Nothing is
+  implemented yet — this is the plan to execute with the other changes.
