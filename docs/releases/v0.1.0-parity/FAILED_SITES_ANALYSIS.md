@@ -74,6 +74,17 @@ AwsWafIntegration.checkForceRefresh().then((forceRefresh) => { ... AwsWafIntegra
 
 ### A.2 — SPA hydration: booking + douyin (2 sites)
 
+> **2026-05-28 reclassification note (parity-workflows):** the master roadmap
+> §1.3 hypothesizes booking is actually **AWS-WAF** (not pure SPA hydration),
+> sharing the same 1.37 MB `challenge.js`. If so, the live-verified AWS
+> root-cause applies — `challenge.js` loads + executes but bails inside its
+> own `checkForceRefresh().then()` chain before creating the blob PoW worker
+> (zero `op_blob_register`/`op_worker_spawn`); see
+> `docs/v0.1.0-parity-workflows/sites/SITE_awswaf_cluster.md` addendum +
+> parity-workflows task #21. VERIFY with a live booking capture (grep the
+> initial body for `gokuProps`/`AwsWafIntegration`) before treating it as a
+> generic SPA fetch-chain bug; `R-SPA-BOOKING-FETCH-CHAIN` may be the wrong frame.
+
 **booking observed:** body 8473 bytes (chrome/pixel/firefox), 3891 (iphone). Time = 15s (full nav budget). Final state: SPA shell, no `/api/...` hydration.
 **douyin observed:** body 6327 bytes — *identical across all 4 profiles*. Deterministic detection. ttwid / `__ac_signature` cookie not set.
 

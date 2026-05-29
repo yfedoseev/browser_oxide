@@ -1,6 +1,12 @@
 # 10 — URL polyfill: `new URL("blob:…")` returns empty `.protocol` / "null" `.origin`
 
-**Status:** ⬜ open. Caught as side-finding during R-DUO-WORKER (commit `967b4dc`).
+**Status:** ⬜ open — VERIFY BEFORE RE-IMPLEMENTING. The parity-workflows
+master roadmap §5 (2026-05-28) lists `blob:` handling as "done", but that
+refers to the WORKER blob-URL spawn path (worker.rs), which is DISTINCT from
+this ticket's `new URL("blob:…")` `.protocol`/`.origin` PARSING. Confirm
+`new URL("blob:null/abc").protocol === "blob:"` against the current
+`shared_apis_bootstrap.js` URL class before deciding this is closed.
+Caught as side-finding during R-DUO-WORKER (commit `967b4dc`).
 **Sites in scope:** indirect — affects any DataDome iframe rendering + duolingo worker recaptcha path beyond what FIX-W already addresses.
 **Effort:** 1-2 days.
 **Scope:** public engine.
