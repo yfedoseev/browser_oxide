@@ -433,6 +433,50 @@ deprioritized for AWS (still possibly relevant to booking SPA hydration).
 
 ---
 
+## ADDENDUM 3 — AWS-WAF CLUSTER SOLVED 9/9 (spaced, 2026-05-28)
+
+After four public-engine fetch/cookie fixes (no vendor_solver), the **entire
+AWS-WAF cluster passes** when calls are spaced 150 s apart (a fresh
+`sweep_metrics` process per site — see `benchmarks/run_spaced_aws.sh`):
+
+| site | result | bytes | note |
+|---|---|---|---|
+| imdb | PASS | 1.27 MB | |
+| amazon-com | PASS | 904 KB | **v150 fails this** |
+| amazon-ca | PASS | 1.03 MB | **v150 fails this** |
+| amazon-co-uk | PASS | 695 KB | |
+| amazon-com-au | PASS | 968 KB | |
+| amazon-de | PASS | 846 KB | |
+| amazon-fr | PASS | 799 KB | THIN 5 KB back-to-back → PASS spaced |
+| amazon-in | PASS | 980 KB | |
+| amazon-jp | PASS | 818 KB | |
+
+**The four fixes (all public engine, all general correctness wins):**
+1. `ec895b6` FIX-COOKIE-SYNC — `document.cookie` writes persist synchronously
+   (was fire-and-forget async, lost before reload).
+2. `5de1a9a` FIX-COOKIE-DELETE — honor `Expires`/`Max-Age` deletions (AWS's
+   delete-stale-token left empty `aws-waf-token=` poison).
+3. `37e2597` shared-jar write — `document.cookie` reaches the global session
+   jar the reload GET reads.
+4. `2157f92` (+`c21c75a` XHR) FIX-FORMDATA — serialize FormData → multipart
+   with a generated boundary (amazon's proof POST is FormData; AWS rejected
+   the boundaryless body with 400).
+
+**Root cause was NOT fingerprint, NOT a blob worker, NOT a drain gap** —
+challenge.js solves inline and obtains the token; the only blockers were
+cookie-persistence + FormData-serialization bugs.
+
+**Proven methodology (user-directed):** same-IP same-vendor calls MUST be
+spaced 2–3 min apart, or per-IP token-clustering produces false failures
+(amazon-fr: THIN 5 KB back-to-back, 799 KB PASS spaced). amazon-com/amazon-ca
+were previously mislabeled "IP/probabilistic" purely because of back-to-back
+clustering — they pass cleanly when spaced. **Bake spacing into the gate.**
+
+BO now **outperforms Camoufox v150** on the AWS cluster (+2 sites: amazon-com,
+amazon-ca). Repro: `bash benchmarks/run_spaced_aws.sh`.
+
+---
+
 ## ADDENDUM 2 — task #21 executed (`aws_probe_live`, live imdb, 2026-05-28)
 
 Built `crates/browser/examples/aws_probe_live.rs` (init_script wrapping `Worker`,
