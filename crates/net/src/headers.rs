@@ -247,7 +247,23 @@ pub fn chrome_headers_fetch(
 
     let sec_ch_ua = build_sec_ch_ua(profile);
     headers.push(("sec-ch-ua".to_string(), sec_ch_ua));
-    headers.push(("sec-ch-ua-mobile".to_string(), "?0".to_string()));
+    // sec-ch-ua-mobile is a LOW-entropy hint sent on EVERY request (nav AND
+    // fetch/XHR). Hardcoding "?0" here made mobile profiles emit "?1" on the
+    // document navigation (chrome_headers) but "?0" on every JS-initiated
+    // subresource — a within-session Client-Hints contradiction that edge/bot
+    // stacks read as an automation tell (match-workflows cluster 03: pixel
+    // adidas/airbnb/yandex-ru/prime-video stall hydration → empty/THIN body).
+    // Mirror the nav path: derive from device_class. (High-entropy hints like
+    // sec-ch-ua-model are correctly NOT sent on fetch unless the origin
+    // persisted Accept-CH, so we don't add them here.)
+    let is_mobile = matches!(
+        profile.device_class,
+        DeviceClass::MobileAndroid | DeviceClass::MobileIOS
+    );
+    headers.push((
+        "sec-ch-ua-mobile".to_string(),
+        if is_mobile { "?1" } else { "?0" }.to_string(),
+    ));
     headers.push((
         "sec-ch-ua-platform".to_string(),
         format!("\"{}\"", profile.os_name),
@@ -979,6 +995,40 @@ mod tests {
     fn accept_language_empty() {
         let result = build_accept_language(&[]);
         assert_eq!(result, "en-US,en;q=0.9");
+    }
+
+    #[test]
+    fn fetch_headers_mobile_flag_matches_nav() {
+        // match-workflows cluster 03 — chrome_headers_fetch hardcoded
+        // sec-ch-ua-mobile: ?0, contradicting the ?1 the nav request sends on
+        // mobile (a within-session Client-Hints flip = automation tell). The
+        // low-entropy mobile flag MUST agree across nav and fetch.
+        let pixel = stealth::presets::pixel_9_pro_chrome_148();
+        let fh: std::collections::HashMap<_, _> =
+            chrome_headers_fetch(&pixel, "https://example.com/x.js", Some("https://example.com"))
+                .into_iter()
+                .collect();
+        assert_eq!(
+            fh.get("sec-ch-ua-mobile").map(String::as_str),
+            Some("?1"),
+            "mobile profile fetch must emit sec-ch-ua-mobile: ?1 (matches nav)"
+        );
+        assert_eq!(
+            fh.get("sec-ch-ua-platform").map(String::as_str),
+            Some("\"Android\""),
+            "mobile profile fetch must emit Android platform"
+        );
+        // Desktop stays ?0.
+        let desk = stealth::presets::chrome_148_macos();
+        let dfh: std::collections::HashMap<_, _> =
+            chrome_headers_fetch(&desk, "https://example.com/x.js", Some("https://example.com"))
+                .into_iter()
+                .collect();
+        assert_eq!(
+            dfh.get("sec-ch-ua-mobile").map(String::as_str),
+            Some("?0"),
+            "desktop profile fetch must stay sec-ch-ua-mobile: ?0"
+        );
     }
 
     #[test]
