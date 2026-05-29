@@ -33,13 +33,26 @@
 // - Caramiaux et al. (2018). "Beyond Recognition: Using Lower
 //   Quantization to Reduce Tactile Sense Load."
 //
-// All events are dispatched on `document` and `body`, with
-// `isTrusted=true` defined on the event so handlers that gate on it
-// see a "trusted" event (matches what real Chrome dispatches; the JS
-// MouseEvent constructor ordinarily produces `isTrusted=false`).
+// All events are dispatched on `document` and `body`, marked trusted via
+// the privileged `_markTrusted` minter (behavioral E2) so handlers that gate
+// on `isTrusted` see a trusted event — matching what real Chrome dispatches
+// (a JS-constructed MouseEvent ordinarily reports `isTrusted=false`). Trust
+// lives in a module-private WeakSet in event_bootstrap.js, NOT a per-event
+// own property, so it is both correctly-shaped and unforgeable by page JS.
 (function humanize() {
     const body = document.body || document.documentElement;
     if (!body) return;
+
+    // behavioral E2 — capture the privileged trusted-event minter published by
+    // event_bootstrap.js and revoke the global handle immediately, so page
+    // scripts (which run after this init script) can never reach it. We mark
+    // our synthesized input events trusted via this closure-held function
+    // instead of the old `Object.defineProperty(ev,'isTrusted',{value:true})`
+    // — which created a detectable OWN data property AND was overridable.
+    const _markTrusted = (typeof globalThis.__bo_mark_trusted === 'function')
+        ? globalThis.__bo_mark_trusted
+        : null;
+    try { delete globalThis.__bo_mark_trusted; } catch (_) {}
 
     // v0.1.0-parity Fix 6 — seeded random for two-level per-session
     // determinism. Symbol-keyed slot is installed by stealth_bootstrap.js
@@ -102,8 +115,7 @@
     // ---- Helpers --------------------------------------------------
 
     function _dispatch(target, event) {
-        try { Object.defineProperty(event, 'isTrusted', { value: true, configurable: true }); }
-        catch (e) {}
+        if (_markTrusted) _markTrusted(event);
         target.dispatchEvent(event);
     }
 
@@ -426,7 +438,7 @@
                 button: 0, buttons: 0,
             };
             const mev = new MouseEvent('mousemove', evOpts);
-            try { Object.defineProperty(mev, 'isTrusted', { value: true, configurable: true }); } catch (_) {}
+            if (_markTrusted) _markTrusted(mev);
             try { window.dispatchEvent(mev); } catch (_) {}
             try { document.dispatchEvent(mev); } catch (_) {}
             try { body.dispatchEvent(mev); } catch (_) {}
@@ -438,7 +450,7 @@
                     pointerType: 'mouse', pointerId: 1,
                     isPrimary: true, pressure: 0, width: 1, height: 1,
                 });
-                try { Object.defineProperty(pev, 'isTrusted', { value: true, configurable: true }); } catch (_) {}
+                if (_markTrusted) _markTrusted(pev);
                 try { window.dispatchEvent(pev); } catch (_) {}
                 try { document.dispatchEvent(pev); } catch (_) {}
                 try { body.dispatchEvent(pev); } catch (_) {}

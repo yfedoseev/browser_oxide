@@ -1,10 +1,23 @@
 ((globalThis) => {
     const _listeners = new Map(); // nodeId → Map<eventType, [{callback, capture, once}]>
-    // Symbol-keyed escape hatch: Rust dispatchers (input_ext.rs etc.) pass
-    // { [Symbol.for('__bo_trusted__')]: true } in options to mark an event as
-    // trusted. Spec-side `new Event(type, opts)` from page JS produces
-    // isTrusted=false because pages don't know this Symbol.
-    const _TRUSTED = Symbol.for('__bo_trusted__');
+    // ---- Trusted-event authenticity (v0.1.0 behavioral E1) ----------------
+    // `isTrusted` MUST be both unforgeable and shaped like a real browser's:
+    //   * a GETTER on Event.prototype — NOT an own data property. Anti-bots
+    //     (DataDome/Akamai/Kasada/PerimeterX) read
+    //     `getOwnPropertyDescriptor(evt,'isTrusted')` and flag an own-data
+    //     `isTrusted` as synthetic (real browsers expose it via the prototype).
+    //   * backed by a MODULE-PRIVATE WeakSet that page JS cannot reach. The
+    //     old design keyed trust off `Symbol.for('__bo_trusted__')` — the
+    //     GLOBAL symbol registry — so any page could re-derive the symbol and
+    //     forge a trusted event (`new Event('x', {[Symbol.for(...)]: true})`).
+    // Only our privileged init scripts mint trust, via `_markTrusted`, handed
+    // off below through a temp global they capture-and-delete before any page
+    // script runs. There is no in-band (options/symbol) path from page JS.
+    const _trustedEvents = new WeakSet();
+    const _markTrusted = (ev) => {
+        try { if (ev && typeof ev === 'object') _trustedEvents.add(ev); } catch (_) {}
+        return ev;
+    };
 
     class Event {
         constructor(type, options = {}) {
@@ -16,7 +29,10 @@
             this.target = null;
             this.currentTarget = null;
             this.eventPhase = 0;
-            this.isTrusted = !!(options && options[_TRUSTED] === true);
+            // NOTE: `isTrusted` is intentionally NOT set here. It is a prototype
+            // getter (installed below) reading the private WeakSet — default
+            // false for page-constructed events; trusted only when our
+            // privileged dispatch path calls `_markTrusted(ev)`.
             this.timeStamp = performance.now();
             this._stopped = false;
             this._stoppedImmediate = false;
@@ -38,6 +54,18 @@
         static AT_TARGET = 2;
         static BUBBLING_PHASE = 3;
     }
+
+    // isTrusted as an inherited, native-masked prototype accessor backed by the
+    // private WeakSet. Subclasses (CustomEvent, MouseEvent, …) inherit it. The
+    // descriptor shape matches real Chrome: {get: ƒ, set: undefined,
+    // enumerable: true, configurable: true}.
+    Object.defineProperty(Event.prototype, 'isTrusted', {
+        configurable: true,
+        enumerable: true,
+        get: (typeof _maskFunction === 'function')
+            ? _maskFunction(function () { return _trustedEvents.has(this); }, 'get isTrusted')
+            : function () { return _trustedEvents.has(this); },
+    });
 
     class CustomEvent extends Event {
         constructor(type, options = {}) {
@@ -513,4 +541,18 @@
     // EventTarget is already defined in dom_bootstrap.js as the base of
     // the Node prototype chain — do not reassign it here or the
     // `document instanceof EventTarget` check will break.
+
+    // Privileged handoff of the trusted-event minter (behavioral E1/E2). Our
+    // init scripts (humanize.js) capture this into a closure and `delete` it
+    // synchronously at their top — before any page script runs — so page JS
+    // never observes it. Non-enumerable to keep it off Object.keys scans even
+    // in the brief window before capture.
+    try {
+        Object.defineProperty(globalThis, '__bo_mark_trusted', {
+            value: _markTrusted,
+            configurable: true,
+            enumerable: false,
+            writable: false,
+        });
+    } catch (_) { /* ignore */ }
 })(globalThis);

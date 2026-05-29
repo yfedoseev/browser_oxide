@@ -106,13 +106,38 @@ async fn event_constructor_default_is_not_trusted() {
 }
 
 #[tokio::test]
-async fn event_trusted_via_internal_symbol() {
-    // The Rust dispatchers can use Symbol.for('__bo_trusted__') to opt-in.
-    // Page JS doesn't know this Symbol unless it's registered; verify the
-    // mechanism works.
+async fn event_global_symbol_forgery_is_blocked() {
+    // behavioral E1 — the OLD design keyed trust off the GLOBAL symbol
+    // registry (`Symbol.for('__bo_trusted__')`), which any page can re-derive,
+    // making `isTrusted` forgeable. Trust now lives in a module-private
+    // WeakSet that page JS cannot reach, so this forgery attempt MUST fail.
     let r =
         evaluate("new Event('click', { [Symbol.for('__bo_trusted__')]: true }).isTrusted").await;
-    assert_eq!(r, "true", "Symbol-opt-in event must be trusted");
+    assert_eq!(
+        r, "false",
+        "global-symbol forgery must NOT produce a trusted event"
+    );
+}
+
+#[tokio::test]
+async fn istrusted_is_a_prototype_accessor_not_own_data() {
+    // behavioral E1 — anti-bots read getOwnPropertyDescriptor; real browsers
+    // expose isTrusted as a getter on Event.prototype, never as an own data
+    // property on the instance.
+    let own =
+        evaluate("Object.getOwnPropertyDescriptor(new Event('x'), 'isTrusted') === undefined")
+            .await;
+    assert_eq!(own, "true", "isTrusted must NOT be an own property");
+    let proto = evaluate(
+        "typeof Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted').get === 'function'",
+    )
+    .await;
+    assert_eq!(proto, "true", "isTrusted must be a prototype getter");
+    let masked = evaluate(
+        "Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted').get.toString().includes('[native code]')",
+    )
+    .await;
+    assert_eq!(masked, "true", "isTrusted getter must be native-masked");
 }
 
 // ================================================================
