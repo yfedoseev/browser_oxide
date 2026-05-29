@@ -530,7 +530,23 @@
                     if (_n === 'constructor') continue;
                     let _d;
                     try { _d = Object.getOwnPropertyDescriptor(_p, _n); } catch (_e) { continue; }
-                    if (_d && typeof _d.value === 'function') _methods.push(_n);
+                    // MASK-1 (parity-workflows): collect ACCESSOR props too
+                    // (get/set), not just data-value methods. _maskAsNative
+                    // already masks desc.get/desc.set (stealth_bootstrap.js:94),
+                    // but the sweep previously skipped accessor-only props, so
+                    // ~15 injected getters/setters (Request.signal, Response.*,
+                    // ReadableStream.locked, MessagePort.onmessage,
+                    // URLSearchParams.size, WebSocket.*) leaked JS source under
+                    // `getOwnPropertyDescriptor(proto,name).get.toString()` —
+                    // a Function.toString integrity tell ~11 vendors probe.
+                    if (
+                        _d &&
+                        (typeof _d.value === 'function' ||
+                            typeof _d.get === 'function' ||
+                            typeof _d.set === 'function')
+                    ) {
+                        _methods.push(_n);
+                    }
                 }
                 if (_methods.length) {
                     try { _mask(_p, ..._methods); } catch (_e) {}
