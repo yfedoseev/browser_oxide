@@ -136,7 +136,27 @@ confirms `safari18_ios` JA4/JA4_o are a known moving target):
 
 ---
 
+> **⚠️ CORRECTION (2026-05-29, verified against ground truth — supersedes §3
+> below).** §3's load-bearing claim is **FALSE**. I decoded the actual
+> `CIPHER_LIST_SAFARI_IOS` (`tls.rs:111-132`) against the authoritative
+> `lexiforest/curl-impersonate/tests/signatures/safari_18.0_iOS.yaml`:
+> `4865,4866,4867,49196,49195,52393,49200,49199,52392,49162,49161,49172,49171,157,156,53,47,49160,49170,10`.
+> **BO matches it byte-for-byte — both the SET (JA4 cipher-hash) and the ORDER
+> (JA4_o).** Real iOS-18 Safari *does* carry all THREE 3DES suites
+> (`49160=0xC008`, `49170=0xC012`, `10=0x000A`); the doc's "real Safari has only
+> one 3DES" was transcribed from a wrong reference. Curves (`29,23,24,25`) and
+> sigalgs (incl. the duplicated `rsa_pss_rsae_sha384`) also match. **Do NOT make
+> the §3 cipher change — it would break the currently-correct list.** The real
+> residual (if TLS at all) is the §4.1 ordered-variant: BoringSSL's auto-emitted
+> PADDING / trailing-GREASE *position* (JA4_o), confirmable only with a live
+> `tls.peet.ws` capture (added: `crates/net/tests/tls_fingerprint.rs::capture_profiles_ja4`).
+> If the live JA4_o matches the reference too, the iphone-Cloudflare trigger is
+> **not** the TLS layer and the search moves to JA4H (HTTP/2) / Accept headers.
+
 ## 3. ROOT CAUSE — the iphone TLS cipher SET is wrong (JA4 cipher-hash mismatch)
+
+> **(Falsified — see the CORRECTION banner above. Retained for the analysis
+> trail only.)**
 
 BO's iOS-Safari TLS branch is *substantially* implemented — this is the
 good news that retires `25_CLOUDFLARE_DEEP.md` H4's "maybe it falls back
