@@ -3787,6 +3787,39 @@
                     let bin = '';
                     for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
                     bodyEncoded = 'b:' + btoa(bin);
+                } else if (typeof FormData !== 'undefined' && body instanceof FormData) {
+                    // FIX-FORMDATA (parity-workflows): same multipart serialization
+                    // the fetch path does — XHR.send(formData) must produce a real
+                    // multipart/form-data body with a boundary, and the browser sets
+                    // the Content-Type itself (overriding any setRequestHeader). Used
+                    // by anti-bot scripts (Kasada, AWS variants) that POST proofs via
+                    // synchronous XHR.
+                    const boundary = '----browserOxideFormBoundary' +
+                        Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+                    let mp = '';
+                    body.forEach((value, name) => {
+                        mp += '--' + boundary + '\r\n';
+                        if (typeof Blob !== 'undefined' && value instanceof Blob) {
+                            mp += 'Content-Disposition: form-data; name="' + name + '"; filename="' +
+                                (value.name || 'blob') + '"\r\n';
+                            mp += 'Content-Type: ' + (value.type || 'application/octet-stream') + '\r\n\r\n';
+                            mp += String(value) + '\r\n';
+                        } else {
+                            mp += 'Content-Disposition: form-data; name="' + name + '"\r\n\r\n';
+                            mp += String(value) + '\r\n';
+                        }
+                    });
+                    mp += '--' + boundary + '--\r\n';
+                    bodyEncoded = 's:' + mp;
+                    // Force the browser-controlled Content-Type (drop any prior variant).
+                    for (const k of Object.keys(xhr._headers)) {
+                        if (k.toLowerCase() === 'content-type') delete xhr._headers[k];
+                    }
+                    xhr._headers['Content-Type'] = 'multipart/form-data; boundary=' + boundary;
+                } else if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+                    bodyEncoded = 's:' + body.toString();
+                    const hasCT = Object.keys(xhr._headers).some((k) => k.toLowerCase() === 'content-type');
+                    if (!hasCT) xhr._headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
                 } else {
                     bodyEncoded = 's:' + String(body);
                 }
