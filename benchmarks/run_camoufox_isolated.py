@@ -31,25 +31,40 @@ def classify(html: str):
         return "ERROR", len(html)
 
 
-async def visit_one(site):
-    """Fresh camoufox browser for a single site."""
+async def _visit_once(site):
+    """One fresh camoufox browser, one page load. Generous settle to match
+    BO's per-site budget (BO gets up to 90s + a 3-iter challenge loop)."""
     from camoufox.async_api import AsyncCamoufox
-    tag, length, err = "ERROR", 0, None
     mgr = AsyncCamoufox(headless=True)
     try:
         browser = await mgr.__aenter__()
         page = await browser.new_page()
-        await page.goto(site["url"], timeout=35000, wait_until="load")
-        await asyncio.sleep(3)
+        # domcontentloaded (not full load — some sites never fire load) then a
+        # generous settle so SPA hydration / challenge self-solves complete,
+        # comparable to BO's budget. A real browser solves challenges fast.
+        await page.goto(site["url"], timeout=45000, wait_until="domcontentloaded")
+        await asyncio.sleep(12)
         html = await page.content()
-        tag, length = classify(html)
-    except Exception as e:
-        err = str(e)[:160]
+        return classify(html) + (None,)
     finally:
         try:
             await mgr.__aexit__(None, None, None)
         except Exception:
             pass
+
+
+async def visit_one(site):
+    """Retry on driver crash/error — the camoufox/playwright driver is flaky
+    and crashes ~20% of fresh launches here; a retry recovers most. Up to 3
+    attempts; a real failure (challenge/timeout) is kept, only ERROR retries."""
+    tag, length, err = "ERROR", 0, None
+    for attempt in range(3):
+        try:
+            tag, length, err = await _visit_once(site)
+            return tag, length, err
+        except Exception as e:
+            err = str(e)[:160]
+            await asyncio.sleep(2)  # let the driver settle before relaunch
     return tag, length, err
 
 
@@ -62,9 +77,9 @@ async def main():
     for i, site in enumerate(corpus):
         st = time.time()
         try:
-            tag, length, err = await asyncio.wait_for(visit_one(site), timeout=90)
+            tag, length, err = await asyncio.wait_for(visit_one(site), timeout=180)
         except asyncio.TimeoutError:
-            tag, length, err = "TIMEOUT", 0, ">90s"
+            tag, length, err = "TIMEOUT", 0, ">180s"
         ms = int((time.time() - st) * 1000)
         row = {"cat": site.get("cat", ""), "name": site["name"], "url": site["url"],
                "tag": tag, "len": length, "ms": ms, "rss_mb": 0.0, "err": err}
