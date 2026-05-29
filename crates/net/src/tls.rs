@@ -179,7 +179,13 @@ const SAFARI_IOS_EXTENSION_PERMUTATION: &[u8] = &[
     14, // key_share
     15, // psk_key_exchange_modes
     17, // supported_versions
-    22, // cert_compression
+    21, // cert_compression (compress_certificate, type 27). boring2 kExtensions
+        // index is 21 (proven by CHROME_EXTENSION_PERMUTATION, which emits 0x1b);
+        // the previous `22` is the PADDING slot — a live tls.peet.ws capture
+        // (2026-05-29) showed BO emitting ext 0x15 (padding) instead of 0x1b
+        // here, giving JA4 t13d2013h2 vs real iOS-18 Safari's t13d2014h2. With
+        // 21, compress_certificate is emitted and BoringSSL auto-appends padding
+        // last by ClientHello length → the 14-extension Safari JA4.
 ];
 
 /// ALPN protocols: h2 + http/1.1
