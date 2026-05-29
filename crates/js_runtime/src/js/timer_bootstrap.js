@@ -55,8 +55,21 @@
     //            analytics) while preserving macys/ria/threads
     //            ~1.5s-delay hydration callbacks as refed.
     const UNREF_THRESHOLD_MS = 2000;
+    // parity-workflows M-3: on a challenge nav (page.rs sets
+    // `__keepLongTimersRefed` when the initial doc is an AWS-WAF /
+    // sec-cpt / DataDome / Cloudflare challenge), keep EVERY timer refed.
+    // Anti-bot self-solves schedule a long `chlg_duration` wait (sec-cpt
+    // 5-30 s) and defer the PoW-worker continuation behind a long
+    // setTimeout; unrefing those lets `run_until_idle` report AllWorkDone
+    // and the drain hands off before the token is posted. Real Chrome
+    // keeps the page alive across these waits. Gated on the flag ⇒ benign
+    // SPA pages keep the W5b unref behavior (no x.com/twitter regression).
     const _maybeUnref = _unrefRaw
-        ? (p, ms) => { if (ms >= UNREF_THRESHOLD_MS) _unrefRaw(p); }
+        ? (p, ms) => {
+              if (ms >= UNREF_THRESHOLD_MS && !globalThis.__keepLongTimersRefed) {
+                  _unrefRaw(p);
+              }
+          }
         : () => {};
 
     globalThis.setTimeout = function setTimeout(callback, delay = 0, ...args) {

@@ -3584,6 +3584,24 @@ impl Page {
             .ok();
         mark!("install error + fetch/XHR instrumentation");
 
+        // parity-workflows M-3: if the initial document is an anti-bot
+        // challenge (AWS-WAF / sec-cpt / DataDome / Cloudflare), keep all
+        // long timers refed for this page so the self-solve's
+        // `chlg_duration` wait + deferred PoW-worker continuation pin the
+        // event loop instead of being unref'd at UNREF_THRESHOLD_MS=2000
+        // (timer_bootstrap.js). Must be set BEFORE the page scripts run so
+        // challenge.js's setTimeout calls see the flag at schedule time.
+        // Narrow predicate set ⇒ false for every benign nav ⇒ no x.com /
+        // twitter SPA-unref regression.
+        let doc_is_challenge = is_awswaf_challenge(html)
+            || is_datadome_challenge(html)
+            || html.contains("sec-if-cpt-container")
+            || html.contains("sec-cpt-if")
+            || crate::classify::is_cf_challenge_doc(html);
+        if doc_is_challenge {
+            let _ = event_loop.execute_script("globalThis.__keepLongTimersRefed = true;");
+        }
+
         // Execute scripts in document order using pre-fetched code.
         // Interleave with event loop ticks to allow for microtasks and
         // macrotasks scheduled by one script to run before the next.
