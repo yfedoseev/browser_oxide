@@ -1522,6 +1522,7 @@ impl Page {
             .filter_map(|(i, script)| {
                 let src = script.src.as_ref()?;
                 let full_url = Self::resolve_url(&resp_url, src)?;
+                let dbg = std::env::var("BROWSER_OXIDE_DEBUG_NAV").is_ok();
                 if let Ok(parsed_url) = url::Url::parse(&full_url) {
                     if js_runtime::extensions::fetch_ext::check_csp(
                         net::csp::Directive::ScriptSrcElem,
@@ -1531,8 +1532,14 @@ impl Page {
                     )
                     .is_err()
                     {
+                        if dbg {
+                            eprintln!("[navigate] script[{i}] CSP-SKIP {full_url}");
+                        }
                         return None;
                     }
+                }
+                if dbg {
+                    eprintln!("[navigate] script[{i}] PREFETCH {full_url}");
                 }
                 let client = client.clone();
                 let profile = profile.clone();
@@ -1548,18 +1555,36 @@ impl Page {
                     hdrs.push(("sec-fetch-dest".to_string(), "script".to_string()));
                     hdrs.push(("sec-fetch-mode".to_string(), "no-cors".to_string()));
                     hdrs.push(("sec-fetch-site".to_string(), "cross-site".to_string()));
+                    let dbg = std::env::var("BROWSER_OXIDE_DEBUG_NAV").is_ok();
                     match client.get_follow_with_headers(&full_url, &hdrs, 5).await {
                         Ok(r) if r.ok() => {
                             let text = r.text();
                             if text.trim_start().starts_with("<!")
                                 || text.trim_start().starts_with("<html")
                             {
+                                if dbg {
+                                    eprintln!("[navigate] script[{i}] FETCHED-BUT-HTML-FILTERED {} ({} bytes)", full_url, text.len());
+                                }
                                 None
                             } else {
+                                if dbg {
+                                    eprintln!("[navigate] script[{i}] FETCHED-OK {} ({} bytes)", full_url, text.len());
+                                }
                                 Some((i, text, r.timings.clone()))
                             }
                         }
-                        _ => None,
+                        Ok(r) => {
+                            if dbg {
+                                eprintln!("[navigate] script[{i}] FETCH-NOT-OK status={} {}", r.status, full_url);
+                            }
+                            None
+                        }
+                        Err(e) => {
+                            if dbg {
+                                eprintln!("[navigate] script[{i}] FETCH-ERR {e} {full_url}");
+                            }
+                            None
+                        }
                     }
                 })
             })
@@ -3825,8 +3850,7 @@ mod tests {
     /// `sec-if-cpt-container` / `sec-cpt-if` markers).
     #[test]
     fn seccpt_solved_requires_marker_and_clean_body() {
-        let challenge_body =
-            r#"<html><body><div id="sec-if-cpt-container"></div><script src="/qjBo8d0vY/..."></script></body></html>"#;
+        let challenge_body = r#"<html><body><div id="sec-if-cpt-container"></div><script src="/qjBo8d0vY/..."></script></body></html>"#;
         let real_body = "<html><body><h1>The Home Depot</h1>main content</body></html>";
 
         // Solved cookie + real body → SOLVED.
@@ -3836,10 +3860,7 @@ mod tests {
         ));
 
         // Solved cookie BUT still-on-challenge body → NOT solved.
-        assert!(!is_seccpt_solved(
-            "sec_cpt=ABC123~3~XYZ",
-            challenge_body
-        ));
+        assert!(!is_seccpt_solved("sec_cpt=ABC123~3~XYZ", challenge_body));
 
         // Cookie missing `~3~` marker (state ~1~ or ~2~) → NOT solved.
         assert!(!is_seccpt_solved("sec_cpt=ABC123~1~XYZ", real_body));

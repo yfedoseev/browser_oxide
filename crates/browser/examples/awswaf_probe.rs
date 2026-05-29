@@ -71,6 +71,10 @@ async fn main() {
                     return JSON.stringify({
                         awswafintegration_exists: !!awi,
                         awswafintegration_methods: awi ? Object.keys(awi) : null,
+                        // THE bailout signal: did challenge.js fingerprint then
+                        // call getToken (proceed) or silently return (bail)?
+                        get_token_called: p ? !!p.getTokenCalled : null,
+                        check_force_refresh_called: p ? !!p.checkForceRefreshCalled : null,
                         probe_installed: !!p,
                         access_count: p ? p.accesses.length : 0,
                         error_count: p ? p.errors.length : 0,
