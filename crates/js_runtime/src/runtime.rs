@@ -306,7 +306,15 @@ pub fn create_runtime_with_signals(
 /// DO get canvas (for `OffscreenCanvas`, which sites probe inside
 /// workers per the WHATWG spec), console, crypto, timers, fetch,
 /// and the worker-side ops.
-pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
+/// `is_secure_context` is inherited from the spawning document: a Worker is a
+/// secure context iff its owner is (HTML spec §"secure context"). Without this,
+/// the worker realm defaulted to insecure and `cleanup_bootstrap.js` stripped
+/// `crypto.subtle` / `crypto.randomUUID` — which silently broke any worker doing
+/// SHA-256 proof-of-work (AWS WAF `challenge.js`, reCAPTCHA `webworker.js`).
+pub fn create_worker_runtime(
+    profile: Option<StealthProfile>,
+    is_secure_context: bool,
+) -> JsRuntime {
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![
             console_extension::init_ops(),
@@ -336,11 +344,18 @@ pub fn create_worker_runtime(profile: Option<StealthProfile>) -> JsRuntime {
     runtime.op_state().borrow_mut().put(dom_state);
 
     // StealthState must also carry the profile so op_get_profile_value
-    // returns the correct values inside the worker context.
+    // returns the correct values inside the worker context. is_secure_context
+    // is inherited from the parent document so [SecureContext] APIs
+    // (crypto.subtle, crypto.randomUUID) survive cleanup_bootstrap in workers
+    // spawned from secure (https / blob:https) pages.
     runtime
         .op_state()
         .borrow_mut()
-        .put(StealthState::new(profile));
+        .put(StealthState::new_with_flags(
+            profile,
+            false,
+            is_secure_context,
+        ));
 
     // W2.7 — every worker bootstrap script runs with name "<anonymous>"
     // (V8's eval-default) so Error.stack frames don't leak our internal

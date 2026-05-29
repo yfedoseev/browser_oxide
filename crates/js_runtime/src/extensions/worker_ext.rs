@@ -233,6 +233,11 @@ pub fn op_worker_spawn(
         .profile
         .clone()
         .or_else(|| state.stealth_profile.clone());
+    // A Worker inherits its owner's secure-context (HTML spec). Captured here
+    // (Copy bool) and moved into the worker thread so the worker realm keeps
+    // crypto.subtle / crypto.randomUUID when spawned from an https/blob:https
+    // page — required by SHA-256 proof-of-work workers (AWS WAF, reCAPTCHA).
+    let is_secure_context = stealth.is_secure_context;
     let (to_worker_tx, to_worker_rx) = std::sync::mpsc::channel::<String>();
     let (to_parent_tx, to_parent_rx) = std::sync::mpsc::channel::<String>();
     let terminate = Arc::new(AtomicBool::new(false));
@@ -287,7 +292,8 @@ pub fn op_worker_spawn(
 
             let local = tokio::task::LocalSet::new();
             local.block_on(&rt, async move {
-                let mut runtime = crate::runtime::create_worker_runtime(profile);
+                let mut runtime =
+                    crate::runtime::create_worker_runtime(profile, is_secure_context);
 
                 // Execute the worker script inside the worker's isolate.
                 // Module workers go through `load_main_es_module_from_code`
