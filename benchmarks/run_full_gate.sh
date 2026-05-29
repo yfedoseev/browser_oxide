@@ -22,18 +22,16 @@ CACHE=/home/yfedoseev/.cache
 
 note() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
 
+# BO runs PER-SITE ISOLATED (fresh sweep_metrics process per site) so memory
+# can't accumulate across the 126 heavy now-passing pages — a single process
+# ran away (1.7GB RSS, 100% CPU, stuck) on the cold all-in-one path.
 run_bo() {
   local profile="$1" mode="$2"
   local out="$OUT/bo_${profile}_${mode}.json"
-  note "START bo $profile $mode"
+  note "START bo $profile $mode (isolated)"
   local start=$(date +%s)
-  if [ "$mode" = "pool" ]; then
-    BROWSER_OXIDE_SWEEP_POOL=1 "$BO_BIN" "$profile" "$CORPUS_FILE" "$out" \
-      > "$OUT/bo_${profile}_${mode}.log" 2>&1 || note "WARN bo $profile $mode nonzero"
-  else
-    "$BO_BIN" "$profile" "$CORPUS_FILE" "$out" \
-      > "$OUT/bo_${profile}_${mode}.log" 2>&1 || note "WARN bo $profile $mode nonzero"
-  fi
+  "$PY" "$REPO/benchmarks/run_bo_isolated.py" "$profile" "$CORPUS_FILE" "$out" \
+    > "$OUT/bo_${profile}_${mode}.log" 2>&1 || note "WARN bo $profile $mode nonzero"
   note "DONE  bo $profile $mode in $(($(date +%s)-start))s"
 }
 
@@ -49,11 +47,10 @@ run_comp() {
 
 note "==== FULL GATE START ($(date)) corpus=$(python3 -c 'import json;print(len(json.load(open("/tmp/corpus.json"))))') sites ===="
 
-# 1) browser_oxide — 4 profiles cold + pool for the headline profile.
+# 1) browser_oxide — 4 profiles, per-site isolated (no pool: same runaway risk).
 for prof in chrome_148_macos pixel_9_pro_chrome_148 iphone_15_pro_safari_18 firefox_135_macos; do
   run_bo "$prof" cold
 done
-run_bo chrome_148_macos pool
 
 # 2) Chromium-tier competitors.
 for eng in playwright playwright_stealth patchright; do
