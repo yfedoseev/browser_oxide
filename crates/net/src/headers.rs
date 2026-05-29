@@ -44,11 +44,7 @@ pub fn nav_headers_for_url(
 /// Replace `accept-language` in `hdrs` with the region-appropriate value
 /// for `url`, using the browser family's q-step convention. No-op if the
 /// URL's TLD has no regional override registered.
-pub fn apply_region_accept_language(
-    hdrs: &mut [(String, String)],
-    url: &str,
-    browser_name: &str,
-) {
+pub fn apply_region_accept_language(hdrs: &mut [(String, String)], url: &str, browser_name: &str) {
     let Some(langs) = region_languages_for_url(url) else {
         return;
     };
