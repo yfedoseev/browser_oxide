@@ -116,3 +116,19 @@ Ordered by ROI = (expected flips × confidence) ÷ effort. "Flips" are *expected
 ## 6. One-Line Bottom Line
 
 The highest-ROI work is **Phase 1 quick wins (homedepot deterministic, bestbuy geo-follow, firefox interim convergence)** followed by **Phase 2 wiring the already-present ES-module capability** (5-of-7 sites, contingent on idle+budget fixes landing together) — with the **Firefox TLS/H2 wire (Phase 4)** as the single highest-effort lever that converges the profile set AND unblocks DataDome. ozon/wildberries are module-exec gaps (not IP blocks), adidas is a de-scoped ML-tail, and etsy has no deterministic public-engine path.
+
+---
+
+## 7. P0 execution notes (2026-05-30)
+
+- **Harness iteration count CONFIRMED = 3.** `sweep_metrics` cold path
+  (`examples/sweep_metrics.rs:202`) calls `Page::navigate(url, profile, 3)`;
+  the post-solve reload gate is `iter+1 == iterations` (`page.rs:2738`), so a
+  sec-cpt cookie-only solve has 2 reload opportunities — the homedepot flip is
+  measurable. `run_bo_isolated.py` uses this cold path (no `SWEEP_POOL`). No
+  harness change needed. (Roadmap #1 satisfied.)
+- **adidas NOT de-scoped (revises roadmap #4).** BO returns `L3-RENDERED/2508`
+  — a *rendered shell*, not an `Akamai-CHL` tag — so adidas is primarily a
+  **module-exec / thin-render candidate (P2)**, not (only) the holistic ML-tail
+  the Akamai agent assumed. Per the "fix all, no defer" goal it stays in P2's
+  target set; escalate to deep Akamai sensor work only if P2 does not flip it.
