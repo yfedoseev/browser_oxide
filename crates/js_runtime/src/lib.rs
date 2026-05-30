@@ -3,6 +3,7 @@
 //! MIT/Apache-2.0 licensed. Part of the browser_oxide project.
 
 pub mod extensions;
+pub mod module_loader;
 pub mod native_fns;
 pub mod runtime;
 pub mod snapshot;
@@ -155,6 +156,53 @@ impl BrowserJsRuntime {
         self.inner
             .run_event_loop(deno_core::PollEventLoopOptions::default())
             .await
+    }
+
+    /// P2 — load + evaluate an EXTERNAL ES module (`<script type="module" src>`).
+    /// The configured `BrowserModuleLoader` fetches the import graph on demand;
+    /// we drive the event loop so those async fetches + top-level async work
+    /// resolve. Returns Err for the caller to log — a throwing/failing module
+    /// must NOT blank the page (matches classic-script handling).
+    pub async fn load_eval_module_url(
+        &mut self,
+        url: &str,
+    ) -> Result<(), deno_core::error::AnyError> {
+        let spec = deno_core::ModuleSpecifier::parse(url)
+            .map_err(|e| deno_core::error::AnyError::msg(format!("module url {url}: {e}")))?;
+        let mod_id = self.inner.load_main_es_module(&spec).await?;
+        self.eval_module(mod_id).await
+    }
+
+    /// P2 — load + evaluate an INLINE ES module. `specifier` must be a unique
+    /// URL whose path is the document URL (e.g. `https://site/p#oxide-mod-3`) so
+    /// relative `import`s resolve against the document while staying distinct
+    /// from other inline modules on the page.
+    pub async fn load_eval_module_code(
+        &mut self,
+        specifier: &str,
+        code: String,
+    ) -> Result<(), deno_core::error::AnyError> {
+        let spec = deno_core::ModuleSpecifier::parse(specifier).map_err(|e| {
+            deno_core::error::AnyError::msg(format!("inline module spec {specifier}: {e}"))
+        })?;
+        let mod_id = self
+            .inner
+            .load_main_es_module_from_code(&spec, code)
+            .await?;
+        self.eval_module(mod_id).await
+    }
+
+    async fn eval_module(
+        &mut self,
+        mod_id: deno_core::ModuleId,
+    ) -> Result<(), deno_core::error::AnyError> {
+        let eval = self.inner.mod_evaluate(mod_id);
+        // Drive the loop so the loader's async fetches + any top-level await
+        // resolve, THEN await the module's evaluation result.
+        self.inner
+            .run_event_loop(deno_core::PollEventLoopOptions::default())
+            .await?;
+        eval.await
     }
 
     /// Get console output captured so far.

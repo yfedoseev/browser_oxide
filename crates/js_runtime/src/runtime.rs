@@ -80,6 +80,17 @@ pub fn create_runtime_with_signals(
     }
     state.update_cached_rules();
 
+    // P2 — ES-module loader for document `<script type="module">`. Resolves
+    // relative specifiers + fetches the import graph through the shared HTTP
+    // session (cookie/profile-consistent with the nav). Built before
+    // `stealth_profile` is moved into StealthState below. Without it, module
+    // SPA bundles throw SyntaxError and are dropped (the thin-render gap).
+    let module_loader: Option<std::rc::Rc<dyn deno_core::ModuleLoader>> =
+        options.stealth_profile.as_ref().map(|p| {
+            std::rc::Rc::new(crate::module_loader::BrowserModuleLoader::new(p.clone()))
+                as std::rc::Rc<dyn deno_core::ModuleLoader>
+        });
+
     // Create fetch client from stealth profile if available
     let fetch_state = match &options.stealth_profile {
         Some(profile) => {
@@ -135,6 +146,7 @@ pub fn create_runtime_with_signals(
         // The SAB *constructor* is always exposed by V8; we gate transfer
         // separately on `cross_origin_isolated` (gap #30).
         shared_array_buffer_store: Some(SharedArrayBufferStore::default()),
+        module_loader,
         ..Default::default()
     });
 

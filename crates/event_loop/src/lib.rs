@@ -404,6 +404,25 @@ impl BrowserEventLoop {
         self.runtime.execute_script(code, Some(name))
     }
 
+    /// P2 — execute an EXTERNAL ES module (`<script type="module" src>`) via the
+    /// module loader (fetches the import graph) instead of classic compile.
+    pub async fn eval_module_url(
+        &mut self,
+        url: &str,
+    ) -> Result<(), deno_core::error::AnyError> {
+        self.runtime.load_eval_module_url(url).await
+    }
+
+    /// P2 — execute an INLINE ES module. `specifier` is the document URL plus a
+    /// unique fragment so its relative imports resolve against the document.
+    pub async fn eval_module_code(
+        &mut self,
+        specifier: &str,
+        code: String,
+    ) -> Result<(), deno_core::error::AnyError> {
+        self.runtime.load_eval_module_code(specifier, code).await
+    }
+
     /// Run scripts then wait for idle.
     pub async fn execute_and_run(
         &mut self,

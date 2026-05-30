@@ -12,6 +12,11 @@ pub struct ScriptInfo {
     /// fetch path (`page.rs::navigate_with_init`) can pass it to
     /// `net::csp::CheckCtx`.
     pub nonce: Option<String>,
+    /// `<script type="module">` — must be executed via the ES-module path
+    /// (`load_main_es_module` + `mod_evaluate`) NOT classic `execute_script`,
+    /// which throws `SyntaxError: Cannot use import statement outside a module`
+    /// and silently drops modern Vite/React/Vue bundles. (P2 / thin-render fix.)
+    pub is_module: bool,
 }
 
 /// Find all <script> elements in the DOM and extract their content.
@@ -66,12 +71,24 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                         .map(|a| a.value.to_string())
                         .filter(|n| !n.is_empty());
 
+                    // `type="module"` (and the rarer `type="text/javascript;
+                    // version=module"` is not a thing — only the exact "module"
+                    // token) routes to the ES-module path. `type="importmap"`
+                    // is handled separately (skipped here, not executable code).
+                    let is_module = script_type == Some("module");
+                    if script_type == Some("importmap") || script_type == Some("speculationrules")
+                    {
+                        collect_scripts(dom, child_id, scripts);
+                        continue;
+                    }
+
                     if src.is_some() {
                         // External script — store the URL for fetching
                         scripts.push(ScriptInfo {
                             code: String::new(),
                             src,
                             nonce,
+                            is_module,
                         });
                     } else {
                         // Inline script
@@ -81,6 +98,7 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                                 code,
                                 src: None,
                                 nonce,
+                                is_module,
                             });
                         }
                     }

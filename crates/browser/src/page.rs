@@ -3686,7 +3686,40 @@ impl Page {
                 // DataDome.
                 url.to_string()
             };
-            if let Err(e) = event_loop.execute_script_with_name(&code, &name) {
+
+            if script.is_module {
+                // P2 — `<script type="module">`: execute via the ES-module
+                // loader (resolves + fetches the import graph) instead of
+                // classic `v8::Script::compile`, which throws
+                // `SyntaxError: Cannot use import statement outside a module`
+                // and drops modern Vite/React/Vue bundles (the thin-render gap).
+                // BOUND the module eval: a module whose import graph stalls (a
+                // dep that never resolves) or whose top-level work never idles
+                // must NOT hang the whole navigation. 10s/module is generous;
+                // on timeout we log and continue so the page renders what it has.
+                let eval_fut = async {
+                    if let Some(src) = &script.src {
+                        // External module: resolve src to an absolute specifier;
+                        // reuse the prefetched entry, loader fetches the imports.
+                        let module_url = url::Url::parse(url)
+                            .ok()
+                            .and_then(|base| base.join(src).ok())
+                            .map(|u| u.to_string())
+                            .unwrap_or_else(|| src.clone());
+                        event_loop.eval_module_code(&module_url, code.clone()).await
+                    } else {
+                        // Inline module: unique specifier whose path is the doc
+                        // URL so its relative imports resolve against the document.
+                        let spec = format!("{url}#oxide-mod-{i}");
+                        event_loop.eval_module_code(&spec, code.clone()).await
+                    }
+                };
+                match tokio::time::timeout(Duration::from_secs(10), eval_fut).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => tracing::warn!(script = %name, error = %e, "ES module eval error"),
+                    Err(_) => tracing::warn!(script = %name, "ES module eval timed out (10s) — continuing"),
+                }
+            } else if let Err(e) = event_loop.execute_script_with_name(&code, &name) {
                 tracing::warn!(script = %name, error = %e, "Script execution error");
             }
 
