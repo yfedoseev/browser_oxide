@@ -43,7 +43,11 @@ REPO = Path(__file__).resolve().parent.parent
 CLASSIFY = REPO / "target" / "release" / "examples" / "classify_stdin"
 DIAG = {"areyouheadless"}
 
-MAX_LOAD = float(os.environ.get("CR_MAX_LOAD", "6.0"))
+MAX_LOAD = float(os.environ.get("CR_MAX_LOAD", "25.0"))
+# Free RAM (GiB) required before launching a site. Each camoufox Firefox needs
+# ~5 GB; on the shared 14 GB box it gets OOM-killed ("Connection closed") if it
+# launches low on memory. THE important gate for camoufox.
+MIN_FREE_GB = float(os.environ.get("CR_MIN_FREE_GB", "6.0"))
 SETTLE = int(os.environ.get("CR_SETTLE", "12"))
 GOTO_MS = int(os.environ.get("CR_GOTO_MS", "60000"))
 RETRIES = int(os.environ.get("CR_RETRIES", "4"))
@@ -64,20 +68,35 @@ def classify(html: str):
         return "ERROR", len(html)
 
 
+def _avail_gb():
+    """MemAvailable in GiB (what the kernel thinks is allocatable without swap)."""
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / (1024 * 1024)
+    except Exception:
+        pass
+    return 999.0
+
+
 def wait_for_quiet(name):
-    """Block until 1-min loadavg < MAX_LOAD (or LOAD_WAIT elapses)."""
+    """Block until BOTH 1-min loadavg < MAX_LOAD AND free RAM > MIN_FREE_GB
+    (or LOAD_WAIT elapses). The memory gate is the important one for camoufox:
+    each Firefox needs ~5 GB and gets OOM-killed (`Connection closed`) if it
+    launches when the shared 14 GB box is low on memory."""
     t0 = time.time()
     waited = False
     while time.time() - t0 < LOAD_WAIT:
         load1 = os.getloadavg()[0]
-        if load1 < MAX_LOAD:
+        avail = _avail_gb()
+        if load1 < MAX_LOAD and avail > MIN_FREE_GB:
             if waited:
-                print(f"    [load-gate] cleared (load={load1:.1f}) after "
-                      f"{int(time.time()-t0)}s", flush=True)
+                print(f"    [gate] cleared (load={load1:.1f} mem={avail:.1f}GB) "
+                      f"after {int(time.time()-t0)}s", flush=True)
             return load1
         if not waited:
-            print(f"    [load-gate] {name}: load={load1:.1f} >= {MAX_LOAD}, "
-                  f"waiting for quiet...", flush=True)
+            print(f"    [gate] {name}: load={load1:.1f} mem={avail:.1f}GB "
+                  f"(need load<{MAX_LOAD} mem>{MIN_FREE_GB}GB), waiting...", flush=True)
             waited = True
         time.sleep(10)
     return os.getloadavg()[0]  # gave up; proceed anyway

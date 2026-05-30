@@ -12,8 +12,8 @@ STABLE=/tmp/warm_verify/sweep_stable
 BOVENV=/tmp/bo-venv/bin/python
 CF150=/tmp/cfv150/bin/python
 export PLAYWRIGHT_BROWSERS_PATH=/home/yfedoseev/.cache/ms-playwright
-export CR_MAX_LOAD=6.0 CR_RETRIES=4 CR_SETTLE=12 CR_COOLDOWN=4
-export BO_MAX_LOAD=6.0 BO_SITE_TIMEOUT=180 BO_SWEEP_BIN="$STABLE"
+export CR_MAX_LOAD=20.0 CR_MIN_FREE_GB=7.0 CR_RETRIES=5 CR_SETTLE=12 CR_COOLDOWN=5 CR_LOAD_WAIT=600
+export BO_MAX_LOAD=20.0 BO_SITE_TIMEOUT=180 BO_SWEEP_BIN="$STABLE"
 note(){ echo "[$(date +%H:%M:%S)] $*"; }
 
 # Ensure a stable binary (sweep_metrics + classify_stdin) immune to target churn.

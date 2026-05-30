@@ -1,0 +1,1276 @@
+{
+  "summary": {
+    "engine": "browser_oxide",
+    "profile": "pixel_9_pro_chrome_148",
+    "mode": "isolated",
+    "n": 126,
+    "pass": 110,
+    "production_n": 125,
+    "production_pass": 110,
+    "diagnostic_n": 1,
+    "wall_total_ms": 3212883
+  },
+  "results": [
+    {
+      "cat": "news",
+      "name": "reuters",
+      "url": "https://www.reuters.com/",
+      "tag": "DataDome-CHL",
+      "len": 1422,
+      "ms": 90837,
+      "rss_mb": 47.9,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "facebook",
+      "url": "https://www.facebook.com/",
+      "tag": "L3-RENDERED",
+      "len": 249851,
+      "ms": 2197,
+      "rss_mb": 58.3,
+      "err": null
+    },
+    {
+      "cat": "chl-known",
+      "name": "douyin",
+      "url": "https://www.douyin.com/",
+      "tag": "L3-RENDERED",
+      "len": 6327,
+      "ms": 4559,
+      "rss_mb": 63.2,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "duolingo",
+      "url": "https://www.duolingo.com/",
+      "tag": "L3-RENDERED",
+      "len": 13566,
+      "ms": 10157,
+      "rss_mb": 161.0,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "x-com",
+      "url": "https://x.com/",
+      "tag": "L3-RENDERED",
+      "len": 274276,
+      "ms": 1781,
+      "rss_mb": 46.5,
+      "err": null
+    },
+    {
+      "cat": "chl-known",
+      "name": "leboncoin",
+      "url": "https://www.leboncoin.fr/",
+      "tag": "L3-RENDERED",
+      "len": 252829,
+      "ms": 18567,
+      "rss_mb": 84.7,
+      "err": null
+    },
+    {
+      "cat": "amazon",
+      "name": "amazon-ca",
+      "url": "https://www.amazon.ca/",
+      "tag": "L3-RENDERED",
+      "len": 994700,
+      "ms": 12762,
+      "rss_mb": 84.7,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "pinterest",
+      "url": "https://www.pinterest.com/",
+      "tag": "L3-RENDERED",
+      "len": 491210,
+      "ms": 15978,
+      "rss_mb": 60.9,
+      "err": null
+    },
+    {
+      "cat": "amazon",
+      "name": "amazon-fr",
+      "url": "https://www.amazon.fr/",
+      "tag": "L3-RENDERED",
+      "len": 1046215,
+      "ms": 18227,
+      "rss_mb": 82.4,
+      "err": null
+    },
+    {
+      "cat": "tech",
+      "name": "google-cloud",
+      "url": "https://cloud.google.com/",
+      "tag": "L3-RENDERED",
+      "len": 1808047,
+      "ms": 7721,
+      "rss_mb": 90.1,
+      "err": null
+    },
+    {
+      "cat": "chl-known",
+      "name": "hyatt",
+      "url": "https://www.hyatt.com/",
+      "tag": "Kasada-CHL",
+      "len": 737,
+      "ms": 92848,
+      "rss_mb": 96.8,
+      "err": null
+    },
+    {
+      "cat": "realestate",
+      "name": "zillow",
+      "url": "https://www.zillow.com/",
+      "tag": "L3-RENDERED",
+      "len": 402225,
+      "ms": 16379,
+      "rss_mb": 66.2,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "creepjs",
+      "url": "https://abrahamjuliot.github.io/creepjs/",
+      "tag": "L3-RENDERED",
+      "len": 57416,
+      "ms": 747,
+      "rss_mb": 77.0,
+      "err": null
+    },
+    {
+      "cat": "search",
+      "name": "brave",
+      "url": "https://search.brave.com/",
+      "tag": "L3-RENDERED",
+      "len": 95064,
+      "ms": 496,
+      "rss_mb": 59.3,
+      "err": null
+    },
+    {
+      "cat": "streaming",
+      "name": "spotify",
+      "url": "https://open.spotify.com/",
+      "tag": "L3-RENDERED",
+      "len": 147914,
+      "ms": 971,
+      "rss_mb": 46.8,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "walmart",
+      "url": "https://www.walmart.com/",
+      "tag": "L3-RENDERED",
+      "len": 333951,
+      "ms": 25212,
+      "rss_mb": 72.7,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "areyouheadless",
+      "url": "https://arh.antoinevastel.com/bots/areyouheadless",
+      "tag": "L3-RENDERED",
+      "len": 3653,
+      "ms": 6719,
+      "rss_mb": 69.6,
+      "err": null,
+      "diagnostic": true
+    },
+    {
+      "cat": "ru",
+      "name": "mail-ru",
+      "url": "https://mail.ru/",
+      "tag": "L3-RENDERED",
+      "len": 431802,
+      "ms": 29893,
+      "rss_mb": 63.3,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "ebay",
+      "url": "https://www.ebay.com/",
+      "tag": "L3-RENDERED",
+      "len": 727617,
+      "ms": 46607,
+      "rss_mb": 138.4,
+      "err": null
+    },
+    {
+      "cat": "gov-bank",
+      "name": "chase",
+      "url": "https://www.chase.com/",
+      "tag": "L3-RENDERED",
+      "len": 310636,
+      "ms": 2272,
+      "rss_mb": 63.5,
+      "err": null
+    },
+    {
+      "cat": "realestate",
+      "name": "realtor",
+      "url": "https://www.realtor.com/",
+      "tag": "Kasada-CHL",
+      "len": 1764,
+      "ms": 92496,
+      "rss_mb": 97.5,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "imdb",
+      "url": "https://www.imdb.com/",
+      "tag": "L3-RENDERED",
+      "len": 1255270,
+      "ms": 26165,
+      "rss_mb": 103.8,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "macys",
+      "url": "https://www.macys.com/",
+      "tag": "L3-RENDERED",
+      "len": 1269779,
+      "ms": 15508,
+      "rss_mb": 141.2,
+      "err": null
+    },
+    {
+      "cat": "amazon",
+      "name": "amazon-co-uk",
+      "url": "https://www.amazon.co.uk/",
+      "tag": "L3-RENDERED",
+      "len": 966394,
+      "ms": 19014,
+      "rss_mb": 83.7,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "slack-com",
+      "url": "https://slack.com/",
+      "tag": "L3-RENDERED",
+      "len": 246197,
+      "ms": 1250,
+      "rss_mb": 68.8,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "alibaba",
+      "url": "https://www.alibaba.com/",
+      "tag": "L3-RENDERED",
+      "len": 194662,
+      "ms": 3868,
+      "rss_mb": 103.9,
+      "err": null
+    },
+    {
+      "cat": "travel",
+      "name": "hotels",
+      "url": "https://www.hotels.com/",
+      "tag": "L3-RENDERED",
+      "len": 559994,
+      "ms": 31325,
+      "rss_mb": 115.7,
+      "err": null
+    },
+    {
+      "cat": "tech",
+      "name": "openai",
+      "url": "https://openai.com/",
+      "tag": "L3-RENDERED",
+      "len": 420133,
+      "ms": 91304,
+      "rss_mb": 69.2,
+      "err": null
+    },
+    {
+      "cat": "gov-bank",
+      "name": "wellsfargo",
+      "url": "https://www.wellsfargo.com/",
+      "tag": "L3-RENDERED",
+      "len": 125742,
+      "ms": 15398,
+      "rss_mb": 94.8,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "homedepot",
+      "url": "https://www.homedepot.com/",
+      "tag": "Akamai-CHL",
+      "len": 2758,
+      "ms": 135380,
+      "rss_mb": 78.0,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "pixelscan",
+      "url": "https://pixelscan.net/",
+      "tag": "L3-RENDERED",
+      "len": 103748,
+      "ms": 1908,
+      "rss_mb": 48.7,
+      "err": null
+    },
+    {
+      "cat": "tech",
+      "name": "aws",
+      "url": "https://aws.amazon.com/",
+      "tag": "L3-RENDERED",
+      "len": 1851660,
+      "ms": 15173,
+      "rss_mb": 108.3,
+      "err": null
+    },
+    {
+      "cat": "travel",
+      "name": "booking",
+      "url": "https://www.booking.com/",
+      "tag": "L3-RENDERED",
+      "len": 503869,
+      "ms": 6987,
+      "rss_mb": 88.3,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "nowsecure",
+      "url": "https://nowsecure.nl/",
+      "tag": "L3-RENDERED",
+      "len": 191354,
+      "ms": 105973,
+      "rss_mb": 46.1,
+      "err": null
+    },
+    {
+      "cat": "streaming",
+      "name": "youtube",
+      "url": "https://www.youtube.com/",
+      "tag": "L3-RENDERED",
+      "len": 309574,
+      "ms": 15593,
+      "rss_mb": 96.3,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "quora",
+      "url": "https://www.quora.com/",
+      "tag": "L3-RENDERED",
+      "len": 78754,
+      "ms": 15382,
+      "rss_mb": 45.9,
+      "err": null
+    },
+    {
+      "cat": "news",
+      "name": "wsj",
+      "url": "https://www.wsj.com/",
+      "tag": "L3-RENDERED",
+      "len": 275578,
+      "ms": 30761,
+      "rss_mb": 85.3,
+      "err": null
+    },
+    {
+      "cat": "tech",
+      "name": "azure",
+      "url": "https://azure.microsoft.com/",
+      "tag": "L3-RENDERED",
+      "len": 524020,
+      "ms": 41726,
+      "rss_mb": 109.6,
+      "err": null
+    },
+    {
+      "cat": "news",
+      "name": "nytimes",
+      "url": "https://www.nytimes.com/",
+      "tag": "L3-RENDERED",
+      "len": 1122978,
+      "ms": 16452,
+      "rss_mb": 105.1,
+      "err": null
+    },
+    {
+      "cat": "ru",
+      "name": "ria",
+      "url": "https://ria.ru/",
+      "tag": "L3-RENDERED",
+      "len": 1139518,
+      "ms": 21283,
+      "rss_mb": 82.6,
+      "err": null
+    },
+    {
+      "cat": "search",
+      "name": "bing",
+      "url": "https://www.bing.com/",
+      "tag": "L3-RENDERED",
+      "len": 126447,
+      "ms": 2360,
+      "rss_mb": 52.8,
+      "err": null
+    },
+    {
+      "cat": "reference",
+      "name": "mdn",
+      "url": "https://developer.mozilla.org/",
+      "tag": "L3-RENDERED",
+      "len": 99764,
+      "ms": 532,
+      "rss_mb": 42.2,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "amiunique",
+      "url": "https://amiunique.org/",
+      "tag": "L3-RENDERED",
+      "len": 571152,
+      "ms": 3088,
+      "rss_mb": 57.5,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "coursera",
+      "url": "https://www.coursera.org/",
+      "tag": "L3-RENDERED",
+      "len": 801898,
+      "ms": 25634,
+      "rss_mb": 59.3,
+      "err": null
+    },
+    {
+      "cat": "tech",
+      "name": "stripe",
+      "url": "https://stripe.com/",
+      "tag": "L3-RENDERED",
+      "len": 300903,
+      "ms": 31736,
+      "rss_mb": 96.8,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "substack",
+      "url": "https://substack.com/",
+      "tag": "L3-RENDERED",
+      "len": 65016,
+      "ms": 105277,
+      "rss_mb": 93.5,
+      "err": null
+    },
+    {
+      "cat": "gov-bank",
+      "name": "paypal",
+      "url": "https://www.paypal.com/",
+      "tag": "L3-RENDERED",
+      "len": 252958,
+      "ms": 3242,
+      "rss_mb": 64.0,
+      "err": null
+    },
+    {
+      "cat": "search",
+      "name": "duckduckgo",
+      "url": "https://duckduckgo.com/",
+      "tag": "L3-RENDERED",
+      "len": 88293,
+      "ms": 25444,
+      "rss_mb": 61.5,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "ikea",
+      "url": "https://www.ikea.com/",
+      "tag": "L3-RENDERED",
+      "len": 584000,
+      "ms": 25463,
+      "rss_mb": 56.4,
+      "err": null
+    },
+    {
+      "cat": "amazon",
+      "name": "amazon-jp",
+      "url": "https://www.amazon.co.jp/",
+      "tag": "L3-RENDERED",
+      "len": 464771,
+      "ms": 13077,
+      "rss_mb": 103.0,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "fingerprintscan",
+      "url": "https://fingerprint.com/",
+      "tag": "L3-RENDERED",
+      "len": 408888,
+      "ms": 1067,
+      "rss_mb": 103.6,
+      "err": null
+    },
+    {
+      "cat": "gov-bank",
+      "name": "usa-gov",
+      "url": "https://www.usa.gov/",
+      "tag": "L3-RENDERED",
+      "len": 48224,
+      "ms": 15251,
+      "rss_mb": 67.6,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "udemy",
+      "url": "https://www.udemy.com/",
+      "tag": "L3-RENDERED",
+      "len": 476536,
+      "ms": 15179,
+      "rss_mb": 83.9,
+      "err": null
+    },
+    {
+      "cat": "streaming",
+      "name": "disneyplus",
+      "url": "https://www.disneyplus.com/",
+      "tag": "L3-RENDERED",
+      "len": 1576386,
+      "ms": 4187,
+      "rss_mb": 84.7,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "h-m",
+      "url": "https://www2.hm.com/",
+      "tag": "L3-RENDERED",
+      "len": 48915,
+      "ms": 90315,
+      "rss_mb": 124.4,
+      "err": null
+    },
+    {
+      "cat": "search",
+      "name": "startpage",
+      "url": "https://www.startpage.com/",
+      "tag": "L3-RENDERED",
+      "len": 216177,
+      "ms": 15180,
+      "rss_mb": 60.0,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "sannysoft",
+      "url": "https://bot.sannysoft.com/",
+      "tag": "L3-RENDERED",
+      "len": 26072,
+      "ms": 25828,
+      "rss_mb": 72.7,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "zoom",
+      "url": "https://zoom.us/",
+      "tag": "L3-RENDERED",
+      "len": 247055,
+      "ms": 11090,
+      "rss_mb": 96.9,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "medium",
+      "url": "https://medium.com/",
+      "tag": "L3-RENDERED",
+      "len": 39874,
+      "ms": 15158,
+      "rss_mb": 54.7,
+      "err": null
+    },
+    {
+      "cat": "travel",
+      "name": "airbnb",
+      "url": "https://www.airbnb.com/",
+      "tag": "L3-RENDERED",
+      "len": 528948,
+      "ms": 41459,
+      "rss_mb": 126.1,
+      "err": null
+    },
+    {
+      "cat": "reference",
+      "name": "wikipedia-en",
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "tag": "L3-RENDERED",
+      "len": 229409,
+      "ms": 1813,
+      "rss_mb": 47.3,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "linkedin",
+      "url": "https://www.linkedin.com/",
+      "tag": "L3-RENDERED",
+      "len": 137905,
+      "ms": 1089,
+      "rss_mb": 58.8,
+      "err": null
+    },
+    {
+      "cat": "realestate",
+      "name": "trulia",
+      "url": "https://www.trulia.com/",
+      "tag": "L3-RENDERED",
+      "len": 63335,
+      "ms": 30533,
+      "rss_mb": 77.2,
+      "err": null
+    },
+    {
+      "cat": "tech",
+      "name": "microsoft",
+      "url": "https://www.microsoft.com/",
+      "tag": "L3-RENDERED",
+      "len": 274046,
+      "ms": 40168,
+      "rss_mb": 65.7,
+      "err": null
+    },
+    {
+      "cat": "streaming",
+      "name": "netflix",
+      "url": "https://www.netflix.com/",
+      "tag": "L3-RENDERED",
+      "len": 518971,
+      "ms": 90600,
+      "rss_mb": 120.8,
+      "err": null
+    },
+    {
+      "cat": "reference",
+      "name": "wiktionary",
+      "url": "https://en.wiktionary.org/",
+      "tag": "L3-RENDERED",
+      "len": 144250,
+      "ms": 2267,
+      "rss_mb": 53.5,
+      "err": null
+    },
+    {
+      "cat": "search",
+      "name": "yahoo",
+      "url": "https://www.yahoo.com/",
+      "tag": "L3-RENDERED",
+      "len": 565747,
+      "ms": 999,
+      "rss_mb": 63.4,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "zara",
+      "url": "https://www.zara.com/",
+      "tag": "THIN-BODY",
+      "len": 0,
+      "ms": 60117,
+      "rss_mb": 115.5,
+      "err": null
+    },
+    {
+      "cat": "chl-known",
+      "name": "canadagoose",
+      "url": "https://www.canadagoose.com/",
+      "tag": "Kasada-CHL",
+      "len": 732,
+      "ms": 93580,
+      "rss_mb": 97.7,
+      "err": null
+    },
+    {
+      "cat": "tech",
+      "name": "cloudflare",
+      "url": "https://www.cloudflare.com/",
+      "tag": "L3-RENDERED",
+      "len": 1379939,
+      "ms": 25608,
+      "rss_mb": 77.0,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "wayfair",
+      "url": "https://www.wayfair.com/",
+      "tag": "L3-RENDERED",
+      "len": 911246,
+      "ms": 18198,
+      "rss_mb": 85.6,
+      "err": null
+    },
+    {
+      "cat": "amazon",
+      "name": "amazon-com-au",
+      "url": "https://www.amazon.com.au/",
+      "tag": "L3-RENDERED",
+      "len": 1120853,
+      "ms": 11963,
+      "rss_mb": 96.6,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "etsy",
+      "url": "https://www.etsy.com/",
+      "tag": "DataDome-CHL",
+      "len": 1424,
+      "ms": 90854,
+      "rss_mb": 76.4,
+      "err": null
+    },
+    {
+      "cat": "news",
+      "name": "bbc",
+      "url": "https://www.bbc.com/",
+      "tag": "L3-RENDERED",
+      "len": 551771,
+      "ms": 16149,
+      "rss_mb": 83.4,
+      "err": null
+    },
+    {
+      "cat": "tech",
+      "name": "apple",
+      "url": "https://www.apple.com/",
+      "tag": "L3-RENDERED",
+      "len": 307202,
+      "ms": 15168,
+      "rss_mb": 65.7,
+      "err": null
+    },
+    {
+      "cat": "search",
+      "name": "ecosia",
+      "url": "https://www.ecosia.org/",
+      "tag": "L3-RENDERED",
+      "len": 69256,
+      "ms": 462,
+      "rss_mb": 39.8,
+      "err": null
+    },
+    {
+      "cat": "ru",
+      "name": "ozon",
+      "url": "https://www.ozon.ru/",
+      "tag": "THIN-BODY",
+      "len": 156,
+      "ms": 3101,
+      "rss_mb": 36.6,
+      "err": null
+    },
+    {
+      "cat": "amazon",
+      "name": "amazon-in",
+      "url": "https://www.amazon.in/",
+      "tag": "L3-RENDERED",
+      "len": 1071479,
+      "ms": 15786,
+      "rss_mb": 105.5,
+      "err": null
+    },
+    {
+      "cat": "reference",
+      "name": "github",
+      "url": "https://github.com/",
+      "tag": "L3-RENDERED",
+      "len": 571769,
+      "ms": 4325,
+      "rss_mb": 87.2,
+      "err": null
+    },
+    {
+      "cat": "news",
+      "name": "bloomberg",
+      "url": "https://www.bloomberg.com/",
+      "tag": "L3-RENDERED",
+      "len": 8310704,
+      "ms": 23112,
+      "rss_mb": 132.0,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "threads",
+      "url": "https://www.threads.net/",
+      "tag": "L3-RENDERED",
+      "len": 665443,
+      "ms": 3469,
+      "rss_mb": 58.1,
+      "err": null
+    },
+    {
+      "cat": "travel",
+      "name": "expedia",
+      "url": "https://www.expedia.com/",
+      "tag": "L3-RENDERED",
+      "len": 471880,
+      "ms": 27517,
+      "rss_mb": 107.3,
+      "err": null
+    },
+    {
+      "cat": "ru",
+      "name": "vk",
+      "url": "https://vk.com/",
+      "tag": "L3-RENDERED",
+      "len": 966164,
+      "ms": 20535,
+      "rss_mb": 88.7,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "instagram",
+      "url": "https://www.instagram.com/",
+      "tag": "L3-RENDERED",
+      "len": 605804,
+      "ms": 1788,
+      "rss_mb": 112.0,
+      "err": null
+    },
+    {
+      "cat": "news",
+      "name": "cnn",
+      "url": "https://www.cnn.com/",
+      "tag": "L3-RENDERED",
+      "len": 4346222,
+      "ms": 1659,
+      "rss_mb": 83.1,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "shopify",
+      "url": "https://www.shopify.com/",
+      "tag": "L3-RENDERED",
+      "len": 420074,
+      "ms": 434,
+      "rss_mb": 45.8,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "aliexpress",
+      "url": "https://www.aliexpress.com/",
+      "tag": "L3-RENDERED",
+      "len": 363834,
+      "ms": 1957,
+      "rss_mb": 52.8,
+      "err": null
+    },
+    {
+      "cat": "travel",
+      "name": "skyscanner",
+      "url": "https://www.skyscanner.com/",
+      "tag": "L3-RENDERED",
+      "len": 100510,
+      "ms": 16362,
+      "rss_mb": 52.8,
+      "err": null
+    },
+    {
+      "cat": "realestate",
+      "name": "redfin",
+      "url": "https://www.redfin.com/",
+      "tag": "AWS-WAF-CHL",
+      "len": 391984,
+      "ms": 93103,
+      "rss_mb": 79.6,
+      "err": null
+    },
+    {
+      "cat": "ru",
+      "name": "yandex-ru",
+      "url": "https://yandex.ru/",
+      "tag": "L3-RENDERED",
+      "len": 2225796,
+      "ms": 93091,
+      "rss_mb": 80.1,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "yelp",
+      "url": "https://www.yelp.com/",
+      "tag": "DataDome-CHL",
+      "len": 1424,
+      "ms": 90949,
+      "rss_mb": 47.8,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "bestbuy",
+      "url": "https://www.bestbuy.com/",
+      "tag": "L3-RENDERED",
+      "len": 7871,
+      "ms": 25171,
+      "rss_mb": 107.1,
+      "err": null
+    },
+    {
+      "cat": "gov-bank",
+      "name": "bofa",
+      "url": "https://www.bankofamerica.com/",
+      "tag": "L3-RENDERED",
+      "len": 353133,
+      "ms": 876,
+      "rss_mb": 65.3,
+      "err": null
+    },
+    {
+      "cat": "streaming",
+      "name": "hulu",
+      "url": "https://www.hulu.com/",
+      "tag": "L3-RENDERED",
+      "len": 1394950,
+      "ms": 1438,
+      "rss_mb": 87.5,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "discord-com",
+      "url": "https://discord.com/",
+      "tag": "L3-RENDERED",
+      "len": 165602,
+      "ms": 105191,
+      "rss_mb": 126.9,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "uniqlo",
+      "url": "https://www.uniqlo.com/",
+      "tag": "L3-RENDERED",
+      "len": 1656163,
+      "ms": 15783,
+      "rss_mb": 140.1,
+      "err": null
+    },
+    {
+      "cat": "streaming",
+      "name": "prime-video",
+      "url": "https://www.primevideo.com/",
+      "tag": "L3-RENDERED",
+      "len": 557299,
+      "ms": 47160,
+      "rss_mb": 102.0,
+      "err": null
+    },
+    {
+      "cat": "travel",
+      "name": "tripadvisor",
+      "url": "https://www.tripadvisor.com/",
+      "tag": "L3-RENDERED",
+      "len": 383109,
+      "ms": 1812,
+      "rss_mb": 63.6,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "target",
+      "url": "https://www.target.com/",
+      "tag": "L3-RENDERED",
+      "len": 338355,
+      "ms": 17856,
+      "rss_mb": 72.3,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "khanacademy",
+      "url": "https://www.khanacademy.org/",
+      "tag": "L3-RENDERED",
+      "len": 396886,
+      "ms": 28503,
+      "rss_mb": 71.9,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "tumblr",
+      "url": "https://www.tumblr.com/",
+      "tag": "L3-RENDERED",
+      "len": 114331,
+      "ms": 25561,
+      "rss_mb": 69.5,
+      "err": null
+    },
+    {
+      "cat": "search",
+      "name": "google",
+      "url": "https://www.google.com/",
+      "tag": "L3-RENDERED",
+      "len": 224155,
+      "ms": 3743,
+      "rss_mb": 54.8,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "botd",
+      "url": "https://fingerprint.com/products/bot-detection/",
+      "tag": "L3-RENDERED",
+      "len": 131359,
+      "ms": 1363,
+      "rss_mb": 101.8,
+      "err": null
+    },
+    {
+      "cat": "travel",
+      "name": "uber",
+      "url": "https://www.uber.com/",
+      "tag": "L3-RENDERED",
+      "len": 705564,
+      "ms": 25982,
+      "rss_mb": 118.3,
+      "err": null
+    },
+    {
+      "cat": "news",
+      "name": "economist",
+      "url": "https://www.economist.com/",
+      "tag": "L3-RENDERED",
+      "len": 518880,
+      "ms": 30775,
+      "rss_mb": 76.7,
+      "err": null
+    },
+    {
+      "cat": "reference",
+      "name": "stackoverflow",
+      "url": "https://stackoverflow.com/",
+      "tag": "L3-RENDERED",
+      "len": 247365,
+      "ms": 105399,
+      "rss_mb": 82.8,
+      "err": null
+    },
+    {
+      "cat": "amazon",
+      "name": "amazon-de",
+      "url": "https://www.amazon.de/",
+      "tag": "L3-RENDERED",
+      "len": 769412,
+      "ms": 12683,
+      "rss_mb": 99.2,
+      "err": null
+    },
+    {
+      "cat": "tech",
+      "name": "anthropic",
+      "url": "https://www.anthropic.com/",
+      "tag": "L3-RENDERED",
+      "len": 263376,
+      "ms": 6277,
+      "rss_mb": 62.2,
+      "err": null
+    },
+    {
+      "cat": "streaming",
+      "name": "vimeo",
+      "url": "https://vimeo.com/",
+      "tag": "L3-RENDERED",
+      "len": 1793829,
+      "ms": 27539,
+      "rss_mb": 110.1,
+      "err": null
+    },
+    {
+      "cat": "gov-bank",
+      "name": "irs",
+      "url": "https://www.irs.gov/",
+      "tag": "L3-RENDERED",
+      "len": 132493,
+      "ms": 914,
+      "rss_mb": 61.5,
+      "err": null
+    },
+    {
+      "cat": "search",
+      "name": "yandex",
+      "url": "https://ya.ru/",
+      "tag": "L3-RENDERED",
+      "len": 433211,
+      "ms": 7174,
+      "rss_mb": 49.0,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "twitter",
+      "url": "https://twitter.com/",
+      "tag": "L3-RENDERED",
+      "len": 274276,
+      "ms": 2143,
+      "rss_mb": 47.7,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "iphey",
+      "url": "https://iphey.com/",
+      "tag": "L3-RENDERED",
+      "len": 29915,
+      "ms": 3483,
+      "rss_mb": 52.4,
+      "err": null
+    },
+    {
+      "cat": "chl-known",
+      "name": "adidas",
+      "url": "https://www.adidas.com/us",
+      "tag": "L3-RENDERED",
+      "len": 2508,
+      "ms": 115387,
+      "rss_mb": 93.8,
+      "err": null
+    },
+    {
+      "cat": "news",
+      "name": "ft",
+      "url": "https://www.ft.com/",
+      "tag": "L3-RENDERED",
+      "len": 334485,
+      "ms": 1267,
+      "rss_mb": 49.3,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "costco",
+      "url": "https://www.costco.com/",
+      "tag": "L3-RENDERED",
+      "len": 4020114,
+      "ms": 15637,
+      "rss_mb": 119.5,
+      "err": null
+    },
+    {
+      "cat": "ru",
+      "name": "wildberries",
+      "url": "https://www.wildberries.ru/",
+      "tag": "L3-RENDERED",
+      "len": 1765,
+      "ms": 38203,
+      "rss_mb": 67.6,
+      "err": null
+    },
+    {
+      "cat": "travel",
+      "name": "kayak",
+      "url": "https://www.kayak.com/",
+      "tag": "L3-RENDERED",
+      "len": 1519554,
+      "ms": 2395,
+      "rss_mb": 66.2,
+      "err": null
+    },
+    {
+      "cat": "antibot",
+      "name": "browserleaks-canvas",
+      "url": "https://browserleaks.com/canvas",
+      "tag": "L3-RENDERED",
+      "len": 37429,
+      "ms": 932,
+      "rss_mb": 60.2,
+      "err": null
+    },
+    {
+      "cat": "news",
+      "name": "washingtonpost",
+      "url": "https://www.washingtonpost.com/",
+      "tag": "L3-RENDERED",
+      "len": 2717755,
+      "ms": 5075,
+      "rss_mb": 93.8,
+      "err": null
+    },
+    {
+      "cat": "social",
+      "name": "reddit",
+      "url": "https://www.reddit.com/",
+      "tag": "L3-RENDERED",
+      "len": 557422,
+      "ms": 3132,
+      "rss_mb": 58.0,
+      "err": null
+    },
+    {
+      "cat": "streaming",
+      "name": "twitch",
+      "url": "https://www.twitch.tv/",
+      "tag": "L3-RENDERED",
+      "len": 183909,
+      "ms": 30387,
+      "rss_mb": 64.8,
+      "err": null
+    },
+    {
+      "cat": "news",
+      "name": "guardian",
+      "url": "https://www.theguardian.com/",
+      "tag": "L3-RENDERED",
+      "len": 1337729,
+      "ms": 4185,
+      "rss_mb": 64.9,
+      "err": null
+    },
+    {
+      "cat": "stores",
+      "name": "asos",
+      "url": "https://www.asos.com/",
+      "tag": "L3-RENDERED",
+      "len": 291892,
+      "ms": 4242,
+      "rss_mb": 127.0,
+      "err": null
+    },
+    {
+      "cat": "amazon",
+      "name": "amazon-com",
+      "url": "https://www.amazon.com/",
+      "tag": "L3-RENDERED",
+      "len": 993203,
+      "ms": 12392,
+      "rss_mb": 100.1,
+      "err": null
+    },
+    {
+      "cat": "misc",
+      "name": "weather",
+      "url": "https://weather.com/",
+      "tag": "L3-RENDERED",
+      "len": 1796245,
+      "ms": 2184,
+      "rss_mb": 81.9,
+      "err": null
+    }
+  ]
+}
