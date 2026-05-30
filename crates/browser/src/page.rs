@@ -206,7 +206,24 @@ fn body_has_challenge_marker(body: &str) -> bool {
 /// defensive primitives are public-engine scope (they enable the
 /// bundle's OWN self-solve flow to run).
 fn is_datadome_challenge(html: &str) -> bool {
-    html.len() < 50_000 && html.contains("captcha-delivery.com")
+    // P1 #5 — tightened. The 50 KB cap + CDN string alone could misclassify a
+    // real rendered page that merely references captcha-delivery.com. Tiny
+    // bodies (<8 KB) with the CDN are unambiguously the interstitial (every
+    // shipped DD interstitial is 1-5 KB). In the 8-50 KB band, additionally
+    // require a DD-config structural token (`dd={ 'rt':…, 'cid':…, … }`) so a
+    // real page can't trip the DD-aware behaviour.
+    if html.len() >= 50_000 || !html.contains("captcha-delivery.com") {
+        return false;
+    }
+    if html.len() < 8_000 {
+        return true;
+    }
+    html.contains("'cid'")
+        || html.contains("\"cid\"")
+        || html.contains("'rt'")
+        || html.contains("\"rt\"")
+        || html.contains("dd={")
+        || html.contains("interstitial")
 }
 
 /// Public-engine DataDome solve detector (R-DATADOME-DAILY-KEY).
@@ -1990,7 +2007,11 @@ impl Page {
             // Give it the Kasada heavy-PoW tier so the flip is
             // deterministic, not budget-luck. (bestbuy is the benign
             // i18n splash — Task#1 — so it stays in the plain-BMP tier.)
-            Some(h) if h.ends_with("homedepot.com") => 45_000,
+            // P1 #7 — 45s was too tight: must cover build + ~1MB bundle fetch +
+            // sha256 PoW + the server-enforced chlg_duration (5-30s) + reload +
+            // drain. The b623d5d flip was observed at nav_ms≈119s. Raise to 60s
+            // base; the +45s sec-cpt-solve arm (#6) stacks on top for the reload.
+            Some(h) if h.ends_with("homedepot.com") => 60_000,
             // Akamai BMP-protected (plain sensor_data, no sec-cpt PoW).
             Some(h)
                 if h.ends_with("bestbuy.com")
@@ -2335,9 +2356,24 @@ impl Page {
                             if solvers.iter().any(|s| s.solved_signal(&now, &body))
                                 || is_seccpt_solved(&now, &body)
                             {
+                                // P1 #6 — a cookie-only sec-cpt `~3~` solve must
+                                // get guaranteed build+drain budget for the
+                                // post-solve reload. The +45 s bump on the
+                                // JS-pending-nav branch (≈:2760) is unreachable
+                                // from this cookie-only path, so a solve that
+                                // doesn't also arm a JS pending-nav falls into
+                                // the MIN_RETRY_BUDGET early-return and returns
+                                // the ~2.7 KB interstitial when <15 s remain.
+                                // Arm +45 s here, once. Gated by
+                                // `started_as_seccpt_challenge` ⇒ zero non-sec-cpt
+                                // regression.
+                                if !budget_extended {
+                                    nav_budget += Duration::from_secs(45);
+                                    budget_extended = true;
+                                }
                                 if debug_nav {
                                     eprintln!(
-                                        "[solver] solved_signal fired (likely sec-cpt ~3~) — breaking poll"
+                                        "[solver] solved_signal fired (likely sec-cpt ~3~) — armed +45s budget, breaking poll"
                                     );
                                 }
                                 break;
@@ -3935,6 +3971,30 @@ mod tests {
         let html =
             r#"<html><head><title>Real Site</title></head><body><h1>Welcome</h1></body></html>"#;
         assert!(!is_datadome_challenge(html));
+    }
+
+    /// P1 #5 — an 8-50 KB body that references captcha-delivery.com but has NO
+    /// DD-config structural token is a real page (e.g. CSP report-uri), NOT a
+    /// challenge; adding the `dd={…'rt'…'cid'…}` config flips it to challenge.
+    #[test]
+    fn datadome_challenge_midsize_needs_dd_config() {
+        let mut page = String::from("<html><body>");
+        page.push_str(&"content ".repeat(2000)); // ~16 KB of real content
+        page.push_str("<!-- csp report-uri https://x.captcha-delivery.com/ -->");
+        page.push_str("</body></html>");
+        assert!(page.len() > 8_000 && page.len() < 50_000);
+        assert!(
+            !is_datadome_challenge(&page),
+            "mid-size real page with only the CDN string must NOT flag"
+        );
+        page.push_str("<script>var dd={'rt':'i','cid':'abc','hsh':'X'};</script>");
+        assert!(
+            is_datadome_challenge(&page),
+            "DD-config token => interstitial"
+        );
+        // tiny body with the CDN is still unambiguously the interstitial
+        let tiny = r#"<html><head><script src="https://geo.captcha-delivery.com/c.js"></script></head><body></body></html>"#;
+        assert!(tiny.len() < 8_000 && is_datadome_challenge(tiny));
     }
 
     /// `is_datadome_solved` requires BOTH the `datadome=` cookie AND a
