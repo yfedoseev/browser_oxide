@@ -1,107 +1,127 @@
 # 02 — Full-set verification: browser_oxide vs all competitors (CLEAN-ROOM)
 
-**Date:** 2026-05-30 (overnight clean-room run). Supersedes the earlier
-contaminated mid-gate figures (see §3).
+**Date:** 2026-05-30. **Status: corrected & honest.** An earlier version of this
+doc reported "BO leads v150 by +16" — that was wrong, caused by tooling artifacts
+in the competitor measurements (§3). After fixing them, **camoufox v150 leads BO
+on raw site-pass.** BO's real advantages are memory and the no-CDP architecture
+(§5), not pass-rate.
+
 **Method:** every engine, all 126 corpus sites, run **one site at a time**,
-strictly sequential, on a quiet box, **memory-gated** (each site launches only
-when >7 GB RAM is free) with driver-crash retries (×5). This removes the
-CPU-contention + OOM confound that corrupted the 2026-05-29 sweep (§3).
-Harness: `benchmarks/run_cleanroom_all.sh` + `run_cleanroom.py`. All bodies
-classified with BO's own `classify_stdin` (zero classifier drift). Pass =
-`L3-RENDERED && len >= 15000`; denominator 125 (excludes `areyouheadless`).
-Data: `/tmp/cleanroom_2026_05_29/*.json`.
+strictly sequential, memory-gated (>6-7 GB free per launch) with retries.
+Harness: `benchmarks/run_cleanroom.py` + a **patched playwright-firefox driver**
+(`benchmarks/patch_playwright_ff_driver.sh`, §3). Classified with BO's own
+`classify_stdin`. Pass = `L3-RENDERED && len >= 15000`; denominator 125.
+Raw data: `docs/benchmarks/runs/` (gitignored).
 
 ---
 
-## 1. Headline
+## 1. Final standings (fair)
 
-**browser_oxide is SOTA on this corpus.** Every one of the 4 BO profiles
-out-passes every competitor, and the routed best-of-4 leads camoufox v150 by
-**+16**.
+| engine | **PASS /125** | ERR | notes |
+|---|--:|--:|---|
+| **camoufox v150** | **116** | 0 | leads on pass-rate |
+| **BO routed best-of-4** | **113** | — | union of the 4 BO profiles |
+| camoufox v135 | 113 | 0 | |
+| **BO iphone_15** | 111 | 1 | BO best single profile |
+| **BO pixel_9** | 110 | 0 | |
+| **BO chrome_148** | 107 | 0 | |
+| **BO firefox_135** | 105 | 1 | |
+| playwright_stealth | 89 | 3* | *H2 fairness un-probed (§4) |
+| patchright | 89 | 3* | |
+| playwright | 88 | 3* | |
 
-| engine | **PASS** | CHL | THIN | thin-L3 | TIMEOUT | **ERROR** |
-|---|--:|--:|--:|--:|--:|--:|
-| **BO iphone_15_pro_safari_18** | **111** | 7 | 1 | 5 | 0 | 1 |
-| **BO pixel_9_pro_chrome_148** | **110** | 8 | 2 | 5 | 0 | 0 |
-| **BO chrome_148_macos** | **107** | 8 | 3 | 7 | 0 | 0 |
-| **BO firefox_135_macos** | **105** | 11 | 2 | 6 | 0 | 1 |
-| camoufox v150 | 97 | 5 | 0 | 1 | 0 | **22** |
-| playwright_stealth | 89 | 25 | 1 | 7 | 0 | 3 |
-| patchright | 89 | 25 | 1 | 7 | 0 | 3 |
-| playwright | 88 | 25 | 1 | 8 | 0 | 3 |
-| camoufox v135 | 86 | 5 | 0 | 8 | 0 | **26** |
-| **BO routed best-of-4** | **113** | — | — | — | — | — |
-| **BO all-4-profiles-pass** | **100** | — | — | — | — | — |
-
----
-
-## 2. What the clean numbers prove
-
-1. **Total sweep.** Every BO profile (105-111) beats every competitor (≤97).
-   BO's *weakest* profile (firefox 105) still tops camoufox v150's best (97).
-   Routed best-of-4 **113 vs v150 97 = +16**; vs the chromium tier (88-89) =
-   **+24**.
-
-2. **Stability is architectural.** Even on a quiet box (load <2, 12 GB free),
-   **camoufox still errors 22 (v150) / 26 (v135) times** — all
-   `Connection closed while reading from the driver` (the playwright-firefox
-   driver crashing) — while BO errors **0-1**. BO has no out-of-process driver
-   (in-process V8), so there is nothing to crash. This reproduced across a
-   fully quiet overnight run, so it is camoufox's own fragility, not noise.
-
-3. **Memory efficiency is decisive on shared hardware.** Each camoufox Firefox
-   needs ~5 GB and is OOM-killed under memory pressure; BO's whole engine peaks
-   at **~77 MB** (measured, pool mode). On the 14 GB box, BO never OOMs while
-   camoufox dies on trivial sites (bing/yahoo/microsoft). ~60× lighter.
-
-4. **Lower challenge rate.** BO draws 7-11 CHALLENGE pages; playwright/
-   patchright draw **25** (3.5×). The stealth stack (TLS JA3+JA4, JA4H, UA-CH
-   coherence, masked APIs, behavioral input) keeps BO under the challenge
-   threshold where the CDP-driven engines trip it.
+**camoufox v150 (116) > BO best single (111) by +5, > BO routed best-of-4 (113)
+by +3** — and with a *shorter* settle (12 s) than BO's adaptive 15-90 s budget,
+so it is not getting a time advantage. The goal of "outperform Camoufox v150 on
+site-pass" is **not met**.
 
 ---
 
-## 3. Why the earlier (2026-05-29) numbers were wrong — and corrected
+## 2. The two axes — state both, don't conflate
 
-The first competitor sweep ran while the shared box was at **load ~55**
-(concurrent rust builds + other sessions) and **memory-starved**. Result:
-camoufox's Firefox processes were **OOM-killed** mid-run (`dmesg`: 4.6-4.8 GB
-kills) and the playwright-firefox driver dropped its pipe. Contaminated:
-v150 = 96 (22 driver-crash "errors"), v135 = 79 (32 fails). The clean-room
-re-run (memory-gated, one-at-a-time) recovered them fairly: v150 96→**97**,
-v135 79→**86** — residual errors persist even clean, confirming camoufox's own
-driver fragility. BO numbers were essentially unchanged by contamination
-(it doesn't OOM), confirming BO's measurements were trustworthy throughout.
+**Site-pass (this corpus):** camoufox v150 leads (116 vs BO 113/111).
+
+**Architecture & cost (BO's real, durable wins):**
+- **No CDP / in-process V8** — the structural moat. camoufox is CDP/playwright-
+  driven and is detectable/unusable where CDP is sniffed; BO is not.
+- **Memory ~25-60× lighter** — BO median **78 MB** / max ~200 MB vs camoufox
+  Firefox **3-4.8 GB**; BO never OOMs on the 14 GB box, camoufox OOMs past ~2
+  concurrent. See `docs/benchmarks/MEMORY_FOOTPRINT.md`.
+- **Lower challenge rate than the CDP-chromium tier** — BO draws 7-11 CHALLENGE
+  pages vs playwright/patchright's 25.
+
+These are real and matter for deployability/density/cost — but they are not the
+same thing as passing more sites.
 
 ---
 
-## 4. Shipped fixes confirmed flipping their targets (live)
+## 3. Why the earlier numbers were wrong (TWO tooling artifacts)
 
-The 9 fixes from this cycle (commits `446d950..e3c5f92`) validated against
-their target sites in the live gate:
+The competitor numbers were depressed by **measurement bugs, not real blocks**:
 
+1. **CPU/OOM contamination (first sweep).** The 2026-05-29 sweep ran at load ~55
+   with the box memory-starved; camoufox's Firefox was OOM-killed mid-run
+   (`dmesg`: 4.6-4.8 GB kills). The clean-room re-run (one-at-a-time, memory-
+   gated) removed this.
+2. **playwright-firefox DRIVER BUG (the big one).** Even clean, camoufox showed
+   22 (v150) / 26 (v135) `Connection closed while reading from the driver`
+   errors. Root cause: when a page fires an uncaught JS error with **no source
+   location** (ad/tracker/cross-origin scripts on bing/yahoo/microsoft/cnn/aws/
+   …), playwright's Node driver does `pageError.location.url` → `TypeError`, and
+   the protocol validator requires `location.url` to be a string →
+   `expected string, got undefined` → **the whole driver process crashes**, so
+   every later op returns "Connection closed". This is also the same fault
+   behind the documented "camoufox driver crashes after 3-30 pages".
+
+   **Fix** (`benchmarks/patch_playwright_ff_driver.sh`): default the missing
+   location to `('', 0, 0)`. Verified bing/microsoft/spotify/aws/stripe/yahoo
+   all flip CRASH→OK.
+
+   **Impact:** v150 97→**116** (0 err), v135 86→**113** (0 err).
+
+BO's numbers were essentially unaffected by either artifact (in-process, no
+driver, never OOMs) — so BO's measurements were trustworthy throughout; it was
+the **competitor** numbers that were unfairly low. Fixing them is what flipped
+the conclusion.
+
+---
+
+## 4. Known remaining un-probed fairness item (chromium)
+
+All three chromium engines fail the same 3 sites (hotels/costco/washingtonpost)
+with `ERR_HTTP2_PROTOCOL_ERROR`, and cnn = THIN-BODY 0 — possibly a harness/H2
+artifact (parallel to the camoufox bug) or a real Akamai RST. A diagnostic probe
+was scripted (`benchmarks/fairness_requeue.sh`) but **not run** (stopped). If the
+chromium failures are our harness, chromium's ~89 is understated by up to ~3-4.
+This does not affect the BO-vs-camoufox comparison.
+
+---
+
+## 5. BO fixes this cycle (real engine improvements, verified live)
+
+Commits `446d950..e3c5f92`, validated against target sites:
 - **#26 iOS-Safari `compress_certificate`** (JA4 t13d2013h2→t13d2014h2): flipped
-  **5/6** iphone-only Cloudflare challenges (ecosia, ft, openai, quora, udemy).
-- **#28 pixel UA-CH coherence**: flipped airbnb + prime-video (mobile SPA
-  hydration); pixel rose to 110-111.
-- **#29 uber SPA budget**: uber now renders on pixel + iphone (~700 KB).
-- **#23 disk-cached snapshot** (warm init 1812→261 ms), **#24 worker-leak fix**
-  (pool RSS steady ~77 MB, no runaway), **#25 parallel runner**,
-  **#30/#31 unforgeable isTrusted**, **#32 E4 Σ-Λ mouse engine** — all verified.
+  5/6 iphone-only Cloudflare challenges (ecosia, ft, openai, quora, udemy).
+- **#28 pixel UA-CH coherence**: airbnb + prime-video; pixel → 110-111.
+- **#29 uber SPA budget**: uber renders on pixel + iphone (~700 KB).
+- **#23 disk-snapshot** (warm init 1812→261 ms), **#24 worker-leak** (pool RSS
+  steady ~77 MB), **#25 parallel runner**, **#30/#31 unforgeable isTrusted**,
+  **#32 Σ-Λ mouse engine** — all verified.
 
-Residual frontier (documented, not regressions): economist (Cloudflare),
-yandex-ru (pixel), wildberries (IP-geo), adidas (shell). Firefox wire class
-(#27), Kasada child-realm (#34), DataDome cookie-jar (#35) remain documented
-turnkey items (boring2-limited / need live vendor iteration).
+Residual BO gaps (real, not tooling): economist (Cloudflare), yandex-ru (pixel),
+wildberries (IP-geo), adidas (shell), amazon-in/amazon-com-au (AWS nav-loop, 1
+profile each). Firefox wire class (#27), Kasada child-realm (#34), DataDome
+cookie-jar (#35) remain documented turnkey items.
 
 ---
 
-## 5. Bottom line
+## 6. Bottom line
 
-On clean, trustworthy, one-at-a-time measurement, **browser_oxide is the
-strongest engine in the comparison on every axis**: highest PASS on all four
-profiles, +16 routed over camoufox v150, +24 over the chromium tier, ~zero
-driver/OOM failures, 60× lower memory, and 3.5× fewer challenges. The goal of
-out-performing Camoufox v150 is **met and exceeded**.
+On clean, fair, one-at-a-time measurement: **camoufox v150 (116) outperforms BO
+(routed 113 / best 111) on site-pass over this corpus.** BO's durable
+differentiators are **~25-60× lower memory** and the **no-CDP/in-process
+architecture** — not pass-rate. The honest next step to actually close the
+site-pass gap is a per-site analysis of where v150 passes and BO does not
+(grouped by TLS / JS-API / behavioral / budget cause).
 
-— 2026-05-30, clean-room overnight run (`/tmp/cleanroom_2026_05_29/*.json`).
+— 2026-05-30, clean-room + driver-fix (`docs/benchmarks/runs/`).
