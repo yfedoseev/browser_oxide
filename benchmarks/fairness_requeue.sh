@@ -11,7 +11,7 @@ STABLE=/tmp/warm_verify/sweep_stable
 note(){ echo "[$(date +%H:%M:%S)] $*"; }
 
 note "WAIT: camoufox driver-fix re-run to finish (free the IP)"
-while pgrep -f 'run_cleanroom.py camoufox' >/dev/null 2>&1; do sleep 120; done
+while pgrep -f 'bin/python benchmarks/run_cleanroom.py camoufox' >/dev/null 2>&1; do sleep 120; done
 note "camoufox re-run done — starting fairness diagnostics"
 
 # 1) CHROMIUM: the 3 ERR_HTTP2_PROTOCOL_ERROR sites + cnn THIN. Test whether a
