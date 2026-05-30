@@ -44,7 +44,10 @@ except Exception:
     SITE_VENDOR = {}
 
 REPO = Path(__file__).resolve().parent.parent
-BIN = REPO / "target" / "release" / "examples" / "sweep_metrics"
+# Allow pointing at a stable copy of the binary (BO_SWEEP_BIN) so a concurrent
+# `cargo` in the shared target/ dir can't delete it mid-run.
+BIN = Path(os.environ.get("BO_SWEEP_BIN",
+                          str(REPO / "target" / "release" / "examples" / "sweep_metrics")))
 DIAGNOSTIC = {"areyouheadless"}
 
 
@@ -78,10 +81,23 @@ def _print_row(i, total, site, row):
           flush=True)
 
 
+def _wait_for_quiet():
+    """Block until 1-min loadavg < BO_MAX_LOAD (clean-room mode). Off by default."""
+    maxload = float(os.environ.get("BO_MAX_LOAD", "0") or "0")
+    if maxload <= 0:
+        return
+    t0 = time.time()
+    while time.time() - t0 < 600:
+        if os.getloadavg()[0] < maxload:
+            return
+        time.sleep(10)
+
+
 def run_sequential(corpus, profile, timeout, cooldown):
     results = [None] * len(corpus)
     prev_vendor = None
     for i, site in enumerate(corpus):
+        _wait_for_quiet()
         vendor = SITE_VENDOR.get(site["name"])
         if vendor and vendor == prev_vendor and cooldown:
             time.sleep(cooldown)
