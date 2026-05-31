@@ -67,6 +67,20 @@ const SAFARI_IOS_INITIAL_STREAM_WINDOW_SIZE: u32 = 2_097_152; // 2 MB
 const SAFARI_IOS_MAX_CONCURRENT_STREAMS: u32 = 100;
 const SAFARI_IOS_INITIAL_CONNECTION_WINDOW_SIZE: u32 = 10_485_760; // → wire 10_420_225
 
+// =============================================================================
+// Firefox 135 HTTP/2 SETTINGS — Firefox wire class (04_FIREFOX_WIRE)
+// =============================================================================
+//
+// Canonical Firefox H2 fingerprint (FoxIO / Akamai H2 reference,
+// `1:65536;4:131072;5:16384|12517377|...|m,p,a,s`). Firefox sends only THREE
+// settings: 1 HEADER_TABLE_SIZE=65536, 4 INITIAL_WINDOW_SIZE=131072 (128 KiB,
+// vs Chrome's 6 MB), 5 MAX_FRAME_SIZE=16384. No ENABLE_PUSH, no
+// MAX_HEADER_LIST_SIZE on the wire, no MAX_CONCURRENT_STREAMS. Pseudo-header
+// order is m,p,a,s. Connection-window wire delta 12517377 → target 12582912.
+const FIREFOX_INITIAL_STREAM_WINDOW_SIZE: u32 = 131_072; // 128 KiB
+const FIREFOX_MAX_FRAME_SIZE: u32 = 16_384;
+const FIREFOX_INITIAL_CONNECTION_WINDOW_SIZE: u32 = 12_582_912; // → wire 12_517_377
+
 /// Perform an HTTP/2 handshake over a TLS stream and return a sender + connection.
 ///
 /// The connection must be driven by spawning it onto a tokio task.
@@ -83,16 +97,25 @@ where
     T: AsyncRead + AsyncWrite + Unpin,
 {
     let is_safari_ios = profile.device_class == DeviceClass::MobileIOS;
+    let is_firefox = profile.browser_name == "Firefox";
 
     // Pseudo-header order:
-    //   Chrome (masp) = :method, :authority, :scheme, :path
-    //   Safari (msap) = :method, :scheme, :authority, :path
+    //   Chrome  (masp) = :method, :authority, :scheme, :path
+    //   Safari  (msap) = :method, :scheme, :authority, :path
+    //   Firefox (mpas) = :method, :path, :authority, :scheme
     let pseudo_order = if is_safari_ios {
         PseudoOrder::builder()
             .push(PseudoId::Method)
             .push(PseudoId::Scheme)
             .push(PseudoId::Authority)
             .push(PseudoId::Path)
+            .build()
+    } else if is_firefox {
+        PseudoOrder::builder()
+            .push(PseudoId::Method)
+            .push(PseudoId::Path)
+            .push(PseudoId::Authority)
+            .push(PseudoId::Scheme)
             .build()
     } else {
         PseudoOrder::builder()
@@ -114,6 +137,13 @@ where
             .push(SettingId::MaxConcurrentStreams)
             .push(SettingId::InitialWindowSize)
             .push(SettingId::NoRfc7540Priorities)
+            .build()
+    } else if is_firefox {
+        // Firefox 135 wire order: 1, 4, 5 (only three settings)
+        SettingsOrder::builder()
+            .push(SettingId::HeaderTableSize)
+            .push(SettingId::InitialWindowSize)
+            .push(SettingId::MaxFrameSize)
             .build()
     } else {
         // Chrome 130+ canonical 8-entry order — wreq-util reference impl.
@@ -155,6 +185,28 @@ where
         // is the lib's HEADERS-frame priority hint — Chrome sends weight 255,
         // exclusive=true; Safari has NO_RFC7540_PRIORITIES so it omits priority).
         // Skipping the headers_stream_dependency call entirely.
+    } else if is_firefox {
+        // Firefox 135: 3 SETTINGS (1,4,5), 128 KiB stream window, m,p,a,s
+        // pseudo-order. MAX_FRAME_SIZE=16384 (HTTP/2 default) is advertised.
+        // max_header_list_size is set for internal validation (Akamai servers
+        // RST without a limit) but kept OUT of settings_order so it doesn't
+        // appear on the wire — same trick the Safari arm uses.
+        // NOTE: do NOT set max_header_list_size for Firefox — this http2
+        // builder emits any set non-default value on the wire even when it's
+        // absent from settings_order, and real Firefox sends ONLY settings
+        // 1,4,5 (no setting 6). Including it produced a spurious `6:262144`
+        // on the wire, diverging from the canonical Firefox H2 fingerprint.
+        builder
+            .header_table_size(HEADER_TABLE_SIZE)
+            .initial_window_size(FIREFOX_INITIAL_STREAM_WINDOW_SIZE)
+            .max_frame_size(FIREFOX_MAX_FRAME_SIZE)
+            .initial_connection_window_size(FIREFOX_INITIAL_CONNECTION_WINDOW_SIZE)
+            .headers_pseudo_order(pseudo_order)
+            .settings_order(settings_order);
+        // Firefox emits an RFC 7540 idle-stream PRIORITY tree, which this
+        // builder's single StreamDependency hint can't express; per
+        // 04_FIREFOX_WIRE §4 the pragmatic choice is to omit the single Chrome
+        // priority hint entirely (closer to Firefox than a Chrome-weighted one).
     } else {
         builder
             .header_table_size(HEADER_TABLE_SIZE)

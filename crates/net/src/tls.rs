@@ -188,6 +188,105 @@ const SAFARI_IOS_EXTENSION_PERMUTATION: &[u8] = &[
         // last by ClientHello length → the 14-extension Safari JA4.
 ];
 
+/// Firefox 135 (NSS) cipher suite list — 17 ciphers, NSS order. Distinct
+/// from Chrome's 15: NSS leads TLS1.3 with AES-128-GCM, CHACHA20, AES-256-GCM
+/// (CHACHA before AES-256), then the ECDHE-ECDSA/RSA GCM pairs, then the CBC
+/// block (ECDSA before RSA, 256 before 128 in NSS's CBC ordering), then the
+/// two RSA-GCM and two RSA-CBC fallbacks. Yields the Firefox JA4 cipher hash
+/// `5b57614c22b0` (vs Chrome's). Per lwthiker/curl-impersonate firefox + a
+/// tls.peet.ws Firefox 135 capture.
+const CIPHER_LIST_FIREFOX: &str = concat!(
+    "TLS_AES_128_GCM_SHA256",
+    ":TLS_CHACHA20_POLY1305_SHA256",
+    ":TLS_AES_256_GCM_SHA384",
+    ":TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    ":TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    ":TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    ":TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    ":TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    ":TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    ":TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
+    ":TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
+    ":TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+    ":TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    ":TLS_RSA_WITH_AES_128_GCM_SHA256",
+    ":TLS_RSA_WITH_AES_256_GCM_SHA384",
+    ":TLS_RSA_WITH_AES_128_CBC_SHA",
+    ":TLS_RSA_WITH_AES_256_CBC_SHA",
+);
+
+/// Firefox 135 (NSS) signature algorithms — 11 entries, NSS order: the three
+/// ECDSA curves first, then RSA-PSS, then RSA-PKCS1, then the SHA-1 tail
+/// (ecdsa_sha1, rsa_pkcs1_sha1). Yields the Firefox JA4 sigalg hash
+/// `3d5424432f57`.
+const SIGALGS_LIST_FIREFOX: &str = concat!(
+    "ecdsa_secp256r1_sha256",
+    ":ecdsa_secp384r1_sha384",
+    ":ecdsa_secp521r1_sha512",
+    ":rsa_pss_rsae_sha256",
+    ":rsa_pss_rsae_sha384",
+    ":rsa_pss_rsae_sha512",
+    ":rsa_pkcs1_sha256",
+    ":rsa_pkcs1_sha384",
+    ":rsa_pkcs1_sha512",
+    ":ecdsa_sha1",
+    ":rsa_pkcs1_sha1",
+);
+
+/// Firefox 135 supported_groups. NSS appends the two FFDHE groups
+/// (ffdhe2048, ffdhe3072) after the EC curves — a hard Firefox signature no
+/// Chrome build sends. X25519MLKEM768 leads (Firefox shipped PQ key-share by
+/// default in 132+). P-521 present (Chrome desktop omits it).
+const CURVES_FIREFOX: &[SslCurve] = &[
+    SslCurve::X25519_MLKEM768,
+    SslCurve::X25519,
+    SslCurve::SECP256R1,
+    SslCurve::SECP384R1,
+    SslCurve::SECP521R1,
+    SslCurve::FFDHE2048,
+    SslCurve::FFDHE3072,
+];
+
+/// Firefox 135 delegated_credentials (ext 0x22) sigalg list — Firefox-only.
+/// The four ECDSA sigalgs NSS advertises in the delegated-credential ext.
+const FIREFOX_DELEGATED_CREDENTIALS: &str = concat!(
+    "ecdsa_secp256r1_sha256",
+    ":ecdsa_secp384r1_sha384",
+    ":ecdsa_secp521r1_sha512",
+    ":ecdsa_sha1",
+);
+
+/// Firefox 135 record_size_limit (ext 0x1c) value: 0x4001 (16385).
+const FIREFOX_RECORD_SIZE_LIMIT: u16 = 0x4001;
+
+/// Firefox 135 extension order (indices into BoringSSL's
+/// `BORING_SSLEXTENSION_PERMUTATION` table — same index space the Chrome and
+/// Safari permutations use). FIXED order every handshake (NSS does not
+/// Fisher-Yates shuffle). 15 extensions → the Firefox `t13d1715h2` JA4 count.
+/// Index map (proven from CHROME_/SAFARI_ permutations + boring2 ext table):
+/// 0=SNI, 1=ECH, 2=ext_master_secret, 3=renegotiate, 4=supported_groups,
+/// 5=ec_point_formats, 6=session_ticket, 7=ALPN, 8=status_request,
+/// 9=signature_algorithms, 14=key_share, 15=psk_kex_modes, 17=supported_versions,
+/// 22=delegated_credentials, 26=record_size_limit. Order verified against a
+/// tls.peet.ws Firefox 135 capture — iterate if the JA4 ext-hash diverges.
+const FIREFOX_EXTENSION_PERMUTATION: &[u8] = &[
+    0,  // server_name
+    2,  // extended_master_secret
+    3,  // renegotiation_info
+    4,  // supported_groups
+    5,  // ec_point_formats
+    6,  // session_ticket
+    7,  // ALPN
+    8,  // status_request
+    22, // delegated_credentials (0x22) — Firefox-only
+    14, // key_share
+    17, // supported_versions
+    9,  // signature_algorithms
+    15, // psk_key_exchange_modes
+    25, // record_size_limit (0x1c) — Firefox-only (boring2 perm-table index 25)
+    1,  // encrypted_client_hello (ECH grease)
+];
+
 /// ALPN protocols: h2 + http/1.1
 const ALPN_PROTOS: &[u8] = b"\x02h2\x08http/1.1";
 
@@ -245,18 +344,33 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
     //    Per-connection ALPS and ECH grease are also skipped — see
     //    configure_connection() below.
     let is_safari_ios = profile.device_class == DeviceClass::MobileIOS;
-    let curves: &[SslCurve] = match profile.device_class {
-        DeviceClass::MobileAndroid => CURVES_ANDROID,
-        DeviceClass::MobileIOS => CURVES_SAFARI_IOS,
-        DeviceClass::Desktop => CURVES_DESKTOP,
+    // Firefox wire class (04_FIREFOX_WIRE): a desktop profile whose browser
+    // family is Firefox emits an NSS-class ClientHello (no GREASE, FFDHE
+    // groups, delegated_credentials + record_size_limit, fixed extension
+    // order) instead of Chrome's. Without this a firefox_135_* profile put a
+    // Chrome JA4 under a Firefox UA — an incoherent identity every JA4↔UA
+    // cross-checking vendor (DataDome, Cloudflare, Akamai) buckets as bot.
+    let is_firefox = profile.browser_name == "Firefox";
+    let curves: &[SslCurve] = if is_firefox {
+        CURVES_FIREFOX
+    } else {
+        match profile.device_class {
+            DeviceClass::MobileAndroid => CURVES_ANDROID,
+            DeviceClass::MobileIOS => CURVES_SAFARI_IOS,
+            DeviceClass::Desktop => CURVES_DESKTOP,
+        }
     };
     let cipher_list: &str = if is_safari_ios {
         CIPHER_LIST_SAFARI_IOS
+    } else if is_firefox {
+        CIPHER_LIST_FIREFOX
     } else {
         CIPHER_LIST
     };
     let sigalgs_list: &str = if is_safari_ios {
         SIGALGS_LIST_SAFARI_IOS
+    } else if is_firefox {
+        SIGALGS_LIST_FIREFOX
     } else {
         SIGALGS_LIST
     };
@@ -300,29 +414,50 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
         .set_max_proto_version(Some(SslVersion::TLS1_3))
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
-    // Chrome extensions
-    builder.set_grease_enabled(true);
+    // GREASE: Chrome sprinkles GREASE across cipher/group/extension lists;
+    // NSS-class Firefox sends NONE. The visible no-GREASE shape is itself a
+    // Firefox tell, so disable it for the Firefox arm.
+    builder.set_grease_enabled(!is_firefox);
 
     builder.set_permute_extensions(false);
 
     builder.enable_ocsp_stapling();
     builder.enable_signed_cert_timestamps();
 
-    // Chrome 131+ sends both X25519MLKEM768 and X25519 key shares.
+    // Chrome 131+ and Firefox 132+ both send two key shares
+    // (X25519MLKEM768 + X25519).
     builder.set_key_shares_limit(2);
 
+    // Firefox-only extensions: delegated_credentials (0x22) and
+    // record_size_limit (0x1c). Both are hard Firefox/NSS signatures absent
+    // from every Chrome build. boring2 4.15 exposes them as builder methods.
+    if is_firefox {
+        builder
+            .set_delegated_credentials(FIREFOX_DELEGATED_CREDENTIALS)
+            .map_err(|e| NetError::Tls(e.to_string()))?;
+        builder.set_record_size_limit(FIREFOX_RECORD_SIZE_LIMIT);
+    }
+
     // Certificate compression. Chrome desktop+Android = Brotli (algo 2).
-    // iOS Safari = Zlib (algo 1) — this is one of the four big "Safari
-    // is missing" / "Safari is different" signals (the other three are
-    // ECH absence, ALPS absence, session_ticket absence).
-    let cert_compress_alg = if is_safari_ios {
-        CertCompressionAlgorithm::Zlib
+    // iOS Safari = Zlib (algo 1). Firefox 135 advertises zlib THEN brotli in
+    // its compress_certificate ext (NSS order).
+    if is_firefox {
+        builder
+            .add_cert_compression_alg(CertCompressionAlgorithm::Zlib)
+            .map_err(|e| NetError::Tls(e.to_string()))?;
+        builder
+            .add_cert_compression_alg(CertCompressionAlgorithm::Brotli)
+            .map_err(|e| NetError::Tls(e.to_string()))?;
     } else {
-        CertCompressionAlgorithm::Brotli
-    };
-    builder
-        .add_cert_compression_alg(cert_compress_alg)
-        .map_err(|e| NetError::Tls(e.to_string()))?;
+        let cert_compress_alg = if is_safari_ios {
+            CertCompressionAlgorithm::Zlib
+        } else {
+            CertCompressionAlgorithm::Brotli
+        };
+        builder
+            .add_cert_compression_alg(cert_compress_alg)
+            .map_err(|e| NetError::Tls(e.to_string()))?;
+    }
 
     // iOS Safari does not send the session_ticket extension at all.
     // SslOptions::NO_TICKET tells BoringSSL to omit the extension entirely
@@ -352,6 +487,10 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
     //    typically does.
     let permutation = if is_safari_ios {
         SAFARI_IOS_EXTENSION_PERMUTATION.to_vec()
+    } else if is_firefox {
+        // Firefox/NSS emits a FIXED extension order every handshake (no
+        // Fisher-Yates), like Safari — use the Firefox order verbatim.
+        FIREFOX_EXTENSION_PERMUTATION.to_vec()
     } else {
         shuffled_chrome_extension_permutation()
     };
@@ -389,14 +528,19 @@ pub fn configure_connection(
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
     let is_safari_ios = profile.device_class == DeviceClass::MobileIOS;
+    let is_firefox = profile.browser_name == "Firefox";
 
     if !is_safari_ios {
-        // ECH GREASE — Chrome desktop+Android both send it. Safari does not.
+        // ECH GREASE — Chrome desktop+Android AND Firefox all send it.
+        // Safari does not.
         config.set_enable_ech_grease(true);
+    }
 
+    if !is_safari_ios && !is_firefox {
         // Application-layer settings (ALPS) for HTTP/2.
         // Chrome 147 Headless sends 4 settings: 1, 2, 4, 6.
         // Safari has no ALPS extension at all — skip entirely on iOS.
+        // Firefox has no ALPS extension either — skip for the Firefox arm.
         let alps_payload: &[u8] = &[
             // SETTINGS frame (Length 24, Type 4, Flags 0, Stream 0)
             0x00, 0x00, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, // ID 1: 65536
