@@ -1728,7 +1728,42 @@ impl Page {
                 continue;
             }
             let name = script.src.clone().unwrap_or_else(|| resp_url.clone());
-            if let Err(e) = self.event_loop.execute_script_with_name(&code, &name) {
+            if script.is_module {
+                // Mirror the cold path (navigate_loop_internal): route
+                // `<script type="module">` through the ES-module loader instead
+                // of classic `execute_script`, which throws `SyntaxError: Cannot
+                // use import statement outside a module` and drops the whole
+                // bundle. Without this the warm/PagePool path serves only the
+                // server shell for every modern Vite/React/Vue SPA — reddit's
+                // 16 module scripts rendered 8 KB warm vs 676 KB cold (the
+                // dominant warm-pool thin-render artifact; the gate runs pooled).
+                // Bounded at 10s/module so a stalled import graph can't hang the
+                // nav; on timeout we log and continue with what rendered.
+                let eval_fut = async {
+                    if let Some(src) = &script.src {
+                        let module_url = url::Url::parse(&resp_url)
+                            .ok()
+                            .and_then(|base| base.join(src).ok())
+                            .map(|u| u.to_string())
+                            .unwrap_or_else(|| src.clone());
+                        self.event_loop
+                            .eval_module_code(&module_url, code.clone())
+                            .await
+                    } else {
+                        let spec = format!("{resp_url}#oxide-mod-{i}");
+                        self.event_loop.eval_module_code(&spec, code.clone()).await
+                    }
+                };
+                match tokio::time::timeout(Duration::from_secs(10), eval_fut).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        tracing::warn!(script = %name, error = %e, "warm ES module eval error")
+                    }
+                    Err(_) => {
+                        tracing::warn!(script = %name, "warm ES module eval timed out (10s) — continuing")
+                    }
+                }
+            } else if let Err(e) = self.event_loop.execute_script_with_name(&code, &name) {
                 tracing::warn!(script = %name, error = %e, "warm script error");
             }
             let _ = self
@@ -3716,8 +3751,12 @@ impl Page {
                 };
                 match tokio::time::timeout(Duration::from_secs(10), eval_fut).await {
                     Ok(Ok(())) => {}
-                    Ok(Err(e)) => tracing::warn!(script = %name, error = %e, "ES module eval error"),
-                    Err(_) => tracing::warn!(script = %name, "ES module eval timed out (10s) — continuing"),
+                    Ok(Err(e)) => {
+                        tracing::warn!(script = %name, error = %e, "ES module eval error")
+                    }
+                    Err(_) => {
+                        tracing::warn!(script = %name, "ES module eval timed out (10s) — continuing")
+                    }
                 }
             } else if let Err(e) = event_loop.execute_script_with_name(&code, &name) {
                 tracing::warn!(script = %name, error = %e, "Script execution error");
