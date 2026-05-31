@@ -41,6 +41,10 @@ async fn main() {
             let ec = browser::engine_classify(&body);
             println!("== thin_probe {url} ==");
             println!("nav_ms={nav_ms} tag={} len={}", ec.tag, ec.len);
+            if let Ok(path) = std::env::var("DUMP_BODY") {
+                let _ = std::fs::write(&path, &body);
+                println!("  dumped body -> {path}");
+            }
             let bl = body.to_lowercase();
             for sig in [
                 "gokuprops",
