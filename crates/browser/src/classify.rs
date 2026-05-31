@@ -78,24 +78,40 @@ pub struct EngineClass {
 /// any-size structural signal that catches the large udemy CF shell
 /// `/cdn-cgi/challenge-platform/` alone cannot — that JSD URL also
 /// stays on *passed* CF pages, so it is deliberately NOT used here).
-/// INVERSE-CHL (parity-workflows M-1 guard): `gokuprops` and
-/// `awswafcookiedomainlist` are AWS-WAF token-challenge envelope variables
-/// emitted **only** on the unsolved challenge stub. They are gone the
-/// moment the PoW worker posts the `aws-waf-token` and the reload serves
-/// real Amazon/IMDb content. Adding them here (any-size, like the CF/DD
-/// structural tokens) means the M-1 async-drain refactor cannot grow a
-/// still-unsolved AWS shell past the 30 KB `INTERSTITIAL_MAX_BYTES` gate
-/// and have it false-PASS as `L3-RENDERED` — an unsolved AWS body stays a
-/// challenge at every size. Mirrors the inline `AwsWafIntegration` /
-/// `gokuProps` guard at `page.rs:2521-2522`.
+/// AWS-WAF token-challenge markers (`gokuprops` / `awswafcookiedomainlist`)
+/// are deliberately NOT here — redfin retains them on its solved page, so
+/// they are co-signed by an active PoW loader instead (see [`AWSWAF_MARKERS`]).
 const UNAMBIGUOUS: &[(&str, &str)] = &[
     ("cf-browser-verification", "Cloudflare-CHL"),
     ("_cf_chl_opt", "Cloudflare-CHL"),
     ("/_sec/cp_challenge", "Akamai-sec-cpt-CHL"),
     ("ddcaptchaencoded", "DataDome-CHL"),
-    ("gokuprops", "AWS-WAF-CHL"),
-    ("awswafcookiedomainlist", "AWS-WAF-CHL"),
 ];
+
+/// AWS-WAF token-challenge envelope variables. The original comment above
+/// claimed these are "gone the moment the PoW worker posts the token" — true
+/// for amazon/imdb (which DROP the AWS-WAF script after solving) but FALSE for
+/// redfin, which KEEPS `awswafcookiedomainlist` (and sometimes `gokuProps`)
+/// embedded in its fully-rendered, solved 392 KB React app
+/// (`window.REDFIN_APP_NAME`, real listings). Treating these as any-size
+/// UNAMBIGUOUS therefore false-FAILED redfin as AWS-WAF-CHL.
+///
+/// The reliable discriminator (captured 2026-05-31, redfin solved vs amazon/imdb
+/// stub) is NOT the envelope config and NOT body size — it is the **active PoW
+/// loader**. A live, unsolved AWS-WAF challenge always pulls
+/// `token.awswaf.com/.../challenge.js` and calls
+/// `AwsWafIntegration.checkForceRefresh()`; a solved page drops that loader
+/// (the PoW already cleared) even when leftover config vars persist. So an
+/// AWS-WAF marker is now a challenge ONLY when co-signed by an active loader —
+/// size-independent, so it cannot false-FAIL redfin's large solved body NOR
+/// false-PASS a still-unsolved shell that an async-drain refactor grows past any
+/// byte gate.
+const AWSWAF_MARKERS: &[&str] = &["gokuprops", "awswafcookiedomainlist"];
+
+/// Substrings that prove the AWS-WAF PoW loader is still live on the page.
+/// Present on the unsolved stub, gone once the token clears (redfin solved).
+const AWSWAF_ACTIVE_LOADER: &[&str] =
+    &["token.awswaf.com", "awswafintegration", "checkforcerefresh"];
 
 /// English-phrase interstitial markers — these CAN appear in normal page
 /// copy (article body, cookie banner, privacy policy), so they only
@@ -217,6 +233,14 @@ pub fn engine_classify(body: &str) -> EngineClass {
             if lower.contains(n) {
                 break 'tag t;
             }
+        }
+        // AWS-WAF: an envelope marker is a live challenge ONLY when co-signed by
+        // an active PoW loader. redfin's solved page retains the config vars but
+        // drops the loader, so it must NOT be tagged. See AWSWAF_MARKERS doc.
+        if AWSWAF_MARKERS.iter().any(|n| lower.contains(n))
+            && AWSWAF_ACTIVE_LOADER.iter().any(|n| lower.contains(n))
+        {
+            break 'tag "AWS-WAF-CHL";
         }
         if len < INTERSTITIAL_MAX_BYTES {
             for (n, t) in PHRASE {
@@ -399,6 +423,52 @@ mod tests {
         let pah = r#"<html><body><p>Press &amp; Hold to confirm</p></body></html>"#;
         assert_eq!(engine_classify(pah).tag, "PerimeterX-PaH");
         assert!(engine_classify(pah).verdict.is_challenge());
+    }
+
+    // FP-B5 regression (redfin): AWS-WAF token-challenge markers
+    // (`gokuProps` / `awswafcookiedomainlist`) are co-signed by an active PoW
+    // loader, NOT size-gated. Captured 2026-05-31: redfin's solved 392 KB
+    // React app retains `awswafcookiedomainlist` but drops the
+    // `token.awswaf.com` / `AwsWafIntegration.checkForceRefresh` loader — so it
+    // must classify as a pass at ANY size. amazon/imdb's unsolved stub carries
+    // both the marker AND the live loader and must still be detected.
+    #[test]
+    fn fp_b5_awswaf_markers_loader_cosigned() {
+        // redfin shape: config var retained in a large, fully-rendered app, but
+        // the active loader is GONE (PoW already cleared).
+        let mut solved = String::from(
+            r#"<html><head><script>window.awsWafCookieDomainList=["redfin.com"];</script></head><body>
+               <script>window.REDFIN_APP_NAME="customer-pages-personalization";</script>"#,
+        );
+        for _ in 0..6000 {
+            solved.push_str("<div class='HomeCard'>real listing content here</div>");
+        }
+        solved.push_str("</body></html>");
+        assert_eq!(engine_classify(&solved).tag, "L3-RENDERED");
+        assert_eq!(engine_classify(&solved).verdict, ChallengeVerdict::Pass);
+        assert_eq!(holistic_tag(&solved), "L3-RENDERED");
+
+        // Even a SMALL leftover (config var, no loader) is NOT an AWS-WAF
+        // challenge — the discriminator is the loader, not the byte count. (A
+        // tiny body falls to THIN-BODY on its own; the point is it is not a
+        // false AWS-WAF-CHL.)
+        let small_leftover = r#"<html><body><script>window.awsWafCookieDomainList=["redfin.com"];</script>
+            <p>real content</p></body></html>"#;
+        assert_ne!(engine_classify(small_leftover).tag, "AWS-WAF-CHL");
+        assert!(!engine_classify(small_leftover).verdict.is_challenge());
+
+        // amazon/imdb shape: unsolved AWS-WAF stub with the live loader — detected.
+        let stub = r#"<html><head><script src="https://x.token.awswaf.com/challenge.js"></script>
+            <script>window.gokuProps={key:'a',context:'b',iv:'c'};</script></head>
+            <body><div id="challenge-container"></div></body></html>"#;
+        assert_eq!(engine_classify(stub).tag, "AWS-WAF-CHL");
+        assert!(engine_classify(stub).verdict.is_challenge());
+
+        // checkForceRefresh loader variant with the cookie-domain marker — detected.
+        let stub2 = r#"<html><body><script>var awsWafCookieDomainList=["a.com"];
+            AwsWafIntegration.checkForceRefresh().then(()=>{});</script></body></html>"#;
+        assert_eq!(engine_classify(stub2).tag, "AWS-WAF-CHL");
+        assert!(engine_classify(stub2).verdict.is_challenge());
     }
 
     // FP-B4 regression: a large Cloudflare orchestrator shell that ran
@@ -619,11 +689,15 @@ mod tests {
         assert!(s.verdict.is_challenge(), "unsolved AWS stub is a challenge");
         assert_ne!(s.verdict, ChallengeVerdict::Pass);
 
-        // The core guard: even if the body is grown past the 30 KB / 50 KB
-        // gates (e.g. a partial-solve refactor artifact) while still
-        // carrying the AWS envelope vars, it must NOT false-PASS.
+        // The core guard: even if a STILL-UNSOLVED shell (the live PoW loader is
+        // present) is grown past the 30 KB / 50 KB gates by an async-drain
+        // refactor artifact, it must NOT false-PASS. The active loader — not the
+        // byte count — is what keeps it a challenge (redfin's solved page drops
+        // the loader, so this guard cannot misfire on a genuine pass).
         let mut grown = String::from(
-            r#"<script>window.gokuProps={"key":"AQ=="};window.awsWafCookieDomainList=[];</script>"#,
+            r#"<script>window.gokuProps={"key":"AQ=="};window.awsWafCookieDomainList=[];
+            AwsWafIntegration.checkForceRefresh();</script>
+            <script src="https://x.token.awswaf.com/x/challenge.js"></script>"#,
         );
         for _ in 0..3000 {
             grown.push_str("<div>partially rendered challenge shell padding here</div>");

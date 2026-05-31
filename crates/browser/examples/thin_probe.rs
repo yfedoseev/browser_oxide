@@ -41,6 +41,18 @@ async fn main() {
             let ec = browser::engine_classify(&body);
             println!("== thin_probe {url} ==");
             println!("nav_ms={nav_ms} tag={} len={}", ec.tag, ec.len);
+            let bl = body.to_lowercase();
+            for sig in [
+                "gokuprops",
+                "awswafcookiedomainlist",
+                "token.awswaf.com",
+                "awswafintegration",
+                "checkforcerefresh",
+                "challenge.js",
+                "captcha.awswaf.com",
+            ] {
+                println!("  awssig {sig}={}", bl.contains(sig));
+            }
 
             let diag = r#"
                 JSON.stringify((function(){
