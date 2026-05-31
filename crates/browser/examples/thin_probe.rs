@@ -93,6 +93,22 @@ async fn main() {
                     return out;
                 })())
             "#;
+            if let Ok(js) = std::env::var("PROBE_JS") {
+                // Run an arbitrary async probe: stash JSON result on a global,
+                // drive the loop so the fetch resolves, then read it back.
+                let kick = format!(
+                    "globalThis.__probeResult='(pending)';(async()=>{{try{{globalThis.__probeResult=JSON.stringify(await ({js}))}}catch(e){{globalThis.__probeResult='PROBE_ERR '+(e&&e.stack||e)}}}})();"
+                );
+                let _ = page
+                    .event_loop()
+                    .execute_and_run(&kick, std::time::Duration::from_secs(15))
+                    .await;
+                let r = page
+                    .event_loop()
+                    .execute_script("globalThis.__probeResult")
+                    .unwrap_or_default();
+                println!("PROBE_RESULT: {r}");
+            }
             let dump = page.event_loop().execute_script(diag).unwrap_or_default();
             // Pretty-print the JSON for readability.
             match deno_core::serde_json::from_str::<deno_core::serde_json::Value>(&dump) {
