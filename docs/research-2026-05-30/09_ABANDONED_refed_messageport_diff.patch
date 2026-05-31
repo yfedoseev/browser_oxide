@@ -1,0 +1,111 @@
+diff --git a/crates/browser/src/page.rs b/crates/browser/src/page.rs
+index 8cd6499..cf920fe 100644
+--- a/crates/browser/src/page.rs
++++ b/crates/browser/src/page.rs
+@@ -2236,7 +2236,21 @@ impl Page {
+                         .unwrap_or_default()
+                         .parse()
+                         .unwrap_or(0);
+-                    if mount_populated > 0 {
++                    // Floor: only fast-exit once the rendered body has reached
++                    // passing size (the 15 KB sweep threshold). A mount with a
++                    // FEW children but a tiny body is a PREMATURE render — the
++                    // app shell mounted but lazy-loaded chunks / deferred
++                    // content (adidas: 1.45 MB behind code-split chunks gated by
++                    // unref'd timers + IntersectionObserver) haven't landed yet.
++                    // Bailing there returns a 2.4 KB shell that fails the metric.
++                    // Without the floor, the refed-MessagePort scheduler (which
++                    // drains React's chunk chain in one run_event_loop call)
++                    // makes the mount populate FAST, then idle, then trip this
++                    // exit before the lazy graph loads. Keeping the loop spinning
++                    // below 15 KB gives those chunks the multi-drain wall-clock
++                    // they need. Heavy shells (twitter/x 274 KB, hulu) clear the
++                    // floor on iter 0 and still fast-exit.
++                    if mount_populated > 0 && body_len >= 15_000 {
+                         eprintln!(
+                             "[navigate] SPA-fast-exit on iter={} (body={}KB, mount has {} children)",
+                             iter,
+@@ -2742,6 +2756,57 @@ impl Page {
+                         continue;
+                     }
+                 }
++
++                // Sub-threshold benign continued-drain (thin-render rescue).
++                // A benign page (no pending nav, not a challenge) that reached
++                // run_until_idle = AllWorkDone but whose body is still BELOW the
++                // 15 KB pass threshold has typically mounted its SPA shell and
++                // idled with deferred render work still queued behind machinery a
++                // SINGLE drain doesn't surface: unref'd timers (>2000 ms — they
++                // don't gate one drain but DO fire on the NEXT run_until_idle),
++                // requestIdleCallback, and IntersectionObserver/lazy code-split
++                // fallbacks. Real Chrome keeps the loop running and lands those;
++                // returning here serves the partial shell (duolingo 13 KB,
++                // adidas 2.4 KB). Give that deferred work bounded extra
++                // wall-clock. Gated on body < 15 KB ⇒ already-passing pages
++                // return immediately (zero added latency for the common case);
++                // stalls-out after 3 no-growth ticks ⇒ genuinely-done small
++                // pages don't burn the budget.
++                if !page.is_anti_bot_challenge() {
++                    let body_len_now = |p: &mut Self| -> usize {
++                        p.event_loop()
++                            .execute_script(
++                                "document.body ? document.body.outerHTML.length : 0",
++                            )
++                            .unwrap_or_default()
++                            .parse()
++                            .unwrap_or(0)
++                    };
++                    let mut last_len = body_len_now(&mut page);
++                    if last_len < 15_000 {
++                        let mut stalls = 0u32;
++                        while nav_t0.elapsed() < nav_budget && stalls < 3 {
++                            let _ = page
++                                .event_loop()
++                                .run_until_idle(Duration::from_millis(500))
++                                .await;
++                            let cur = body_len_now(&mut page);
++                            if cur >= 15_000 {
++                                eprintln!(
++                                    "[navigate] thin-render rescue: body grew {}→{} bytes, returning",
++                                    last_len, cur
++                                );
++                                break;
++                            }
++                            if cur <= last_len {
++                                stalls += 1;
++                            } else {
++                                stalls = 0;
++                            }
++                            last_len = cur;
++                        }
++                    }
++                }
+                 return Ok(page);
+             }
+ 
+diff --git a/crates/js_runtime/src/js/window_bootstrap.js b/crates/js_runtime/src/js/window_bootstrap.js
+index d6f69df..bc7a559 100644
+--- a/crates/js_runtime/src/js/window_bootstrap.js
++++ b/crates/js_runtime/src/js/window_bootstrap.js
+@@ -2408,7 +2408,20 @@
+                     port.dispatchEvent(ev);
+                 } catch (_e) {}
+             };
+-            const _sched = globalThis.__bgSetTimeout || globalThis.setTimeout;
++            // Use the REFED setTimeout (0 ms stays refed — below the 2000 ms
++            // unref threshold), NOT __bgSetTimeout. __bgSetTimeout unrefs the
++            // op_timer_sleep, so deno_core reports AllWorkDone while React's
++            // next scheduler chunk is still pending — run_until_idle then exits
++            // after ONE chunk and the continuation only runs on the next page.rs
++            // drain. A heavy concurrent render (adidas 1.45 MB) needs dozens of
++            // chunks, so that path is slow/flaky. A refed 0 ms timer keeps the
++            // loop alive so the ENTIRE performWorkUntilDeadline chain drains in
++            // a single run_event_loop call. React's scheduler stops posting once
++            // hasMoreWork is false (isMessageLoopRunning = false), so the chain
++            // is finite — it idles cleanly once the render commits. This matches
++            // Chrome, where a pending MessageChannel task DOES gate navigation
++            // idle.
++            const _sched = globalThis.setTimeout || globalThis.__bgSetTimeout;
+             try { _sched(_fire, 0); } catch (_e) { _fire(); }
+         };
+ 
