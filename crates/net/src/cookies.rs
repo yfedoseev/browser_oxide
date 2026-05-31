@@ -204,13 +204,28 @@ fn parse_http_date(s: &str) -> Option<u64> {
     let s = s.trim();
     const FORMATS: &[&str] = &[
         "%a, %d %b %Y %H:%M:%S GMT",
+        // Abbreviated weekday + 2-digit year (`Mon, 31-May-27 …`) — Ozon and
+        // others emit this. MUST come before the 4-digit `%Y` form: `%Y` on
+        // "27" mis-parses to year 0027 → a NEGATIVE/epoch-0 timestamp → the
+        // expiry guard (`set_cookies`) then DELETES the cookie, so Ozon's
+        // antibot cookie is never stored and its 307-redirect loop never breaks
+        // (THIN-BODY/156). `%y` maps 27 → 2027. (Full-weekday `%A` form below
+        // needs "Monday", not "Mon", so it never matched this string.)
+        "%a, %d-%b-%y %H:%M:%S GMT",
         "%a, %d-%b-%Y %H:%M:%S GMT",
         "%A, %d-%b-%y %H:%M:%S GMT",
         "%a %b %e %H:%M:%S %Y",
     ];
     for f in FORMATS {
         if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, f) {
-            return Some(ndt.and_utc().timestamp().max(0) as u64);
+            let ts = ndt.and_utc().timestamp();
+            // A NEGATIVE timestamp = a mis-parse (e.g. a future 2-digit year
+            // read as year 00xx). Skip it so a wrong format can't return 0 and
+            // trigger a spurious deletion; let a better format (or the session
+            // fallback) win.
+            if ts >= 0 {
+                return Some(ts as u64);
+            }
         }
     }
     chrono::DateTime::parse_from_rfc2822(s)
@@ -387,6 +402,33 @@ mod tests {
         jar.set_cookies(&set_url, &["t=v; Domain=mail.ru".to_string()]);
         let sibling = Url::parse("https://m.mail.ru/").unwrap();
         assert_eq!(jar.cookies_for(&sibling), Some("t=v".to_string()));
+    }
+
+    #[test]
+    fn expires_2digit_year_stored_not_deleted() {
+        // Ozon (and others) emit `Mon, 31-May-27 …` (abbreviated weekday +
+        // 2-digit year). The 4-digit %Y format mis-parsed "27" → year 0027 →
+        // epoch-0 → the expiry guard DELETED the cookie, so Ozon's antibot
+        // 307-redirect loop never broke (THIN-BODY/156). %y must parse 27→2027.
+        let ts = parse_http_date("Mon, 31-May-27 00:05:44 GMT");
+        assert!(
+            ts.is_some() && ts.unwrap() > 1_800_000_000,
+            "2-digit future year must parse to 2027 (stored), got {ts:?}"
+        );
+        // 4-digit and asctime forms still parse.
+        assert!(parse_http_date("Wed, 09 Jun 2027 10:18:14 GMT").is_some());
+        // Integration: the cookie must be STORED (not deleted) and echoed.
+        let mut jar = CookieJar::new();
+        let u = Url::parse("https://www.ozon.ru/").unwrap();
+        jar.set_cookies(
+            &u,
+            &["antibot=tok; Expires=Mon, 31-May-27 00:05:44 GMT; Path=/".to_string()],
+        );
+        assert_eq!(
+            jar.cookies_for(&u),
+            Some("antibot=tok".to_string()),
+            "2027-expiry cookie must be stored, not deleted"
+        );
     }
 
     #[test]
