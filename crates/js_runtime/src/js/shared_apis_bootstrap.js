@@ -358,6 +358,24 @@
                 const sliced = this._data.slice(start, end);
                 const b = new Blob([], { type }); b._data = sliced; b.size = sliced.byteLength; return b;
             }
+            // P2b — Blob.prototype.stream(). Was missing; SPA state persisters
+            // (e.g. duolingo: `new Blob([...]).stream().pipeThrough(new
+            // CompressionStream('gzip'))`) threw `.stream is not a function`,
+            // aborting the event-loop drain before React's commit → empty #root.
+            stream() {
+                const data = this._data;
+                if (typeof globalThis.ReadableStream === 'function') {
+                    return new globalThis.ReadableStream({
+                        start(controller) {
+                            if (data && data.byteLength) controller.enqueue(data);
+                            controller.close();
+                        }
+                    });
+                }
+                // Minimal fallback if ReadableStream is unavailable.
+                let done = false;
+                return { getReader() { return { read() { if (done) return Promise.resolve({ done: true, value: undefined }); done = true; return Promise.resolve({ done: false, value: data }); }, releaseLock() {}, cancel() { return Promise.resolve(); } }; } };
+            }
         };
         _maskAsNative(globalThis.Blob);
     }
