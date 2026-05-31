@@ -15,32 +15,12 @@ use url::Url;
 const MAX_SYNC_FETCH_PER_PAGE: usize = 30;
 thread_local! {
     static SYNC_FETCH_COUNT: Cell<usize> = const { Cell::new(0) };
-    /// Per-page per-URL (repeat-count, last-body) cache for synchronous script
-    /// fetches. A script that re-injects itself in a tight loop (OneTrust
-    /// `otBannerSdk.js`, `document.write` loaders) re-fetches the SAME url
-    /// hundreds of times, and each `op_net_fetch_sync` spawns a fresh tokio
-    /// runtime + HTTP client → thread/memory exhaustion → SIGKILL (exit 137,
-    /// killed the 126-gate on zoom.us). But some flows legitimately re-fetch the
-    /// same url a FEW times expecting FRESH content (Akamai BMP re-fetches its
-    /// sensor script across the challenge round-trips — caching stale bodies
-    /// breaks the solve and regresses adidas). So we serve from cache ONLY after
-    /// the same url has been fetched `SYNC_FETCH_URL_REPEAT_CACHE_AT` times: the
-    /// first few stay fresh (Akamai works), a runaway loop is bounded (zoom).
-    static SYNC_FETCH_CACHE: std::cell::RefCell<
-        std::collections::HashMap<String, (usize, String)>,
-    > = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-/// Fetch the same URL fresh up to this many times per page; beyond it, serve the
-/// last body from cache (bounds re-injection loops without breaking the handful
-/// of legitimate fresh re-fetches Akamai/sensor flows do).
-const SYNC_FETCH_URL_REPEAT_CACHE_AT: usize = 8;
-
-/// Reset the per-page sync-fetch counter + cache. Called by
-/// Page::navigate_with_init at the start of each navigation iteration.
+/// Reset the per-page sync-fetch counter. Called by Page::navigate_with_init
+/// at the start of each navigation iteration.
 pub fn reset_sync_fetch_count() {
     SYNC_FETCH_COUNT.with(|c| c.set(0));
-    SYNC_FETCH_CACHE.with(|c| c.borrow_mut().clear());
 }
 
 pub fn record_resource_timing(state: &mut deno_core::OpState, timings: net::TimingStats) {
@@ -505,19 +485,6 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
         return String::new();
     }
 
-    // Per-page repeat guard: once the SAME url has been fetched
-    // SYNC_FETCH_URL_REPEAT_CACHE_AT times this page, serve the last body from
-    // cache (no runtime spawn) — bounds a re-injection loop (zoom.us OOM) while
-    // letting the first few fetches stay fresh (Akamai sensor re-fetches).
-    if let Some(cached) = SYNC_FETCH_CACHE.with(|c| {
-        c.borrow()
-            .get(&url)
-            .filter(|(n, _)| *n >= SYNC_FETCH_URL_REPEAT_CACHE_AT)
-            .map(|(_, body)| body.clone())
-    }) {
-        return cached;
-    }
-
     // Per-page chain ceiling — see MAX_SYNC_FETCH_PER_PAGE.
     let n = SYNC_FETCH_COUNT.with(|c| {
         let v = c.get();
@@ -633,15 +600,6 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
         result.len(),
         url
     );
-    // Record this fetch: bump the per-URL repeat count and stash the latest body
-    // so that once the count crosses the threshold above, repeats serve from
-    // cache instead of spawning another runtime.
-    SYNC_FETCH_CACHE.with(|c| {
-        let mut map = c.borrow_mut();
-        let entry = map.entry(url.clone()).or_insert((0, String::new()));
-        entry.0 += 1;
-        entry.1 = result.clone();
-    });
     result
 }
 
