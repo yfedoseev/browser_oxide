@@ -2386,14 +2386,30 @@
                 q.push(data);
                 return;
             }
-            try {
-                const ev = new MessageEvent('message', { data, bubbles: false, cancelable: false });
-                // dispatchEvent fires both addEventListener handlers AND
-                // the on-property (deno_core's EventTarget auto-promotes
-                // `onmessage` to a listener). Calling the on-property
-                // explicitly in addition would double-fire it.
-                try { port.dispatchEvent(ev); } catch (_e) {}
-            } catch (_e) {}
+            // Deliver as a MACROTASK, not synchronously. React 18's concurrent
+            // scheduler is built on a MessageChannel: it sets port1.onmessage =
+            // performWorkUntilDeadline and calls port2.postMessage(null) to
+            // schedule the NEXT chunk of work, REQUIRING that callback to run on
+            // a later task so it can yield between units. Synchronous re-entrant
+            // delivery (the previous behaviour) ran performWorkUntilDeadline
+            // inside postMessage — re-entering the scheduler — so the concurrent
+            // render never completed and `#root` stayed an empty shell (the
+            // thin-render gap on duolingo/douyin/adidas/ozon/wildberries). The
+            // event loop drives this timer during the nav drain, so React's
+            // render chain now runs to completion.
+            const _fire = () => {
+                if (_PortClosed.get(port)) return;
+                try {
+                    const ev = new MessageEvent('message', { data, bubbles: false, cancelable: false });
+                    // dispatchEvent fires both addEventListener handlers AND the
+                    // on-property (deno_core's EventTarget auto-promotes
+                    // `onmessage`). Calling the on-property explicitly too would
+                    // double-fire it.
+                    port.dispatchEvent(ev);
+                } catch (_e) {}
+            };
+            const _sched = globalThis.__bgSetTimeout || globalThis.setTimeout;
+            try { _sched(_fire, 0); } catch (_e) { _fire(); }
         };
 
         globalThis.MessagePort = class MessagePort extends EventTarget {
