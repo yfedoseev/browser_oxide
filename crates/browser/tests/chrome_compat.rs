@@ -5592,40 +5592,45 @@ async fn iframe_postmessage_round_trip_via_proxy() {
     )
     .await
     .unwrap();
-    let js = r#"
-        // Set up parent-side listener.
-        let received = null;
-        window.addEventListener('message', (e) => {
-            // First message we observe is the one our iframe synthesized.
-            if (received === null) received = String(e.data);
-        });
-        // Mount iframe; trigger postMessage from inside iframe.contentWindow.
+    // FP-E1: real bidirectional iframe postMessage. The framed document
+    // registers a 'message' listener (proving the child realm now exposes a
+    // working addEventListener — previously undefined, a headless tell) and
+    // replies via `event.source`. The parent posts to iframe.contentWindow and
+    // must receive the reply with `event.source === iframe.contentWindow`
+    // (what real challenge solvers — WBAAS / DataDome / Cloudflare — assert).
+    let setup = r#"
+        globalThis.__rt = { parentGot: null, sourceIsCW: null, hasCw: null };
         const ifr = document.createElement('iframe');
+        ifr.srcdoc = "<scr" + "ipt>window.addEventListener('message', function(e){ try { e.source.postMessage('echo:' + e.data, '*'); } catch(_){} });</scr" + "ipt>";
         document.body.appendChild(ifr);
         const cw = ifr.contentWindow;
-        if (!cw) { JSON.stringify({err: 'no contentWindow'}); }
-        else {
-            cw.postMessage('hello-from-iframe', '*');
-            // Drain the microtask: postMessage delivers via Promise.resolve()
-            // in dom_bootstrap.js's iframe Proxy. Wait one turn.
-            Promise.resolve().then(() => {
-                received_microtask_drained = true;
-            });
-        }
-        JSON.stringify({ received, hasCw: cw != null });
+        globalThis.__rt.hasCw = (cw != null);
+        window.addEventListener('message', function(e){
+            if (typeof e.data === 'string' && e.data.indexOf('echo:') === 0) {
+                globalThis.__rt.parentGot = e.data;
+                globalThis.__rt.sourceIsCW = (e.source === cw);
+            }
+        });
+        if (cw) cw.postMessage('hello', '*');
     "#;
-    let immediate = page.evaluate(js).unwrap_or_else(|e| format!("ERROR: {e}"));
-    eprintln!("iframe postmessage immediate: {immediate}");
-    // After microtask drain, the listener should have fired.
-    let after = page.evaluate("String(received)").unwrap_or_default();
-    eprintln!("iframe postmessage after-drain: {after}");
+    let _ = page
+        .evaluate_async(setup, std::time::Duration::from_secs(5))
+        .await;
+    let result = page
+        .evaluate("JSON.stringify(globalThis.__rt)")
+        .unwrap_or_default();
+    eprintln!("iframe postmessage round-trip: {result}");
     assert!(
-        immediate.contains("\"hasCw\":true"),
-        "iframe contentWindow missing: {immediate}"
+        result.contains("\"hasCw\":true"),
+        "no contentWindow: {result}"
     );
     assert!(
-        after.contains("hello-from-iframe"),
-        "postMessage didn't deliver to parent listener; got {after}"
+        result.contains("echo:hello"),
+        "bidirectional iframe postMessage failed (child listener never fired or reply not delivered): {result}"
+    );
+    assert!(
+        result.contains("\"sourceIsCW\":true"),
+        "event.source !== iframe.contentWindow on the reply: {result}"
     );
 }
 

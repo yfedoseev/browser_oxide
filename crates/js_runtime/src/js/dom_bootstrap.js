@@ -2789,10 +2789,79 @@
                 _sp("devicePixelRatio", _dprVal);
             }
 
-            // postMessage stub
+            // ── iframe EventTarget + bidirectional postMessage (FP-E1) ───────
+            // The child v8::Context has a genuine MessageEvent but NO
+            // addEventListener/dispatchEvent: those live on the parent's
+            // EventTarget/Window prototype chain, which the own-enumerable
+            // blanket-copy above never reaches. So a framed document's
+            // `window.addEventListener('message', …)` threw (swallowed),
+            // leaving the iframe unable to receive OR answer messages. That
+            // both (a) gates real iframe-based challenge solvers (WBAAS /
+            // DataDome / Cloudflare load the challenge in an <iframe> and
+            // postMessage with it) and (b) is itself a headless tell (real
+            // iframes expose these). Install a native-shaped EventTarget backed
+            // by a realm-local listener registry + a `__deliverMessage` hook the
+            // parent uses to post INTO the realm. `parent`/`top` identity is
+            // left untouched (set to globalThis above) — replies route via the
+            // delivered event's `source` (the standard postMessage pattern), so
+            // no `iframe.contentWindow.parent === window` FP invariant changes.
+            try {
+                ops.op_eval_in_child_realm(_realmId,
+                    "(function(){var _nt=Symbol.for('__browser_oxide_native__');var _L=Object.create(null);"
+                    + "function _n(fn,nm){try{Object.defineProperty(fn,'name',{value:nm,configurable:true});"
+                    + "Object.defineProperty(fn,_nt,{value:nm,configurable:true});var ts=function toString(){return 'function '+nm+'() { [native code] }'};"
+                    + "Object.defineProperty(ts,_nt,{value:'toString',configurable:true});Object.defineProperty(ts,'name',{value:'toString',configurable:true});"
+                    + "Object.defineProperty(fn,'toString',{value:ts,configurable:true});}catch(_){}return fn;}"
+                    + "function ael(type,fn){if(!(typeof fn==='function'||(fn&&typeof fn.handleEvent==='function')))return;var t=String(type);(_L[t]||(_L[t]=[])).push(fn);}"
+                    + "function rel(type,fn){var a=_L[String(type)];if(a){var i=a.indexOf(fn);if(i>=0)a.splice(i,1);}}"
+                    + "function de(ev){try{var t=ev&&ev.type;var a=_L[t];if(a)a.slice().forEach(function(h){try{(typeof h==='function'?h:h.handleEvent).call(globalThis,ev);}catch(_){}});"
+                    + "var on=globalThis['on'+t];if(typeof on==='function'){try{on.call(globalThis,ev);}catch(_){}}}catch(_){}return true;}"
+                    + "Object.defineProperty(globalThis,'addEventListener',{value:_n(ael,'addEventListener'),writable:true,configurable:true});"
+                    + "Object.defineProperty(globalThis,'removeEventListener',{value:_n(rel,'removeEventListener'),writable:true,configurable:true});"
+                    + "Object.defineProperty(globalThis,'dispatchEvent',{value:_n(de,'dispatchEvent'),writable:true,configurable:true});"
+                    + "Object.defineProperty(globalThis,'__deliverMessage',{value:function(data,origin,source){Promise.resolve().then(function(){try{de(new MessageEvent('message',{data:data,origin:origin||'',source:source||null}));}catch(_){}});},configurable:true});})();"
+                );
+            } catch (_) {}
+
+            // child→parent reply target: a Proxy over the real parent window
+            // whose ONLY override is postMessage — lands a 'message' on the MAIN
+            // window with source === this iframe's contentWindow (cw), what
+            // solvers assert (`event.source === iframe.contentWindow`). Exposed
+            // to the framed doc as the delivered event's `source`, NOT as
+            // `parent`, so the parent-identity invariant is preserved.
+            const _parentOrigin = (globalThis.location && globalThis.location.origin) || "";
+            const _postToParent = function postMessage(msg, origin) {
+                Promise.resolve().then(() => {
+                    try {
+                        globalThis.dispatchEvent(new MessageEvent("message", {
+                            data: msg,
+                            origin: (origin && origin !== "*") ? String(origin) : _parentOrigin,
+                            source: cw,
+                        }));
+                    } catch (_) {}
+                });
+            };
+            let _msgSource = null;
+            try {
+                _msgSource = new Proxy(globalThis, {
+                    get(t, p) { return (p === "postMessage") ? _postToParent : Reflect.get(t, p); },
+                });
+            } catch (_) { _msgSource = { postMessage: _postToParent }; }
+            _sp("__msgSource", _msgSource);
+
+            // parent→child: cw.postMessage(...) (and the framed doc's own
+            // window.postMessage) deliver a 'message' INTO the child realm. Data
+            // crosses the realm boundary as a JSON literal; the event's source
+            // is the reply-routing proxy above.
             const _pm = function postMessage(msg, origin) {
                 Promise.resolve().then(() => {
-                    globalThis.dispatchEvent(new MessageEvent("message", { data: msg, origin: origin || "" }));
+                    try {
+                        const _dj = JSON.stringify(msg === undefined ? null : msg);
+                        const _oj = JSON.stringify((origin && origin !== "*") ? String(origin) : _parentOrigin);
+                        ops.op_eval_in_child_realm(_realmId,
+                            "try{globalThis.__deliverMessage((" + _dj + ")," + _oj + ",(globalThis.__msgSource||null));}catch(_){}"
+                        );
+                    } catch (_) {}
                 });
             };
             _sp("postMessage", _pm);
