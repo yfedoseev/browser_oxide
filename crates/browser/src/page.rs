@@ -2208,6 +2208,44 @@ impl Page {
                     .parse()
                     .unwrap_or(0);
                 let is_chl = page.is_anti_bot_challenge();
+
+                // SSR-preservation. Client hydration can CLEAR the server-
+                // rendered DOM and then fail to rebuild it headless, collapsing
+                // a full SSR page to an empty body. Seen on shopify: its inline
+                // `<script type="module">` (React Router 7 / Remix) hydrates,
+                // wipes the 410 KB SSR body, then never finishes the client
+                // render → body=0. Running the module made us STRICTLY worse
+                // than ignoring it (the SSR HTML was already the full page).
+                // When the rendered body is below the pass floor but the server
+                // HTML carried a substantial document, the SSR content IS the
+                // page: rebuild the static server DOM via reload_html (the
+                // destructive inline module re-throws under classic eval and is
+                // skipped, so the SSR body survives). Gated on !challenge (the
+                // challenge-solve path owns small bodies) and a large server
+                // HTML (challenge stubs are tiny) — and we only KEEP the restore
+                // if it actually yields a passing body, so a genuinely-thin page
+                // is never falsely inflated.
+                if !is_chl && body_len < 15_000 && current_html.len() > 50_000 {
+                    page.reload_html(&current_html, &current_url);
+                    let _ = page
+                        .event_loop()
+                        .run_until_idle(Duration::from_millis(200))
+                        .await;
+                    let restored: usize = page
+                        .event_loop()
+                        .execute_script("document.body ? document.body.outerHTML.length : 0")
+                        .unwrap_or_default()
+                        .parse()
+                        .unwrap_or(0);
+                    if restored >= 15_000 {
+                        eprintln!(
+                            "[navigate] SSR-preservation: hydration collapsed body to {}B; restored server DOM ({}B)",
+                            body_len, restored
+                        );
+                        return Ok(page);
+                    }
+                }
+
                 if !is_chl && body_len > 50 * 1024 {
                     let ready_state = page
                         .event_loop()
