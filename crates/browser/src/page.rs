@@ -282,6 +282,56 @@ fn is_awswaf_challenge(html: &str) -> bool {
     html.len() < 4096 && html.contains("AwsWafIntegration") && html.contains("gokuProps")
 }
 
+/// Geo country-selection splash follow (e.g. bestbuy "Best Buy
+/// International: Select your Country"). A datacenter / non-US IP is served a
+/// thin interstitial instead of the storefront; the splash's own region link
+/// (here `https://www.bestbuy.com/?intl=nosplash` — same host, root path, with
+/// a splash-skip query) serves the real site. A real regional visitor clicks
+/// "United States"; we follow the same-host root link to the document's own
+/// region exactly once.
+///
+/// Tightly gated to avoid false positives: thin body (interstitial-sized) +
+/// an explicit country-selection phrase + a SAME-HOST link whose path is `/`
+/// and which carries a query that differs from the current URL. A legitimate
+/// cross-region selector links OFF-host (e.g. bestbuy.ca) and is never
+/// followed; a normal storefront page is far above the size gate. Returns the
+/// absolute URL to follow, or `None`.
+fn geo_country_splash_target(body: &str, current_url: &str) -> Option<String> {
+    if body.len() >= 30_000 {
+        return None;
+    }
+    let lower = body.to_lowercase();
+    let is_splash = lower.contains("country")
+        && (lower.contains("select your country")
+            || lower.contains("choose a country")
+            || lower.contains("choisir un pays")
+            || lower.contains("seleccione su país"));
+    if !is_splash {
+        return None;
+    }
+    let cur = url::Url::parse(current_url).ok()?;
+    let cur_host = cur.host_str()?;
+    let mut idx = 0usize;
+    while let Some(hpos) = body[idx..].find("href=\"") {
+        let start = idx + hpos + 6;
+        let Some(rel_end) = body[start..].find('"') else {
+            break;
+        };
+        let href = body[start..start + rel_end].replace("&amp;", "&");
+        idx = start + rel_end + 1;
+        if let Ok(u) = cur.join(&href) {
+            if u.host_str() == Some(cur_host)
+                && u.path() == "/"
+                && u.query().is_some()
+                && u.as_str() != cur.as_str()
+            {
+                return Some(u.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Public-engine AWS-WAF solve detector (parity-workflows M-2).
 ///
 /// A genuine solve = the jar holds the `aws-waf-token` cookie AND the
@@ -2047,10 +2097,15 @@ impl Page {
             // drain. The b623d5d flip was observed at nav_ms≈119s. Raise to 60s
             // base; the +45s sec-cpt-solve arm (#6) stacks on top for the reload.
             Some(h) if h.ends_with("homedepot.com") => 60_000,
+            // bestbuy serves a geo country-selection splash to non-US/datacenter
+            // IPs; the navigate loop follows its same-host region link
+            // (`?intl=nosplash`) to the real storefront (geo_country_splash_target).
+            // That is splash-render + follow + full-store-render, which the 25s
+            // BMP tier is too tight for (observed flip at ~70s) — give it 60s.
+            Some(h) if h.ends_with("bestbuy.com") => 60_000,
             // Akamai BMP-protected (plain sensor_data, no sec-cpt PoW).
             Some(h)
-                if h.ends_with("bestbuy.com")
-                    || h.ends_with("nike.com")
+                if h.ends_with("nike.com")
                     || h.ends_with("adidas.com")
                     || h.ends_with("samsclub.com")
                     || h.ends_with("walmart.com") =>
@@ -2086,6 +2141,7 @@ impl Page {
                 .unwrap_or(25_000),
         );
         let mut budget_extended = false;
+        let mut geo_splash_followed = false;
         let nav_t0 = std::time::Instant::now();
 
         for iter in start_iter..iterations {
@@ -2559,6 +2615,24 @@ impl Page {
                     crate::challenge::SolveOutcome::Solved
                 ) {
                     any_solved = true;
+                }
+            }
+
+            // Geo country-selection splash follow (bestbuy etc.): if no script
+            // requested a navigation and we were served a thin country-splash
+            // instead of the storefront, follow the document's own same-host
+            // region link ONCE — exactly what a real regional visitor does by
+            // clicking "United States". The skip-link sets the locale cookie and
+            // serves the real site. Tightly gated in `geo_country_splash_target`
+            // ⇒ never fires on a normal page or an off-host cross-region link.
+            if pending_info.is_empty() && !geo_splash_followed && iter + 1 < iterations {
+                let body_now = page.content();
+                if let Some(target) = geo_country_splash_target(&body_now, &current_url) {
+                    geo_splash_followed = true;
+                    if let Ok(u) = deno_core::serde_json::to_string(&target) {
+                        pending_info = format!("{{\"url\":{u},\"kind\":\"assign\"}}");
+                        tracing::info!(target = %target, "geo country-splash: following region link");
+                    }
                 }
             }
 
@@ -4104,6 +4178,37 @@ mod tests {
     fn datadome_challenge_detects_interstitial() {
         let interstitial = r#"<html><head><script src="https://geo.captcha-delivery.com/c"></script></head><body></body></html>"#;
         assert!(is_datadome_challenge(interstitial));
+    }
+
+    #[test]
+    fn geo_country_splash_follows_same_host_region_link() {
+        // bestbuy "Select your Country" splash: follow the same-host root link
+        // with the splash-skip query (the US link), NOT the off-host Canada link
+        // and NOT the non-root more-details help link.
+        let splash = r#"<html><body><h1>Best Buy International: Select your Country</h1>
+            <a href="https://www.bestbuy.ca/en-ca?intlredir=x" class="canada-link">Canada</a>
+            <a href="https://www.bestbuy.com/?intl=nosplash" class="us-link">United States</a>
+            <a href="https://www.bestbuy.com/site/help-topics/international-orders/x.c?intl=nosplash" class="more-details">More</a>
+            </body></html>"#;
+        assert_eq!(
+            geo_country_splash_target(splash, "https://www.bestbuy.com/").as_deref(),
+            Some("https://www.bestbuy.com/?intl=nosplash")
+        );
+        // A normal storefront page (no country-selection phrase) is never followed.
+        let store = r#"<html><body><h1>Top Deals</h1><a href="https://www.bestbuy.com/?x=1">cart</a></body></html>"#;
+        assert_eq!(
+            geo_country_splash_target(store, "https://www.bestbuy.com/"),
+            None
+        );
+        // A large page that merely contains the phrase is above the size gate.
+        let mut big = String::from("<html><body>select your country");
+        big.push_str(&"<div>real product card</div>".repeat(2000));
+        big.push_str("</body></html>");
+        assert!(big.len() > 30_000);
+        assert_eq!(
+            geo_country_splash_target(&big, "https://www.bestbuy.com/"),
+            None
+        );
     }
 
     /// Legitimate page that mentions captcha-delivery.com in a benign
