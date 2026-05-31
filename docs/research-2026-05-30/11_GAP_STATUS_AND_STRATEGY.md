@@ -60,3 +60,30 @@ These pass in v150 because **camoufox IS real Firefox** — its genuine browser 
 Every CLEAN public-engine render/correctness bug found this session is fixed (SSR, Firefox wire, readyState, warm-pool). BO union 113 vs v150 116. Closing the final 3 requires either (a) open-ended per-vendor fingerprint quality work (the "holistic ML tail, no single lever" the 2026-05-16 research already concluded), or (b) vendor solvers (out of public scope). Beyond the from-scratch engine's reach without crossing the project's scope boundary.
 
 BO's standing advantages over v150 remain: ~25-60× lighter memory, no-CDP in-process architecture, and 4 BO-edge sites v150 fails (amazon-ca, amazon-com, leboncoin, yelp).
+
+---
+
+## FINAL (clean gate v7, 2026-05-31)
+
+**BO UNION = 113/126 (chrome 111 ∪ firefox-wire-arm 108) vs camoufox v150 = 116. Gap = 3.**
+Run: `docs/benchmarks/runs/2026-05-31_chrome148macos_COLD_v7_clean.json` (no crash, full 126).
+
+### Confirmed engine-driven flips this session (vs the 110 starting baseline)
+- **shopify, mail-ru, wsj** — SSR-preservation (d2e0554)
+- **tripadvisor, leboncoin** — Firefox TLS+H2 wire arm (e6923d5); firefox-unique DataDome flips
+
+### Robustness/process-abort bugs found by running the gate (would crash production)
+- DOM arena `panic!` → non-unwinding FFI abort (c9ea80e) — wellsfargo 8.28MB
+- readyState navigate-loop guard → GTM/OneTrust runaway OOM (a10a035/aa96337) — zoom
+- sync-fetch cache reverted (aa96337) — was unnecessary (guard-removal + 30-cap suffice) and risked stale challenge bodies
+
+### Remaining 6 (v150 passes, union fails) — vendor-bound or flaky
+- **adidas, homedepot** — flaky Akamai (risk-roll; pass on good rolls, e.g. homedepot passed v2/989KB, adidas 1.48MB on 4 earlier runs). Not deterministically fixable engine-side.
+- **etsy** — DataDome Device Check WASM (vendor passive sensor)
+- **duolingo, spotify** — reCAPTCHA-enterprise telemetry score (vendor)
+- **wildberries** — WBAAS 498 (proprietary vendor)
+
+### BO edge (union passes, v150 fails): amazon-ca, amazon-com, leboncoin.
+
+### Verdict
+Every clean public-engine bug is fixed; the engine is crash-free and stable. The 3-site gap to v150 is vendor passive-sensor/captcha challenges (out of public-crate scope per CLAUDE.md — vendor_solvers measured +0 net) plus Akamai challenge-site flakiness (±2-3 between gates). BO's durable advantages over v150 stand: ~25-60× lighter memory, no-CDP in-process architecture, 3 BO-edge sites.
