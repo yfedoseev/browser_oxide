@@ -2188,15 +2188,18 @@ impl Page {
 
             // NOTE: an earlier revision force-fired DOMContentLoaded/load +
             // readyState='complete' here for builds poisoned by a build-budget
-            // terminate. It was REMOVED: it flipped no site (spotify/duolingo
-            // stay reCAPTCHA-gated regardless) but on GTM/OneTrust-heavy pages
-            // whose build was terminated (zoom.us) it fired lifecycle events the
-            // poisoned build would NOT have fired, and the tag managers responded
-            // by injecting a runaway script/tag graph that OOM-killed the
-            // process (exit 137, took down the 126-gate). The safe readyState
-            // advance still happens in the build's own lifecycle setTimeout for
-            // NON-terminated builds (the common case); terminated heavy builds
-            // keep the prior behaviour (readyState left at 'loading'), which is
+            // terminate. REMOVED after measurement: it flipped NO site
+            // (spotify/duolingo stay reCAPTCHA-gated; adidas is flaky Akamai —
+            // 2.4 KB or 1.48 MB on a risk-roll, with or without this), but on
+            // GTM/OneTrust-heavy terminated builds (zoom.us) it fired lifecycle
+            // events the poisoned build would NOT have, and the tag managers
+            // injected a runaway DOM/tag graph that OOM-killed the process
+            // (exit 137 — verified it still OOMs even with the otBannerSdk
+            // re-fetch loop bounded by the sync-fetch cache, because the growth
+            // is the injected DOM/JS, not the fetches). The safe readyState
+            // advance still runs in the build's own lifecycle setTimeout for
+            // NON-terminated builds (the common case; spotify still reaches
+            // 'complete'). Terminated heavy builds keep readyState='loading',
             // strictly no worse than before this session.
 
             // Phase A.1 — Adaptive budget. Two paths after the first iteration:
