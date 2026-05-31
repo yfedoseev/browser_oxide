@@ -31,3 +31,32 @@ amazon-ca, amazon-com, leboncoin, yelp. (Caveat: 8 amazon TLDs run back-to-back 
 3. Accept B/D (reCAPTCHA interactive tail, vendor captchas) as scope-bounded.
 
 **Conclusion:** the clean public-engine render bugs are now fixed (SSR cluster). The remaining gap is dominated by passive vendor-sensor challenges whose single realistic lever is the Firefox profile (#43), not per-site engine patches.
+
+---
+
+## UPDATE 2 — post Firefox-wire-arm + readyState fix (final session state)
+
+**chrome∪firefox UNION = 113/126 vs v150 116. Net gap = 3.**
+Runs: `2026-05-30_chrome148macos_COLD_v2.json` (112), `2026-05-30_firefox135macos_COLD_wirearm.json` (108).
+
+### Engine fixes shipped this session (union 110 → 113)
+- **SSR-preservation** (d2e0554): shopify 0→420K, mail-ru 0→440K, wsj stabilized. +2.
+- **Firefox TLS+H2 wire arm** (e6923d5): firefox profile now emits a real NSS ClientHello (JA4 t13d1516h2→t13d1715h2, cipher-hash exact; akamai_h2 canonical Firefox). tripadvisor DataDome flipped under it. +1 union.
+- **readyState fix** (f0a4334): document.readyState was stuck at 'loading' for EVERY navigated page (build path never advanced it). Fixed → spotify's 25s readyState-spin collapsed to 3s; spec-correct lifecycle. Correctness, no flip.
+- **warm-pool undercount** documented: pooled gate under-counts challenges; SOTA must be cold.
+
+### The remaining 7 union-fails are ALL vendor-challenge-bound (the genuine ceiling)
+| site | challenge | class |
+|---|---|---|
+| etsy, reuters | DataDome "Device Check" WASM | passive sensor fingerprint |
+| spotify, duolingo | reCAPTCHA-enterprise scoring + CSR | passive telemetry score (invisible reCAPTCHA, execute-ms=30000; app gates mount on the token) |
+| adidas | Akamai BMP sensor | passive sensor fingerprint |
+| douyin | ByteDance slide-captcha | interactive captcha (out of scope) |
+| wildberries | WBAAS 498 | proprietary vendor (out of scope) |
+
+These pass in v150 because **camoufox IS real Firefox** — its genuine browser fingerprint clears the passive sensor/telemetry checks (DataDome Device Check, reCAPTCHA-enterprise scoring, Akamai BMP). BO emulates the browser and carries residual fingerprint tells. Per CLAUDE.md the vendor solvers live in the private `vendor_solvers` crate (out of public scope) and were **measured to add 0 net passes** — the from-scratch engine carries the rate.
+
+### Honest verdict
+Every CLEAN public-engine render/correctness bug found this session is fixed (SSR, Firefox wire, readyState, warm-pool). BO union 113 vs v150 116. Closing the final 3 requires either (a) open-ended per-vendor fingerprint quality work (the "holistic ML tail, no single lever" the 2026-05-16 research already concluded), or (b) vendor solvers (out of public scope). Beyond the from-scratch engine's reach without crossing the project's scope boundary.
+
+BO's standing advantages over v150 remain: ~25-60× lighter memory, no-CDP in-process architecture, and 4 BO-edge sites v150 fails (amazon-ca, amazon-com, leboncoin, yelp).
