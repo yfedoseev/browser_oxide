@@ -222,8 +222,16 @@
 
     // --- close: terminate this worker ---
     // Terminating a worker from inside is rare; the parent handles cleanup.
+    // We DO stop the message-pump interval here so a self-closed worker stops
+    // holding `pending_intervals > 0` forever (06_ENGINE_CORRECTNESS #8) — a
+    // closed DedicatedWorkerGlobalScope must not keep a live 5 ms poll.
+    let _pumpId = 0;
     self.close = function () {
-        // No-op here; parent.terminate() drives real shutdown via AtomicBool.
+        if (_pumpId) {
+            try { clearInterval(_pumpId); } catch (_e) {}
+            _pumpId = 0;
+        }
+        // parent.terminate() still drives real shutdown via AtomicBool.
     };
 
     // --- Poll loop: drain parent→worker messages and fire message events ---
@@ -257,8 +265,9 @@
         }
     }
     // Prime the pump every 5ms. In a later pass this can be driven by the
-    // event loop directly instead of setInterval.
-    setInterval(drainOnce, 5);
+    // event loop directly instead of setInterval. Capture the id so
+    // self.close() can clear it (see above).
+    _pumpId = setInterval(drainOnce, 5);
 
     // --- importScripts: classic-worker synchronous script loader ---
     self.importScripts = function importScripts(...urls) {

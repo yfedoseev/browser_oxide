@@ -1520,9 +1520,29 @@
         queryCommandSupported(command) { return false; }
         queryCommandEnabled(command) { return false; }
         getSelection() { return globalThis.getSelection ? globalThis.getSelection() : null; }
-        // Point-based queries
-        elementFromPoint(x, y) { return this.body; }
-        elementsFromPoint(x, y) { return this.body ? [this.body] : []; }
+        // Point-based queries. Per spec, a point OUTSIDE the viewport
+        // (negative, or >= innerWidth/innerHeight) returns null / []. Real
+        // Chrome returns null for elementFromPoint(-1,-1) and (99999,99999);
+        // the previous unconditional `return this.body` was a one-call CreepJS
+        // / PerimeterX / DataDome layout lie-detector tell
+        // (06_ENGINE_CORRECTNESS #7). We lack full layout, so an in-viewport
+        // point still approximates the topmost element with body (falling back
+        // to documentElement) — but the viewport-bounds null result, which is
+        // the detectable behaviour, is now spec-correct.
+        _pointInViewport(x, y) {
+            x = +x; y = +y;
+            const w = globalThis.innerWidth || 0;
+            const h = globalThis.innerHeight || 0;
+            return x >= 0 && y >= 0 && x < w && y < h;
+        }
+        elementFromPoint(x, y) {
+            if (!this._pointInViewport(x, y)) return null;
+            return this.body || this.documentElement || null;
+        }
+        elementsFromPoint(x, y) {
+            if (!this._pointInViewport(x, y)) return [];
+            return this.body ? [this.body] : [];
+        }
         caretPositionFromPoint(x, y) { return null; }
         hasFocus() { return true; }  // Anti-bot: must return true
         get readyState() { 

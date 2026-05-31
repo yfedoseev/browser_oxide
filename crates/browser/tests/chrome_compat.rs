@@ -583,6 +583,38 @@ async fn doc_element_from_point() {
     assert_eq!(check("typeof document.elementFromPoint").await, "function");
 }
 #[tokio::test]
+async fn doc_element_from_point_out_of_viewport_is_null() {
+    // Real Chrome returns null for a point outside the viewport (negative or
+    // beyond innerWidth/innerHeight). The previous unconditional
+    // `return this.body` was a one-call CreepJS/PerimeterX/DataDome layout
+    // lie-detector tell (06_ENGINE_CORRECTNESS #7).
+    let r = check(
+        r#"(function(){
+            var oob = document.elementFromPoint(99999, 99999);
+            var neg = document.elementFromPoint(-1, -1);
+            var oobList = document.elementsFromPoint(99999, 99999);
+            return JSON.stringify({
+                oob: oob === null,
+                neg: neg === null,
+                oobListEmpty: Array.isArray(oobList) && oobList.length === 0,
+            });
+        })()"#,
+    )
+    .await;
+    assert!(
+        r.contains("\"oob\":true"),
+        "OOB elementFromPoint must be null: {r}"
+    );
+    assert!(
+        r.contains("\"neg\":true"),
+        "negative elementFromPoint must be null: {r}"
+    );
+    assert!(
+        r.contains("\"oobListEmpty\":true"),
+        "OOB elementsFromPoint must be []: {r}"
+    );
+}
+#[tokio::test]
 async fn doc_write() {
     assert_eq!(check("typeof document.write").await, "function");
 }
@@ -5960,6 +5992,17 @@ async fn message_channel_paired_routing() {
             ch.port1.postMessage({n: 42});
         })()"#,
     );
+    // MessagePort delivery is a MACROTASK via __bgSetTimeout (unref'd — React
+    // 18's concurrent scheduler needs this async, non-loop-pinning delivery),
+    // so it fires across SUBSEQUENT run_until_idle invocations, not one.
+    // Pump a few short drains with real time so the unref'd timer lands.
+    for _ in 0..10 {
+        let _ = page
+            .event_loop()
+            .run_until_idle(std::time::Duration::from_millis(10))
+            .await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
     let result = page
         .evaluate("JSON.stringify({len: globalThis.__mctest.got.length, first: globalThis.__mctest.got[0], second: globalThis.__mctest.got[1] && globalThis.__mctest.got[1].n})")
         .unwrap();
@@ -5998,6 +6041,15 @@ async fn message_channel_queue_then_start() {
             ch.port2.start();
         })()"#,
     );
+    // start() flushes the queued messages as unref'd macrotasks — pump several
+    // short drains with real time so they land (see paired_routing note).
+    for _ in 0..10 {
+        let _ = page
+            .event_loop()
+            .run_until_idle(std::time::Duration::from_millis(10))
+            .await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
     let post = page
         .evaluate("globalThis.__mctest.got.length")
         .unwrap_or_default();
