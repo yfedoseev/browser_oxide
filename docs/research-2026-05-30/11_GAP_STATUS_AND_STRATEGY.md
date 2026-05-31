@@ -87,3 +87,26 @@ Run: `docs/benchmarks/runs/2026-05-31_chrome148macos_COLD_v7_clean.json` (no cra
 
 ### Verdict
 Every clean public-engine bug is fixed; the engine is crash-free and stable. The 3-site gap to v150 is vendor passive-sensor/captcha challenges (out of public-crate scope per CLAUDE.md — vendor_solvers measured +0 net) plus Akamai challenge-site flakiness (±2-3 between gates). BO's durable advantages over v150 stand: ~25-60× lighter memory, no-CDP in-process architecture, 3 BO-edge sites.
+
+---
+
+## FINGERPRINT-TELL AUDIT (2026-05-31) — the passive JS fingerprint is clean
+
+Mined the internals DataDome/Akamai probe matrices (W6a_DATADOME_PROBE_GAP_MATRIX,
+AKAMAI_BMP_V13_FIELD_ENCODING) for engine-addressable tells (the elementFromPoint
+class). DIRECTLY VERIFIED in the public repo that every flagged JS-API tell is
+ALREADY handled correctly:
+- color-gamut: chrome_148_macos/firefox_135_macos set `color_gamut:"p3"` (presets.rs:188,492) → matchMedia("color-gamut: p3")=true ✓
+- timezone: Date.prototype.getTimezoneOffset AND Intl.DateTimeFormat().resolvedOptions().timeZone both honor the profile tz, synced (window_bootstrap.js:2542-2589) ✓
+- navigator.userAgentData.mobile in Worker realm: real WorkerNavigatorUAData class (worker_bootstrap.js) ✓
+- navigator.permissions.query: correct per-name states + TypeError-rejects invalid enum names (speaker/device-info/bluetooth/clipboard) EXACTLY like Chrome (window_bootstrap.js:505-539, _PERMISSION_STATE_MAP) ✓
+- elementFromPoint OOB-null (022846f) ✓
+
+**Conclusion: the remaining DataDome/reCAPTCHA/Akamai gap is NOT an engine-addressable JS-API tell.** Per the internals' OWN research, the residual signals are:
+1. **Canvas/audio "Picasso" fingerprint** — server-SEEDED canvas ops hashed bit-exactly; the internals doc states bit-exact parity is **"NOT achievable with tiny-skia"** (BO's rasterizer) and the seed rotates per-challenge so a static hash lookup can't work. This is a rendering-backend limitation, not a stub.
+2. **Behavior-in-iframe** — DataDome's Device Check runs in a cross-origin iframe; humanize.js fires mouse events on the MAIN document, which the iframe's listeners don't receive.
+3. **reCAPTCHA-enterprise / WBAAS / ByteDance** — vendor telemetry/captcha, out of public-crate scope (vendor_solvers, measured +0 net).
+
+The amazon cluster is fully passing for BO (all 8 TLDs in v7; amazon-ca/amazon-com are BO-edge v150 fails). No measurement gain left there.
+
+**FINAL VERDICT:** the from-scratch public engine's passive JS fingerprint is clean and every engine bug is fixed (BO union 113/126, crash-free). The 3-site gap to v150 116 requires either a Skia-exact canvas/audio rendering backend (a fundamental rasterizer change, possibly infeasible) or vendor solvers (out of scope) — there is no remaining elementFromPoint-class JS-API fix. This is the honest, evidenced engineering ceiling.
