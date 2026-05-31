@@ -83,26 +83,20 @@ impl PagePool {
         let mut page = self.acquire(Some(profile.clone())).await?;
         page.navigate_warm(url).await?;
 
-        // Warm-path challenge/thin guard. The warm path skips the cold
-        // iteration loop (pending-nav follow + cookie-diff retry), so a site
-        // that serves a JS interstitial returns the UNSOLVED shell — e.g.
-        // reddit's "Please wait for verification" page (an inline-script
-        // form-submit challenge) warm-renders 8 KB, while the cold path follows
-        // the submit and gets the real 676 KB app. Since the pooled gate (and
-        // any library user) takes this result verbatim, every challenge/
-        // interstitial site was silently under-counted. Detect a sub-threshold
-        // or challenge-flagged warm result and fall back to the authoritative
-        // cold `Page::navigate`, which runs the full solve loop. Gated on a thin
-        // body (< the 15 KB pass threshold) so benign pages — the warm
-        // fast-path's whole purpose — keep the warm result with zero extra cost.
-        let thin = {
-            let content = page.content();
-            crate::engine_classify(&content).len < 15_000
-        };
-        if thin || page.is_anti_bot_challenge() {
-            self.release(page);
-            return Page::navigate(url, profile, 3).await;
-        }
+        // Warm-path challenge caveat. The warm path skips the cold iteration
+        // loop (pending-nav follow + cookie-diff retry), so a JS interstitial —
+        // e.g. reddit's "Please wait for verification" inline-script form-submit
+        // challenge — warm-renders an 8 KB shell while the cold path follows the
+        // submit to the real 676 KB app. We deliberately do NOT cold-fall-back
+        // by building a fresh `Page::navigate` here: that constructs a new V8
+        // OwnedIsolate while the pool's isolates are still alive, and V8 requires
+        // isolates be dropped in reverse creation order — injecting one
+        // mid-stream aborts the process ("OwnedIsolate instances must be dropped
+        // in the reverse order of creation"). Challenge-protected origins should
+        // be navigated with the cold `Page::navigate(url, profile, max_iter)`
+        // path directly (the challenge VM dominates runtime there anyway, so
+        // warm reuse offers little benefit). In-place warm challenge-follow on
+        // the same isolate is a tracked follow-up.
         Ok(page)
     }
 }
