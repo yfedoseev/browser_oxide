@@ -2186,6 +2186,36 @@ impl Page {
             // events, classification, etc.).
             page.event_loop().runtime_mut().cancel_terminate_execution();
 
+            // Document-lifecycle guarantee. The build installs the
+            // DOMContentLoaded/load + readyState='complete' sequence as its
+            // LAST step (a setTimeout(0)); a build-budget terminate (a heavy
+            // SPA bundle that burns the whole 25s — spotify/duolingo) poisons
+            // every post-loop execute_script in that build, so the install
+            // never happens and document.readyState stays stuck at the
+            // bootstrap 'loading' default with DOMContentLoaded/load never
+            // fired. A framework gating its mount on readyState==='complete'
+            // (or polling it) then never mounts. Now that the terminate has
+            // been cancelled, force the lifecycle here — idempotent: it only
+            // fires when readyState isn't already 'complete', so a normal
+            // build (whose setTimeout already advanced it) no-ops and we never
+            // double-fire the events.
+            let _ = page.event_loop().execute_script(
+                r#"(function(){
+                    try {
+                        var bo = globalThis._browser_oxide;
+                        if (bo && bo.__documentReadyState !== 'complete') {
+                            bo.__documentReadyState = 'interactive';
+                            document.dispatchEvent(new Event('readystatechange'));
+                            document.dispatchEvent(new Event('DOMContentLoaded', {bubbles:true}));
+                            window.dispatchEvent(new Event('DOMContentLoaded', {bubbles:true}));
+                            bo.__documentReadyState = 'complete';
+                            document.dispatchEvent(new Event('readystatechange'));
+                            window.dispatchEvent(new Event('load'));
+                        }
+                    } catch(_e){}
+                })();"#,
+            );
+
             // Phase A.1 — Adaptive budget. Two paths after the first iteration:
             //
             // 1. FAST-EXIT — body > 50 KB AND no CHL marker AND readyState
@@ -3839,8 +3869,19 @@ impl Page {
             .execute_script(
                 r#"
             setTimeout(() => {
+                // Advance the document lifecycle: loading -> interactive
+                // (DOMContentLoaded) -> complete (load). The navigate build
+                // path previously left __documentReadyState at the bootstrap
+                // default 'loading', so document.readyState NEVER reached
+                // 'complete' for any navigated page — frameworks that gate
+                // mounting on readyState==='complete' (or poll it) would
+                // spin/never mount. Fire readystatechange on each transition.
+                try { globalThis._browser_oxide.__documentReadyState = 'interactive'; } catch (_e) {}
+                document.dispatchEvent(new Event('readystatechange'));
                 document.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
                 window.dispatchEvent(new Event('DOMContentLoaded', {bubbles: true}));
+                try { globalThis._browser_oxide.__documentReadyState = 'complete'; } catch (_e) {}
+                document.dispatchEvent(new Event('readystatechange'));
                 window.dispatchEvent(new Event('load'));
             }, 0);
         "#,
