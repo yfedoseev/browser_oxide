@@ -8,10 +8,15 @@ pub struct Dom {
 }
 
 /// Tripwire for tree-walking helpers. A correct DOM tree never has cycles
-/// and is bounded by `nodes.len()` unique ids; if a walker hits this many
-/// steps without terminating it is iterating a cycle and we panic with a
-/// clear message instead of running until OS abort.
-const WALK_LIMIT: usize = 100_000;
+/// and is bounded by `nodes.len()` unique ids. The `visited` guards in these
+/// walkers already make a cycle impossible, so this is really a size ceiling:
+/// raised to 2M because real pages (usa.gov and other huge gov/data pages)
+/// legitimately exceed 100K nodes, and a walker that hits the limit now BAILS
+/// (returns partial results) rather than `panic!`ing — a panic here crosses the
+/// V8 FFI boundary as a non-unwinding abort that takes down the whole process
+/// (observed crashing the 126-gate at a 100K+-node gov page). Graceful bail >
+/// process abort.
+const WALK_LIMIT: usize = 2_000_000;
 
 /// Bound for ancestor walks used by the cycle assertion at mutation sites.
 /// Realistic DOMs are <100 deep; 10K is several orders of magnitude beyond
@@ -125,10 +130,9 @@ impl Dom {
             }
             depth += 1;
             if depth > ANCESTOR_LIMIT {
-                panic!(
-                    "DOM ancestor walk exceeded {} steps from {:?} — pre-existing cycle",
-                    ANCESTOR_LIMIT, target
-                );
+                // Pathological parent chain (cycle / corruption): bail rather
+                // than panic across the FFI boundary — treat as not-an-ancestor.
+                break;
             }
             current = self.get(id).and_then(|n| n.parent);
         }
@@ -315,11 +319,7 @@ impl Dom {
             }
             steps += 1;
             if steps > WALK_LIMIT {
-                panic!(
-                    "DOM walk cycle in collect_text from {:?} — visited {} unique nodes",
-                    root,
-                    visited.len()
-                );
+                break; // huge/pathological DOM — return text collected so far
             }
             let node = match self.get(id) {
                 Some(n) => n,
@@ -443,11 +443,7 @@ impl Dom {
                     }
                     steps += 1;
                     if steps > WALK_LIMIT {
-                        panic!(
-                            "DOM walk cycle in serialize_node from {:?} — visited {} unique nodes",
-                            root,
-                            visited.len()
-                        );
+                        break; // huge/pathological DOM — return partial serialization
                     }
                     let node = match self.get(id) {
                         Some(n) => n,
@@ -563,11 +559,7 @@ impl Dom {
             i += 1;
             steps += 1;
             if steps > WALK_LIMIT {
-                panic!(
-                    "DOM walk cycle in merge_subtree from {:?} — visited {} unique source nodes",
-                    source_root,
-                    visited.len()
-                );
+                break; // huge/pathological subtree — stop merging gracefully
             }
             if !visited.insert(src_id) {
                 continue;
@@ -626,11 +618,7 @@ impl Dom {
             }
             steps += 1;
             if steps > WALK_LIMIT {
-                panic!(
-                    "DOM walk cycle in find_element from {:?} — visited {} unique nodes",
-                    root,
-                    visited.len()
-                );
+                break; // huge/pathological DOM — return None (not found within limit)
             }
             let node = match self.get(id) {
                 Some(n) => n,
@@ -675,11 +663,7 @@ impl Dom {
             }
             steps += 1;
             if steps > WALK_LIMIT {
-                panic!(
-                    "DOM walk cycle in collect_elements from {:?} — visited {} unique nodes",
-                    root,
-                    visited.len()
-                );
+                break; // huge/pathological DOM — return elements collected so far
             }
             let node = match self.get(id) {
                 Some(n) => n,
