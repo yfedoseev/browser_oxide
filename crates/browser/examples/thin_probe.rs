@@ -77,7 +77,16 @@ async fn main() {
                     out.hasVue = !!(window.Vue||window.__VUE__);
                     out.hasNuxt = !!window.__NUXT__;
                     // common "await" globals that gate hydration
-                    out.fetchLogLen = (window._browser_oxide && window._browser_oxide.__fetchLog||[]).length;
+                    var fl = (window._browser_oxide && window._browser_oxide.__fetchLog)||[];
+                    out.fetchLogLen = fl.length;
+                    // last 40 fetch entries (url + status) — what the SPA awaited
+                    out.fetches = fl.slice(-40).map(function(e){
+                        return (e.status||e.ok||'?') + ' ' + (e.url||e.input||e);
+                    });
+                    // #root inner sample + child count of common SPA mounts
+                    var root = document.querySelector('#root')||document.querySelector('#__next')||document.querySelector('#app');
+                    out.rootInner = root ? root.innerHTML.substring(0,300) : '(no root)';
+                    out.rootChildren = root ? root.children.length : -1;
                     // sample tail of body (where an error boundary / spinner sits)
                     var bh = document.body ? document.body.innerHTML : '';
                     out.bodyTail = bh.substring(Math.max(0, bh.length-600));
