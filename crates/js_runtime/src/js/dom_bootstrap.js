@@ -3012,6 +3012,68 @@
                 } catch (_) {}
             }
 
+            // ── Same-origin src document: fetch + execute (FP-E1 pt2) ────────
+            // Real iframe challenge solvers (WBAAS/wildberries, DataDome,
+            // Cloudflare) point the iframe at a same-origin URL whose document
+            // runs the challenge and postMessages the result to the parent.
+            // Cross-origin src already returned a SecurityError proxy above, so
+            // any src reaching here is same-origin. Fetch the doc, reflect its
+            // URL into the child realm's location (challenge scripts read
+            // location.search for ?parentOrigin=…), and execute its scripts in
+            // document order. Bounded + best-effort: a failed/slow fetch is
+            // swallowed and the (empty) realm is returned — never hangs the nav.
+            let _iSrcUrl2 = "";
+            try {
+                const _rawSrc2 = (el && typeof el.getAttribute === "function")
+                    ? (el.getAttribute("src") || el.src || "") : (el && el.src || "");
+                if (_rawSrc2 && _rawSrc2 !== "about:blank"
+                    && !/^javascript:/i.test(_rawSrc2) && !/^data:/i.test(_rawSrc2)) {
+                    try { _iSrcUrl2 = new URL(_rawSrc2, (globalThis.location && globalThis.location.href) || undefined).href; }
+                    catch (_) { _iSrcUrl2 = _rawSrc2; }
+                }
+            } catch (_) {}
+            if (_iSrcUrl2) {
+                try {
+                    let _u2 = null;
+                    try { _u2 = new URL(_iSrcUrl2); } catch (_) {}
+                    if (_u2) {
+                        _sp("location", {
+                            href: _u2.href, origin: _u2.origin, pathname: _u2.pathname,
+                            search: _u2.search, hash: _u2.hash, host: _u2.host,
+                            hostname: _u2.hostname, port: _u2.port, protocol: _u2.protocol,
+                            assign() {}, replace() {}, reload() {},
+                            toString() { return _u2.href; },
+                        });
+                    }
+                    const _docHtml = ops.op_net_fetch_sync(_iSrcUrl2, (globalThis.location && globalThis.location.href) || "");
+                    if (_docHtml && typeof _docHtml === "string" && _docHtml.length < 5000000) {
+                        const _tagRe = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+                        let _sm;
+                        let _guard = 0;
+                        while ((_sm = _tagRe.exec(_docHtml)) !== null && _guard++ < 64) {
+                            const _attrs = _sm[1] || "";
+                            const _inline = _sm[2] || "";
+                            const _typeM = /\btype\s*=\s*["']?([^"'\s>]+)/i.exec(_attrs);
+                            const _ty = _typeM ? _typeM[1].toLowerCase() : "";
+                            if (_ty && _ty !== "text/javascript" && _ty !== "application/javascript" && _ty !== "module") continue;
+                            const _srcM = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(_attrs);
+                            if (_srcM) {
+                                let _eu = _srcM[1];
+                                try { _eu = new URL(_eu, _iSrcUrl2).href; } catch (_) {}
+                                try {
+                                    const _code = ops.op_net_fetch_sync(_eu, _iSrcUrl2);
+                                    if (_code && typeof _code === "string") {
+                                        try { ops.op_eval_in_child_realm(_realmId, _code); } catch (_) {}
+                                    }
+                                } catch (_) {}
+                            } else if (_inline && _inline.trim()) {
+                                try { ops.op_eval_in_child_realm(_realmId, _inline); } catch (_) {}
+                            }
+                        }
+                    }
+                } catch (_) {}
+            }
+
             state = { contentWindow: cw, contentDocument: iframeDoc, _realmId: _realmId, _processedSrcdoc: _srcdoc };
             _iframeState.set(el, state);
             _registerFrame(cw, el);
