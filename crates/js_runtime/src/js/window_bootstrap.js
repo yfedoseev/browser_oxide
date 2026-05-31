@@ -1063,7 +1063,14 @@
         try {
             let absUrl = String(url);
             if (!/^https?:/i.test(absUrl)) {
-                absUrl = new URL(absUrl, globalThis.location && globalThis.location.href || 'about:blank').href;
+                const _base = globalThis.location && globalThis.location.href || 'about:blank';
+                // Empty url resolves to the document URL (real Chrome:
+                // sendBeacon('', data) POSTs to location.href). Handle it
+                // explicitly — our URL polyfill throws on `new URL('', base)`,
+                // which the outer catch swallowed, so the Akamai sec-cpt sensor
+                // beacon (sendBeacon('', sensorData)) silently failed with
+                // "relative URL without a base" and sec-cpt never solved.
+                absUrl = (absUrl === '') ? _base : new URL(absUrl, _base).href;
             }
             let init = { method: 'POST', keepalive: true, credentials: 'include' };
             if (data != null) {

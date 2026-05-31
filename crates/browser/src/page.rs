@@ -3623,13 +3623,31 @@ impl Page {
                     // treating "ftp:" as a relative path.
                     const _schemeMatch = urlStr ? urlStr.match(/^([a-z][a-z0-9+.-]*):/i) : null;
                     const _scheme = _schemeMatch ? _schemeMatch[1].toLowerCase() : '';
-                    if (urlStr && !_scheme) {
+                    // Resolve against the document base when there's no scheme —
+                    // INCLUDING the empty-string url. Real Chrome resolves
+                    // fetch('') / fetch('relative') against location.href; the
+                    // Akamai sec-cpt sensor bundle POSTs to fetch('') (= the
+                    // document URL), and leaving it unresolved sent an empty url
+                    // to the network op ("relative URL without a base"), so the
+                    // sensor POST failed and sec-cpt never solved (homedepot
+                    // Akamai-CHL, deterministic). Gate on a url arg actually
+                    // being provided so a no-arg fetch() still throws.
+                    const _urlProvided = (typeof args[0] === 'string')
+                        || (args[0] instanceof URL)
+                        || (args[0] && typeof args[0].url === 'string');
+                    if (_urlProvided && !_scheme) {
                         try {
                             let base = globalThis.location ? globalThis.location.href : 'about:blank';
                             if (base === 'about:blank' || base === 'javascript:;' || base === '') {
                                 try { base = globalThis.parent.location.href; } catch(e) {}
                             }
-                            urlStr = new URL(urlStr, base).href;
+                            // Empty url resolves to the document URL itself (real
+                            // Chrome: fetch('') hits location.href). Handle it
+                            // explicitly — our URL polyfill throws on `new
+                            // URL('', base)`, which the catch below was silently
+                            // swallowing, leaving the empty url to fail at the
+                            // network op (the Akamai sec-cpt sensor POST).
+                            urlStr = (urlStr === '') ? base : new URL(urlStr, base).href;
                             if (isRequest) {
                                 // Recreate Request with absolute URL. Preserve all properties from the original.
                                 args[0] = new Request(urlStr, args[0]);

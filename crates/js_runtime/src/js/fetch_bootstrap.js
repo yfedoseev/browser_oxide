@@ -188,11 +188,19 @@
         // Note: URLs like "ftp:" (scheme with no authority) are treated by the
         // URL spec as a relative path component, so `new URL("ftp:", base)`
         // resolves to "<base_origin>/ftp:" — matching real Chrome exactly.
-        if (url && !url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("data:") && !url.startsWith("blob:")) {
+        if (typeof url === "string" && !url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("data:") && !url.startsWith("blob:")) {
             try {
                 const base = globalThis.location?.href || "about:blank";
                 if (base && base !== "about:blank") {
-                    url = new URL(url, base).href;
+                    // Empty url resolves to the document URL itself (real Chrome:
+                    // fetch('') hits location.href). The previous `if (url && …)`
+                    // guard skipped the empty case, so fetch('') reached op_fetch
+                    // unresolved → "relative URL without a base" → the Akamai
+                    // sec-cpt sensor POST (fetch('') / sendBeacon('')) silently
+                    // failed and sec-cpt never solved (homedepot Akamai-CHL,
+                    // deterministic). Our URL polyfill throws on `new URL('',base)`,
+                    // so handle empty explicitly.
+                    url = (url === "") ? base : new URL(url, base).href;
                 }
             } catch (e) { /* keep original URL if resolution fails */ }
         }

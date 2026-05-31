@@ -639,6 +639,22 @@ pub fn op_net_xhr_sync(
         body.as_bytes().to_vec()
     };
 
+    // Resolve relative/empty URLs against the document origin. The Akamai
+    // sec-cpt sensor bundle issues sync POSTs to a relative path (and to ''
+    // = the document URL); if such a url reaches here unresolved (the JS-side
+    // XHR open() / fetch resolution can be skipped for empty strings), the
+    // network layer's Url::parse rejects it ("relative URL without a base"),
+    // the sensor POST silently fails, and sec-cpt never solves (homedepot
+    // Akamai-CHL — deterministic across runs). Resolve here as a robust,
+    // path-independent fallback so every sensor POST lands.
+    let url = if url::Url::parse(&url).is_ok() {
+        url
+    } else if let Ok(base) = url::Url::parse(&origin) {
+        base.join(&url).map(|u| u.to_string()).unwrap_or(url)
+    } else {
+        url
+    };
+
     let url_clone = url.clone();
     let method_upper = method.to_uppercase();
     let origin_str = if origin.is_empty() {
