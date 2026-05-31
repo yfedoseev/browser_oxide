@@ -21,6 +21,25 @@ use deno_core::{
 use net::HttpClient;
 use stealth::StealthProfile;
 
+/// Minimal percent-decoder for non-base64 `data:` URL JS payloads.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 3 <= bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Fetches ES-module sources through browser_oxide's shared HTTP session.
 pub struct BrowserModuleLoader {
     profile: StealthProfile,
@@ -62,12 +81,44 @@ impl ModuleLoader for BrowserModuleLoader {
             .map(|r| r.to_string())
             .unwrap_or_else(|| url.clone());
 
-        // Only http(s) modules are network-fetchable; data: modules are inlined
-        // by V8 before reaching the loader.
+        // data: modules. deno_core 0.311 routes `import('data:…')` THROUGH the
+        // loader (it is NOT inlined by V8 for dynamic import), so we MUST resolve
+        // it. Rejecting it (the previous behaviour) left an UNHANDLED promise
+        // rejection that aborted the event-loop drain — duolingo's React app runs
+        // a native-dynamic-import capability probe `import('data:text/javascript;
+        // base64,Cg==')`, and that abort killed React's MessageChannel commit so
+        // `#root` stayed an empty shell. Resolve data: like Chrome.
+        if let Some(rest) = url.strip_prefix("data:") {
+            use base64::Engine as _;
+            let (meta, payload) = rest.split_once(',').unwrap_or(("", rest));
+            let code = if meta.contains(";base64") {
+                base64::engine::general_purpose::STANDARD
+                    .decode(payload.trim())
+                    .ok()
+                    .map(|b| String::from_utf8_lossy(&b).into_owned())
+                    .unwrap_or_default()
+            } else {
+                // Percent-decoded text payload.
+                percent_decode(payload)
+            };
+            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::String(code.into()),
+                &spec,
+                None,
+            )));
+        }
+
+        // Only http(s) modules are network-fetchable.
         if !(url.starts_with("http://") || url.starts_with("https://")) {
-            return ModuleLoadResponse::Sync(Err(AnyError::msg(format!(
-                "module loader: unsupported specifier {url}"
-            ))));
+            // Unknown scheme (blob:, about:, …): return an EMPTY module rather
+            // than an error, so an unhandled rejection can't abort the drain.
+            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::String(String::new().into()),
+                &spec,
+                None,
+            )));
         }
 
         let fut = async move {
