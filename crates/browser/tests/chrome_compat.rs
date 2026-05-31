@@ -1231,6 +1231,68 @@ async fn offscreen_canvas_webgl_context() {
     );
 }
 #[tokio::test]
+async fn webgpu_adapter_has_real_limits_and_info() {
+    // FP parity: a real GPUAdapter exposes numeric limits, a feature set, and
+    // adapter info. A hollow adapter (undefined limits / empty features / no
+    // info) is a headless tell collected as gpuSupportedLimits/gpuAdapterInfo.
+    // Limits are prototype getters (own-keys stays []), values must be numeric,
+    // info must match the macOS/Metal profile, and requestDevice must resolve.
+    // navigator.gpu is secure-context-gated, and the probe is async — use an
+    // https page + evaluate_async to drain the requestAdapter/requestDevice
+    // promise chain, then read the stashed result.
+    let mut page = Page::from_html_with_url(
+        &html(""),
+        "https://example.com/",
+        None::<stealth::StealthProfile>,
+    )
+    .await
+    .unwrap();
+    let setup = r#"
+        globalThis.__gpu = "(pending)";
+        (async () => {
+            const a = await navigator.gpu.requestAdapter();
+            const d = await a.requestDevice();
+            globalThis.__gpu = JSON.stringify({
+                ownKeys: Object.keys(a.limits).length,
+                maxTex: a.limits.maxTextureDimension2D,
+                maxBind: a.limits.maxBindGroups,
+                vendor: a.info && a.info.vendor,
+                arch: a.info && a.info.architecture,
+                features: a.features.size,
+                deviceOk: !!(d && d.limits && d.limits.maxBindGroups === 4),
+            });
+        })();
+    "#;
+    let _ = page
+        .evaluate_async(setup, std::time::Duration::from_secs(5))
+        .await;
+    let out = page.evaluate("globalThis.__gpu").unwrap_or_default();
+    assert!(
+        out.contains("\"ownKeys\":0"),
+        "limits own-keys must be [] like Chrome: {out}"
+    );
+    assert!(
+        out.contains("\"maxTex\":16384"),
+        "maxTextureDimension2D missing/wrong: {out}"
+    );
+    assert!(
+        out.contains("\"vendor\":\"apple\""),
+        "adapter.info.vendor wrong: {out}"
+    );
+    assert!(
+        out.contains("\"arch\":\"metal-3\""),
+        "adapter.info.architecture wrong: {out}"
+    );
+    assert!(
+        out.contains("\"deviceOk\":true"),
+        "requestDevice must resolve to a device: {out}"
+    );
+    assert!(
+        !out.contains("\"features\":0"),
+        "adapter must expose features: {out}"
+    );
+}
+#[tokio::test]
 async fn canvas_to_data_url() {
     assert_eq!(
         check("document.createElement('canvas').toDataURL().startsWith('data:image/png')").await,

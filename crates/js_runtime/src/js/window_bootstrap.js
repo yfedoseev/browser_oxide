@@ -6117,17 +6117,82 @@
     // navigator.gpu (WebGPU) — prototype getter so own-descriptor probe
     // returns undefined on the instance (kNoScriptId-safe).
     if (!_NavProto.hasOwnProperty('gpu')) {
+        // FP parity: a real GPUAdapter ALWAYS exposes numeric limits, a feature
+        // set, and adapter info. The previous stub had `limits: {}` (so
+        // `adapter.limits.maxTextureDimension2D === undefined`), an empty
+        // feature set, no `.info`, a bogus `.name` (real GPUAdapter has none),
+        // and a rejecting requestDevice — a strong headless tell that anti-bot
+        // fingerprints collect as `gpuSupportedLimits` / `gpuAdapterInfo`.
+        // Chrome BUCKETS WebGPU limits for anti-fingerprinting, so these values
+        // are standardized across GPUs; info matches the macOS/Metal profile
+        // (Apple Silicon, consistent with the ANGLE Metal WebGL renderer).
+        const _gpuLimitVals = {
+            maxTextureDimension1D: 16384, maxTextureDimension2D: 16384,
+            maxTextureDimension3D: 2048, maxTextureArrayLayers: 2048,
+            maxBindGroups: 4, maxBindGroupsPlusVertexBuffers: 24,
+            maxBindingsPerBindGroup: 1000,
+            maxDynamicUniformBuffersPerPipelineLayout: 8,
+            maxDynamicStorageBuffersPerPipelineLayout: 8,
+            maxSampledTexturesPerShaderStage: 16, maxSamplersPerShaderStage: 16,
+            maxStorageBuffersPerShaderStage: 10, maxStorageTexturesPerShaderStage: 8,
+            maxUniformBuffersPerShaderStage: 12, maxUniformBufferBindingSize: 65536,
+            maxStorageBufferBindingSize: 134217728,
+            minUniformBufferOffsetAlignment: 256, minStorageBufferOffsetAlignment: 256,
+            maxVertexBuffers: 8, maxBufferSize: 268435456, maxVertexAttributes: 30,
+            maxVertexBufferArrayStride: 2048, maxInterStageShaderComponents: 64,
+            maxInterStageShaderVariables: 16, maxColorAttachments: 8,
+            maxColorAttachmentBytesPerSample: 32, maxComputeWorkgroupStorageSize: 32768,
+            maxComputeInvocationsPerWorkgroup: 1024, maxComputeWorkgroupSizeX: 1024,
+            maxComputeWorkgroupSizeY: 1024, maxComputeWorkgroupSizeZ: 64,
+            maxComputeWorkgroupsPerDimension: 65535,
+        };
+        // Limits live as prototype getters (own-keys stays [] like real Chrome).
+        const _mkLimits = () => {
+            const proto = {};
+            for (const k of Object.keys(_gpuLimitVals)) {
+                const v = _gpuLimitVals[k];
+                Object.defineProperty(proto, k, { get() { return v; }, enumerable: false, configurable: true });
+            }
+            Object.defineProperty(proto, Symbol.toStringTag, { value: "GPUSupportedLimits", configurable: true });
+            return Object.create(proto);
+        };
+        const _mkFeatures = () => {
+            const s = new Set([
+                "depth-clip-control", "depth32float-stencil8", "texture-compression-bc",
+                "texture-compression-etc2", "texture-compression-astc", "timestamp-query",
+                "indirect-first-instance", "shader-f16", "rg11b10ufloat-renderable",
+                "bgra8unorm-storage", "float32-filterable",
+            ]);
+            try { Object.defineProperty(s, Symbol.toStringTag, { value: "GPUSupportedFeatures", configurable: true }); } catch (_) {}
+            return s;
+        };
+        const _mkInfo = () => {
+            const i = { vendor: "apple", architecture: "metal-3", device: "", description: "" };
+            try { Object.defineProperty(i, Symbol.toStringTag, { value: "GPUAdapterInfo", configurable: true }); } catch (_) {}
+            return i;
+        };
+        const _mkDevice = () => ({
+            limits: _mkLimits(), features: _mkFeatures(),
+            queue: { submit() {}, writeBuffer() {}, writeTexture() {}, onSubmittedWorkDone() { return Promise.resolve(); }, label: "" },
+            label: "", lost: new Promise(() => {}),
+            destroy() {}, createBuffer() { return {}; }, createTexture() { return {}; },
+            createShaderModule() { return {}; }, createCommandEncoder() { return {}; },
+            createBindGroup() { return {}; }, createBindGroupLayout() { return {}; },
+            createPipelineLayout() { return {}; }, createRenderPipeline() { return {}; },
+            createComputePipeline() { return {}; }, createSampler() { return {}; },
+            pushErrorScope() {}, popErrorScope() { return Promise.resolve(null); },
+            addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; },
+        });
+        const _mkAdapter = () => ({
+            features: _mkFeatures(), limits: _mkLimits(), info: _mkInfo(),
+            isFallbackAdapter: false,
+            requestAdapterInfo() { return Promise.resolve(_mkInfo()); },
+            requestDevice() { return Promise.resolve(_mkDevice()); },
+        });
         const _navGpu = {
-            requestAdapter() {
-                return Promise.resolve({
-                    name: _p("webgl_renderer", "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080)"),
-                    features: new Set(),
-                    limits: {},
-                    isFallbackAdapter: false,
-                    requestDevice() { return Promise.reject(new DOMException("Not supported", "NotSupportedError")); },
-                });
-            },
+            requestAdapter() { return Promise.resolve(_mkAdapter()); },
             getPreferredCanvasFormat() { return "bgra8unorm"; },
+            wgslLanguageFeatures: new Set(["readonly_and_readwrite_storage_textures", "packed_4x8_integer_dot_product", "pointer_composite_access"]),
         };
         Object.defineProperty(_navGpu, Symbol.toStringTag, { value: "GPU", configurable: true });
         // WebGPU is [SecureContext] — undefined on data:/http:/about:blank.
