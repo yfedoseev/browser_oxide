@@ -15,12 +15,23 @@ use url::Url;
 const MAX_SYNC_FETCH_PER_PAGE: usize = 30;
 thread_local! {
     static SYNC_FETCH_COUNT: Cell<usize> = const { Cell::new(0) };
+    /// Per-page URL→body cache for synchronous script fetches. A script that
+    /// re-injects itself (OneTrust `otBannerSdk.js`, `document.write` loaders)
+    /// would otherwise re-fetch the SAME url on every re-injection — and each
+    /// `op_net_fetch_sync` spawns a fresh tokio runtime + HTTP client, so a
+    /// tight re-injection loop exhausts threads/memory and the OS SIGKILLs the
+    /// process (observed exit 137 killing the 126-gate on zoom.us). Serving
+    /// repeats from this cache costs no runtime, no counter, no network, and no
+    /// new allocation beyond the one cached copy.
+    static SYNC_FETCH_CACHE: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-/// Reset the per-page sync-fetch counter. Called by Page::navigate_with_init
-/// at the start of each navigation iteration.
+/// Reset the per-page sync-fetch counter + cache. Called by
+/// Page::navigate_with_init at the start of each navigation iteration.
 pub fn reset_sync_fetch_count() {
     SYNC_FETCH_COUNT.with(|c| c.set(0));
+    SYNC_FETCH_CACHE.with(|c| c.borrow_mut().clear());
 }
 
 pub fn record_resource_timing(state: &mut deno_core::OpState, timings: net::TimingStats) {
@@ -485,6 +496,14 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
         return String::new();
     }
 
+    // Per-page cache: a re-injecting script (OneTrust otBannerSdk,
+    // document.write loaders) re-fetches the same URL repeatedly; serve those
+    // from cache so we never spawn a runtime per repeat (prevents the OOM/
+    // SIGKILL observed on zoom.us). Cache hits bypass the counter — they're free.
+    if let Some(cached) = SYNC_FETCH_CACHE.with(|c| c.borrow().get(&url).cloned()) {
+        return cached;
+    }
+
     // Per-page chain ceiling — see MAX_SYNC_FETCH_PER_PAGE.
     let n = SYNC_FETCH_COUNT.with(|c| {
         let v = c.get();
@@ -600,6 +619,10 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
         result.len(),
         url
     );
+    // Cache the body so a re-injecting script doesn't re-fetch (and re-spawn a
+    // runtime) for the same URL. Bounded by MAX_SYNC_FETCH_PER_PAGE distinct
+    // URLs per page, cleared per navigation iteration.
+    SYNC_FETCH_CACHE.with(|c| c.borrow_mut().insert(url.clone(), result.clone()));
     result
 }
 

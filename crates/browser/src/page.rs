@@ -2186,35 +2186,18 @@ impl Page {
             // events, classification, etc.).
             page.event_loop().runtime_mut().cancel_terminate_execution();
 
-            // Document-lifecycle guarantee. The build installs the
-            // DOMContentLoaded/load + readyState='complete' sequence as its
-            // LAST step (a setTimeout(0)); a build-budget terminate (a heavy
-            // SPA bundle that burns the whole 25s — spotify/duolingo) poisons
-            // every post-loop execute_script in that build, so the install
-            // never happens and document.readyState stays stuck at the
-            // bootstrap 'loading' default with DOMContentLoaded/load never
-            // fired. A framework gating its mount on readyState==='complete'
-            // (or polling it) then never mounts. Now that the terminate has
-            // been cancelled, force the lifecycle here — idempotent: it only
-            // fires when readyState isn't already 'complete', so a normal
-            // build (whose setTimeout already advanced it) no-ops and we never
-            // double-fire the events.
-            let _ = page.event_loop().execute_script(
-                r#"(function(){
-                    try {
-                        var bo = globalThis._browser_oxide;
-                        if (bo && bo.__documentReadyState !== 'complete') {
-                            bo.__documentReadyState = 'interactive';
-                            document.dispatchEvent(new Event('readystatechange'));
-                            document.dispatchEvent(new Event('DOMContentLoaded', {bubbles:true}));
-                            window.dispatchEvent(new Event('DOMContentLoaded', {bubbles:true}));
-                            bo.__documentReadyState = 'complete';
-                            document.dispatchEvent(new Event('readystatechange'));
-                            window.dispatchEvent(new Event('load'));
-                        }
-                    } catch(_e){}
-                })();"#,
-            );
+            // NOTE: an earlier revision force-fired DOMContentLoaded/load +
+            // readyState='complete' here for builds poisoned by a build-budget
+            // terminate. It was REMOVED: it flipped no site (spotify/duolingo
+            // stay reCAPTCHA-gated regardless) but on GTM/OneTrust-heavy pages
+            // whose build was terminated (zoom.us) it fired lifecycle events the
+            // poisoned build would NOT have fired, and the tag managers responded
+            // by injecting a runaway script/tag graph that OOM-killed the
+            // process (exit 137, took down the 126-gate). The safe readyState
+            // advance still happens in the build's own lifecycle setTimeout for
+            // NON-terminated builds (the common case); terminated heavy builds
+            // keep the prior behaviour (readyState left at 'loading'), which is
+            // strictly no worse than before this session.
 
             // Phase A.1 — Adaptive budget. Two paths after the first iteration:
             //
