@@ -1203,6 +1203,34 @@ async fn canvas_webgl_context() {
     );
 }
 #[tokio::test]
+async fn offscreen_canvas_webgl_context() {
+    // FP parity: a real OffscreenCanvas exposes WebGL (anti-bot fingerprint
+    // workers read webGLVendor/webGLRenderer via
+    // `new OffscreenCanvas(1,1).getContext('webgl')`). Returning null was a
+    // headless tell. webgl + webgl2 must both yield a context, and the
+    // unmasked vendor must match the profile-spoofed value the on-DOM canvas
+    // reports (not empty).
+    assert_eq!(
+        check("typeof new OffscreenCanvas(1,1).getContext('webgl')").await,
+        "object"
+    );
+    assert_eq!(
+        check("typeof new OffscreenCanvas(1,1).getContext('webgl2')").await,
+        "object"
+    );
+    let vendor = check(
+        "(function(){var gl=new OffscreenCanvas(1,1).getContext('webgl');var e=gl.getExtension('WEBGL_debug_renderer_info');return String(gl.getParameter(e.UNMASKED_VENDOR_WEBGL));})()",
+    )
+    .await;
+    assert!(
+        vendor.contains("Google")
+            || vendor.contains("Apple")
+            || vendor.contains("Intel")
+            || vendor.contains("Mozilla"),
+        "OffscreenCanvas WebGL unmasked vendor looks empty/wrong: {vendor}"
+    );
+}
+#[tokio::test]
 async fn canvas_to_data_url() {
     assert_eq!(
         check("document.createElement('canvas').toDataURL().startsWith('data:image/png')").await,

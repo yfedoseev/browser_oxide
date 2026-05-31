@@ -1314,15 +1314,40 @@
             this._context = null;
         }
         getContext(type, _opts) {
-            if (type !== "2d") return null;
-            if (!this._canvasId) {
-                this._canvasId = ops.op_canvas_create(this.width, this.height, _getOsName(), _getCanvasSeed());
+            if (type === "2d") {
+                if (!this._canvasId) {
+                    this._canvasId = ops.op_canvas_create(this.width, this.height, _getOsName(), _getCanvasSeed());
+                }
+                if (!this._context) {
+                    this._context = new CanvasRenderingContext2D(this._canvasId);
+                    this._context.canvas = this;
+                }
+                return this._context;
             }
-            if (!this._context) {
-                this._context = new CanvasRenderingContext2D(this._canvasId);
-                this._context.canvas = this;
+            if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
+                // FP parity: a real OffscreenCanvas exposes WebGL. Anti-bot
+                // fingerprint workers read webGLVendor/webGLRenderer via
+                // `new OffscreenCanvas(1,1).getContext('webgl')` →
+                // gl.getParameter(UNMASKED_VENDOR_WEBGL); returning null here was
+                // a headless tell (the on-DOM <canvas> already supports WebGL).
+                // Back it with the same profile-spoofed context that <canvas>
+                // getContext uses (canvas_bootstrap.js:1232-1234).
+                if (!this._canvasId) {
+                    this._canvasId = ops.op_canvas_create(this.width, this.height, _getOsName(), _getCanvasSeed());
+                }
+                const _k = (type === "webgl2") ? "_glctx2" : "_glctx1";
+                if (!this[_k]) {
+                    const isV2 = (type === "webgl2");
+                    const gl = isV2
+                        ? new WebGL2RenderingContext(this._canvasId, this.width, this.height)
+                        : new WebGLRenderingContext(this._canvasId, this.width, this.height);
+                    gl._isWebGL2 = isV2;
+                    gl.canvas = this;
+                    this[_k] = gl;
+                }
+                return this[_k];
             }
-            return this._context;
+            return null;
         }
         transferToImageBitmap() {
             const self = this;
