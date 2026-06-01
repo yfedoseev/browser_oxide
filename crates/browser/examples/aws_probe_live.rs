@@ -22,10 +22,7 @@ async fn main() {
         std::process::exit(2);
     });
     let profile_name = args.next().unwrap_or_else(|| "chrome_148_macos".into());
-    let iterations: u8 = args
-        .next()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(2);
+    let iterations: u8 = args.next().and_then(|s| s.parse().ok()).unwrap_or(2);
     let profile = match profile_name.as_str() {
         "chrome_148_macos" => stealth::presets::chrome_148_macos(),
         "chrome_148_windows" => stealth::presets::chrome_148_windows(),
@@ -76,10 +73,17 @@ async fn main() {
             if (_of) {
                 globalThis.fetch = function(u, o) {
                     const _u = (u && u.url) ? u.url : String(u);
-                    _push('fetch(' + _u.slice(0,90) + ' method=' + ((o&&o.method)||'GET') + ')');
+                    const _body = (o && o.body != null) ? String(o.body) : ((u && u.body != null) ? '[Request.body]' : '');
+                    _push('fetch(' + _u.slice(0,90) + ' method=' + ((o&&o.method)||'GET') +
+                        (_body ? ' bodylen=' + _body.length + ' body=' + _body.slice(0,160) : '') + ')');
                     const p = _of.apply(this, arguments);
-                    p.then((r) => _push('fetch DONE ' + _u.slice(0,60) + ' status=' + (r && r.status)),
-                           (e) => _push('fetch FAIL ' + _u.slice(0,60) + ' ' + String(e && (e.message||e))));
+                    p.then((r) => {
+                        _push('fetch DONE ' + _u.slice(0,60) + ' status=' + (r && r.status));
+                        // On a non-2xx awswaf response, dump the body (the reject reason).
+                        if (r && r.status >= 400 && _u.indexOf('awswaf') !== -1) {
+                            try { r.clone().text().then((t) => _push('  ERR-BODY ' + r.status + ': ' + String(t).slice(0,200))); } catch(_){}
+                        }
+                    }, (e) => _push('fetch FAIL ' + _u.slice(0,60) + ' ' + String(e && (e.message||e))));
                     return p;
                 };
             }
@@ -156,15 +160,16 @@ async fn main() {
 
     eprintln!("[aws_probe_live] navigating {url} (profile {profile_name}, {iterations} iters)");
     let profile_for_check = profile.clone();
-    match browser::Page::navigate_with_init(&url, profile, iterations, vec![probe.to_string()]).await
+    match browser::Page::navigate_with_init(&url, profile, iterations, vec![probe.to_string()])
+        .await
     {
         Ok(mut page) => {
             let body_len = page.content().len();
-            let final_cookie = page
-                .evaluate("String(document.cookie)")
-                .unwrap_or_default();
+            let final_cookie = page.evaluate("String(document.cookie)").unwrap_or_default();
             let dump = page
-                .evaluate("JSON.stringify(globalThis.__awsProbe || {note:'no probe state'}, null, 1)")
+                .evaluate(
+                    "JSON.stringify(globalThis.__awsProbe || {note:'no probe state'}, null, 1)",
+                )
                 .unwrap_or_else(|e| format!("{{\"evaluate_error\":\"{e}\"}}"));
             eprintln!("[aws_probe_live] final body_len={body_len}");
             eprintln!("[aws_probe_live] final document.cookie: {final_cookie}");

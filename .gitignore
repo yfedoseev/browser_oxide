@@ -46,3 +46,4 @@ crates/*/kasada_blob_*.b64
 crates/*/decoded_*.bin
 crates/*/decoded_*.txt
 docs/benchmarks/runs/
+docs/handoffs/

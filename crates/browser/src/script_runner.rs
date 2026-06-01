@@ -76,8 +76,7 @@ fn collect_scripts(dom: &Dom, node_id: NodeId, scripts: &mut Vec<ScriptInfo>) {
                     // token) routes to the ES-module path. `type="importmap"`
                     // is handled separately (skipped here, not executable code).
                     let is_module = script_type == Some("module");
-                    if script_type == Some("importmap") || script_type == Some("speculationrules")
-                    {
+                    if script_type == Some("importmap") || script_type == Some("speculationrules") {
                         collect_scripts(dom, child_id, scripts);
                         continue;
                     }

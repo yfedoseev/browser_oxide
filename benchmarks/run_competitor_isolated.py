@@ -75,7 +75,7 @@ async def _camoufox_once(site):
 async def visit_one(site, engine):
     once = _camoufox_once if engine == "camoufox" else (lambda s: _chromium_once(s, engine))
     tag, length, err = "ERROR", 0, None
-    for _ in range(3):
+    for _ in range(5):
         try:
             return await once(site)
         except Exception as e:
