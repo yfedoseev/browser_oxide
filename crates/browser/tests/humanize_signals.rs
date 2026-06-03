@@ -161,10 +161,20 @@ async fn humanize_mouse_intervals_are_right_skewed() {
     let humanize = include_str!("../src/js/humanize.js");
     page.evaluate(humanize).unwrap();
 
-    let _ = page
-        .event_loop()
-        .run_until_idle(std::time::Duration::from_secs(4))
-        .await;
+    // humanize schedules its mouse stroke on *background* (unref'd) timers so
+    // it doesn't pin `run_until_idle` open on benign pages (humanize.js:73 →
+    // timer_bootstrap.js `__bgSetTimeout`). A single `run_until_idle` therefore
+    // returns at idle before any scheduled move fires, leaving only the 2
+    // synchronous seeding moves. The bg-timer callbacks fire on *successive*
+    // pumps as wall-clock time elapses (timer_bootstrap.js:33), so drive the
+    // loop in short real-time slices instead of one idle wait.
+    for _ in 0..90 {
+        let _ = page
+            .event_loop()
+            .run_until_idle(std::time::Duration::from_millis(20))
+            .await;
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    }
 
     // Debug: print what's in __events.
     let dbg = page
