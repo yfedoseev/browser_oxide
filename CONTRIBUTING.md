@@ -7,7 +7,7 @@ contributors. The longer architectural references live in `docs/`.
 
 This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
 By participating you accept its terms. Report violations privately via a
-GitHub security advisory or by emailing the maintainer.
+GitHub security advisory or by emailing **yfedoseev@gmail.com**.
 
 ## Scope
 

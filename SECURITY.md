@@ -14,8 +14,8 @@ Use one of these channels:
 
 1. **GitHub Security Advisories (preferred):** open a private advisory
    at <https://github.com/yfedoseev/browser_oxide/security/advisories/new>.
-2. **Email:** the maintainer's email is in
-   [CONTRIBUTING.md](CONTRIBUTING.md) and on the GitHub profile.
+2. **Email:** email **yfedoseev@gmail.com** with the subject line
+   `[browser_oxide] Security Vulnerability Report`.
 
 ### What to include
 
