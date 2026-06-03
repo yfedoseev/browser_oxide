@@ -34,7 +34,10 @@ async fn test_tls_fingerprint_peet() {
 #[ignore] // Requires internet; IP-safe (tls.peet.ws is not an anti-bot vendor).
 async fn capture_profiles_ja4() {
     let profiles: &[(&str, stealth::StealthProfile)] = &[
-        ("iphone_15_pro_safari_18", presets::iphone_15_pro_safari_18()),
+        (
+            "iphone_15_pro_safari_18",
+            presets::iphone_15_pro_safari_18(),
+        ),
         ("firefox_135_macos", presets::firefox_135_macos()),
         ("chrome_148_macos", presets::chrome_148_macos()),
     ];
@@ -59,13 +62,19 @@ async fn capture_profiles_ja4() {
                         println!("  ja3    = {}", tls["ja3"].as_str().unwrap_or("?"));
                         println!("  ja3_hash = {}", tls["ja3_hash"].as_str().unwrap_or("?"));
                         println!("  peetprint = {}", tls["peetprint"].as_str().unwrap_or("?"));
-                        println!("  ja4h   = {}", j["http2"]["akamai_fingerprint"]
-                            .as_str()
-                            .or(j["ja4h"].as_str())
-                            .unwrap_or("?"));
+                        println!(
+                            "  ja4h   = {}",
+                            j["http2"]["akamai_fingerprint"]
+                                .as_str()
+                                .or(j["ja4h"].as_str())
+                                .unwrap_or("?")
+                        );
                     }
-                    Err(_) => println!("[{name}] non-JSON body ({} bytes): {}",
-                        body.len(), &body[..body.len().min(200)]),
+                    Err(_) => println!(
+                        "[{name}] non-JSON body ({} bytes): {}",
+                        body.len(),
+                        &body[..body.len().min(200)]
+                    ),
                 }
             }
             Err(e) => println!("[{name}] request FAILED: {e}"),

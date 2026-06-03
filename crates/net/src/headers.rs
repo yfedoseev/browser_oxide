@@ -999,10 +999,13 @@ mod tests {
         // mobile (a within-session Client-Hints flip = inconsistency). The
         // low-entropy mobile flag MUST agree across nav and fetch.
         let pixel = stealth::presets::pixel_9_pro_chrome_148();
-        let fh: std::collections::HashMap<_, _> =
-            chrome_headers_fetch(&pixel, "https://example.com/x.js", Some("https://example.com"))
-                .into_iter()
-                .collect();
+        let fh: std::collections::HashMap<_, _> = chrome_headers_fetch(
+            &pixel,
+            "https://example.com/x.js",
+            Some("https://example.com"),
+        )
+        .into_iter()
+        .collect();
         assert_eq!(
             fh.get("sec-ch-ua-mobile").map(String::as_str),
             Some("?1"),
@@ -1015,10 +1018,13 @@ mod tests {
         );
         // Desktop stays ?0.
         let desk = stealth::presets::chrome_148_macos();
-        let dfh: std::collections::HashMap<_, _> =
-            chrome_headers_fetch(&desk, "https://example.com/x.js", Some("https://example.com"))
-                .into_iter()
-                .collect();
+        let dfh: std::collections::HashMap<_, _> = chrome_headers_fetch(
+            &desk,
+            "https://example.com/x.js",
+            Some("https://example.com"),
+        )
+        .into_iter()
+        .collect();
         assert_eq!(
             dfh.get("sec-ch-ua-mobile").map(String::as_str),
             Some("?0"),

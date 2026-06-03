@@ -406,10 +406,7 @@ impl BrowserEventLoop {
 
     /// P2 — execute an EXTERNAL ES module (`<script type="module" src>`) via the
     /// module loader (fetches the import graph) instead of classic compile.
-    pub async fn eval_module_url(
-        &mut self,
-        url: &str,
-    ) -> Result<(), deno_core::error::AnyError> {
+    pub async fn eval_module_url(&mut self, url: &str) -> Result<(), deno_core::error::AnyError> {
         self.runtime.load_eval_module_url(url).await
     }
 
