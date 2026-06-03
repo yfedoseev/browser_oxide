@@ -2,6 +2,7 @@
 name = "event_loop"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Browser event loop: timers, microtasks, requestAnimationFrame, idle detection"

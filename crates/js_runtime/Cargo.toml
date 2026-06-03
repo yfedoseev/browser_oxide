@@ -2,6 +2,7 @@
 name = "js_runtime"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "V8 JavaScript runtime with DOM bindings for browser_oxide"

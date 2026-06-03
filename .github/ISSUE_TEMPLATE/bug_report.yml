@@ -11,9 +11,6 @@ body:
         runtime / stealth interaction). The more reproducible signal you
         give us, the faster we can root-cause.
 
-        If your report is about an anti-bot site failing to render,
-        please instead use the "Site failing to render" template — those
-        reports have a different triage path.
 
   - type: textarea
     id: description

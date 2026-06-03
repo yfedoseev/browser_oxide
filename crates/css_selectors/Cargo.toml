@@ -2,6 +2,7 @@
 name = "css_selectors"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "CSS Selectors Level 4 parser and matching engine"

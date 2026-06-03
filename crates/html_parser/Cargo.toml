@@ -2,6 +2,7 @@
 name = "html_parser"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "html5ever integration producing a browser_oxide DOM"

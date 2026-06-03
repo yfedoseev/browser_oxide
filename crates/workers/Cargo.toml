@@ -2,6 +2,7 @@
 name = "workers"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Web Workers (separate V8 isolates) for browser_oxide"

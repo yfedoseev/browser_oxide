@@ -24,6 +24,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Yury Fedoseev"]
 repository = "https://github.com/yfedoseev/browser_oxide"
+rust-version = "1.83"
 
 # Central lint policy. CI runs `cargo clippy --workspace -- -D warnings`;
 # the few `allow`s below are deliberate, documented exceptions rather

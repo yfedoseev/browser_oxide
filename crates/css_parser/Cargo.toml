@@ -2,6 +2,7 @@
 name = "css_parser"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "CSS Syntax Level 3 tokenizer and parser with nesting support"
