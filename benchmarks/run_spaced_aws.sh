@@ -8,7 +8,7 @@
 # Spaced all-amazon + imdb AWS-WAF check: each site a fresh sweep_metrics
 # process, 150s gap between calls to avoid per-IP token clustering.
 set -u
-cd /home/yfedoseev/projects/browser_oxide
+cd $(cd "$(dirname "$0")/.." && pwd)
 BIN=target/release/examples/sweep_metrics
 OUT=/tmp/awswaf/spaced_aws
 mkdir -p "$OUT"

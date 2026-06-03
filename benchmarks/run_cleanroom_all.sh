@@ -4,14 +4,14 @@
 # camoufox's driver in the 2026-05-29 sweep. Resumable: an engine whose output
 # already has 126 results is skipped. Long run (many hours) by design.
 set -uo pipefail
-cd /home/yfedoseev/projects/browser_oxide
+cd $(cd "$(dirname "$0")/.." && pwd)
 OUT=/tmp/cleanroom_2026_05_29
 mkdir -p "$OUT"
 CORPUS=/tmp/corpus.json
 STABLE=/tmp/warm_verify/sweep_stable
 BOVENV=/tmp/bo-venv/bin/python
 CF150=/tmp/cfv150/bin/python
-export PLAYWRIGHT_BROWSERS_PATH=/home/yfedoseev/.cache/ms-playwright
+export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright
 export CR_MAX_LOAD=20.0 CR_MIN_FREE_GB=7.0 CR_RETRIES=5 CR_SETTLE=12 CR_COOLDOWN=5 CR_LOAD_WAIT=600
 export BO_MAX_LOAD=20.0 BO_SITE_TIMEOUT=180 BO_SWEEP_BIN="$STABLE"
 note(){ echo "[$(date +%H:%M:%S)] $*"; }

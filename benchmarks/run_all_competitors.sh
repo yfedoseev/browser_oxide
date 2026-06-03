@@ -6,10 +6,10 @@
 # classified via BO's classify_stdin -> comparable to BO's 115.
 # Outputs -> /tmp/full_gate_2026_05_28/comp_*.json
 set -uo pipefail
-cd /home/yfedoseev/projects/browser_oxide
+cd $(cd "$(dirname "$0")/.." && pwd)
 GATE=/tmp/full_gate_2026_05_28
 export CORPUS_FILE=/tmp/corpus.json
-export PLAYWRIGHT_BROWSERS_PATH=/home/yfedoseev/.cache/ms-playwright
+export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright
 PY=/tmp/bo-venv/bin/python
 note(){ echo "[$(date +%H:%M:%S)] $*"; }
 

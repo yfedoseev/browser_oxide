@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # BO post-fix verification gate: 4 profiles x 126 sites, per-site isolated,
 # parallel + vendor-spaced. Compares against the all-5 competitor run.
-cd /home/yfedoseev/projects/browser_oxide
+cd $(cd "$(dirname "$0")/.." && pwd)
 GATE=/tmp/full_gate_2026_05_28
 CORPUS=/tmp/corpus.json
 note(){ echo "[$(date +%H:%M:%S)] $*"; }

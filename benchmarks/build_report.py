@@ -55,7 +55,7 @@ def fmt_mb(mb):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default=str(DEFAULT_DIR))
-    ap.add_argument("--out", default="/home/yfedoseev/projects/browser_oxide/docs/BENCHMARK_2026_05_24.md")
+    ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "docs" / "BENCHMARK.md"))
     args = ap.parse_args()
     d = Path(args.dir)
 

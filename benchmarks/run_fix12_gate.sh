@@ -19,7 +19,7 @@
 # Output: /tmp/fix12_gate/<profile>_run{1,2,3}.{json,log,partial}
 
 set -uo pipefail
-cd /home/yfedoseev/projects/browser_oxide
+cd $(cd "$(dirname "$0")/.." && pwd)
 mkdir -p /tmp/fix12_gate
 
 PROFILES=(chrome_148_macos chrome_148_windows firefox_135_macos iphone_15_pro_safari_18)
@@ -59,7 +59,7 @@ for profile in "${PROFILES[@]}"; do
     # hash so the order is reproducible. The spacing pass ensures no two
     # consecutive sites share an antibot vendor (AWS WAF / DataDome /
     # Akamai / Kasada / Twitter) — see benchmarks/corpus_vendor_map.py.
-    PYTHONPATH=/home/yfedoseev/projects/browser_oxide python3 -c "
+    PYTHONPATH=$(cd "$(dirname "$0")/.." && pwd) python3 -c "
 import json, random
 from benchmarks.corpus_vendor_map import space_by_vendor, vendor_run_summary
 c = json.load(open('$CORPUS'))

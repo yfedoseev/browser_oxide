@@ -12,13 +12,13 @@ mkdir -p "$OUT"
 LOG="$OUT/run.log"
 : > "$LOG"
 
-REPO=/home/yfedoseev/projects/browser_oxide
+REPO=$(cd "$(dirname "$0")/.." && pwd)
 BO_BIN="$REPO/target/release/examples/sweep_metrics"
 PY=/tmp/bo-venv/bin/python
 COMP="$REPO/benchmarks/bench_corpus_v2.py"
 export CORPUS_FILE=/tmp/corpus.json
-export PLAYWRIGHT_BROWSERS_PATH=/home/yfedoseev/.cache/ms-playwright
-CACHE=/home/yfedoseev/.cache
+export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright
+CACHE=$HOME/.cache
 
 note() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
 

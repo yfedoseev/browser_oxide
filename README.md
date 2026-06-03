@@ -11,11 +11,11 @@ remote-debugging surface, no Chromium underneath.
 
 ## Why this exists
 
-Every stealth tool today wraps a real browser and hides the puppet strings.
-Puppeteer/Playwright + stealth plugins patch ~12 JS properties at runtime
-and lose to `Function.prototype.toString` checks. Patched-Chromium forks
-still inherit Chromium's CDP detection vectors. Patched-Firefox forks
-(Camoufox et al.) have ~3% browser-market-share which is itself a signal.
+Most stealth tooling today wraps a real browser and hides the puppet strings.
+CDP-driver stealth plugins patch a handful of JS properties at runtime and
+lose to `Function.prototype.toString` checks. Patched-Chromium forks still
+inherit Chromium's CDP detection vectors. Patched-Firefox forks ride a
+browser engine with low market share, which is itself a fingerprint signal.
 
 `browser_oxide` is a different bet: build the engine from the parser up so
 the fingerprint properties are *native*, not *injected*. There is no
@@ -48,23 +48,18 @@ A complete browser engine for scraping, archival, and AI agent workloads:
 
 Anti-bot coverage measured against a 126-site corpus of commercially-
 protected pages (Cloudflare, Akamai, DataDome, PerimeterX, Kasada,
-Shape/F5, etc.), release build, 2026-05-23. **These numbers are from
-the vendor-stripped open-source engine** — no per-vendor bypass code
-in the tree. Same machine, same IP, same hour, same classifier
-(`browser::engine_classify`) across browser_oxide and every
-competitor.
+Shape/F5, etc.), release build. These numbers are from the
+vendor-stripped open-source engine — no per-vendor bypass code in the
+tree. Same machine, same IP, same hour, same classifier
+(`browser::engine_classify`).
 
-| Engine                            | **Pass** (real render, ≥15 KB) | L3-tag (loose) |
-|-----------------------------------|--:|--:|
-| Chromium headless (vanilla)       | 86 | 97 |
-| Playwright + Stealth              | 87 | 97 |
-| Patchright (CDP-hidden)           | 86 | 97 |
-| **browser_oxide chrome_148_macos**       | **102** | **116** |
-| **browser_oxide pixel_9_pro_chrome_148** | **104** | **119** |
-| **browser_oxide iphone_15_pro_safari_18**| **106** | **120** |
-| **browser_oxide firefox_135_macos**      | **101** | **115** |
-| Camoufox (Firefox-based)          | 108 | 118 |
-| **browser_oxide best-of-4 routed**       | **110** | **122** |
+| browser_oxide profile        | **Pass** (real render, ≥15 KB) | L3-tag (loose) |
+|------------------------------|--:|--:|
+| `chrome_148_macos`           | 102 | 116 |
+| `firefox_135_macos`          | 101 | 115 |
+| `pixel_9_pro_chrome_148`     | 104 | 119 |
+| `iphone_15_pro_safari_18`    | 106 | 120 |
+| **best-of-4 routed**         | **110** | **122** |
 
 Two numbers per row because the corpus contains 10–15 SPA-bootstrap
 sites (amazon stubs, imdb, booking, …) that ship a 2–13 KB shell to
@@ -72,8 +67,8 @@ sites (amazon stubs, imdb, booking, …) that ship a 2–13 KB shell to
 absence of a challenge marker but the body isn't a real render. The
 strict `Pass` column requires `≥15 KB` of actual content
 (`ChallengeVerdict::Pass`, the rule the engine's own audit harness
-uses). `L3-tag` is the loose count for compatibility with prior
-reports.
+uses). "Routed" = the caller picks the best profile per domain, which
+most real scraping pipelines do naturally.
 
 (Built-in preset constructors `chrome_130_*` / `pixel_9_pro_chrome_147`
 are deprecated aliases that emit a current Chrome 148 UA — the profile
@@ -85,66 +80,35 @@ function name.)
 captcha pages (`yelp.com`, `etsy.com`) are human-gated and out of
 scope; they pass on some profiles and block on others.
 
-> **The engine carries the number, not bypass code.** Earlier A/B
-> measurements with per-vendor challenge solvers enabled vs fully
-> removed from the tree show no difference in routed pass rate. Every
-> site that renders, renders on the from-scratch TLS + fingerprint +
-> V8 engine alone. The open-source engine ships no solver
-> implementations (see "Challenge solving" below).
+> **The engine carries the number, not bypass code.** A/B measurements
+> with per-vendor challenge solvers enabled vs fully removed from the
+> tree show no difference in routed pass rate. Every site that renders,
+> renders on the from-scratch TLS + fingerprint + V8 engine alone. The
+> open-source engine ships no solver implementations (see "Challenge
+> solving" below).
 
 ### Things to know before believing the numbers
 
-- **Best single-profile result trails Camoufox by 2 Pass** (iphone 106
-  vs Camoufox 108). When the caller is free to pick the best profile
-  per domain (the routed row above), browser_oxide takes the lead by
-  +2 Pass / +4 L3-tag. Most real scraping pipelines do this naturally.
-- **Clear lead over the CDP-driver tier**: Chromium headless,
-  Playwright + Stealth, and Patchright all sit at 86–87 Pass with
-  ~25 CHL per engine (anti-bot vendors detect their CDP-driver
-  fingerprint regardless of stealth plugins). browser_oxide routed
-  shows 3 routed CHL — almost 8× fewer challenges hit us.
-- **Anti-bot responses are noisy.** Single sweep runs vary by ±5
-  sites from WAF lottery alone (measured per-site 3× re-tests: amazon
-  variants have ~1-in-3 pass rate per fetch on any engine). The
-  routed `110` number is the central tendency, not a guaranteed
-  per-run result. See `docs/BENCHMARK_2026_05_23.md` and
-  `docs/NOISE_FLOOR_ANALYSIS_2026_05_23.md` for the full per-site
-  breakdown and reproduction commands.
+- **Anti-bot responses are noisy.** Single sweep runs vary by ±5 sites
+  from WAF lottery alone (measured per-site 3× re-tests: amazon variants
+  have ~1-in-3 pass rate per fetch). The routed `110` is the central
+  tendency, not a guaranteed per-run result.
 - **Kasada is the OSS-wide gap.** No open-source tool publicly passes
-  Kasada from scratch. The published 2026 winners are paid
-  real-browser farms (Scrapfly et al.).
+  Kasada from scratch.
 
-### Per-page performance (post 2026-05-24 perf pass)
+### Per-page performance
 
-Three navigation-path fixes (see `docs/PERFORMANCE_2026_05_24.md`)
-combined with a new `PagePool::navigate(url)` API land browser_oxide
-within 5–20% of Playwright on per-page wall-clock — with **~10× lower
-memory** because it's a single Rust process, not Chrome over CDP.
+A single Rust process (not Chrome over CDP), so resident memory stays in
+the tens of MB. Per-page wall-clock, 5-run median, same box, single IP,
+warm binary cache:
 
-5-run median per site, same box, single-IP, warm Chrome binary cache:
-
-| Engine | example.com (528 B) | hacker news (~35 KB) | wikipedia (~230 KB) |
+| Path | example.com (528 B) | hacker news (~35 KB) | wikipedia (~230 KB) |
 |---|--:|--:|--:|
-| browser_oxide (cold, `Page::navigate`) | 244 ms | 444 ms | 849 ms |
-| **browser_oxide (warm pool, `PagePool::navigate`)** | **141 ms** | **333 ms** | **724 ms** |
-| Playwright (chromium-headless) | 181 ms | 412 ms | 829 ms |
-| Puppeteer | 595 ms | 751 ms | 1131 ms |
-| Puppeteer + Stealth | 617 ms | 882 ms | 1319 ms |
+| cold (`Page::navigate`) | 244 ms | 444 ms | 849 ms |
+| **warm pool (`PagePool::navigate`)** | **141 ms** | **333 ms** | **724 ms** |
 
-On the 528-byte static page (pure per-navigation-overhead measurement)
-the pool path is now **22% faster than Playwright**. On heavier pages
-where parse + script execution dominate, browser_oxide tracks Playwright
-within ~4%.
-
-The pre-fix per-navigate cost on example.com was 6585 ms — three
-specific bugs (`__pendingNavigation` re-fetch loop, build-phase drain
-caps, `humanize.js` timers pinning the event loop) accounted for
-**26× of the 47× total speedup**; the new pool API closed the
-remaining gap to Playwright's per-page steady state. All
-chrome_compat / anti_bot / navigation_primitives tests still pass.
-Full root-cause writeup: `docs/PERFORMANCE_2026_05_24.md`. Full per-engine
-sweep (Playwright / Patchright / Camoufox / Puppeteer-stealth) over the
-126-site corpus: `docs/BENCHMARK_2026_05_24.md`.
+A warm `PagePool` amortizes V8 isolate + snapshot setup across
+navigations (the `PagePool::navigate(url)` API).
 
 ## Challenge solving
 

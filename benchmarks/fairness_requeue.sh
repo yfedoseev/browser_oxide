@@ -4,7 +4,7 @@
 # the camoufox playwright-driver bug) so no engine loses points to our tooling.
 # Read-only on results; gathers data for analysis (does NOT auto-edit numbers).
 set -uo pipefail
-cd /home/yfedoseev/projects/browser_oxide
+cd $(cd "$(dirname "$0")/.." && pwd)
 OUT=docs/benchmarks/runs/2026-05-30_fairness_diag
 mkdir -p "$OUT"
 STABLE=/tmp/warm_verify/sweep_stable
