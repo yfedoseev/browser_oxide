@@ -797,9 +797,9 @@ pub fn op_dom_get_all_computed_styles(
 
     // Resolve calc() and CSS Values 4 math functions to their used
     // pixel value before returning — Chrome's getComputedStyle does
-    // this. Otherwise antibot probes that compute via calc(... sin(pi)
-    // ...) and read the result back catch us returning the unresolved
-    // expression text.
+    // this. Otherwise scripts that compute via calc(... sin(pi) ...)
+    // and read the result back would see the unresolved expression
+    // text instead of the resolved value real Chrome returns.
     let ctx = calc_context_from(state);
     let res: HashMap<String, String> = declarations
         .into_iter()
@@ -1103,13 +1103,13 @@ pub fn op_dom_storage_keys(#[state] state: &DomState, #[string] area: String) ->
 }
 
 // ──────────────────────────────────────────────────────────────────
-// Child-realm support (§4 of 2026-05-15 handoff / doc 27 §5.2)
+// Child-realm support
 // ──────────────────────────────────────────────────────────────────
 
 /// Window constructor callback — throws per the spec ("Illegal constructor").
 /// Used only to create a real, named `Window` function whose `.name === "Window"`
-/// and whose `.prototype.constructor === Window`.  Kasada never calls `new Window()`,
-/// so the throw body is never reached; we keep it for spec correctness.
+/// and whose `.prototype.constructor === Window`. In practice nothing calls
+/// `new Window()`, so the throw body is never reached; we keep it for spec correctness.
 fn _window_ctor_cb(
     scope: &mut v8::HandleScope,
     _args: v8::FunctionCallbackArguments,
@@ -1126,7 +1126,8 @@ fn _window_ctor_cb(
 ///
 /// The child context gets:
 /// - Real, realm-distinct native intrinsics (`Object`/`Function`/`Array`/… ≠ parent's)
-///   — defeats Kasada's `addContentWindowProxy` + realm-divergence bail (doc 26).
+///   — matching real Chrome, where contentWindow is a genuine realm, not a Proxy
+///   or a parent alias.
 /// - `[[Prototype]] === Window.prototype` → `cw.constructor.name === "Window"`.
 /// - Genuine-native `Function.prototype.toString` (same API-fn recipe as the main window).
 /// - Standard self-referential globals (`window`, `self`, `globalThis`, `frames`).
@@ -1216,7 +1217,7 @@ pub fn op_create_child_realm<'s>(
 
         let child_global = child_ctx.global(cs);
 
-        // Expose Window on child global (Kasada reads `contentWindow.Window`).
+        // Expose Window on child global (scripts may read `contentWindow.Window`).
         if let Some(k) = v8::String::new(cs, "Window") {
             child_global.set(cs, k.into(), window_fn.into());
         }
@@ -1365,10 +1366,10 @@ pub fn op_eval_in_child_realm<'s>(
     let cs = &mut v8::ContextScope::new(scope, child_ctx);
 
     let src = v8::String::new(cs, &code)?;
-    // G12 (master plan §4 Phase 1): a swallowed compile/runtime error
-    // here means the child realm is silently under-populated (a missing
-    // shim → Kasada/DataDome bail "score is not numeric" / undefined
-    // receiver). Surface it to an opt-in diagnostic channel
+    // A swallowed compile/runtime error here means the child realm is
+    // silently under-populated (a missing shim can make site scripts
+    // bail or hit an undefined receiver). Surface it to an opt-in
+    // diagnostic channel
     // (`BROWSER_OXIDE_DEBUG_CHILD_REALM`) WITHOUT changing behavior: still
     // best-effort runs the script, still returns `None`.
     let tc = &mut v8::TryCatch::new(cs);

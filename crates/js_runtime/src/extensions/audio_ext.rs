@@ -1,7 +1,7 @@
 //! Web Audio ops.
 //!
 //! - `op_offline_audio_render` runs Blink's DynamicsCompressorKernel (Rust
-//!   port in `canvas::audio`) for the FPjs/CreepJS audio fingerprint probe.
+//!   port in `canvas::audio`) for the standard audio fingerprint probe.
 //!   Per-`audio_seed` jitter perturbs threshold and release so different
 //!   profiles produce distinct hashes within Blink's observed variance band
 //!   (gap #27, P2.2c).
@@ -21,7 +21,7 @@ use rustfft::{num_complex::Complex32, FftPlanner};
 use std::f64::consts::PI;
 use std::sync::OnceLock;
 
-/// Render the default CreepJS/FingerprintJS audio probe pipeline:
+/// Render the standard audio-fingerprint probe pipeline:
 /// `OfflineAudioContext(1, length, sample_rate)` → triangle osc at
 /// `frequency` Hz → DynamicsCompressor with the parameters the sensor set →
 /// destination. Returns the rendered samples as a Float32 buffer (f32 little-
@@ -91,7 +91,7 @@ pub fn op_offline_audio_render(
 // AnalyserNode.getFloatFrequencyData (P2.2a)
 // ----------------------------------------------------------------
 // Per Web Audio §1.36.2: applyBlackmanWindow → FFT → magnitude
-// → smooth → 20·log10 → dB clamp. CreepJS hashes this output.
+// → smooth → 20·log10 → dB clamp. Fingerprint scripts hash this output.
 // ================================================================
 
 fn fft_planner() -> &'static std::sync::Mutex<FftPlanner<f32>> {

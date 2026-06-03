@@ -42,7 +42,7 @@
     // timers (< threshold) carry render-critical work — React's
     // scheduler postTask, microtask-equivalent rIC fallback, etc. —
     // and unrefing them causes run_until_idle to exit before the
-    // continuation runs (verified empirically on x.com 2026-05-10:
+    // continuation runs (observed empirically on an SPA:
     // unref-everything → AllWorkDone in 4 s, body=69 B; unref nothing
     // → 90 s timeout, body=69 B).
     //
@@ -55,15 +55,14 @@
     //            analytics) while preserving macys/ria/threads
     //            ~1.5s-delay hydration callbacks as refed.
     const UNREF_THRESHOLD_MS = 2000;
-    // parity-workflows M-3: on a challenge nav (page.rs sets
-    // `__keepLongTimersRefed` when the initial doc is an AWS-WAF /
-    // sec-cpt / DataDome / Cloudflare challenge), keep EVERY timer refed.
-    // Anti-bot self-solves schedule a long `chlg_duration` wait (sec-cpt
-    // 5-30 s) and defer the PoW-worker continuation behind a long
+    // On a challenge nav (page.rs sets `__keepLongTimersRefed` when the
+    // initial doc is an interstitial challenge), keep EVERY timer refed.
+    // Such challenge scripts schedule a long wait (often 5-30 s) and
+    // defer a proof-of-work-worker continuation behind a long
     // setTimeout; unrefing those lets `run_until_idle` report AllWorkDone
     // and the drain hands off before the token is posted. Real Chrome
     // keeps the page alive across these waits. Gated on the flag ⇒ benign
-    // SPA pages keep the W5b unref behavior (no x.com/twitter regression).
+    // SPA pages keep the default unref behavior (no SPA regression).
     const _maybeUnref = _unrefRaw
         ? (p, ms) => {
               if (ms >= UNREF_THRESHOLD_MS && !globalThis.__keepLongTimersRefed) {
@@ -97,8 +96,8 @@
     // — its ~30 synthetic-input timers (50 ms-1.8 s spread) should not
     // gate engine "idle" because the page can be returned to the caller
     // the moment its own work settles; whatever humanize timers haven't
-    // fired yet are background no-ops for benign pages, and anti-bot
-    // pages keep the loop busy with their own challenge VMs so the
+    // fired yet are background no-ops for benign pages, and challenge
+    // pages keep the loop busy with their own scripts so the
     // humanize timers still fire there. Same semantics as Node's
     // `setTimeout(...).unref()`.
     globalThis.__bgSetTimeout = function __bgSetTimeout(callback, delay = 0, ...args) {
@@ -157,10 +156,10 @@
     let _rafId = 0;
     const _rafCallbacks = new Map();
 
-    // v0.1.0-parity Fix 9 — RAF cadence jitter (60 Hz target, Gaussian
+    // RAF cadence jitter (60 Hz target, Gaussian
     // σ=0.5 ms around 16.67 ms mean, clamped ≥1 ms). A perfect 16 ms
-    // grid is a Kasada-class bot tell — real Chrome's RAF cadence
-    // shows scheduler noise. Sourced from the Fix 6 seeded RNG (the
+    // grid differs from real Chrome, whose RAF cadence
+    // shows scheduler noise. Sourced from the seeded RNG (the
     // Symbol-keyed slot installed by stealth_bootstrap) so the cadence
     // is deterministic per session.
     const _behaviorRandSym = Symbol.for('__browser_oxide_behavior_rand__');
@@ -200,9 +199,9 @@
     globalThis.requestAnimationFrame = function requestAnimationFrame(callback) {
         const id = ++_rafId;
         _rafCallbacks.set(id, callback);
-        // Fire near 60 Hz via real timer, not microtask. Anti-bot
-        // systems (Kasada `set(diffs).size === 1` probe) measure RAF
-        // timing and flag perfect-grid cadence.
+        // Fire near 60 Hz via real timer, not microtask. Some scripts
+        // measure RAF timing; a perfect-grid cadence (`set(diffs).size
+        // === 1`) differs from real Chrome.
         setTimeout(() => {
             const cb = _rafCallbacks.get(id);
             if (cb) {
@@ -227,10 +226,10 @@
         };
     }
 
-    // Native-code masking — PerimeterX/HUMAN, Akamai, and others probe
+    // Native-code masking — some scripts read
     // `Function.prototype.toString.call(setTimeout)` and friends. The
     // expected serialization is `function setTimeout() { [native code] }`;
-    // a JS source body is a hard bot tell.
+    // a JS source body differs from real Chrome.
     if (typeof _maskFunction === 'function') {
         _maskFunction(globalThis.setTimeout, 'setTimeout');
         _maskFunction(globalThis.setInterval, 'setInterval');

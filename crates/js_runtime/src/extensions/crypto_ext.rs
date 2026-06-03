@@ -1,5 +1,5 @@
 //! Web Crypto API ops — digest, random bytes, HMAC. Backs the JS-side
-//! `crypto.subtle` stub so Kasada-style probes that hash payloads via
+//! `crypto.subtle` stub so scripts that hash payloads via
 //! `crypto.subtle.digest("SHA-256", ...)` see a real result.
 
 use deno_core::op2;

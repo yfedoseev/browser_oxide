@@ -1,7 +1,7 @@
 //! Human-like input simulation.
 //!
-//! Anti-bot ML models (Kasada, PerimeterX/HUMAN, Akamai sensor) detect
-//! single-Bezier mouse paths with ~99% accuracy via Sigma-Lognormal stroke
+//! Behavioral classifiers can distinguish single-Bezier mouse paths from
+//! human motion with high accuracy via Sigma-Lognormal stroke
 //! decomposition. We use `stealth::behavior::mouse_trajectory` (Plamondon
 //! 1995) which produces 2-7 lognormal velocity strokes — same generator
 //! BeCAPTCHA-Mouse benchmarks against.
@@ -15,7 +15,7 @@ use stealth::BehaviorProfile;
 /// Per-page seeded RNG state for `op_behavior_random`. Replaces
 /// `Math.random()` in humanize.js so synthetic mouse/scroll/key event
 /// streams are deterministic per page lifetime (two-level seed pattern —
-/// session-stable, page-deterministic). v0.1.0-parity Fix 6.
+/// session-stable, page-deterministic).
 ///
 /// Seed source priority (constructor):
 ///   1. BROWSER_OXIDE_BEHAVIOR_SEED env var (decimal u64) — for tests +
@@ -150,8 +150,7 @@ fn char_to_code(c: char) -> String {
 /// `stealth::behavior::keystroke_timings` (CMU + Buffalo bigram-aware
 /// LogNormal) but exposes the dwell/flight split so JS can dispatch
 /// real `KeyboardEvent`s at the right wall-clock offsets — wiring the
-/// generator that already exists but had no consumer
-/// (40_TIMING_BEHAVIORAL.md §3.2 wiring gap). v0.1.0-parity Fix 5.
+/// generator that already exists but previously had no consumer.
 #[op2]
 #[serde]
 pub fn op_human_keystroke_schedule(

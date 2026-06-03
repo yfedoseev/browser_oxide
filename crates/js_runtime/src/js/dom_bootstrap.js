@@ -366,7 +366,7 @@
             return tokens[index] != null ? tokens[index] : null;
         }
         // Real Chrome DOMTokenList is iterable; iterating yields each token
-        // string. Kasada's `ao` probe spreads element.classList — without
+        // string. Some scripts spread element.classList — without
         // Symbol.iterator we throw "non-iterable" while Chrome returns the
         // token array.
         [Symbol.iterator]() {
@@ -413,7 +413,7 @@
 
     // EventTarget is the base of the DOM prototype chain in real Chrome:
     //   EventTarget ← Node ← Element ← HTMLElement ← HTMLDivElement etc.
-    // Anti-bot probes check `document instanceof EventTarget === true`
+    // Some scripts check `document instanceof EventTarget === true`
     // and walk Object.getPrototypeOf chains expecting this layout.
     const EventTarget = globalThis.EventTarget || class EventTarget {
         constructor() {}
@@ -618,7 +618,7 @@
             // V8 Proxy invariant: has/ownKeys/getOwnPropertyDescriptor must
             // agree. Without explicit traps V8 reconciles against the empty
             // target object on every `prop in style` / Object.keys(style)
-            // call — hot work that creepjs hits per WebIDL property under test.
+            // call — hot work that fingerprint scripts hit per WebIDL property under test.
             has(target, prop) {
                 if (prop === "setProperty" || prop === "getPropertyValue" ||
                     prop === "removeProperty" || prop === "cssText") return true;
@@ -878,7 +878,7 @@
             // NamedNodeMap-like object. Uses op_dom_get_attribute_names to
             // enumerate real attributes; previous shim hardcoded length: 0
             // which violates the V8 Proxy invariant ownKeys ⇔ has and made
-            // creepjs's per-element attribute audit do redundant work.
+            // per-element attribute audits do redundant work.
             const el = this;
             const id = _getNodeId(this);
             const namesOf = () => ops.op_dom_get_attribute_names(id);
@@ -888,11 +888,11 @@
             };
             return new Proxy([], {
                 get(target, prop) {
-                    // MASK-4 (parity-workflows): real Chrome reports
+                    // Real Chrome reports
                     // Object.prototype.toString.call(el.attributes) ===
                     // "[object NamedNodeMap]". The Proxy target is [], so
-                    // without this it leaked "[object Array]" (an Akamai BMP +
-                    // CreepJS attribute-audit tell). @@toStringTag (a string)
+                    // without this it leaked "[object Array]", which differs
+                    // from real Chrome. @@toStringTag (a string)
                     // overrides the array builtin tag per spec step 5.
                     if (prop === Symbol.toStringTag) return "NamedNodeMap";
                     if (prop === "length") return namesOf().length;
@@ -1012,8 +1012,8 @@
             const shadowId = ops.op_dom_attach_shadow(_getNodeId(this), mode);
             // Use _wrapNode — _wrap is not a defined helper. Was a stale
             // reference that threw `ReferenceError: _wrap is not defined`
-            // whenever attachShadow was actually called. Caught by
-            // Kasada's `sdt.c` field (decrypted blob 0, 2026-05-10).
+            // whenever attachShadow was actually called — observable to
+            // scripts that exercise Shadow DOM.
             const shadowRoot = _wrapNode(shadowId);
             // ShadowRoot inherits Node methods (appendChild, querySelector, etc.)
             Object.defineProperties(shadowRoot, {
@@ -1161,7 +1161,6 @@
     // calls `form.elements.namedItem('solution').value = token`; without
     // this getter that throws TypeError, the SPA's pendingNavigation is
     // never set, and the page returns iter=0 with the challenge stub.
-    // v0.1.0-parity Fix 11 per EXECUTION_PLAN.md.
     Object.defineProperty(HTMLFormElement.prototype, 'elements', {
         get() {
             const form = this;
@@ -1523,9 +1522,9 @@
         // Point-based queries. Per spec, a point OUTSIDE the viewport
         // (negative, or >= innerWidth/innerHeight) returns null / []. Real
         // Chrome returns null for elementFromPoint(-1,-1) and (99999,99999);
-        // the previous unconditional `return this.body` was a one-call CreepJS
-        // / PerimeterX / DataDome layout lie-detector tell
-        // (06_ENGINE_CORRECTNESS #7). We lack full layout, so an in-viewport
+        // the previous unconditional `return this.body` differed from
+        // real Chrome's layout behaviour for out-of-bounds points.
+        // We lack full layout, so an in-viewport
         // point still approximates the topmost element with body (falling back
         // to documentElement) — but the viewport-bounds null result, which is
         // the detectable behaviour, is now spec-correct.
@@ -1587,10 +1586,10 @@
                     url = globalThis.__browser_oxide && globalThis.__browser_oxide._baseUrl;
                 }
                 if (url) {
-                    // FIX-COOKIE-SYNC (parity-workflows): persist into the Rust
+                    // Persist into the Rust
                     // jar SYNCHRONOUSLY. The async op_cookie_set was
                     // fire-and-forget, so a cookie set in the last microtasks
-                    // before location.reload() (e.g. AWS-WAF aws-waf-token) was
+                    // before location.reload() (e.g. a challenge token) was
                     // lost — the reload re-fetched the stub. op_cookie_set_sync
                     // writes immediately (try_lock) with an async fallback.
                     if (ops.op_cookie_set_sync) {
@@ -1603,9 +1602,8 @@
         }
         // HTML legacy default per HTML Standard §2.4 — Chrome reports
         // "windows-1252" for HTML documents without an explicit
-        // `<meta charset>` declaration. Verified via Playwright MCP
-        // probe_mcp.json + probe_mcp_secure.json (both report
-        // "windows-1252"). Phase 7.
+        // `<meta charset>` declaration. Verified against a real browser
+        // (which reports "windows-1252").
         get characterSet() { return "windows-1252"; }
         get charset() { return "windows-1252"; }
         get contentType() { return "text/html"; }
@@ -1751,11 +1749,11 @@
     _nodeCache.set(ops.op_dom_document_node(), new WeakRef(_document));
 
     // Set globals
-    // Symbol.toStringTag on every DOM class — Akamai BMP v3 and DataDome
+    // Symbol.toStringTag on every DOM class — some scripts
     // check Object.prototype.toString.call(node) and expect the Chrome
     // WebIDL brand name like "[object HTMLDivElement]". Without these
-    // tags every node shows as "[object Object]" which is an instant bot
-    // signal.
+    // tags every node shows as "[object Object]", which differs from
+    // real Chrome.
     const _tag = (cls, name) => {
         try {
             Object.defineProperty(cls.prototype, Symbol.toStringTag, {
@@ -1812,8 +1810,7 @@
     // documentElement (HTMLHtmlElement) and body (HTMLBodyElement) layout
     // dimensions in standards mode are viewport-clipped, NOT full document.
     // Default Element getters return offsetWidth/Height = full document
-    // (e.g. 1914 × 28638 on walmart) which is a damning headless tell — see
-    // Akamai pixel POST `client` field and `sr.client` in sensor_data.
+    // (e.g. 1914 × 28638 on some sites) which differs from real Chrome.
     // Real Chrome returns innerWidth × innerHeight (1440 × 789 on a typical
     // macOS 1440x900 viewport).
     {
@@ -2013,7 +2010,7 @@
     }
 
     // Window frame registry: tracks appended iframes so window[0], window[1], etc.
-    // work correctly. Kasada's ifw probe accesses window.frames[0].navigator.webdriver
+    // work correctly. Some scripts access window.frames[0].navigator.webdriver
     // (which is window[0] since frames===window in our engine). Without this,
     // window[0] is undefined → TypeError "Cannot read properties of undefined
     // (reading 'webdriver')".
@@ -2133,7 +2130,7 @@
 
     // --- iframe support (contentWindow / contentDocument) ---
     //
-    // Kasada, Castle, CreepJS, and DataDome all perform iframe-realm checks:
+    // Many scripts perform iframe-realm checks:
     // they create or find an <iframe>, access `.contentWindow`, then pull
     // native constructors (TextEncoder, Function, Array, ...) from the iframe
     // window to compare against the main window's versions. A mismatch
@@ -2197,9 +2194,9 @@
     // Constructors NOT in this set are real callable types — for those we
     // delegate `new` to the parent realm's constructor via `Reflect.construct`
     // so e.g. `new iframe.contentWindow.Function("return 1")` returns a
-    // function in the iframe realm, matching real Chrome. Kasada probes
+    // function in the iframe realm, matching real Chrome. Some scripts use
     // `new w.Function(...)` to materialize a fresh-realm function; if we
-    // throw where real Chrome succeeds, that's a definitive headless tell.
+    // throw where real Chrome succeeds, that differs from real Chrome.
     const _ILLEGAL_CONSTRUCTORS = new Set([
         "Navigator", "Window", "Document", "HTMLDocument",
         "Node", "Element", "HTMLElement",
@@ -2247,8 +2244,8 @@
         // The fresh prototype's own __proto__ must point at the FRESH grandparent
         // prototype (built earlier in _buildRemoteRealm's topological pass),
         // NOT at the parent realm's grandparent. Crossing realms here makes
-        // creepjs's lie-detection walk the parent realm's full chain on top
-        // of the fresh chain, multiplying its work O(N) → O(N²+).
+        // a prototype-chain walk traverse the parent realm's full chain on
+        // top of the fresh chain, multiplying its work O(N) → O(N²+).
         const freshProto = Object.create(freshGrandparentProto || Object.prototype);
 
         if (parentProto) {
@@ -2345,10 +2342,10 @@
     }
 
     // Module-level cache: every iframe in this realm shares the same set of
-    // mirrored constructors. Kasada's VM tags function/descriptor objects on
-    // first scope-chain walk and re-reads on a later walk; without this cache
-    // every _getIframeWindow() call rebuilt the realm and Kasada's sentinel
-    // property (`unjzomuybtbyyhwwkdpkxomylnab`) was lost on the second read.
+    // mirrored constructors. Some scripts tag function/descriptor objects on
+    // a first scope-chain walk and re-read them on a later walk; without this
+    // cache every _getIframeWindow() call rebuilt the realm and any such
+    // sentinel property set by the script was lost on the second read.
     let _cachedRemoteRealm = null;
 
     function _buildRemoteRealm() {
@@ -2375,7 +2372,7 @@
     let _nextRealmId = 0;
 
     // Frame registry: window[0], window[1], ... and window.length.
-    // Kasada's ifw/spd/dpi/crs probes access child iframes via window[N]
+    // Some scripts access child iframes via window[N]
     // (frames[N]), NOT via iframe.contentWindow. Real Chrome updates
     // window[N] and window.length when iframes are appended to the DOM.
     const _frameRegistry = [];
@@ -2447,8 +2444,8 @@
     function _getIframeWindow(el) {
         let state = _iframeState.get(el);
         if (state) {
-            // Kasada's crs probe: creates an iframe with no src, accesses contentWindow
-            // (creates child realm), then sets src to a cross-origin URL and re-accesses.
+            // Cross-origin transition: a script creates an iframe with no src, accesses
+            // contentWindow (creates child realm), then sets src to a cross-origin URL and re-accesses.
             // When src changes to cross-origin, invalidate the cached realm and return a
             // SecurityError proxy — exactly what real Chrome does.
             try {
@@ -2472,7 +2469,7 @@
                 }
             } catch (_) {}
             // Re-run srcdoc scripts if srcdoc was set after initial contentWindow access.
-            // Kasada may set iframe.srcdoc = "..." before or after first contentWindow
+            // A script may set iframe.srcdoc = "..." before or after first contentWindow
             // access; in either case we must execute the scripts in the child realm.
             if (state._realmId !== undefined) {
                 let _cur = "";
@@ -2494,9 +2491,9 @@
             return state.contentWindow;
         }
 
-        // ── Cross-origin iframe detection (crs probe) ────────────────────
-        // Kasada's crs probe creates an iframe with a different origin (e.g. a
-        // data: URI or cross-origin https URL) and expects V8's SecurityError
+        // ── Cross-origin iframe detection ────────────────────
+        // Some scripts create an iframe with a different origin (e.g. a
+        // data: URI or cross-origin https URL) and expect a SecurityError
         // when accessing contentWindow.document. Return a Proxy that throws
         // SecurityError on any property read — matches real Chrome behaviour.
         try {
@@ -2525,7 +2522,7 @@
         } catch (_) {}
 
         // ── Build the iframe document shell ──────────────────────────────
-        // W3.5 — srcdoc iframes: expose the source text for fingerprint-grade
+        // srcdoc iframes: expose the source text for
         // reads (`iframe.contentDocument.body.innerHTML`).
         let _srcdoc = "";
         try {
@@ -2607,13 +2604,14 @@
         }
 
         // ── Obtain the child window object ───────────────────────────────
-        // PRIMARY PATH: genuine v8::Context child realm (doc 26/27 §4).
+        // PRIMARY PATH: genuine v8::Context child realm.
         // op_create_child_realm returns the child global:
         //   - Real, realm-distinct native intrinsics (Object/Function/… ≠ parent)
         //   - constructor.name === "Window" (set up in Rust)
         //   - Genuine-native Function.prototype.toString in child realm
         //   - self/window/globalThis/frames self-refs (set in Rust)
-        // Defeats Kasada's `addContentWindowProxy` detector + realm-divergence bail.
+        // Matches real Chrome, where contentWindow is a genuine realm rather
+        // than a Proxy or a parent alias.
         const _realmId = _nextRealmId++;
         let cw = null;
         try {
@@ -2624,8 +2622,8 @@
         if (cw) {
             // ── Populate child realm with DOM/FP properties ───────────────
             // CRITICAL: use op_set_child_realm_prop for properties that must be
-            // visible to code running INSIDE the child realm (e.g. Kasada's srcdoc
-            // eval). Direct `cw.x = v` from parent JS goes to the global PROXY's
+            // visible to code running INSIDE the child realm (e.g. srcdoc
+            // script eval). Direct `cw.x = v` from parent JS goes to the global PROXY's
             // own dict; code inside the realm reads from the INNER global.
             // op_set_child_realm_prop enters the child ContextScope and calls
             // child_global.set() which forwards via [[Set]] to the inner global.
@@ -2640,8 +2638,8 @@
             _sp("document", iframeDoc);
 
             // Location stub — about:blank inherits the parent origin per HTML spec.
-            // Kasada's loc probe reads document.domain (= hostname) and
-            // lli probe reads location.origin; empty values are bot signals.
+            // Some scripts read document.domain (= hostname) and
+            // location.origin; empty values differ from real Chrome.
             const _pLoc = globalThis.location || {};
             _sp("location", {
                 href: "about:blank",
@@ -2661,19 +2659,19 @@
             _sp("top", globalThis);
             _sp("name", "");
 
-            // Screen mirror (Kasada spd probe reads these from inside child realm)
+            // Screen mirror (some scripts read these from inside child realm)
             _sp("screen", _iframeScreen);
             _sp("availWidth",  _iframeScreen.availWidth);
             _sp("availHeight", _iframeScreen.availHeight);
 
-            // Viewport dimensions (Kasada spd probe)
+            // Viewport dimensions
             _sp("innerWidth",   globalThis.innerWidth  || 1920);
             _sp("innerHeight",  globalThis.innerHeight || 1080);
             _sp("outerWidth",   globalThis.outerWidth  || 1920);
             _sp("outerHeight",  globalThis.outerHeight || 1080);
             _sp("scrollX", 0); _sp("scrollY", 0);
             _sp("pageXOffset", 0); _sp("pageYOffset", 0);
-            // Window state properties expected by Kasada `bas` probe.
+            // Window state properties some scripts expect to be present.
             _sp("closed", false);
             _sp("name", "");
             _sp("status", "");
@@ -2685,7 +2683,7 @@
             // history stub — basic object so `.toString()` doesn't throw.
             _sp("history", { length: 0, state: null, scrollRestoration: "auto",
                 back() {}, forward() {}, go() {}, pushState() {}, replaceState() {} });
-            // Storage stubs — Kasada `bas` probe may call `.toString()` on these.
+            // Storage stubs — some scripts may call `.toString()` on these.
             const _storageStub = Object.create(null);
             Object.defineProperty(_storageStub, Symbol.toStringTag, { value: "Storage", configurable: true });
             _storageStub.length = 0;
@@ -2698,13 +2696,13 @@
             try { _sp("sessionStorage", _storageStub); } catch (_) {}
             // indexedDB — basic stub so typeof is "object".
             _sp("indexedDB", { open() {}, deleteDatabase() {}, databases() { return Promise.resolve([]); }, cmp() { return 0; } });
-            // visualViewport — propagate from parent (Kasada `bas` probe may call .toString()).
+            // visualViewport — propagate from parent (some scripts may call .toString()).
             try { if (globalThis.visualViewport !== undefined) _sp("visualViewport", globalThis.visualViewport); } catch (_) {}
 
             // Event handler stubs — Chrome defines all on* handlers as null (data property,
             // enumerable:true) on the Window global. The child realm gets genuine V8 natives
-            // but NOT these Window interface additions. Kasada `bas` probe iterates parent
-            // window's enumerable properties and for each key checks it in the child realm;
+            // but NOT these Window interface additions. Some scripts iterate the parent
+            // window's enumerable properties and for each key check it in the child realm;
             // calling .toString() on the undefined value throws, while null.toString()
             // would throw too but with the correct Chrome-matching TypeError shape.
             // Setting them null here makes child[key] !== undefined for all on* keys.
@@ -2745,8 +2743,8 @@
             }
 
             // Blanket-copy ALL remaining enumerable parent-window properties to child
-            // realm. Kasada `bas` probe iterates parent window's enumerable props and
-            // checks them in child; any that are undefined in child cause errors.
+            // realm. Some scripts iterate parent window's enumerable props and
+            // check them in child; any that are undefined in child cause errors.
             // Real Chrome child frames have the same complete set as parent.
             // We skip child-specific properties (document, location, self-refs) that
             // are already set above or will be overridden below with correct values.
@@ -2776,8 +2774,8 @@
             } catch (_) {}
 
             // devicePixelRatio: define as a native-tagged accessor so that
-            // Kasada's dpi probe sees both a proper descriptor (getter:fn, not
-            // data) AND [native code] from Function.prototype.toString.
+            // A script inspecting these sees both a proper descriptor (getter:fn,
+            // not data) AND [native code] from Function.prototype.toString.
             // The eval runs inside the child realm so Symbol.for resolves via
             // the isolate-level global symbol registry (same symbol as parent).
             const _dprVal = globalThis.devicePixelRatio || 1;
@@ -2796,10 +2794,10 @@
             // blanket-copy above never reaches. So a framed document's
             // `window.addEventListener('message', …)` threw (swallowed),
             // leaving the iframe unable to receive OR answer messages. That
-            // both (a) gates real iframe-based challenge solvers (WBAAS /
-            // DataDome / Cloudflare load the challenge in an <iframe> and
-            // postMessage with it) and (b) is itself a headless tell (real
-            // iframes expose these). Install a native-shaped EventTarget backed
+            // both (a) gates real iframe-based challenge flows (which load
+            // the challenge in an <iframe> and postMessage with it) and (b)
+            // differs from real Chrome (real iframes expose these). Install a
+            // native-shaped EventTarget backed
             // by a realm-local listener registry + a `__deliverMessage` hook the
             // parent uses to post INTO the realm. `parent`/`top` identity is
             // left untouched (set to globalThis above) — replies route via the
@@ -2884,9 +2882,9 @@
                     } catch (_) {}
                 }
                 // webdriver: `false` in modern Chrome (property present,
-                // value false; `undefined` is the headless tell — K2-DIFF
-                // wdt fix). Kasada ifw probe checks i_nwd =
-                // cw.navigator.webdriver (false is the Chrome-faithful value).
+                // value false; `undefined` would differ from real Chrome).
+                // Some scripts check cw.navigator.webdriver; false is the
+                // Chrome-faithful value.
                 Object.defineProperty(_nav, 'webdriver', { value: false, writable: true, configurable: true, enumerable: true });
                 _sp("navigator", _nav);
             } catch (_) {}
@@ -2900,8 +2898,8 @@
                 _sp("fetch", _ifetch);
             } catch (_) {}
 
-            // Copy key browser APIs that Kasada reads from the child realm.
-            // mrs probe reads MediaSource.isTypeSupported from inside child realm.
+            // Copy key browser APIs that some scripts read from the child realm.
+            // e.g. reading MediaSource.isTypeSupported from inside the child realm.
             const _apisToCopy = [
                 'MediaSource', 'MediaSourceHandle', 'MediaCapabilities',
                 'MediaRecorder', 'MediaStream', 'MediaStreamTrack',
@@ -2930,19 +2928,13 @@
                 // Singleton constructors the npc/crs probes expect in child realm.
                 'Navigator', 'Location', 'History', 'Screen',
                 'Performance', 'Permissions', 'ScreenOrientation',
-                // K2-DIFF fix #2 (2026-05-17): the canvas/graphics
-                // constructor surface. Without these, an iframe child
-                // realm has `CanvasRenderingContext2D === undefined`
-                // (proven: kasada_proto_surface_probe — all 37 ctx2d
-                // proto methods missing on the child realm). Kasada's
-                // `esd.cpt` (canvas-paint) probe — and the shared
-                // `smc`/`dpv` path — fetch such a constructor/method via
-                // the VM, get `undefined`, and the CALL handler (rec 111:
-                // `l=e(n); if(l[h]&&l[h].I===l){} else l.apply(o,_)`)
-                // then evaluates `l[<sentinel>]` on `undefined` → the
-                // exact `TypeError: Cannot read properties of undefined
-                // (reading 'unjzomuybtbyyhwwkdpkxomylnab')` that aborts
-                // sensor assembly → /error instead of /tl. Real Chrome
+                // The canvas/graphics constructor surface. Without these,
+                // an iframe child realm has `CanvasRenderingContext2D ===
+                // undefined` (all ctx2d proto methods missing on the child
+                // realm). A script that fetches such a constructor/method
+                // from the child realm gets `undefined` and then accessing a
+                // property on it throws `TypeError: Cannot read properties of
+                // undefined`, which differs from real Chrome. Real Chrome
                 // iframe realms expose the full set. Only names that are
                 // genuine main-realm globals are copied (the loop skips
                 // `undefined`), so this is Chrome-faithful, not a stub.
@@ -2959,9 +2951,9 @@
                 } catch (_) {}
             }
 
-            // mrs/smc/dpv probes: Kasada reads MediaSource.isTypeSupported from inside
+            // Some scripts read MediaSource.isTypeSupported from inside the
             // child realm. Wrap in IIFE to prevent __kms leaking into child realm globals
-            // (Kasada's ltk probe detects unexpected global variables).
+            // (some scripts detect unexpected global variables).
             // globalThis.X = Y inside an IIFE IS visible to subsequent op_eval_in_child_realm
             // calls because they all run in the same child v8::Context.
             try {
@@ -2985,7 +2977,7 @@
                 );
             } catch (_) {}
 
-            // Align child realm globals with main window to prevent realm-divergence detection.
+            // Align child realm globals with main window so the realms don't diverge.
             // Chrome without COOP/COEP: SharedArrayBuffer is disabled in all frames.
             // Our V8 child context natively has SAB; delete it to match.
             try {
@@ -2996,7 +2988,7 @@
             } catch (_) {}
 
             // Execute srcdoc scripts in the child realm.
-            // Kasada probes (ifw, spd) inject script content via srcdoc to
+            // Some scripts inject content via srcdoc to
             // run code inside the iframe. A real browser executes those
             // scripts; we extract and eval them in the child realm context.
             if (_srcdoc) {
@@ -3012,9 +3004,9 @@
                 } catch (_) {}
             }
 
-            // ── Same-origin src document: fetch + execute (FP-E1 pt2) ────────
-            // Real iframe challenge solvers (WBAAS/wildberries, DataDome,
-            // Cloudflare) point the iframe at a same-origin URL whose document
+            // ── Same-origin src document: fetch + execute ────────
+            // Real iframe-based challenge flows
+            // point the iframe at a same-origin URL whose document
             // runs the challenge and postMessages the result to the parent.
             // Cross-origin src already returned a SecurityError proxy above, so
             // any src reaching here is same-origin. Fetch the doc, reflect its
@@ -3178,7 +3170,7 @@
             configurable: true,
             enumerable: true,
         });
-        // srcdoc setter: when Kasada sets iframe.srcdoc = "..." BEFORE the first
+        // srcdoc setter: when a script sets iframe.srcdoc = "..." BEFORE the first
         // contentWindow access, the value lands on the element's own property dict
         // (no setter exists, so JS creates an own data property). Our fallback in
         // _getIframeWindow reads el.srcdoc if getAttribute("srcdoc") is empty.
@@ -3231,8 +3223,8 @@
     // queueMicrotask, Document.createElement, etc. returns the literal
     // JS source — including our deno_core op names like
     // `op_dom_attach_shadow`. Real Chrome returns
-    // `function NAME() { [native code] }`. Kasada's `sfc` and `sdt`
-    // probes (decrypted blob 0, 2026-05-10) catch us on this.
+    // `function NAME() { [native code] }`; without masking, scripts that
+    // inspect these would see our op names and detect the difference.
     //
     // Strategy: walk every named own property of every Web API
     // prototype we define, find any function-typed values + getters +
@@ -3304,9 +3296,9 @@
         }
 
         // Top-level globalThis function-typed members that should be
-        // native. queueMicrotask + fetch were the worst offenders in
-        // the captured Kasada error report — both leaked their literal
-        // JS source via Function.prototype.toString.
+        // native. queueMicrotask + fetch were the worst offenders —
+        // both leaked their literal JS source via
+        // Function.prototype.toString.
         const _topLevelFns = [
             'queueMicrotask', 'fetch', 'setTimeout', 'clearTimeout',
             'setInterval', 'clearInterval', 'requestAnimationFrame',

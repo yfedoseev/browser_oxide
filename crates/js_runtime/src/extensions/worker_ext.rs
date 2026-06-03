@@ -7,8 +7,8 @@
 //!
 //! Also hosts a process-global BlobRegistry so that `URL.createObjectURL(blob)`
 //! produces a blob: URL whose source text can be resolved when a worker is
-//! spawned from it (Akamai's BMP v3 spawns workers via blob: URLs built from
-//! inline scripts).
+//! spawned from it (a common pattern: scripts build an inline worker from a
+//! blob: URL via `URL.createObjectURL`).
 
 use crate::extensions::stealth_ext::StealthState;
 use crate::state::DomState;
@@ -51,9 +51,9 @@ pub fn op_blob_register(
     #[buffer] data: &[u8],
     #[string] content_type: String,
 ) {
-    // parity-workflows task #2 instrumentation: trace blob registration so
-    // the AWS-WAF blob-worker path (URL.createObjectURL(blob) -> new
-    // Worker(blobUrl)) is observable just before the spawn.
+    // Trace blob registration so the blob-worker path
+    // (URL.createObjectURL(blob) -> new Worker(blobUrl)) is observable
+    // just before the spawn.
     tracing::debug!(
         url = %url,
         bytes = data.len(),
@@ -211,10 +211,9 @@ struct WorkerSelf {
     notify_parent: Arc<Notify>,
     /// URL the worker was constructed with (`new Worker(url)`). Drives
     /// `self.location.href` in the worker realm via `op_worker_self_url`.
-    /// Recaptcha enterprise's webworker reads `self.location.origin`
-    /// to verify it was loaded from a trusted recaptcha.net URL; an
-    /// empty / missing `self.location` is one cause of duolingo's
-    /// stuck-at-13.5KB residual (R-DUO-WORKER).
+    /// Some workers read `self.location.origin` to verify they were
+    /// loaded from an expected URL; an empty / missing `self.location`
+    /// can leave a worker-dependent app stuck on a thin shell.
     url: String,
 }
 
@@ -246,26 +245,26 @@ pub fn op_worker_spawn(
     // A Worker inherits its owner's secure-context (HTML spec). Captured here
     // (Copy bool) and moved into the worker thread so the worker realm keeps
     // crypto.subtle / crypto.randomUUID when spawned from an https/blob:https
-    // page — required by SHA-256 proof-of-work workers (AWS WAF, reCAPTCHA).
+    // page — required by SHA-256 proof-of-work workers (a common pattern in
+    // challenge scripts that run in workers).
     let is_secure_context = stealth.is_secure_context;
-    // F3 (parity-workflows): capture the page's fetch client (correct
-    // profile + shared cookie jar) on the MAIN thread so the worker thread
+    // Capture the page's fetch client (correct profile + shared cookie
+    // jar) on the MAIN thread so the worker thread
     // can seed its own thread-local FETCH_CLIENT with it. Without this,
     // `op_worker_sync_fetch` runs on the worker thread where the
     // thread-local is None and falls back to `chrome_148_linux()` — a Linux
     // UA leak on a macOS/Windows page, and a window<->worker fetch-identity
-    // mismatch that DataDome / CreepJS / Kasada worker probes flag.
+    // mismatch — real Chrome's worker shares the document's network identity.
     let parent_fetch_client = crate::extensions::fetch_ext::fetch_client();
     let (to_worker_tx, to_worker_rx) = std::sync::mpsc::channel::<String>();
     let (to_parent_tx, to_parent_rx) = std::sync::mpsc::channel::<String>();
     let terminate = Arc::new(AtomicBool::new(false));
     let notify_parent = Arc::new(Notify::new());
     let worker_id = NEXT_WORKER_ID.fetch_add(1, Ordering::Relaxed);
-    // parity-workflows task #2 instrumentation: op_worker_spawn previously
-    // logged only on failure, so a missing spawn and a silent spawn were
-    // indistinguishable when diagnosing the AWS-WAF PoW-worker path. Trace
-    // every spawn (module/classic, secure-context, url) so the live-nav
-    // self-solve flow is observable under
+    // op_worker_spawn previously logged only on failure, so a missing
+    // spawn and a silent spawn were indistinguishable when diagnosing a
+    // proof-of-work worker path. Trace every spawn (module/classic,
+    // secure-context, url) so the worker flow is observable under
     // RUST_LOG=js_runtime::extensions::worker_ext=debug.
     tracing::debug!(
         worker_id,
@@ -294,7 +293,7 @@ pub fn op_worker_spawn(
     owned.spawned_ids.borrow_mut().push(worker_id);
 
     // 64 MB stack: V8's default stack guard isn't large enough for some
-    // anti-bot probes that recurse deeply through wrapped natives.
+    // scripts that recurse deeply through wrapped natives.
     // Chrome's renderer threads also run with ~16 MB stacks; we go larger
     // because our shim adds more JS frames per native call.
     let thread_result = std::thread::Builder::new()
@@ -492,7 +491,7 @@ pub struct WorkerOwnership {
     pub spawned_ids: RefCell<Vec<u32>>,
 }
 
-/// W5b-deep: async op that returns the next worker→parent message,
+/// Async op that returns the next worker→parent message,
 /// awaiting on a tokio Notify rather than polling. Returns "" when the
 /// worker has terminated. Replaces the JS-level `setInterval(5)` pump
 /// at `window_bootstrap.js:1633` that previously pinned `is_pending=true`
@@ -571,13 +570,12 @@ pub fn op_worker_self_recv() -> String {
     })
 }
 
-/// R-DUO-WORKER: return the URL the current worker was constructed
+/// Return the URL the current worker was constructed
 /// with (`new Worker(url)`). Used by `worker_bootstrap.js` to install
 /// `self.location` — real Chrome's `WorkerLocation` reports the
-/// worker script's URL, and recaptcha enterprise's webworker reads
-/// `self.location.origin` to verify it was loaded from a trusted
-/// recaptcha.net URL. Empty `self.location` (BO pre-fix) bails the
-/// worker silently.
+/// worker script's URL, and some workers read
+/// `self.location.origin` to verify they were loaded from an expected
+/// URL. Empty `self.location` bails such a worker silently.
 #[op2]
 #[string]
 pub fn op_worker_self_url() -> String {

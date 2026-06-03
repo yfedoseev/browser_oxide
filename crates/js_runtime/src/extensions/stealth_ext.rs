@@ -172,14 +172,13 @@ pub fn op_is_secure_context(#[state] state: &StealthState) -> bool {
 ///
 /// Used by `humanize.js` to pre-populate the synthetic mouse event
 /// buffer (`__akamai_events.mouse`) with statistically correct
-/// trajectories before any anti-bot script reads it. The Rust
+/// trajectories before any script reads it. The Rust
 /// implementation in `crates/stealth/src/behavior.rs` is a real
 /// Plamondon Sigma-Lognormal generator (2-7 strokes, per-stroke σ/μ
 /// from BeCAPTCHA-Mouse-validated distributions, pink-tremor noise)
 /// — strictly stronger than the JS-side triangular approximation it
-/// replaces. Defeats the RF mouse classifier used downstream by
-/// HUMAN/PerimeterX, Kasada (sensor VM), DataDome (slider scorer),
-/// and Akamai (sensor_data field 65).
+/// replaces. Produces trajectories statistically consistent with
+/// human pointer movement rather than synthetic straight-line motion.
 #[op2]
 #[string]
 pub fn op_behavior_mouse_trajectory(

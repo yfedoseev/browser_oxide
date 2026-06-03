@@ -23,8 +23,8 @@ pub struct BrowserJsRuntime {
     /// Per-runtime navigation-pending signal. JS sets it via
     /// `op_set_pending_nav` (called from window_bootstrap.js whenever
     /// `__pendingNavigation` is assigned). The event loop polls it to
-    /// short-circuit `run_until_idle` for fast nav handoff (gap: Kasada
-    /// 5-second retry window).
+    /// short-circuit `run_until_idle` for fast nav handoff (some sites
+    /// expect a navigation to begin within a few seconds).
     nav_signal: NavSignal,
 }
 

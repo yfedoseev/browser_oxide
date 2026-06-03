@@ -30,11 +30,11 @@
     const self = globalThis;
     self.self = self;
 
-    // --- R-DUO-WORKER: WorkerLocation ---
+    // --- WorkerLocation ---
     // Real Chrome workers expose `self.location` as a WorkerLocation
-    // object reporting the script's URL. Recaptcha enterprise's
-    // webworker reads `self.location.origin` to verify it was loaded
-    // from a trusted URL; absence silently bails the token flow.
+    // object reporting the script's URL. Some workers read
+    // `self.location.origin` to verify they were loaded from an
+    // expected URL; absence can silently break their flow.
     if (!self.location) {
         try {
             const _workerUrl = (ops && typeof ops.op_worker_self_url === 'function')
@@ -86,11 +86,10 @@
     // --- WorkerNavigator (matches StealthProfile) ---
     if (!self.navigator) {
         // navigator.userAgentData — must be present in Worker realm AND
-        // return values consistent with the main thread. DataDome's
-        // tags.js v5.6.3 spawns a Worker that reads
-        // `navigator.userAgentData ? .mobile : "NA"`. Main returns false,
-        // worker previously returned "NA" — a cross-realm contradiction
-        // DataDome scores against. Now both return false.
+        // return values consistent with the main thread. Some scripts
+        // spawn a Worker that reads `navigator.userAgentData?.mobile`.
+        // Main returns false, worker previously returned "NA" — a
+        // cross-realm contradiction. Now both return false.
         const _osName = _p("os_name", "Windows");
         const _browserMajor = _p("browser_version", "147.0.7727.117").split(".")[0];
         const _browserFull = _p("browser_version", "147.0.7727.117");
@@ -298,8 +297,8 @@
     };
 
     // MediaSource + MediaRecorder.isTypeSupported in Worker realm.
-    // Kasada's `mrs` probe (W4a 2026-05-11) reads .isTypeSupported on
-    // an undefined receiver in our Worker context — real Chrome has
+    // Some scripts read .isTypeSupported in a Worker context; without
+    // this it would be an undefined receiver — real Chrome has
     // MediaSource available in DedicatedWorker since Chrome 108.
     const _mediaTypes = new Set([
         "video/mp4", 'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',

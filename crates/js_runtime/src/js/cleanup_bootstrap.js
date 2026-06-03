@@ -19,11 +19,11 @@
             // Phase 7 — also strip the constructor *interfaces* for the
             // [SecureContext] APIs. Real Chrome 147 hides these from
             // `Object.getOwnPropertyNames(window)` on insecure pages.
-            // Anti-bot scripts hash the global namespace.
+            // Some scripts hash the global namespace.
             // Also: ApplePaySession, SharedArrayBuffer, webkitAudioContext,
             // DedicatedWorkerGlobalScope, WorkerGlobalScope, CSSPseudoElement
             // are absent from Chrome 147's globalThis on insecure pages —
-            // verified via fresh Playwright MCP capture.
+            // verified against a real browser.
             for (const k of [
                 "SharedArrayBuffer", "webkitAudioContext",
                 "DedicatedWorkerGlobalScope", "WorkerGlobalScope",
@@ -95,10 +95,9 @@
             : "Linux";
 
         // ApplePaySession — present only on macOS Chrome AND only on
-        // secure contexts (Apple Pay requires https). Akamai's sensor
-        // sends `ap=null` if the constructor is missing on a macOS UA;
-        // that mismatch is one of the strongest single tells in the
-        // pixel POST capture. Constructor + statics shaped to match
+        // secure contexts (Apple Pay requires https). A missing constructor
+        // on a macOS UA is a strong inconsistency versus a real browser.
+        // Constructor + statics shaped to match
         // Chrome 147's ApplePaySession surface.
         const _ops2 = Deno && Deno.core && Deno.core.ops;
         const _isSecureForAP = _ops2 && _ops2.op_is_secure_context && _ops2.op_is_secure_context();
@@ -162,8 +161,8 @@
                 "Serial", "SerialPort",
                 "NetworkInformation", "BatteryManager",
                 "IdleDetector", "EyeDropper",
-                // W1.5 — Chrome-only interfaces real Safari does NOT expose.
-                // PerimeterX `'X' in window` tells (research 05_PERIMETERX.md §6.3).
+                // Chrome-only interfaces real Safari does NOT expose.
+                // A `'X' in window` check against an iOS UA would flag these.
                 "UserActivation", "Scheduling",
                 "Sensor", "Accelerometer", "AbsoluteOrientationSensor",
                 "GravitySensor", "Gyroscope", "LinearAccelerationSensor",
@@ -252,10 +251,10 @@
             // 7. Sec-CH-UA-* JS surface absent on Safari — already handled
             //    above via userAgentData getter returning undefined.
 
-            // 8. window.chrome must be absent on iOS Safari. PerimeterX and
-            //    others explicitly probe `typeof window.chrome` — Chrome
-            //    returns "object", Safari "undefined". Research 05_PERIMETERX
-            //    §6.1 names this as one of the iOS kill signals.
+            // 8. window.chrome must be absent on iOS Safari. Some scripts
+            //    explicitly probe `typeof window.chrome` — Chrome
+            //    returns "object", Safari "undefined". A positive hit under
+            //    an iOS UA is a strong inconsistency.
             try { delete globalThis.chrome; } catch (_e) {}
 
             // 8b. navigator.permissions.query() — Safari 18 supports a much
@@ -354,12 +353,11 @@
         }
     } catch (_e) { /* profile-conditional installs are best-effort */ }
 
-    // -- sfc native-source masking (Kasada `/tl` "sfc" probe) --------
-    // Kasada's `/tl` sensor dumps `String(globalThis.<ctor>)` for a
-    // rotating list of Web Platform constructors/functions and feeds
-    // the result into the dominant ~30-40% browser-fingerprint ML
-    // weight. A FRESH decrypted /tl capture (2026-05-15, post console
-    // fix) showed 46 of 47 probed names leaking our polyfill source —
+    // -- native-source masking of Web Platform constructors --------
+    // Some scripts dump `String(globalThis.<ctor>)` for a
+    // rotating list of Web Platform constructors/functions and feed
+    // the result into a browser-fingerprint score. Without masking,
+    // many probed names leak our polyfill source —
     // raw `class Worker {…}` / `function(input, init){…}` bodies, or
     // the wrong native name (constructors that extend our internal
     // EventTarget reported `function EventTarget() { [native code] }`,
@@ -408,8 +406,7 @@
             // confirmed setTimeout/setInterval/clearTimeout/
             // clearInterval/queueMicrotask/structuredClone are plain
             // `function` decls → carry `.prototype` + are
-            // constructable (CreepJS/Castle bot signal; doc-11 §line94
-            // "✓ via _defProtoMethod" was stale for these GLOBALS).
+            // constructable (a real-browser inconsistency).
             // `function f(){}`'s `.prototype` is non-configurable so
             // `delete` fails — the only fix is to REPLACE with a
             // method-shorthand (`{[k](){}}[k]`): no `.prototype`,
@@ -446,11 +443,11 @@
             } catch (_e) {}
 
             // (chrome.app.* are handled by _natMethod above — it both
-            // native-masks toString [Kasada `sbi` probe leaked
+            // native-masks toString [otherwise a probe would leak
             // "function getDetails() { return null; }"] and removes the
             // illegal `.prototype`/constructability.)
-            // The exact 47 names the fresh sensor probed, plus adjacent
-            // standard constructors Kasada rotates through — all are
+            // The commonly probed names, plus adjacent
+            // standard constructors — all are
             // genuinely `[native code]` in real Chrome, so masking any
             // that exist on this profile is correct (missing ones are a
             // safe no-op via `_maskFunction`'s `if (!fn) return`).
@@ -488,16 +485,16 @@
                 'Event', 'CustomEvent', 'MediaStream', 'MediaStreamTrack',
                 'MediaRecorder', 'DOMRect', 'DOMRectReadOnly', 'DOMPoint',
                 'DOMPointReadOnly', 'DOMQuad',
-                // MASK-3 (parity-workflows): the WebGL/Canvas context
+                // The WebGL/Canvas context
                 // constructor OBJECTS themselves. Their prototype methods are
                 // masked by the universal sweep, but String(WebGLRenderingContext)
-                // is enumerated by AWS-WAF + CreepJS and must be `[native code]`.
+                // is commonly enumerated and must be `[native code]`.
                 'WebGLRenderingContext', 'WebGL2RenderingContext',
                 'CanvasRenderingContext2D', 'WebGLContextEvent',
-                // MASK-2 (parity-workflows): Event-subclass constructor
+                // Event-subclass constructor
                 // objects. event_bootstrap.js defines them as JS classes, so
-                // String(MouseEvent) leaked `class MouseEvent extends ...`
-                // (a canonical Kasada `sdt` tell). Masking sets `[native code]`
+                // String(MouseEvent) leaked `class MouseEvent extends ...`,
+                // which differs from real Chrome. Masking sets `[native code]`
                 // + the correct own `.name`. Real Chrome: every one is native.
                 'UIEvent', 'MouseEvent', 'KeyboardEvent', 'InputEvent',
                 'FocusEvent', 'PointerEvent', 'WheelEvent', 'MessageEvent',
@@ -518,9 +515,8 @@
         }
     } catch (_e) { /* sfc masking is best-effort */ }
 
-    // -- Universal prototype mask sweep (v0.1.0-parity Fix 3) ----------
-    // Per 16_STEALTH_FINGERPRINT_AUDIT.md §5 + 08 Lever 3 + 41 §4.4:
-    // 11 of 12 anti-bot vendors fingerprint Function.prototype.toString
+    // -- Universal prototype mask sweep ----------
+    // Many scripts inspect Function.prototype.toString
     // on patched prototype methods (Headers/Request/Response, XHR,
     // Observers, Streams, Event subclasses, IDB, Range, etc.). Walk
     // every globalThis constructor that has a .prototype, mask every
@@ -548,7 +544,7 @@
                     if (_n === 'constructor') continue;
                     let _d;
                     try { _d = Object.getOwnPropertyDescriptor(_p, _n); } catch (_e) { continue; }
-                    // MASK-1 (parity-workflows): collect ACCESSOR props too
+                    // Collect ACCESSOR props too
                     // (get/set), not just data-value methods. _maskAsNative
                     // already masks desc.get/desc.set (stealth_bootstrap.js:94),
                     // but the sweep previously skipped accessor-only props, so

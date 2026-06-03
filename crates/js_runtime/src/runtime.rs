@@ -56,8 +56,9 @@ pub struct BrowserRuntimeOptions {
 ///
 /// **Backward-compatibility shim.** Prefer [`create_runtime_with_signals`]
 /// in new code — it also returns the per-runtime [`NavSignal`] so the
-/// event loop can short-circuit when JS sets `__pendingNavigation` (gap
-/// in 5-second Kasada retry window). Keeps this fn for existing callers
+/// event loop can short-circuit when JS sets `__pendingNavigation`
+/// (some sites expect a navigation to begin within a few seconds).
+/// Keeps this fn for existing callers
 /// that don't need the signal.
 pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
     create_runtime_with_signals(dom, options).0
@@ -107,15 +108,15 @@ pub fn create_runtime_with_signals(
     );
 
     // Match Chrome 147's renderer heap budget. V8's default ~1.5 GB OOMs
-    // on probe sites that build very large fingerprint payloads (creepjs
-    // hits `Builtins_ArrayPrototypePush` OOM at ~1.8 GB on macOS arm64
-    // — the engine is collecting hundreds of thousands of property
-    // descriptors across every WebIDL interface). Real Chrome on a
-    // desktop has 4 GB+ available per renderer; we mirror that.
+    // on sites that build very large fingerprint payloads (a heavy
+    // fingerprint probe hits `Builtins_ArrayPrototypePush` OOM at ~1.8 GB
+    // on macOS arm64 — the engine is collecting hundreds of thousands of
+    // property descriptors across every WebIDL interface). Real Chrome on
+    // a desktop has 4 GB+ available per renderer; we mirror that.
     //
     // HEAP_INITIAL was 256 MB but caused early-growth GC pauses on
-    // fingerprint-heavy sites (creepjs allocates well past 256 MB during
-    // its lie-detection pass; V8 spent time compacting old space before
+    // fingerprint-heavy sites (a heavy probe allocates well past 256 MB
+    // during its pass; V8 spent time compacting old space before
     // growing the heap). 1 GB initial skips those early compactions.
     const HEAP_INITIAL: usize = 1024 * 1024 * 1024; // 1 GB initial
     const HEAP_MAX: usize = 4 * 1024 * 1024 * 1024; // 4 GB max
@@ -178,7 +179,7 @@ pub fn create_runtime_with_signals(
         .put(crate::extensions::worker_ext::WorkerOwnership::default());
 
     // Capture the GENUINE `Function.prototype.toString` before any
-    // bootstrap replaces it (doc 27). Untagged functions delegate to
+    // bootstrap replaces it. Untagged functions delegate to
     // this so real-JS source / real-native `[native code]` stay exactly
     // V8-correct; tagged host fns get the synthetic native string from
     // the API-function callback (which V8 itself renders `[native code]`
@@ -190,7 +191,7 @@ pub fn create_runtime_with_signals(
 
     // IframeRealmStore: holds genuine child v8::Context instances (one per
     // iframe) so `iframe.contentWindow` returns a real realm instead of a
-    // Proxy — defeats Kasada's `addContentWindowProxy` detector (doc 26/27).
+    // Proxy — matching real Chrome, where contentWindow is a genuine realm.
     // Store orig_fp_tostring so op_create_child_realm can install the same
     // genuine-native toString into every child context (cross-realm parity).
     {
@@ -240,8 +241,8 @@ pub fn create_runtime_with_signals(
     }
 
     // All bootstrap scripts run with name "<anonymous>" so V8 stack
-    // frames don't leak browser_oxide-specific tags. Castle.io
-    // documented Kasada/DataDome inspecting Error.stack literal format.
+    // frames don't leak browser_oxide-specific tags — real Chrome's
+    // Error.stack does not reference internal bootstrap scripts.
     // Always run cleanup to hide internals, even when restoring from snapshot.
     runtime
         .execute_script("<anonymous>", include_str!("js/cleanup_bootstrap.js"))
@@ -286,9 +287,9 @@ pub fn create_runtime_with_signals(
     // v8::FunctionTemplate API function) AFTER all bootstrap/cleanup,
     // replacing the JS-level patch. Closes the structurally-JS-
     // unpatchable [[SourceText]] leak (class-extends TypeError /
-    // NoSideEffectsToString / error stacks / eval) — Kasada `fsc`
-    // probe. Behaviour preserved via the captured genuine original +
-    // the `Symbol.for('__browser_oxide_native__')` tag scheme. doc 27.
+    // NoSideEffectsToString / error stacks / eval), which differs from
+    // real Chrome. Behaviour preserved via the captured genuine original
+    // + the `Symbol.for('__browser_oxide_native__')` tag scheme.
     if let Some(ref orig) = orig_fp_tostring {
         let scope = &mut runtime.handle_scope();
         crate::native_fns::install_native_fp_tostring(scope, orig, native_tag_sym.as_ref());
@@ -300,9 +301,10 @@ pub fn create_runtime_with_signals(
     // Script name is `<anonymous>` (V8's eval-default tag) to avoid
     // leaking browser_oxide identifiers in Error.stack frames if a
     // site script overrides Error.prepareStackTrace and bypasses our
-    // filter. A prior VM trace previously captured
-    // `at h (<init_script_0>:51:34)` — anti-bot probes literally saw
-    // the index. Both index and the `init_script` tag are now scrubbed.
+    // filter. An earlier trace exposed a frame like
+    // `at h (<init_script_0>:51:34)`, leaking the script index — which
+    // real Chrome would not show. Both index and the `init_script` tag
+    // are now scrubbed.
     for code in options.init_scripts.iter() {
         if let Err(e) = runtime.execute_script("<anonymous>", code.clone()) {
             tracing::warn!(error = %e, "init script failed");
@@ -315,14 +317,14 @@ pub fn create_runtime_with_signals(
 /// Create a minimal JsRuntime suitable for a Web Worker.
 ///
 /// Workers do not get DOM, layout, SSE, WebSocket, or input APIs. They
-/// DO get canvas (for `OffscreenCanvas`, which sites probe inside
+/// DO get canvas (for `OffscreenCanvas`, which sites use inside
 /// workers per the WHATWG spec), console, crypto, timers, fetch,
 /// and the worker-side ops.
 /// `is_secure_context` is inherited from the spawning document: a Worker is a
 /// secure context iff its owner is (HTML spec §"secure context"). Without this,
 /// the worker realm defaulted to insecure and `cleanup_bootstrap.js` stripped
 /// `crypto.subtle` / `crypto.randomUUID` — which silently broke any worker doing
-/// SHA-256 proof-of-work (AWS WAF `challenge.js`, reCAPTCHA `webworker.js`).
+/// SHA-256 proof-of-work (a common pattern in challenge scripts that run in workers).
 pub fn create_worker_runtime(
     profile: Option<StealthProfile>,
     is_secure_context: bool,
@@ -369,9 +371,9 @@ pub fn create_worker_runtime(
             is_secure_context,
         ));
 
-    // W2.7 — every worker bootstrap script runs with name "<anonymous>"
+    // Every worker bootstrap script runs with name "<anonymous>"
     // (V8's eval-default) so Error.stack frames don't leak our internal
-    // tags to Kasada/DataDome.
+    // tags — matching real Chrome, whose stacks don't reference them.
     //
     // stealth_bootstrap must run first: installs Function.prototype.toString
     // patch and the _nativeTag/_maskFunction/_maskAsNative helpers that

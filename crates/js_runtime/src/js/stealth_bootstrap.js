@@ -5,7 +5,7 @@
     };
 
     // --- Function.prototype.toString bypass patch ---
-    // CreepJS and other detectors call Function.prototype.toString.call(fn)
+    // Some scripts call Function.prototype.toString.call(fn)
     // directly, which bypasses any instance-level fn.toString override and
     // returns the raw JS source of polyfilled functions. We patch
     // Function.prototype.toString itself to consult a private Symbol tag
@@ -20,8 +20,8 @@
     // like the real native Function.prototype.toString. A plain
     // `function toString(){}` IS constructable, so
     // `class X extends Function.prototype.toString {}` did NOT throw in
-    // our engine while real Chrome 147 throws `TypeError` (verified
-    // CDP-free) — Kasada's `fsc` probe recorded `"no error thrown"`.
+    // our engine while real Chrome 147 throws `TypeError`; we match
+    // Chrome here.
     const _patchedFnToStr = ({ toString() {
         if (_inPatchedToStr) return _origFnToStr.call(this);
         _inPatchedToStr = true;
@@ -59,11 +59,10 @@
             // PARENT-realm functions (cross-realm robustness — see iframe
             // contentWindow self-loop commits).
             Object.defineProperty(fn, _nativeTag, { value: name, configurable: true });
-            // NO own `toString`: it was a self-inflicted FP leak — a
-            // fresh /tl-driven clean probe (kasada_masked_fn_own_props_
-            // probe) showed every masked fn had own `toString` →
+            // NO own `toString`: it was a self-inflicted leak — an
+            // earlier version gave every masked fn an own `toString`, so
             // `getOwnPropertyNames(fn)` included "toString" (Chrome:
-            // ['length','name'(,'prototype')] only — doc-11 line98) and
+            // ['length','name'(,'prototype')] only) and
             // `fn.toString !== Function.prototype.toString` (Chrome: ===,
             // inherited). The own toString was REDUNDANT: the patched
             // Function.prototype.toString already yields
@@ -108,7 +107,7 @@
     Object.defineProperty(globalThis, '_maskFunction', { value: _maskFunction, enumerable: false, configurable: true });
     Object.defineProperty(globalThis, '_maskAsNative', { value: _maskAsNative, enumerable: false, configurable: true });
 
-    // v0.1.0-parity Fix 6 — expose seeded random under a Symbol-keyed
+    // Expose seeded random under a Symbol-keyed
     // slot that survives cleanup_bootstrap's string-keyed `internals`
     // purge. humanize.js (injected per-navigation, AFTER cleanup) reads
     // this via `globalThis[Symbol.for('__browser_oxide_behavior_rand__')]`
@@ -130,7 +129,7 @@
         }
     } catch (_e) {}
 
-    // v0.1.0-parity Fix 5 — expose CMU+Buffalo keystroke-schedule
+    // Expose CMU+Buffalo keystroke-schedule
     // generator under a Symbol-keyed slot. humanize.js calls it on
     // input focus to synthesize plausible per-char timings (LogNormal
     // dwell + bigram-modulated flight). The Rust generator existed at
@@ -151,7 +150,7 @@
         }
     } catch (_e) {}
 
-    // BotD `eval_length.ts` detector: `eval.toString().length === 33` for Chromium.
+    // `eval.toString().length === 33` for Chromium is a known invariant.
     // V8 natively produces "function eval() { [native code] }" (33 chars), so this
     // is usually a no-op. We tag `eval` defensively so any V8 build drift is
     // self-corrected to Chrome's canonical shape.
@@ -161,12 +160,10 @@
     // concatenated BEFORE this file in the V8 snapshot (snapshot.rs),
     // so it could not call _maskAsNative itself (undefined then) —
     // `globalThis.console` already exists here, and _maskAsNative is
-    // now defined, so this is the correct place. Kasada's `ofc` probe
-    // dumps `console.<method>.toString()` for all ~19 methods into the
-    // /tl sensor (decrypted_blob_0_pretty.json `/ofc/r` showed ours
-    // leaking `log(...args) { core.ops.op_console_log(...) }` — a
-    // non-Chrome tell feeding the dominant 30-40% browser-fingerprint
-    // weight of Kasada's server ML score). Real Chrome returns
+    // now defined, so this is the correct place. Some scripts dump
+    // `console.<method>.toString()` for all ~19 methods; without masking,
+    // ours would leak `log(...args) { core.ops.op_console_log(...) }`,
+    // which differs from real Chrome. Real Chrome returns
     // `function log() { [native code] }` for every console method.
     try {
         if (globalThis.console) {

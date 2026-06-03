@@ -1,14 +1,14 @@
 //! Humanized `performance.now()` (gap #31a).
 //!
 //! Real Chrome 130 quantizes `performance.now()` to 100 µs (or 5 µs with
-//! cross-origin isolation), but anti-bot vendors (Kasada, DataDome) check
-//! more than just the resolution — they look at the **jitter shape** across
-//! many calls in a tight loop. Real hardware shows ~10–30 µs gaussian-ish
+//! cross-origin isolation), but the resolution is not the whole story —
+//! the **jitter shape** across many calls in a tight loop also differs
+//! from a software clock. Real hardware shows ~10–30 µs gaussian-ish
 //! noise around the quantized step from kernel scheduling, TSC drift, and
 //! V8's own quantization-with-noise applied on top of `CLOCK_MONOTONIC`.
 //!
 //! Pure software clocks return a perfect 100 µs grid with one distinct
-//! step value — `set(diffs).size === 1` flags a bot.
+//! step value — `set(diffs).size === 1`, which a real browser never shows.
 //!
 //! Distribution (per Schwarz et al. "Drawn Apart" 2021 + Jin 2024 measurements
 //! on Chromium 124 stable):
@@ -31,11 +31,11 @@ pub struct PerfState {
     origin: Instant,
     /// Wall-clock (UNIX epoch ms) corresponding to `origin`. Read by
     /// `op_perf_time_origin_ms` so JS `performance.timeOrigin` honors the
-    /// invariant `timeOrigin + performance.now() ≈ Date.now()` — without
-    /// this, Kasada's origin-skew probe (`performance.timeOrigin +
-    /// performance.now() vs Date.now()`) catches the JS-side ad-hoc
-    /// computation that used `Date.now() - <hardcoded nav_end>` as a
-    /// stand-in. v0.1.0-parity Fix 7.
+    /// invariant `timeOrigin + performance.now() ≈ Date.now()`. Real
+    /// Chrome maintains this invariant; without it, an earlier JS-side
+    /// ad-hoc computation (`Date.now() - <hardcoded nav_end>`) produced a
+    /// detectable skew between `performance.timeOrigin + performance.now()`
+    /// and `Date.now()`.
     origin_unix_ms: f64,
     rng: StdRng,
     log_normal: LogNormal<f64>,
@@ -102,7 +102,7 @@ pub fn op_perf_now_humanized(#[state] s: &mut PerfState) -> f64 {
 /// Returns the UNIX-epoch ms corresponding to `PerfState.origin` (the
 /// process-relative t=0 for `performance.now()`). JS uses this as the
 /// `performance.timeOrigin` value so the standard Web Platform invariant
-/// `timeOrigin + performance.now() ≈ Date.now()` holds. v0.1.0-parity Fix 7.
+/// `timeOrigin + performance.now() ≈ Date.now()` holds.
 #[op2(fast)]
 pub fn op_perf_time_origin_ms(#[state] s: &PerfState) -> f64 {
     s.origin_unix_ms
@@ -173,10 +173,10 @@ mod tests {
         let mut s = PerfState::with_seed(7);
         // The monotonicity clamp + a tight hot loop on a fast CPU means many
         // adjacent calls clamp to last_us (the underlying clock advances by
-        // far less than the inter-call gap). Real fingerprinting probes look
-        // at hot-loop diff *cardinality* — anything above ~5 distinct values
-        // defeats the `set(diffs).size === 1` bot detector. We assert >10
-        // here for headroom.
+        // far less than the inter-call gap). A real browser's hot-loop diff
+        // *cardinality* is well above 1; anything above ~5 distinct values
+        // is realistic versus the software-clock `set(diffs).size === 1`
+        // signature. We assert >10 here for headroom.
         let mut samples: Vec<f64> = (0..500).map(|_| s.now_ms()).collect();
         samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
         samples.dedup_by(|a, b| (*a - *b).abs() < 1e-9);

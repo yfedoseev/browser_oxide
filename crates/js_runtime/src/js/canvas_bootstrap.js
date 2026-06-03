@@ -2,7 +2,7 @@
     const ops = Deno.core.ops;
 
     // -- Canvas-based font detection support -----------------------------
-    // Akamai/Kasada/PerimeterX fingerprint sensors detect installed fonts
+    // Some scripts detect installed fonts
     // by comparing measureText widths across candidate families: if
     // measureText("...", "Arial") differs from measureText("...", "sans-serif")
     // the family is reported as installed. Our font_database.rs aliases
@@ -262,7 +262,7 @@
     }
 
     // WebGL — routes through Canvas2D backend for real pixel output.
-    // Anti-bot fingerprinters call readPixels() after clearColor()+clear() and expect real data.
+    // Some scripts call readPixels() after clearColor()+clear() and expect real data.
     class WebGLRenderingContext {
         // WebGL constants
         static COLOR_BUFFER_BIT = 0x4000;
@@ -283,7 +283,7 @@
         static VERTEX_SHADER = 0x8B31;
         static COMPILE_STATUS = 0x8B81;
         static LINK_STATUS = 0x8B82;
-        // Parameter pname constants — anti-bot probes call e.g. gl.getParameter(gl.MAX_TEXTURE_SIZE).
+        // Parameter pname constants — scripts call e.g. gl.getParameter(gl.MAX_TEXTURE_SIZE).
         static VENDOR = 0x1F00;
         static RENDERER = 0x1F01;
         static VERSION = 0x1F02;
@@ -354,7 +354,7 @@
             this._height = h || this._height;
         }
 
-        // --- Parameter queries (anti-bot fingerprint values) ---
+        // --- Parameter queries (fingerprint-relevant values) ---
         //
         // All values come from the active StealthProfile's gpu_profile entry.
         // Loaded lazily the first time getParameter is called and cached on
@@ -363,9 +363,8 @@
         // wrapper around a closure-scoped cache loader so the methods
         // below don't reference `this._g` — that meant
         // `getParameter.call(somethingElse)` threw
-        // `TypeError: this._g is not a function` (caught by Kasada's
-        // `esd.wgl` field, decrypted blob 0, 2026-05-10). Real Chrome's
-        // native methods don't have that dependency.
+        // `TypeError: this._g is not a function`, which some scripts
+        // detect. Real Chrome's native methods don't have that dependency.
         static _g() {
             if (WebGLRenderingContext._gpuCache) return WebGLRenderingContext._gpuCache;
             // Defaults — used when no stealth profile is active. Must match
@@ -443,8 +442,8 @@
         // FIX-D2: the WebGL **1.0** surface. `_g()` above is the WebGL **2.0**
         // surface; a `getContext("webgl")` context must NOT report the WebGL 2
         // version string or expose WebGL-2-only extensions (e.g.
-        // `EXT_color_buffer_float`) — that cross-API mismatch is a deterministic
-        // bot tell (AWS WAF / DataDome / creepjs). Derived from the active
+        // `EXT_color_buffer_float`) — that cross-API mismatch differs from
+        // real Chrome. Derived from the active
         // profile's `webgl1_*` values; falls back to `_g()` when the profile has
         // no distinct WebGL 1 surface (legacy profiles) → no behaviour change.
         static _g1() {
@@ -661,7 +660,7 @@
     class WebGL2RenderingContext extends WebGLRenderingContext {}
 
     // AudioContext + OfflineAudioContext
-    // Simulates the pipeline used by CreepJS/FingerprintJS for audio fingerprinting:
+    // Simulates the pipeline commonly used for audio fingerprinting:
     //   OscillatorNode → DynamicsCompressorNode → destination
     
     class AudioNode extends EventTarget {
@@ -823,11 +822,11 @@
         constructor() { super(); this.maxChannelCount = 2; }
     }
 
-    // W3.4 — AudioContext fingerprintable surface. Real Chrome reports a
+    // AudioContext fingerprintable surface. Real Chrome reports a
     // stable per-device value across page loads. Previously this used
     // `Math.random()` per-IIFE which made sequential page loads in the
-    // same SharedSession return DIFFERENT sampleRates — AWS WAF +
-    // DataDome telemetry catch the inconsistency.
+    // same SharedSession return DIFFERENT sampleRates — an inconsistency
+    // a real browser would not exhibit.
     //
     // Now: sampleRate reads from profile.audio_sample_rate (48000 on
     // Apple Silicon, 44100 elsewhere). baseLatency + outputLatency are
@@ -1108,7 +1107,7 @@
     globalThis.HTMLCanvasElement = HTMLCanvasElement;
     globalThis.CanvasRenderingContext2D = CanvasRenderingContext2D;
     globalThis.WebGLRenderingContext = WebGLRenderingContext;
-    // Symbol.toStringTag — Akamai BMP v3 and DataDome check
+    // Symbol.toStringTag — some scripts check
     // Object.prototype.toString.call(ctx) which must return
     // "[object CanvasRenderingContext2D]" / "[object WebGLRenderingContext]"
     // (not "[object Object]"). Without this tag we show as a bot.
@@ -1149,7 +1148,7 @@
     globalThis.OfflineAudioContext = OfflineAudioContext;
     globalThis.BaseAudioContext = BaseAudioContext;
     globalThis.webkitAudioContext = AudioContext;
-    // Symbol.toStringTag for audio contexts — DataDome probes these.
+    // Symbol.toStringTag for audio contexts — some scripts probe these.
     try {
         Object.defineProperty(AudioContext.prototype, Symbol.toStringTag, {
             value: "AudioContext", configurable: true,
@@ -1325,11 +1324,12 @@
                 return this._context;
             }
             if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
-                // FP parity: a real OffscreenCanvas exposes WebGL. Anti-bot
+                // FP parity: a real OffscreenCanvas exposes WebGL. Some
                 // fingerprint workers read webGLVendor/webGLRenderer via
                 // `new OffscreenCanvas(1,1).getContext('webgl')` →
-                // gl.getParameter(UNMASKED_VENDOR_WEBGL); returning null here was
-                // a headless tell (the on-DOM <canvas> already supports WebGL).
+                // gl.getParameter(UNMASKED_VENDOR_WEBGL); returning null here
+                // differed from real Chrome (the on-DOM <canvas> already
+                // supports WebGL).
                 // Back it with the same profile-spoofed context that <canvas>
                 // getContext uses (canvas_bootstrap.js:1232-1234).
                 if (!this._canvasId) {
@@ -1397,7 +1397,7 @@
 
         // HTMLCanvasElement.prototype.transferControlToOffscreen — Chrome
         // 69+ method that returns a new OffscreenCanvas bound to this
-        // element. Heavily probed by Kasada/CreepJS as a real-Chrome
+        // element. Commonly probed as a real-Chrome
         // signal. Spec: https://html.spec.whatwg.org/#dom-canvas-transfercontroltooffscreen
         if (_HTMLCanvasProto && typeof _HTMLCanvasProto.transferControlToOffscreen !== "function") {
             const _transferControlToOffscreen = function transferControlToOffscreen() {
@@ -1454,8 +1454,8 @@
         }
         
         // Mask every own-function method on WebGL[2]RenderingContext.prototype.
-        // 11 of 12 anti-bot vendors fingerprint Function.prototype.toString of
-        // these methods (38_VISUAL_AUDIO_FINGERPRINTING.md §5.4). Iterating
+        // Many scripts inspect Function.prototype.toString of
+        // these methods, which must serialize as native code. Iterating
         // the prototype's own names is durable as the engine grows method
         // coverage — every new method gets masked automatically.
         const _maskAllProtoFns = (proto) => {

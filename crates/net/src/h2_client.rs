@@ -1,12 +1,11 @@
 //! HTTP/2 client with Chrome 147 SETTINGS fingerprint.
 //!
-//! Uses the `http2` crate (wreq's fork of h2) which supports custom
+//! Uses the `http2` crate (a fork of h2) which supports custom
 //! SETTINGS order, pseudo-header order, and stream priority — all
-//! required for anti-bot fingerprint matching.
+//! required to match Chrome's HTTP/2 fingerprint.
 //!
 //! Verified byte-for-byte against a fresh Chrome 147 (147.0.0.0)
-//! capture on macOS arm64 from `tls.peet.ws/api/all` via Playwright
-//! MCP, 2026-04-29:
+//! capture on macOS arm64 from a TLS-fingerprint reference service:
 //! ```text
 //! akamai_fingerprint: "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 //! priority: { weight: 256, depends_on: 0, exclusive: 1 }
@@ -22,8 +21,8 @@ use crate::error::NetError;
 
 /// Chrome HTTP/2 SETTINGS values.
 ///
-/// **Verified against a fresh Chrome 147 capture** from the developer's
-/// machine via Playwright MCP → `tls.peet.ws/api/all`, 2026-04-29:
+/// **Verified against a fresh Chrome 147 capture** from a real browser
+/// via a TLS-fingerprint reference service:
 /// ```text
 /// 1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p
 /// ```
@@ -31,11 +30,11 @@ use crate::error::NetError;
 /// or `5 MAX_FRAME_SIZE` on its client SETTINGS frame. Those defaults
 /// are negotiated from the server side.
 ///
-/// Earlier in this session we incorrectly added both of those based on
-/// an out-of-date curl-impersonate config; that made the Akamai H2
+/// An earlier version incorrectly added both of those based on
+/// an out-of-date reference; that made the HTTP/2 SETTINGS
 /// fingerprint hash `d23e6399a1d185e3b8cb58e5640dd698`, diverging from
 /// Chrome's actual hash `52d84b11737d980aef856699f885ca86`. The
-/// reference capture corrected us.
+/// reference capture corrected it.
 const HEADER_TABLE_SIZE: u32 = 65_536; // SETTINGS 1
 const ENABLE_PUSH: bool = false; // SETTINGS 2 = 0
 const INITIAL_STREAM_WINDOW_SIZE: u32 = 6_291_456; // SETTINGS 4 = 6 MB
@@ -50,10 +49,10 @@ const MAX_HEADER_LIST_SIZE: u32 = 262_144; // SETTINGS 6 = 256 KB
 const INITIAL_CONNECTION_WINDOW_SIZE: u32 = 15_728_640; // → wire 15_663_105 = Chrome match
 
 // =============================================================================
-// Safari iOS 18.4 HTTP/2 SETTINGS — Phase B2-B4 (2026-05-12)
+// Safari iOS 18.4 HTTP/2 SETTINGS
 // =============================================================================
 //
-// Per lexiforest's `safari_18.4_iOS.yaml`. iOS 18.4 sends 4 SETTINGS:
+// Per reference Safari iOS 18.4 captures. iOS 18.4 sends 4 SETTINGS:
 //   2 ENABLE_PUSH = 0
 //   3 MAX_CONCURRENT_STREAMS = 100
 //   4 INITIAL_WINDOW_SIZE = 2097152 (2 MB, vs Chrome's 6 MB)
@@ -68,11 +67,11 @@ const SAFARI_IOS_MAX_CONCURRENT_STREAMS: u32 = 100;
 const SAFARI_IOS_INITIAL_CONNECTION_WINDOW_SIZE: u32 = 10_485_760; // → wire 10_420_225
 
 // =============================================================================
-// Firefox 135 HTTP/2 SETTINGS — Firefox wire class (04_FIREFOX_WIRE)
+// Firefox 135 HTTP/2 SETTINGS — Firefox wire class
 // =============================================================================
 //
-// Canonical Firefox H2 fingerprint (FoxIO / Akamai H2 reference,
-// `1:65536;4:131072;5:16384|12517377|...|m,p,a,s`). Firefox sends only THREE
+// Canonical Firefox H2 fingerprint
+// (`1:65536;4:131072;5:16384|12517377|...|m,p,a,s`). Firefox sends only THREE
 // settings: 1 HEADER_TABLE_SIZE=65536, 4 INITIAL_WINDOW_SIZE=131072 (128 KiB,
 // vs Chrome's 6 MB), 5 MAX_FRAME_SIZE=16384. No ENABLE_PUSH, no
 // MAX_HEADER_LIST_SIZE on the wire, no MAX_CONCURRENT_STREAMS. Pseudo-header
@@ -167,10 +166,9 @@ where
         // validation (e.g. capacity checks against frames the server might
         // send) without appearing on the wire.
         //
-        // h-m.com (and likely other Akamai-fronted sites) returns RST_STREAM
-        // INTERNAL_ERROR if MAX_HEADER_LIST_SIZE isn't set on the connection
-        // — the server can't validate response headers without a limit.
-        // Discovered via Phase B sweep regression (2026-05-12). Adding
+        // Some servers return RST_STREAM INTERNAL_ERROR if
+        // MAX_HEADER_LIST_SIZE isn't set on the connection — the server
+        // can't validate response headers without a limit. Adding
         // max_header_list_size with Chrome's 256KB default (matches what real
         // Safari uses internally even though it doesn't advertise the setting).
         builder
@@ -188,7 +186,7 @@ where
     } else if is_firefox {
         // Firefox 135: 3 SETTINGS (1,4,5), 128 KiB stream window, m,p,a,s
         // pseudo-order. MAX_FRAME_SIZE=16384 (HTTP/2 default) is advertised.
-        // max_header_list_size is set for internal validation (Akamai servers
+        // max_header_list_size is set for internal validation (some servers
         // RST without a limit) but kept OUT of settings_order so it doesn't
         // appear on the wire — same trick the Safari arm uses.
         // NOTE: do NOT set max_header_list_size for Firefox — this http2
@@ -204,9 +202,9 @@ where
             .headers_pseudo_order(pseudo_order)
             .settings_order(settings_order);
         // Firefox emits an RFC 7540 idle-stream PRIORITY tree, which this
-        // builder's single StreamDependency hint can't express; per
-        // 04_FIREFOX_WIRE §4 the pragmatic choice is to omit the single Chrome
-        // priority hint entirely (closer to Firefox than a Chrome-weighted one).
+        // builder's single StreamDependency hint can't express; the pragmatic
+        // choice is to omit the single Chrome priority hint entirely (closer
+        // to Firefox than a Chrome-weighted one).
     } else {
         builder
             .header_table_size(HEADER_TABLE_SIZE)
@@ -219,8 +217,8 @@ where
             .headers_stream_dependency(StreamDependency::new(
                 StreamId::zero(),
                 // Chrome 147 sends weight 256 (wire byte 255), exclusive=true,
-                // depends_on=0 — verified against the 2026-05-09 Playwright
-                // capture from `tls.peet.ws/api/all`.
+                // depends_on=0 — verified against a real-browser capture
+                // from a TLS-fingerprint reference service.
                 255,
                 true,
             ));

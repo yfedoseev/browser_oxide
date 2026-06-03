@@ -106,7 +106,7 @@ impl Drop for V8DeadlineWatcher {
     }
 }
 
-/// Phase 0 measurement-hygiene typed page outcome.
+/// Typed page outcome for measurement hygiene.
 ///
 /// Replaces the old bare boolean "blocked?" guess. Every navigated
 /// site resolves to exactly one of these so the re-baseline can tell a
@@ -188,7 +188,7 @@ fn body_has_challenge_marker(body: &str) -> bool {
         .is_challenge()
 }
 
-/// Public-engine DataDome interstitial detector (R-DATADOME-DAILY-KEY).
+/// Public-engine DataDome interstitial detector.
 ///
 /// Identifies a `rt:'i'` DataDome interstitial document by the
 /// `captcha-delivery.com` substring — DD's CDN that serves the daily-
@@ -206,7 +206,7 @@ fn body_has_challenge_marker(body: &str) -> bool {
 /// defensive primitives are public-engine scope (they enable the
 /// bundle's OWN self-solve flow to run).
 fn is_datadome_challenge(html: &str) -> bool {
-    // P1 #5 — tightened. The 50 KB cap + CDN string alone could misclassify a
+    // Tightened. The 50 KB cap + CDN string alone could misclassify a
     // real rendered page that merely references captcha-delivery.com. Tiny
     // bodies (<8 KB) with the CDN are unambiguously the interstitial (every
     // shipped DD interstitial is 1-5 KB). In the 8-50 KB band, additionally
@@ -226,12 +226,12 @@ fn is_datadome_challenge(html: &str) -> bool {
         || html.contains("interstitial")
 }
 
-/// Public-engine DataDome solve detector (R-DATADOME-DAILY-KEY).
+/// Public-engine DataDome solve detector.
 ///
 /// A genuine solve = the cookie jar has `datadome=` AND the current
 /// body is no longer a DataDome interstitial (post-solve body is the
 /// real page content, not the captcha-delivery.com challenge document).
-/// Per FP-D3: a `datadome=` cookie is set on EVERY DD nav including
+/// A `datadome=` cookie is set on EVERY DD nav including
 /// the failing 403, so the cookie alone is not a solve marker — the
 /// body-shape transition is what differentiates "still bouncing on the
 /// interstitial" from "passed through".
@@ -239,8 +239,7 @@ fn is_datadome_solved(cookies: &str, body: &str) -> bool {
     cookies.contains("datadome=") && !is_datadome_challenge(body)
 }
 
-/// Public-engine Akamai sec-cpt solve detector
-/// (R-AKAMAI-SECCPT-FLAKE Sprint 2.4).
+/// Public-engine Akamai sec-cpt solve detector.
 ///
 /// The sec-cpt cookie carries a state segment between two `~` delimiters
 /// — the engine considers the challenge SOLVED only when:
@@ -263,7 +262,7 @@ fn is_seccpt_solved(cookies: &str, body: &str) -> bool {
         && !body.contains("sec-cpt-if")
 }
 
-/// Public-engine AWS-WAF token-challenge detector (parity-workflows M-2).
+/// Public-engine AWS-WAF token-challenge detector.
 ///
 /// The AWS-WAF "Challenge" / "Captcha" action serves a small (~2 KB) stub
 /// that defines `window.gokuProps = {key,iv,context}` +
@@ -332,7 +331,7 @@ fn geo_country_splash_target(body: &str, current_url: &str) -> Option<String> {
     None
 }
 
-/// Public-engine AWS-WAF solve detector (parity-workflows M-2).
+/// Public-engine AWS-WAF solve detector.
 ///
 /// A genuine solve = the jar holds the `aws-waf-token` cookie AND the
 /// current body is no longer the AWS challenge stub (challenge.js posted
@@ -342,8 +341,7 @@ fn is_awswaf_solved(cookies: &str, body: &str) -> bool {
     cookies.contains("aws-waf-token=") && !is_awswaf_challenge(body)
 }
 
-/// X1 (parity-workflows / R-SHAREDSESSION-X-COM-COOKIES): scrub the
-/// twitter.com ↔ x.com cookie-collision on entry. The twitter→x.com
+/// Scrub the twitter.com ↔ x.com cookie-collision on entry. The twitter→x.com
 /// rebrand redirect populates jar buckets for BOTH eTLD+1 identities with
 /// different `guest_id` values; on the next x.com nav the WAF reads the
 /// inherited `guest_id` + Cloudflare `__cf_bm` as a stale "previously-issued
@@ -353,7 +351,7 @@ fn is_awswaf_solved(cookies: &str, body: &str) -> bool {
 ///
 /// Shared by `navigate_with_init_solvers` (cold) AND `navigate_warm`
 /// (PagePool reuse). The warm path previously skipped this, so a pooled
-/// Page silently served the unpatched stub — the production hole X1 closes.
+/// Page silently served the unpatched stub — the production hole this closes.
 /// Opt-out via `BROWSER_OXIDE_NO_XCOM_ISOLATION=1`.
 async fn scrub_xcom_cookie_collision(url: &str, client: &net::HttpClient) {
     if std::env::var("BROWSER_OXIDE_NO_XCOM_ISOLATION").is_ok() {
@@ -472,14 +470,13 @@ impl Page {
     ///
     /// Boolean drop-in retained for the four navigate-loop call sites.
     /// Delegates to the shared structural classifier so the
-    /// false-positive tightening (Phase 0 measurement hygiene) applies
-    /// everywhere.
+    /// false-positive tightening applies everywhere.
     pub fn is_anti_bot_challenge(&mut self) -> bool {
         let body = self.content();
         body_has_challenge_marker(&body)
     }
 
-    /// Phase 0 measurement hygiene — typed page outcome.
+    /// Typed page outcome.
     ///
     /// Every navigated site gets exactly one [`ChallengeVerdict`] so a
     /// "blocked" verdict is no longer a bare substring guess. This is
@@ -840,7 +837,7 @@ impl Page {
     ///
     /// Caller MUST gate this on a challenge-origin flag (it is invoked
     /// only inside the challenge poll) so it never runs for a benign
-    /// nav ⇒ zero §4-gate regression risk, same narrow-gating
+    /// nav ⇒ zero regression risk, same narrow-gating
     /// discipline as `started_as_dd/cf/seccpt_challenge`.
     pub async fn rematerialize_iframes(
         &mut self,
@@ -1225,7 +1222,7 @@ impl Page {
         let client = net::HttpClient::shared(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
 
-        // X1 (parity-workflows): shared cold+warm x.com/twitter cookie-
+        // Shared cold+warm x.com/twitter cookie-
         // collision scrub. See `scrub_xcom_cookie_collision`. Previously an
         // inline block here only — the warm/PagePool path lacked it.
         scrub_xcom_cookie_collision(url, &client).await;
@@ -1252,11 +1249,11 @@ impl Page {
                 eprintln!("  {}: {}", k, v);
             }
         }
-        // G.3 — log known anti-bot vendor response markers so post-run
+        // Log known anti-bot vendor response markers so post-run
         // analysis can split CHL outcomes by protocol. Each marker also
-        // hints whether the site needs a vendor-specific solver
-        // (`memory/open_tasks.md#64` Akamai, etc.). No flow change yet —
-        // the adaptive budget from Phase A.1 already short-circuits when
+        // hints whether the site needs a vendor-specific solver. No
+        // flow change yet —
+        // the adaptive budget already short-circuits when
         // the body is small + readyState complete, so we don't burn the
         // full 75 s on a 2 KB challenge stub.
         if let Some(waf) = resp.headers.get("x-amzn-waf-action") {
@@ -1268,8 +1265,7 @@ impl Page {
         if resp.headers.contains_key("x-wbaas-token") {
             eprintln!("[vendor-detect] wbaas on {}", resp.url);
         }
-        // v0.1.0-parity Fix 10: extended vendor-detect markers per
-        // 18_ANTI_BOT_VENDOR_COOKBOOK.md §4.1. Pure observability —
+        // Extended vendor-detect markers. Pure observability —
         // post-run analysis splits CHL outcomes by protocol.
         if let Some(v) = resp.headers.get("cf-mitigated") {
             eprintln!("[vendor-detect] cloudflare-mitigated {} on {}", v, resp.url);
@@ -1530,7 +1526,7 @@ impl Page {
         let client = net::HttpClient::shared(&profile)
             .map_err(|e| deno_core::error::AnyError::msg(e.to_string()))?;
         js_runtime::extensions::fetch_ext::set_fetch_client(client.clone());
-        // X1 (parity-workflows): the warm/PagePool reuse path previously
+        // The warm/PagePool reuse path previously
         // skipped the x.com/twitter cookie-collision scrub the cold path
         // runs, so a pooled Page silently served the 69-byte stub.
         scrub_xcom_cookie_collision(url, &client).await;
@@ -1653,7 +1649,7 @@ impl Page {
                 let profile = profile.clone();
                 let referer = resp_url.clone();
                 Some(async move {
-                    // Sprint 2.1: script fetches inherit the parent doc's
+                    // Script fetches inherit the parent doc's
                     // regional accept-language (real Chrome sends one
                     // accept-language per session, not per-URL — keyed off
                     // the doc URL keeps sub-resource requests consistent).
@@ -1916,20 +1912,19 @@ impl Page {
             // Bypass switch — useful to compare engine behaviour with
             // and without enforcement on the same site without rebuild.
             let env_bypass = std::env::var("BROWSER_OXIDE_CSP_BYPASS").is_ok();
-            // Phase 5 (doc 05 §2c/§2d): a DataDome `rt:'i'` interstitial
-            // is a DataDome-served challenge document, NOT the origin's
-            // page — enforcing the origin's restrictive 403-response CSP
-            // on it refuses geo.captcha-delivery.com and kills the i.js
-            // self-solve round-trip. Narrowly gated to the <4 KB
-            // interstitial shape (detect_datadome_interstitial), so it
-            // cannot affect normal pages or the 10 passing Akamai sites
-            // (their bodies don't match). The cookie-diff retry then
+            // A DataDome `rt:'i'` interstitial is a vendor-served
+            // challenge document, NOT the origin's page — enforcing the
+            // origin's restrictive 403-response CSP on it refuses
+            // geo.captcha-delivery.com and kills the i.js self-solve
+            // round-trip. Narrowly gated to the <4 KB interstitial shape
+            // (detect_datadome_interstitial), so it cannot affect normal
+            // pages (their bodies don't match). The cookie-diff retry then
             // re-issues the original URL once i.js lands `datadome=`.
             // A registered solver may request the origin CSP be
             // suspended for this nav (DataDomeSolver does this for
             // `rt:'i'` interstitials so i.js can reach
             // captcha-delivery.com). Empty solver list ⇒ never relaxed.
-            // R-DATADOME-DAILY-KEY: relax CSP on any DataDome interstitial,
+            // Relax CSP on any DataDome interstitial,
             // not just when a registered solver claims it. The interstitial
             // loads `captcha-delivery.com` scripts that the origin's own
             // CSP refuses; without relaxation the bundle never runs and
@@ -1979,7 +1974,7 @@ impl Page {
         // lands `datadome=`.) Reuses `relax_response_csp` as the
         // "is this my challenge doc" signal. Empty solver list ⇒ false.
         //
-        // R-DATADOME-DAILY-KEY public-engine primitive: also fire on a
+        // Public-engine primitive: also fire on a
         // raw DataDome interstitial shape (i.e. a small body that loads
         // a `captcha-delivery.com` script) so the iframe-materialization
         // poll runs even without a registered DataDomeSolver. The bundle
@@ -1987,19 +1982,19 @@ impl Page {
         // re-fetch the original URL once `datadome=` is in the jar.
         let started_as_dd_challenge =
             solvers.iter().any(|s| s.relax_response_csp(&html)) || is_datadome_challenge(&html);
-        // Akamai sec-cpt analog (master plan §4 Phase 3 / §8.5): homedepot
-        // serves the rotating-obfuscated-bundle sec-cpt variant
+        // Akamai sec-cpt analog: some sites serve the
+        // rotating-obfuscated-bundle sec-cpt variant
         // (`<div id="sec-if-cpt-container">` + `<script src="/Wjv3…">`).
         // The bundle self-solves in our V8 and sets the `sec_cpt` cookie,
         // but it mutates the DOM the same way DataDome's i.js does, so the
         // post-exec `is_anti_bot_challenge()` can flip false and skip the
         // poll + cookie-diff retry before the bundle's round-trip lands.
         // Same narrow gating ⇒ false for every non-sec-cpt site ⇒ zero
-        // regression / §4 gate unaffected. (If the marker happens to
-        // persist post-exec this OR-in is simply a harmless no-op.)
+        // regression. (If the marker happens to persist post-exec this
+        // OR-in is simply a harmless no-op.)
         let started_as_seccpt_challenge =
             html.contains("sec-if-cpt-container") || html.contains("sec-cpt-if");
-        // FP-C2: the last live doc-20 mutable-state guard. The
+        // Persistent CF-origin mutable-state guard. The
         // cookie-diff retry / pending-nav poll below gate on
         // `page.is_anti_bot_challenge()` (the *post-mutation* DOM). A
         // Cloudflare orchestrator mutates the body, so the `_cf_chl_opt`
@@ -2010,9 +2005,9 @@ impl Page {
         // origin-flags; Cloudflare did not. Capture it from the
         // *initial* response `html` (pre-mutation), mirroring the
         // existing detector at `handle_cloudflare_flow`. Narrow ⇒ false
-        // for every non-CF site ⇒ §4 gate unaffected.
+        // for every non-CF site ⇒ no regression.
         let started_as_cf_challenge = crate::classify::is_cf_challenge_doc(&html);
-        // parity-workflows M-2: AWS-WAF analog. The ~2 KB stub mutates
+        // AWS-WAF analog. The ~2 KB stub mutates
         // itself (challenge.js rewrites the body once the PoW worker posts
         // the token + reloads), so — exactly like DD / sec-cpt / CF — the
         // post-exec `is_anti_bot_challenge()` can flip false while
@@ -2020,7 +2015,7 @@ impl Page {
         // cookie-diff retry gate. Capture it from the INITIAL response so
         // those primitives stay armed for the whole AWS self-solve. Narrow
         // (len<4096 + both envelope markers) ⇒ false for every non-AWS
-        // site ⇒ zero §4-gate regression.
+        // site ⇒ zero regression.
         let started_as_awswaf_challenge = is_awswaf_challenge(&html);
         let mut current_html = html;
         let mut current_url = resp_url;
@@ -2083,19 +2078,19 @@ impl Page {
             {
                 90_000
             }
-            // Akamai sec-cpt PoW (Task#3): the obfuscated sec-cpt
+            // Akamai sec-cpt PoW: the obfuscated sec-cpt
             // bundle runs a heavy in-page VM PoW comparable to Kasada
             // and needs ≥2 iterations (build → bundle self-solve →
             // `sec_cpt=…~3~` → post-solve reload). 25 s (the plain-BMP
-            // tier) is too tight — the b623d5d flip was observed at
+            // tier) is too tight — empirically the solve lands near
             // nav_ms≈119 s, surviving only on budget-extend stacking.
             // Give it the Kasada heavy-PoW tier so the flip is
             // deterministic, not budget-luck. (bestbuy is the benign
-            // i18n splash — Task#1 — so it stays in the plain-BMP tier.)
-            // P1 #7 — 45s was too tight: must cover build + ~1MB bundle fetch +
+            // i18n splash, so it stays in the plain-BMP tier.)
+            // 45s was too tight: must cover build + ~1MB bundle fetch +
             // sha256 PoW + the server-enforced chlg_duration (5-30s) + reload +
-            // drain. The b623d5d flip was observed at nav_ms≈119s. Raise to 60s
-            // base; the +45s sec-cpt-solve arm (#6) stacks on top for the reload.
+            // drain. The solve lands near nav_ms≈119s. Raise to 60s base;
+            // the +45s sec-cpt-solve arm stacks on top for the reload.
             Some(h) if h.ends_with("homedepot.com") => 60_000,
             // bestbuy serves a geo country-selection splash to non-US/datacenter
             // IPs; the navigate loop follows its same-host region link
@@ -2114,15 +2109,14 @@ impl Page {
             }
             _ => 15_000,
         };
-        // parity-workflows M-4: an AWS-WAF challenge nav (amazon.* / imdb /
-        // any *.token.awswaf.com-fronted host) needs PoW-worker compute +
-        // token POST + reload to fit. The 15 s default is half-consumed by
-        // the build phase, so the worker never finishes before the budget
-        // expires. Give it the Akamai-BMP 25 s tier. Gated on the AWS
-        // challenge flag (not the host) so it generalizes across all amazon
-        // TLDs and never fires for a benign nav. The M-1 drain still
-        // early-exits the instant the reload sets nav_pending, so this is a
-        // ceiling, not a fixed wait.
+        // An AWS-WAF challenge nav (any *.token.awswaf.com-fronted host)
+        // needs PoW-worker compute + token POST + reload to fit. The 15 s
+        // default is half-consumed by the build phase, so the worker never
+        // finishes before the budget expires. Give it the Akamai-BMP 25 s
+        // tier. Gated on the AWS challenge flag (not the host) so it
+        // generalizes across all such hosts and never fires for a benign
+        // nav. The async drain still early-exits the instant the reload
+        // sets nav_pending, so this is a ceiling, not a fixed wait.
         let host_budget_default_ms = if started_as_awswaf_challenge {
             host_budget_default_ms.max(25_000)
         } else {
@@ -2256,9 +2250,9 @@ impl Page {
             // advance still runs in the build's own lifecycle setTimeout for
             // NON-terminated builds (the common case; spotify still reaches
             // 'complete'). Terminated heavy builds keep readyState='loading',
-            // strictly no worse than before this session.
+            // strictly no worse than the prior behaviour.
 
-            // Phase A.1 — Adaptive budget. Two paths after the first iteration:
+            // Adaptive budget. Two paths after the first iteration:
             //
             // 1. FAST-EXIT — body > 50 KB AND no CHL marker AND readyState
             //    "complete" → the site rendered cleanly, return it now.
@@ -2343,7 +2337,7 @@ impl Page {
                         );
                     }
                 }
-                // SPA hydration early-exit (W5b A3 + W5b-PLUS expansion).
+                // SPA hydration early-exit.
                 // For React/Vue/Next.js sites the `<body>` outerHTML may be
                 // tiny (a 69-byte <noscript> + a single mount div) OR
                 // moderately sized (twitter ships a 241KB shell of inline
@@ -2355,9 +2349,9 @@ impl Page {
                 // twitter/x/hulu (heavy shells, slow hydration) burn the
                 // full nav budget waiting for is_pending=false — which
                 // never arrives because React's scheduler keeps queuing
-                // setTimeout work forever. Per W5b research + W5b-PLUS
-                // profile (2026-05-10): pending state in steady-state is
-                // 33 op_timer_sleep, cycling 33→18→1→33 driven by React.
+                // setTimeout work forever. Empirically, pending state in
+                // steady-state is ~33 op_timer_sleep, cycling
+                // 33→18→1→33 driven by React.
                 //
                 // The mount-populated check is intentionally cheap (single
                 // querySelector chain, fail-fast) so it adds <1ms per
@@ -2420,19 +2414,19 @@ impl Page {
                         .event_loop()
                         .run_until_idle(Duration::from_millis(200))
                         .await;
-                    // FP-E1: a challenge script may have appendChild'd a
+                    // A challenge script may have appendChild'd a
                     // cross-origin challenge iframe (DataDome
                     // geo.captcha-delivery.com / Cloudflare
                     // challenges.cloudflare.com) during the tick above.
                     // `find_iframes` ran only at build time, so such a
                     // script-injected iframe otherwise gets ONLY a
                     // synthetic contentWindow shim and its challenge
-                    // document is never fetched/executed (the structural
-                    // blocker for etsy/tripadvisor + every modern CF
-                    // Managed Challenge). Materialize it for real here.
-                    // Idempotent + cheap (DOM walk only) when nothing new
-                    // appeared; gated by this poll's challenge condition
-                    // ⇒ never runs for a benign nav (zero §4 regression).
+                    // document is never fetched/executed (a structural
+                    // blocker for modern challenge iframes). Materialize
+                    // it for real here. Idempotent + cheap (DOM walk only)
+                    // when nothing new appeared; gated by this poll's
+                    // challenge condition ⇒ never runs for a benign nav
+                    // (zero regression).
                     let _ = page
                         .rematerialize_iframes(&current_url, &client, &profile)
                         .await;
@@ -2443,7 +2437,7 @@ impl Page {
                     if !pending_info.is_empty() {
                         break;
                     }
-                    // Phase 5: for a DataDome nav, i.js's round-trip
+                    // For a DataDome nav, i.js's round-trip
                     // typically lands a fresh `datadome=` cookie WITHOUT
                     // setting a pending nav — break as soon as it does so
                     // the cookie-diff retry below re-issues the original
@@ -2451,22 +2445,20 @@ impl Page {
                     if started_as_dd_challenge {
                         if let Some(p) = parsed_current.as_ref() {
                             let now = client.cookies_for_url(p).await.unwrap_or_default();
-                            // FP-D3: a `datadome=` cookie is set on every
+                            // A `datadome=` cookie is set on every
                             // nav incl. the failing 403 — break only on a
                             // genuine solve (cookie present AND the body
                             // is no longer a DD challenge document), not
                             // on a bare/gained cookie (false success).
-                            // E2 trait dispatch: any registered solver
-                            // reporting solved on this (cookies, body) pair
-                            // breaks the poll. Replaces the direct
-                            // `datadome_handler::datadome_solved` call;
+                            // Any registered solver reporting solved on
+                            // this (cookies, body) pair breaks the poll;
                             // DataDomeSolver.solved_signal internally calls
                             // the same fn so behaviour is preserved.
                             //
-                            // R-DATADOME-DAILY-KEY public primitive: also
-                            // break on the engine-side `is_datadome_solved`
-                            // check so the cookie-diff retry fires even
-                            // without a registered DataDomeSolver.
+                            // Public primitive: also break on the
+                            // engine-side `is_datadome_solved` check so the
+                            // cookie-diff retry fires even without a
+                            // registered DataDomeSolver.
                             let body = page.content();
                             if solvers.iter().any(|s| s.solved_signal(&now, &body))
                                 || is_datadome_solved(&now, &body)
@@ -2475,33 +2467,29 @@ impl Page {
                             }
                         }
                     }
-                    // Task#3 (homedepot deterministic sec-cpt): the
-                    // Akamai sec-cpt bundle self-solves in our V8 and
-                    // transitions the `sec_cpt` cookie to the `~3~`
-                    // (solved) state WITHOUT setting a pending nav —
-                    // exactly analogous to the DataDome break above.
-                    // Pre-fix, the b623d5d flip survived only on
-                    // incidental budget-stacking (observed nav_ms≈119s);
-                    // break the instant the documented `~3~` success
-                    // marker appears so the post-sec-cpt reload is
-                    // deterministic, not budget-luck. Gated by
-                    // `started_as_seccpt_challenge` ⇒ false for every
-                    // non-sec-cpt site ⇒ zero §4 regression.
+                    // Deterministic sec-cpt break: the Akamai sec-cpt
+                    // bundle self-solves in our V8 and transitions the
+                    // `sec_cpt` cookie to the `~3~` (solved) state WITHOUT
+                    // setting a pending nav — exactly analogous to the
+                    // DataDome break above. Break the instant the `~3~`
+                    // success marker appears so the post-sec-cpt reload is
+                    // deterministic, not dependent on incidental budget
+                    // stacking. Gated by `started_as_seccpt_challenge` ⇒
+                    // false for every non-sec-cpt site ⇒ zero regression.
                     if started_as_seccpt_challenge {
                         if let Some(p) = parsed_current.as_ref() {
                             let now = client.cookies_for_url(p).await.unwrap_or_default();
-                            // E2 trait dispatch: AkamaiSolver.solved_signal
-                            // delegates to sec_cpt::sec_cpt_solved. Public-
-                            // engine fallback `is_seccpt_solved` recognizes
-                            // the documented `~3~` cookie marker even when
-                            // no AkamaiSolver is registered (Sprint 2.4 /
-                            // R-AKAMAI-SECCPT-FLAKE) — mirrors FIX-DD's
-                            // is_datadome_solved shape.
+                            // AkamaiSolver.solved_signal delegates to
+                            // sec_cpt::sec_cpt_solved. Public-engine
+                            // fallback `is_seccpt_solved` recognizes the
+                            // `~3~` cookie marker even when no AkamaiSolver
+                            // is registered — mirrors is_datadome_solved's
+                            // shape.
                             let body = page.content();
                             if solvers.iter().any(|s| s.solved_signal(&now, &body))
                                 || is_seccpt_solved(&now, &body)
                             {
-                                // P1 #6 — a cookie-only sec-cpt `~3~` solve must
+                                // A cookie-only sec-cpt `~3~` solve must
                                 // get guaranteed build+drain budget for the
                                 // post-solve reload. The +45 s bump on the
                                 // JS-pending-nav branch (≈:2760) is unreachable
@@ -2525,7 +2513,7 @@ impl Page {
                             }
                         }
                     }
-                    // parity-workflows M-2: AWS-WAF analog of the DD /
+                    // AWS-WAF analog of the DD /
                     // sec-cpt breaks above. challenge.js's blob-URL PoW
                     // worker posts the `aws-waf-token` and reloads WITHOUT
                     // necessarily setting a JS pending-nav we observe, so
@@ -2557,9 +2545,8 @@ impl Page {
             // often block their own Akamai/Kasada trackers in emulated
             // environments due to origin/nonce mismatches. Without the bypass
             // we get body=0 because the ips.js script we'd LOAD to solve the
-            // challenge is the very thing CSP refuses (caught on hyatt.com
-            // 2026-05-10 round-3 sweep — went Kasada-CHL → THIN-BODY when
-            // body=0 because CSP refused to load the ips.js script).
+            // challenge is the very thing CSP refuses (the body collapses to
+            // empty because CSP refused to load the ips.js script).
             if current_url.contains("walmart.com")
                 || current_url.contains("canadagoose.com")
                 || current_url.contains("hyatt.com")
@@ -2581,12 +2568,11 @@ impl Page {
                 }
             }
 
-            // E2 trait dispatch: iterate registered solvers and let each
-            // try to clear its vendor's challenge. The four built-in
-            // wrappers (AkamaiSolver, KasadaSolver, DataDomeSolver,
-            // CloudflareSolver) internally bail out on non-matching
-            // bodies / cookies, so unconditional iteration is
-            // equivalent to the pre-refactor unconditional inline calls.
+            // Iterate registered solvers and let each try to clear its
+            // vendor's challenge. The built-in wrappers (AkamaiSolver,
+            // KasadaSolver, DataDomeSolver, CloudflareSolver) internally
+            // bail out on non-matching bodies / cookies, so unconditional
+            // iteration is equivalent to unconditional inline calls.
             //
             // We track whether *any* solver reported Solved this
             // iteration so the cookie-delta retry below can suppress
@@ -2594,16 +2580,16 @@ impl Page {
             // `akamai_state == Favorable` special case.
             //
             // sec-cpt guard preserved: when this nav started as
-            // sec-cpt, the Akamai BMP POST path is wrong (per doc-20
-            // anti-pattern). AkamaiSolver's `solve` already short-
+            // sec-cpt, the Akamai BMP POST path is the wrong payload for
+            // the verify endpoint. AkamaiSolver's `solve` already short-
             // circuits on the "sec-cpt" sub_kind, returning
             // InProgress, so the unconditional iter is safe.
             let mut any_solved = false;
             for s in solvers.iter() {
                 // Pre-iteration sec-cpt guard: when this nav started as
                 // sec-cpt, the Akamai BMP sensor_data POST is the wrong
-                // payload for the verify endpoint (doc-20 anti-pattern),
-                // so signal the solver via sub_kind to short-circuit.
+                // payload for the verify endpoint, so signal the solver
+                // via sub_kind to short-circuit.
                 let sub = if s.name() == "akamai-bmp" && started_as_seccpt_challenge {
                     "sec-cpt"
                 } else {
@@ -2644,8 +2630,8 @@ impl Page {
                 // expects the NEXT top-level nav to carry it (Kasada; some
                 // Akamai variants). Universal primitive — no per-engine code.
                 //
-                // PHASE J: also retry if the origin just upgraded to Accept-CH
-                // (Wildberries parity). Only retry ONCE for the upgrade.
+                // Also retry if the origin just upgraded to Accept-CH.
+                // Only retry ONCE for the upgrade.
                 if (page.is_anti_bot_challenge()
                     || started_as_dd_challenge
                     || started_as_seccpt_challenge
@@ -2660,18 +2646,16 @@ impl Page {
                         String::new()
                     };
 
-                    // Phase 5 instrumentation: at the exact decision point
+                    // Instrumentation: at the exact decision point
                     // where the cookie-diff retry would re-issue the
                     // original URL, record whether the DataDome i.js
                     // round-trip actually landed a `datadome=` cookie.
                     // `cookie_gained=false` here ⇒ the bundle's VM/WASM
-                    // did not complete (the next increment's target);
-                    // `true` ⇒ the existing retry already re-issues.
-                    // debug_nav-gated ⇒ zero §4-gate impact.
-                    // Phase 5 (homedepot): same diagnostic for the
-                    // sec-cpt bundle — did `/Wjv3…` actually run and fire
-                    // its PoW-answer verify POST? debug_nav-gated ⇒ zero
-                    // §4 gate impact.
+                    // did not complete; `true` ⇒ the existing retry
+                    // already re-issues. debug_nav-gated ⇒ zero impact.
+                    // Same diagnostic for the sec-cpt bundle — did the
+                    // bundle actually run and fire its PoW-answer verify
+                    // POST? debug_nav-gated ⇒ zero impact.
                     if debug_nav && started_as_seccpt_challenge {
                         let fl = page
                             .event_loop()
@@ -2794,13 +2778,10 @@ impl Page {
                         // Coverage of the marker set must mirror
                         // is_anti_bot_challenge() — otherwise a vendor we
                         // detect at the top of the loop is silently accepted
-                        // here, breaking the retry chain. Caught for
-                        // DataDome (yelp/etsy/leboncoin/wsj) on 2026-05-10.
-                        // v0.1.0-parity Fix 10: extended marker set per
-                        // 18_ANTI_BOT_VENDOR_COOKBOOK.md §4.2. Each new
-                        // string is the same one classify.rs already keys
-                        // on for the vendor — keeping this guard in sync
-                        // with the verdict logic.
+                        // here, breaking the retry chain. Each marker
+                        // string below is the same one classify.rs
+                        // already keys on for the vendor — keeping this
+                        // guard in sync with the verdict logic.
                         let v8_html_is_real = !v8_html.is_empty()
                             && v8_html.len() > current_html.len()
                             && !v8_html.contains("/ips.js")
@@ -2923,9 +2904,9 @@ impl Page {
             // non-http(s) schemes (about:blank, data:, javascript:, etc.) —
             // those are programmatic JS navigations that don't change the
             // navigable; treat as no-op and return the current page.
-            // Caught on iphey.com 2026-05-10: JS sets location.href='about:blank'
-            // in an iframe bootstrap, our pending-nav harvester previously
-            // bubbled this as a hard error.
+            // Example: JS that sets location.href='about:blank' in an
+            // iframe bootstrap previously bubbled through the pending-nav
+            // harvester as a hard error.
             let next_url = match Self::resolve_url(&current_url, pending_url) {
                 Some(u) => u,
                 None => return Ok(page),
@@ -3008,36 +2989,34 @@ impl Page {
             let v8_refetched: Option<String> = if same_host_reload {
                 // Post-PoW jitter: real Chrome takes 100-500ms between the
                 // challenge solve and the location.reload that follows. Without
-                // this gap, Kasada's per-IP rate limiter returns 429 on the
-                // refetch (verified 2026-04-27 on hyatt.com). 250ms baseline
+                // this gap, an immediate back-to-back refetch can trip a
+                // per-IP rate limiter and return 429. 250ms baseline
                 // + small jitter mimics the natural human-action gap.
                 let jitter_ms =
                     250 + (std::time::Instant::now().elapsed().as_nanos() & 0xFF) as u64;
                 tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
-                // Phase 5 Increment 8 (doc 05 §2d "let the bundle
-                // self-solve"): a DataDome `rt:'i'` nav sets a reload
-                // __pendingNavigation EARLY, so the flow lands here and
-                // (pre-fix) reloads after ~250 ms — long before i.js can
-                // create the geo.captcha-delivery.com challenge iframe,
-                // let it run its WASM boring_challenge + postMessage, and
-                // write the `datadome=` cookie. Increment 3's extended
-                // challenge poll is gated under `pending_info.is_empty()`
-                // so it is SKIPPED on this branch. Give the challenge a
-                // bounded self-solve window: pump the event loop and
-                // break the instant a `datadome=` cookie appears (the
-                // success signal). Narrowly gated to
+                // "Let the bundle self-solve": a DataDome `rt:'i'` nav
+                // sets a reload __pendingNavigation EARLY, so the flow
+                // lands here and would otherwise reload after ~250 ms —
+                // long before i.js can create the geo.captcha-delivery.com
+                // challenge iframe, let it run its WASM challenge +
+                // postMessage, and write the `datadome=` cookie. The
+                // extended challenge poll is gated under
+                // `pending_info.is_empty()` so it is SKIPPED on this
+                // branch. Give the challenge a bounded self-solve window:
+                // pump the event loop and break the instant a `datadome=`
+                // cookie appears (the success signal). Narrowly gated to
                 // `started_as_dd_challenge` ⇒ false for every non-DataDome
-                // site incl. the entire §4 gate ⇒ zero regression.
+                // site ⇒ zero regression.
                 //
-                // FP-D1 (reachability, verify-don't-assume): this Inc-8
-                // window is the *pending-nav* (homedepot-class) DD path.
-                // The *etsy-class* `rt:'i'` flow (no early pending nav)
-                // is NOT served here — it is served by the
-                // `pending_info.is_empty() && started_as_dd_challenge`
-                // poll above, which now also pumps `rematerialize_iframes`
-                // (FP-E1) and breaks on `datadome_solved` (FP-D3). So the
-                // DD self-solve window is reachable on BOTH branches; the
-                // poll-entry invariant (`started_as_dd_challenge ==
+                // This window is the *pending-nav* DD path. The other
+                // `rt:'i'` flow (no early pending nav) is NOT served here
+                // — it is served by the `pending_info.is_empty() &&
+                // started_as_dd_challenge` poll above, which also pumps
+                // `rematerialize_iframes` and breaks on `datadome_solved`.
+                // So the DD self-solve window is reachable on BOTH
+                // branches; the poll-entry invariant
+                // (`started_as_dd_challenge ==
                 // is_datadome_challenge_doc(initial html)`) is pinned by
                 // `datadome_handler::tests::etsy_rt_i_body_enters_dd_self_solve_path`.
                 if started_as_dd_challenge {
@@ -3411,8 +3390,8 @@ impl Page {
                 // (everything `find_scripts` produces from the initial HTML
                 // parse) need a matching nonce to load under
                 // `'strict-dynamic'`. Without this gate, browser_oxide
-                // fetches Akamai's `/akam/13/<hash>` bootstrap on
-                // walmart while real Chrome blocks it — itself a tell.
+                // would fetch a `/akam/13/<hash>` bootstrap that real
+                // Chrome blocks under CSP — a fidelity divergence.
                 if let Ok(parsed_url) = url::Url::parse(&full_url) {
                     if let Err(violated) = js_runtime::extensions::fetch_ext::check_csp(
                         net::csp::Directive::ScriptSrcElem,
@@ -3430,7 +3409,7 @@ impl Page {
                 let client = client.clone();
                 let profile = profile.clone();
                 Some(async move {
-                    // Sprint 2.1: script fetches inherit parent doc's
+                    // Script fetches inherit parent doc's
                     // regional accept-language (see lib.rs::get_with_headers).
                     let mut hdrs = net::headers::nav_headers_for_url(&profile, url, false);
                     hdrs.push(("referer".to_string(), url.to_string()));
@@ -3439,21 +3418,17 @@ impl Page {
                     hdrs.push(("sec-fetch-mode".to_string(), "no-cors".to_string()));
                     hdrs.push(("sec-fetch-site".to_string(), "cross-site".to_string()));
 
-                    // Phase 5 instrumentation (doc 05 §2d follow-up):
-                    // trace the DataDome i.js external-script fetch so the
-                    // next increment has hard evidence of whether the
-                    // bundle even loads + its size. Env-gated, default
-                    // off ⇒ zero behavioral/perf/log change to the §4
-                    // gate.
+                    // Instrumentation: trace the DataDome i.js
+                    // external-script fetch to get hard evidence of
+                    // whether the bundle even loads + its size. Env-gated,
+                    // default off ⇒ zero behavioral/perf/log change.
                     let dd_trace = full_url.contains("captcha-delivery.com")
                         && std::env::var("BROWSER_OXIDE_DD_TRACE").is_ok();
-                    // Phase 5 (homedepot): trace EVERY external-script
-                    // fetch when BROWSER_OXIDE_SC_TRACE is set, so we can see
-                    // whether the obfuscated `/Wjv3…` sec-cpt bundle is
-                    // actually fetched + its size/status (the unknown the
-                    // "bundle doesn't self-solve" verdict assumed but
-                    // never measured). Env-gated, default off ⇒ zero §4
-                    // gate impact.
+                    // Trace EVERY external-script fetch when
+                    // BROWSER_OXIDE_SC_TRACE is set, so we can see whether
+                    // the obfuscated `/Wjv3…` sec-cpt bundle is actually
+                    // fetched + its size/status. Env-gated, default off ⇒
+                    // zero impact.
                     let sc_trace = std::env::var("BROWSER_OXIDE_SC_TRACE").is_ok();
                     match client.get_follow_with_headers(&full_url, &hdrs, 5).await {
                         Ok(resp) if resp.ok() => {
@@ -3817,7 +3792,7 @@ impl Page {
             .ok();
         mark!("install error + fetch/XHR instrumentation");
 
-        // parity-workflows M-3: if the initial document is an anti-bot
+        // If the initial document is an anti-bot
         // challenge (AWS-WAF / sec-cpt / DataDome / Cloudflare), keep all
         // long timers refed for this page so the self-solve's
         // `chlg_duration` wait + deferred PoW-worker continuation pin the
@@ -4172,7 +4147,7 @@ impl Page {
 mod tests {
     use super::*;
 
-    /// R-DATADOME-DAILY-KEY: `is_datadome_challenge` must catch a typical
+    /// `is_datadome_challenge` must catch a typical
     /// `rt:'i'` interstitial (small body + captcha-delivery.com script).
     #[test]
     fn datadome_challenge_detects_interstitial() {
@@ -4233,7 +4208,7 @@ mod tests {
         assert!(!is_datadome_challenge(html));
     }
 
-    /// P1 #5 — an 8-50 KB body that references captcha-delivery.com but has NO
+    /// An 8-50 KB body that references captcha-delivery.com but has NO
     /// DD-config structural token is a real page (e.g. CSP report-uri), NOT a
     /// challenge; adding the `dd={…'rt'…'cid'…}` config flips it to challenge.
     #[test]
@@ -4276,7 +4251,7 @@ mod tests {
         assert!(!is_datadome_solved("session=x; other=y", real_body));
     }
 
-    /// R-AKAMAI-SECCPT-FLAKE Sprint 2.4: `is_seccpt_solved` requires
+    /// `is_seccpt_solved` requires
     /// (a) the `sec_cpt=` cookie, (b) the `~3~` success-state marker
     /// inside the cookie, AND (c) a body that has TRANSITIONED out of
     /// the sec-cpt challenge page (real homepage, no
@@ -4306,7 +4281,7 @@ mod tests {
         assert!(!is_seccpt_solved("", real_body));
     }
 
-    /// parity-workflows M-2: the AWS-WAF challenge/solve predicates that
+    /// The AWS-WAF challenge/solve predicates that
     /// arm the navigate-loop poll + cookie-diff retry. The stub must be
     /// recognized as a challenge; a solve requires both the
     /// `aws-waf-token` cookie AND a body that is no longer the stub.
@@ -4491,9 +4466,8 @@ mod tests {
     #[tokio::test]
     async fn page_webdriver_false() {
         // Modern Chrome (>=89, incl. Chrome-148): navigator.webdriver
-        // === false for normal browsing (`undefined` is the old/headless
-        // tell). K2-DIFF wdt fix — evidence-backed (Kasada flagged
-        // wdt.r="undefined"); supersedes the prior W3C-spec misreading.
+        // === false for normal browsing — real Chrome reports the
+        // boolean `false`, not `undefined`, so we match that for fidelity.
         let mut page = Page::from_html(
             "<html><head></head><body></body></html>",
             None::<stealth::StealthProfile>,
@@ -4520,10 +4494,10 @@ mod tests {
         assert_eq!(h, "1080");
     }
 
-    /// Akamai pixel POST captured `client=[1914,28638]` for documentElement
-    /// — full document size, not viewport. Real Chrome returns viewport
-    /// (innerWidth × innerHeight). Regression-locks the dom_bootstrap
-    /// HTMLHtmlElement.prototype clientWidth/Height override.
+    /// Real Chrome returns the viewport (innerWidth × innerHeight) for
+    /// `documentElement.clientWidth/Height`, not the full document size.
+    /// Regression-locks the dom_bootstrap HTMLHtmlElement.prototype
+    /// clientWidth/Height override.
     #[tokio::test]
     async fn document_element_client_dims_are_viewport_clipped() {
         let mut page = Page::from_html(
@@ -4548,12 +4522,12 @@ mod tests {
         );
     }
 
-    /// Akamai sensor probes `window.ApplePaySession` on macOS UA. Real
-    /// Chrome on macOS exposes the constructor; absence is a hard tell.
+    /// Real Chrome on macOS exposes the `window.ApplePaySession`
+    /// constructor; we match that on the macOS UA for fidelity.
     /// Regression-locks the macOS-conditional shim in window_bootstrap.
     #[tokio::test]
     async fn apple_pay_session_present_on_macos_profile() {
-        // Phase 7 — ApplePaySession is gated on isSecureContext so the
+        // ApplePaySession is gated on isSecureContext so the
         // page must be loaded over https:// for the macOS shim to install.
         let profile = stealth::presets::chrome_148_macos();
         let mut page = Page::from_html_with_url(

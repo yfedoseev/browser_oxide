@@ -586,12 +586,10 @@
     // ================================================================
     if (!globalThis.FileReader) {
         // Real FileReader. Previously a no-op stub that returned empty
-        // strings/buffers — AWS WAF challenge.js calls readAsDataURL(blob)
-        // to base64-encode its encrypted fingerprint payload before POSTing
-        // to /verify; an empty result caused challenge.js to bail with
-        // "challenge data URL was malformed", which the AWS WAF backend
-        // then served as the 2011-byte stub. See
-        // `docs/releases/v0.1.0-parity/audit/16_DECISION_LOG.md` §FIX-J.
+        // strings/buffers — some challenge scripts call readAsDataURL(blob)
+        // to base64-encode a payload before POSTing it; an empty result
+        // caused the script to bail with "challenge data URL was
+        // malformed", and the server then served a small stub page.
         const _readerEncode = (bytes) => {
             // Manual base64 over Uint8Array via btoa(binary-string). btoa
             // is fine on UTF-8-clean ranges (0-255); we feed it raw bytes

@@ -5,8 +5,8 @@
 //! iteration loop where each iteration does `event_loop.run_until_idle(30s)`.
 //! Without this signal, when a script sets `location.href = ...` the
 //! iteration still runs to its 30-second ceiling before the retry GET
-//! fires — too late for anti-bot challenges with strict timing windows
-//! (Kasada validates protected-GET-after-/tl-response within ~5 seconds).
+//! fires — too late for sites with strict navigation-timing windows
+//! (some expect the follow-up GET within a few seconds of a prior request).
 //!
 //! This op flips an `Arc<AtomicBool>` shared with `BrowserEventLoop`. The
 //! event loop checks the flag each tick and exits early (after a brief

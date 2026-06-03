@@ -272,8 +272,7 @@ mod tests {
         let profile = stealth::presets::chrome_148_macos();
         let s = nav_ja4h_for(&profile);
         // Canonical hash for Chrome 133+ navigation header order
-        // (sec-ch-ua trio FIRST per curl-impersonate
-        // tests/signatures/chrome_142.0.7444.176.yaml).
+        // (sec-ch-ua trio FIRST per reference Chrome captures).
         assert!(
             s.contains("_0c2c1d640f3e_"),
             "JA4H hash mismatch: expected 0c2c1d640f3e in {s}"

@@ -9,9 +9,10 @@
 //! `!SharedFunctionInfo::IsUserJavaScript()` — true exactly for API
 //! functions (FunctionTemplate, `script()==undefined`). A JS-level
 //! `Function.prototype.toString` patch (stealth_bootstrap.js) CANNOT
-//! intercept these internal stringifiers, so our JS shims leak source
-//! (Kasada `fsc` probe: `class K extends Function.prototype.toString{}`
-//! leaked `_patchedFnToStr` source — doc 27 §3, primary V8 source).
+//! intercept these internal stringifiers, so our JS shims would leak
+//! their source (e.g. `class K extends Function.prototype.toString{}`
+//! leaks `_patchedFnToStr` source) — differs from real Chrome, where
+//! these are native functions.
 //!
 //! This installs `Function.prototype.toString` as a genuine API
 //! function. Behaviour preserved: masked host fns (carrying the
@@ -70,14 +71,13 @@ impl IframeRealmStore {
 }
 
 /// Create a GENUINE child realm — a second `v8::Context` in the same
-/// isolate, exactly what Chrome does per iframe (doc 27 §1; the
-/// primitive deno_core itself uses, `jsruntime.rs:2048`). The child
+/// isolate, exactly what Chrome does per iframe (the primitive
+/// deno_core itself uses, `jsruntime.rs:2048`). The child
 /// gets its OWN full set of native builtins for free
-/// (`Object`/`Function`/`Array`/`Reflect`/`Symbol`/`Map`/`TypeError`/…
-/// — the exact 0x12 list Kasada's VM reads, doc 26), each genuinely
-/// `[native code]` and realm-distinct from the parent — i.e. NOT a
-/// `Proxy` (defeats Kasada's named `addContentWindowProxy` detector)
-/// and NOT parent-aliased (defeats the realm-divergence bail).
+/// (`Object`/`Function`/`Array`/`Reflect`/`Symbol`/`Map`/`TypeError`/…),
+/// each genuinely `[native code]` and realm-distinct from the parent —
+/// i.e. NOT a `Proxy` and NOT parent-aliased, matching real Chrome's
+/// per-iframe realm semantics.
 ///
 /// This is the PRIMITIVE only (additive, not yet wired into
 /// `_getIframeWindow`) — proves the core mechanism works in our
@@ -88,8 +88,8 @@ pub fn create_child_realm(
     scope: &mut v8::HandleScope,
 ) -> Option<(v8::Global<v8::Context>, v8::Global<v8::Object>)> {
     // A fresh context. Default options: the child gets the full native
-    // intrinsic set + its own global. (Per doc 27 §1.5, identity probes
-    // test builtins/prototype-chains/ctor-names — all native here;
+    // intrinsic set + its own global. (Real Chrome exposes native
+    // builtins/prototype-chains/ctor-names per realm — all native here;
     // DOM host shims are a later delegation step.)
     let ctx = v8::Context::new(scope, v8::ContextOptions::default());
     let global = {
@@ -203,11 +203,12 @@ fn fp_to_string_cb(
         }
     }
 
-    // Kasada `sbi` probe wraps DOM functions in Proxy sentinels and calls
+    // Some scripts wrap DOM functions in Proxies and call
     // Function.prototype.toString on them. V8's original FP.toString throws
     // "requires that 'this' be a Function" for Proxy objects even when the
     // Proxy wraps a function (V8 checks the JSReceiver type directly, not
-    // [[Call]]). Pre-detect callable Proxies and return a native string.
+    // [[Call]]). Real Chrome returns a native string here; pre-detect
+    // callable Proxies and do the same.
     if this.is_proxy() {
         if let Ok(proxy) = v8::Local::<v8::Proxy>::try_from(this) {
             let target = proxy.get_target(scope);
@@ -389,8 +390,8 @@ mod tests {
     /// Proves the child-realm PRIMITIVE: a raw `v8::Context::new` child
     /// in the same isolate has its OWN genuine native intrinsics
     /// (`[native code]`, correct ctor names) and a global object
-    /// distinct from the parent — i.e. exactly what Kasada wants from
-    /// `iframe.contentWindow` (real realm, NOT a Proxy, NOT
+    /// distinct from the parent — i.e. exactly what real Chrome exposes
+    /// for `iframe.contentWindow` (real realm, NOT a Proxy, NOT
     /// parent-aliased). Foundation for the _getIframeWindow wiring.
     #[test]
     fn child_realm_has_genuine_native_intrinsics() {

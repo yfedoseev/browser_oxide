@@ -10,7 +10,7 @@ use url::Url;
 /// + setTimeout-driven JSONP polls indefinitely, holding the V8 worker
 /// thread for minutes and starving tokio of yield points.
 ///
-/// 30 is comfortable: any anti-bot vendor's solver chain fits in
+/// 30 is comfortable: typical challenge/handshake script chains fit in
 /// <10 sync fetches, leaving headroom for legitimate inline scripts.
 const MAX_SYNC_FETCH_PER_PAGE: usize = 30;
 thread_local! {
@@ -223,7 +223,7 @@ pub struct FetchResponse {
 /// emulation, cookies) when available, falling back to a default Chrome 130.
 ///
 /// The JS side sends the body as a base64 string in the `body` parameter to
-/// preserve binary data (Kasada's challenge solution POST uses
+/// preserve binary data (some challenge scripts POST
 /// `application/octet-stream` with a raw byte payload). The first character
 /// of `body` is a marker: 's' for plain UTF-8 string bodies, 'b' for
 /// base64-encoded binary bodies. This keeps the op signature stable as a
@@ -322,13 +322,13 @@ pub async fn op_fetch(
 
     // Use fetch-API-style headers (accept: */*, sec-fetch-dest: empty, no
     // upgrade-insecure-requests) — this is a JS fetch() call, not a navigation.
-    // Kasada and similar engines use the nav-vs-fetch header distinction as a
-    // strong bot signal.
+    // The nav-vs-fetch header distinction is observable, so a real fetch()
+    // must send fetch-style headers (not navigation headers) here.
     let method_upper = method.to_uppercase();
 
-    // Apply a 30-second hard timeout so hanging connections (e.g. Kasada /tl
-    // where the server black-holes requests with invalid solutions) don't hold
-    // the V8 event loop open indefinitely.
+    // Apply a 30-second hard timeout so hanging connections (e.g. a server
+    // that black-holes requests it dislikes) don't hold the V8 event loop
+    // open indefinitely.
     let fetch_timeout = std::time::Duration::from_secs(30);
     let resp_result = tokio::time::timeout(fetch_timeout, async {
         match method_upper.as_str() {
@@ -406,10 +406,10 @@ pub async fn op_cookie_set(#[string] url: String, #[string] cookie: String) {
     client.set_cookie_str(&parsed, &cookie).await;
 }
 
-/// Synchronous `document.cookie` write (parity-workflows FIX-COOKIE-SYNC).
+/// Synchronous `document.cookie` write.
 /// The async `op_cookie_set` was called fire-and-forget by the
 /// `document.cookie` setter, so a write issued in the last microtasks before
-/// `location.reload()` (e.g. AWS-WAF's `aws-waf-token`) was torn down before
+/// `location.reload()` (e.g. a challenge token) was torn down before
 /// its future ran — the jar stayed empty and the reload re-fetched the stub.
 /// This sync op persists immediately via `try_lock` (the jar is never held
 /// across an await during synchronous JS execution); under genuine contention
@@ -427,8 +427,8 @@ pub fn op_cookie_set_sync(#[string] url: String, #[string] cookie: String) {
     let synced = client.set_cookie_str_sync(&parsed, &cookie);
     // Also write to the process-wide shared-session jar: the nav reload/refetch
     // reads cookies from a shared() client, which can diverge from this
-    // per-thread FETCH_CLIENT — without this the token a challenge deposits via
-    // document.cookie never reached the reload (the AWS-WAF imdb residual).
+    // per-thread FETCH_CLIENT — without this a token a challenge deposits via
+    // document.cookie never reached the reload.
     let shared_synced = net::set_shared_cookie_sync(&parsed, &cookie);
     if std::env::var("BROWSER_OXIDE_COOKIE_TRACE").is_ok() {
         let for_url = net::shared_session()
@@ -606,8 +606,8 @@ pub fn op_net_fetch_sync(#[string] url: String, #[string] referer: String) -> St
 /// Synchronous XHR op: makes a network request (GET or POST) synchronously,
 /// returning a JSON string `{status, headers, body, url}`.
 ///
-/// Used by the XHR polyfill so that KPSDK's /tl POST (and similar anti-bot
-/// challenge POSTs) complete even when V8 is busy with a PoW computation
+/// Used by the XHR polyfill so that synchronous challenge POSTs
+/// complete even when V8 is busy with a proof-of-work computation
 /// loop that starves the async event loop. Cookies set by the response are
 /// written back to the shared FETCH_CLIENT cookie jar.
 ///
@@ -639,14 +639,13 @@ pub fn op_net_xhr_sync(
         body.as_bytes().to_vec()
     };
 
-    // Resolve relative/empty URLs against the document origin. The Akamai
-    // sec-cpt sensor bundle issues sync POSTs to a relative path (and to ''
+    // Resolve relative/empty URLs against the document origin. Some
+    // challenge scripts issue sync POSTs to a relative path (and to ''
     // = the document URL); if such a url reaches here unresolved (the JS-side
     // XHR open() / fetch resolution can be skipped for empty strings), the
-    // network layer's Url::parse rejects it ("relative URL without a base"),
-    // the sensor POST silently fails, and sec-cpt never solves (homedepot
-    // Akamai-CHL — deterministic across runs). Resolve here as a robust,
-    // path-independent fallback so every sensor POST lands.
+    // network layer's Url::parse rejects it ("relative URL without a base")
+    // and the POST silently fails. Resolve here as a robust,
+    // path-independent fallback so every such POST lands.
     let url = if url::Url::parse(&url).is_ok() {
         url
     } else if let Ok(base) = url::Url::parse(&origin) {

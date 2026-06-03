@@ -22,8 +22,8 @@ pub fn nav_headers(profile: &StealthProfile, accept_ch_upgraded: bool) -> Vec<(S
     }
 }
 
-/// URL-aware nav header dispatch (Sprint 2.1 — R-AWSWAF accept-language
-/// per-region). Same as `nav_headers` plus an `accept-language` override
+/// URL-aware nav header dispatch with per-region accept-language.
+/// Same as `nav_headers` plus an `accept-language` override
 /// when the target host's TLD has a well-known regional language
 /// expectation (e.g. amazon-fr expects `fr-FR,fr;q=0.9,en-US;q=0.8`).
 ///
@@ -62,7 +62,7 @@ pub fn apply_region_accept_language(hdrs: &mut [(String, String)], url: &str, br
 }
 
 /// Per-TLD regional language list. Returns the language preference list
-/// AWS WAF / DataDome / Akamai customers in that region expect to see.
+/// a real browser in that region would be expected to send.
 ///
 /// Source of truth: real-Chrome captures from each region (e.g.
 /// amazon.fr from a French Chrome installation sends
@@ -133,7 +133,7 @@ pub fn nav_headers_reload(
 
 /// Browser-aware fetch (XHR/`window.fetch`) header dispatch.
 ///
-/// Sprint 2.1: accept-language override applies for sub-resource fetches
+/// The accept-language override applies for sub-resource fetches
 /// using the **parent doc's origin** when provided (real Chrome sends one
 /// accept-language per session, not per-URL — keying sub-resources off
 /// the origin keeps a French amazon.fr session consistent on its CDN
@@ -161,9 +161,8 @@ pub fn nav_headers_fetch(
 /// (those only appear on follow-up requests after the server
 /// advertises `Accept-CH` in a response).
 ///
-/// Canonical Chrome 133/136/142 order per curl-impersonate signatures
-/// (`tests/signatures/chrome_142.0.7444.176.yaml` and predecessors —
-/// cross-version consistent for at least Chrome 133+):
+/// Canonical Chrome 133/136/142 order per reference Chrome captures
+/// (cross-version consistent for at least Chrome 133+):
 /// 1. sec-ch-ua
 /// 2. sec-ch-ua-mobile
 /// 3. sec-ch-ua-platform
@@ -200,8 +199,8 @@ pub fn chrome_headers_reload(
 ) -> Vec<(String, String)> {
     // Real Chrome on a same-origin reload sends ONLY low-entropy CH
     // unless the previous response advertised `Accept-CH`. Sending
-    // high-entropy hints unconditionally is a bot signal — verified
-    // 2026-04-27 by httpbin.org/headers comparison: real Chrome 147
+    // high-entropy hints unconditionally diverges from real Chrome —
+    // confirmed by header captures: real Chrome 147
     // never sends sec-ch-ua-arch/bitness/full-version-list/etc on
     // first visits OR same-origin reloads (only after the server
     // has explicitly opted in via Accept-CH).
@@ -222,9 +221,9 @@ pub fn chrome_headers_reload(
 
 /// Build headers that match a `window.fetch()` request from JS, NOT a
 /// document navigation. Chrome's fetch API and its nav requests send
-/// completely different header sets, and Kasada+friends use this
-/// distinction as a strong bot signal when a "fetch" request arrives
-/// carrying navigation headers.
+/// completely different header sets; a "fetch" request that arrives
+/// carrying navigation headers is a strong inconsistency that
+/// fingerprinting layers key on.
 ///
 /// Differences from navigation headers:
 ///   - `accept: */*` (not text/html...)
@@ -250,9 +249,9 @@ pub fn chrome_headers_fetch(
     // sec-ch-ua-mobile is a LOW-entropy hint sent on EVERY request (nav AND
     // fetch/XHR). Hardcoding "?0" here made mobile profiles emit "?1" on the
     // document navigation (chrome_headers) but "?0" on every JS-initiated
-    // subresource — a within-session Client-Hints contradiction that edge/bot
-    // stacks read as an automation tell (match-workflows cluster 03: pixel
-    // adidas/airbnb/yandex-ru/prime-video stall hydration → empty/THIN body).
+    // subresource — a within-session Client-Hints contradiction that
+    // edge layers read as inconsistent (on affected sites this stalled
+    // hydration and produced an empty/thin body).
     // Mirror the nav path: derive from device_class. (High-entropy hints like
     // sec-ch-ua-model are correctly NOT sent on fetch unless the origin
     // persisted Accept-CH, so we don't add them here.)
@@ -337,8 +336,8 @@ fn same_site(a: &url::Url, b: &url::Url) -> bool {
 /// AFTER the server sent `Accept-CH` in a previous response — real
 /// Chrome does NOT send these on the first visit.
 ///
-/// Sending them when the server didn't ask for them is a known
-/// fingerprint tell flagged by Akamai Bot Manager v3 and Kasada.
+/// Sending them when the server didn't ask for them diverges from real
+/// Chrome and is a known fingerprint inconsistency.
 pub fn chrome_headers_with_accept_ch(profile: &StealthProfile) -> Vec<(String, String)> {
     chrome_headers_impl(profile, true)
 }
@@ -378,8 +377,8 @@ fn chrome_headers_impl(
         // while keeping `navigator.platform: MacIntel`. Deriving from
         // platform here would emit "x86" and contradict the JS-side
         // `navigator.userAgentData.getHighEntropyValues({hints:['architecture']})`
-        // which reads `profile.cpu_architecture` directly — AWS WAF's
-        // challenge.js cross-checks these and rejects on mismatch.
+        // which reads `profile.cpu_architecture` directly — fingerprinting
+        // scripts cross-check these and reject on mismatch.
         headers.push((
             "sec-ch-ua-arch".to_string(),
             format!("\"{}\"", profile.cpu_architecture),
@@ -393,10 +392,9 @@ fn chrome_headers_impl(
             build_sec_ch_ua_full_version_list(profile),
         ));
         // sec-ch-ua-full-version (singular) is deprecated in favor of
-        // -full-version-list, but Cloudflare's Managed Challenge still
-        // lists it in critical-ch. Send it for compatibility — Chrome
-        // 147 still emits it when servers ask. Verified via
-        // `curl -sI https://www.udemy.com/` 2026-05-10.
+        // -full-version-list, but some servers still list it in
+        // critical-ch. Send it for compatibility — Chrome 147 still emits
+        // it when servers ask. Confirmed against live server responses.
         headers.push((
             "sec-ch-ua-full-version".to_string(),
             format!("\"{}\"", profile.browser_version),
@@ -431,8 +429,8 @@ fn chrome_headers_impl(
             }
             .to_string(),
         ));
-        // sec-ch-device-memory — DataDome's accept-ch demands it
-        // (yelp/leboncoin/etsy/wsj). Per the W3 Device Memory spec
+        // sec-ch-device-memory — some servers demand it via accept-ch.
+        // Per the W3 Device Memory spec
         // (https://www.w3.org/TR/device-memory/) the value MUST be one of
         // {0.25, 0.5, 1, 2, 4, 8}. Chrome's GetApproximateDeviceMemory
         // (third_party/blink/renderer/core/frame/navigator_device_memory.cc)
@@ -534,8 +532,7 @@ fn chrome_platform_version(os_name: &str, os_version: &str) -> String {
 
 /// Build the `Sec-CH-UA-Full-Version-List` header value.
 ///
-/// **Chrome 147 live capture** (httpbin.org/headers via playwright,
-/// 2026-04-27): real Chrome 147 only sends this header AFTER an
+/// **Chrome 147 live capture**: real Chrome 147 only sends this header AFTER an
 /// `Accept-CH` advertisement. When sent, the format is:
 /// ```text
 /// "Google Chrome";v="147.0.7727.117", "Not.A/Brand";v="8.0.0.0", "Chromium";v="147.0.7727.117"
@@ -561,14 +558,14 @@ fn build_sec_ch_ua_full_version_list(profile: &StealthProfile) -> String {
 fn build_sec_ch_ua(profile: &StealthProfile) -> String {
     let major_version = profile.browser_version.split('.').next().unwrap_or("147");
 
-    // Real Chrome 147 sec-ch-ua (verified via playwright on 2026-04-27):
+    // Real Chrome 147 sec-ch-ua:
     //   "Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"
     // Brand order is [Google Chrome, Not.A/Brand, Chromium] (NOT
     // alphabetical and NOT what the W3C spec implies). The "Not."-style
     // dummy brand changes per Chrome version — we hardcode the v=8 / dot-slash
     // form that matches Chrome 147+. Earlier Chrome (130 era) used
     // "Not-A.Brand";v="24" with brands ordered [Chromium, Not-A.Brand, Google Chrome]
-    // — that's what we used to emit, but it's a tell on modern Chrome.
+    // — that's what we used to emit, but it diverges from modern Chrome.
     format!(
         "\"Google Chrome\";v=\"{v}\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"{v}\"",
         v = major_version
@@ -578,19 +575,18 @@ fn build_sec_ch_ua(profile: &StealthProfile) -> String {
 // ============================================================================
 // Firefox 135 header builder
 // ----------------------------------------------------------------------------
-// Empirical Firefox 135 header order from the Camoufox network capture
-// (`/tmp/cam_capture/summary.txt`, 2026-04-28). Firefox sends a distinctly
-// different header set than Chrome:
+// Empirical Firefox 135 header order from a real Firefox network capture.
+// Firefox sends a distinctly different header set than Chrome:
 //   - NO sec-ch-ua / sec-ch-ua-mobile / sec-ch-ua-platform — these are
 //     Chrome-only (User Agent Client Hints aren't implemented in Firefox).
 //   - NO `priority` header.
 //   - `accept` is shorter: no avif/webp/apng/signed-exchange.
 //   - `accept-language` quality values: q=0.5 not q=0.9.
 //   - HTTP/1-style headers (`connection: keep-alive`, explicit `host:`)
-//     surface in Playwright's request capture; over the wire on H2 they
+//     surface in the request capture; over the wire on H2 they
 //     become pseudo-headers that the HTTP/2 stack handles automatically.
 //
-// Header order (from capture, observed via Playwright):
+// Header order (from capture):
 // 1. host
 // 2. user-agent
 // 3. accept
@@ -605,7 +601,7 @@ fn build_sec_ch_ua(profile: &StealthProfile) -> String {
 //
 // `host` and `connection` are connection-level — most HTTP/2 clients write
 // them as pseudo-headers, but listing them here ensures byte-equivalence
-// with Playwright's view if we ever serialize for diagnostic comparison.
+// with the reference capture if we ever serialize for diagnostic comparison.
 
 /// Build ordered Firefox 135 nav headers from a stealth profile.
 pub fn firefox_headers(profile: &StealthProfile) -> Vec<(String, String)> {
@@ -701,8 +697,8 @@ fn firefox_headers_impl(
         "gzip, deflate, br, zstd".to_string(),
     ));
 
-    // NOTE: `connection: keep-alive` was emitted by Playwright in the
-    // Camoufox capture, but it's a connection-specific header forbidden in
+    // NOTE: `connection: keep-alive` appeared in the reference Firefox
+    // capture, but it's a connection-specific header forbidden in
     // HTTP/2 (RFC 7540 §8.1.2.2). The HTTP/2 stack strips it before
     // sending, but our http2 lib rejects it as malformed at insertion
     // time. Omit it here. Same for `host` — pseudo-header on HTTP/2.
@@ -722,12 +718,12 @@ fn firefox_headers_impl(
 }
 
 // =============================================================================
-// Safari iOS 18 header builders — Phase B1 (2026-05-12)
+// Safari iOS 18 header builders
 // =============================================================================
 //
 // Safari does NOT send sec-fetch-*, sec-ch-ua-*, priority, or
 // upgrade-insecure-requests. Header set is much shorter than Chrome's.
-// Per real iOS Safari 18 captures and lexiforest signatures.
+// Per real iOS Safari 18 captures and reference Safari signatures.
 //
 // The `Accept` value uses Safari's specific MIME ordering (no avif/webp/apng,
 // no signed-exchange). `Accept-Encoding` excludes zstd (Safari has not adopted
@@ -773,8 +769,7 @@ pub fn safari_headers_fetch(
 }
 
 fn safari_headers_impl(profile: &StealthProfile, referer: Option<&str>) -> Vec<(String, String)> {
-    // Canonical Safari iOS 18.4 header order per
-    // curl-impersonate `tests/signatures/safari_18.4_iOS.yaml`:
+    // Canonical Safari iOS 18.4 header order per reference Safari captures:
     //   1. sec-fetch-dest: document
     //   2. user-agent
     //   3. accept
@@ -872,7 +867,7 @@ fn build_accept_language(languages: &[String]) -> String {
 // ================================================================
 // Cross-origin isolation — COOP / COEP response-header parsing
 // ----------------------------------------------------------------
-// Anti-bot vendors (Kasada 2024+) probe `self.crossOriginIsolated` and
+// Fingerprinting scripts probe `self.crossOriginIsolated` and
 // `typeof SharedArrayBuffer`. The browser sets `crossOriginIsolated = true`
 // only when both Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy
 // response headers are present with restrictive values:
@@ -999,9 +994,9 @@ mod tests {
 
     #[test]
     fn fetch_headers_mobile_flag_matches_nav() {
-        // match-workflows cluster 03 — chrome_headers_fetch hardcoded
+        // Regression: chrome_headers_fetch hardcoded
         // sec-ch-ua-mobile: ?0, contradicting the ?1 the nav request sends on
-        // mobile (a within-session Client-Hints flip = automation tell). The
+        // mobile (a within-session Client-Hints flip = inconsistency). The
         // low-entropy mobile flag MUST agree across nav and fetch.
         let pixel = stealth::presets::pixel_9_pro_chrome_148();
         let fh: std::collections::HashMap<_, _> =
@@ -1033,8 +1028,8 @@ mod tests {
 
     #[test]
     fn pixel_android_emits_mobile_client_hints() {
-        // Phase 2 (2026-05-12) — verify the pixel_9_pro_chrome_148 preset
-        // wires through to mobile-flavored Sec-CH-UA-* headers.
+        // Verify the pixel_9_pro_chrome_148 preset wires through to
+        // mobile-flavored Sec-CH-UA-* headers.
         let profile = stealth::presets::pixel_9_pro_chrome_148();
         assert_eq!(profile.device_class, DeviceClass::MobileAndroid);
         let headers = chrome_headers_with_accept_ch(&profile);
@@ -1289,7 +1284,7 @@ mod tests {
         // cpu_architecture="arm". Real Chrome on M3 emits
         // `sec-ch-ua-arch: "arm"`, NOT "x86" — and the JS-side
         // `navigator.userAgentData.architecture` reads profile.cpu_architecture
-        // directly. The HTTP header must agree with JS or AWS WAF rejects.
+        // directly. The HTTP header must agree with JS or fingerprinting scripts reject.
         let mut profile = stealth::chrome_148_macos();
         profile.cpu_architecture = "arm".into();
         let headers = chrome_headers_with_accept_ch(&profile);
@@ -1431,7 +1426,7 @@ mod tests {
         assert!(fvl.contains(&profile.browser_version));
     }
 
-    // ===== Sprint 2.1 — per-region accept-language =====
+    // ===== per-region accept-language =====
 
     #[test]
     fn region_languages_amazon_fr() {

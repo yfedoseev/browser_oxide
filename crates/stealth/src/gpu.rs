@@ -4,8 +4,8 @@
 //! `getSupportedExtensions()`, `getParameter()`, and
 //! `getShaderPrecisionFormat()` return realistic, Chrome-matching
 //! values. Without this, every profile returns an identical hardcoded
-//! WebGL fingerprint and antibot engines (DataDome, Akamai BMP,
-//! Kasada) trivially detect us via canvas/webgl hash mismatch.
+//! WebGL fingerprint, which is trivially detectable via a canvas/webgl
+//! hash that does not match the claimed device.
 //!
 //! Each `GpuProfile` describes one real consumer GPU + driver combo
 //! as exposed by Chrome 131. Extension lists, parameter values, and
@@ -50,7 +50,7 @@ pub struct GpuProfile {
     /// must return the WebGL 1 version string + extension list, NOT the WebGL 2
     /// one. A WebGL 1 context advertising WebGL-2-only extensions (e.g.
     /// `EXT_color_buffer_float`) or the `WebGL 2.0` version string is a
-    /// deterministic cross-API fingerprint tell (AWS WAF / DataDome / creepjs).
+    /// deterministic cross-API fingerprint inconsistency.
     /// `None` = legacy behaviour (the shared fields are used for both contexts).
     #[serde(default)]
     pub webgl1: Option<WebGL1Surface>,
@@ -127,16 +127,14 @@ pub fn nvidia_rtx_3060_windows() -> GpuProfile {
 
 /// Chrome 147 on macOS 15 with Apple M3.
 ///
-/// Phase 7 — extension list verified byte-exact against a fresh
-/// Playwright MCP capture from real Chrome 147 on M3 MacBook Pro
-/// (`.playwright-mcp/captures/probe_mcp.json`). 39 extensions in the
+/// Extension list verified byte-exact against a fresh capture from real
+/// Chrome 147 on an M3 MacBook Pro. 39 extensions in the
 /// exact registration order Chromium emits via
 /// `WebGLRenderingContextBase::getSupportedExtensions()`.
 /// Chrome 147+ on macOS 15 with Apple M3.
 ///
 /// Values aligned to the WebGL 2 surface captured from a real Chrome 147 on
-/// M3 (`tests/fixtures/chrome147/captured_macos_arm64.json`). See
-/// `docs/releases/v0.1.0-parity/audit/16_DECISION_LOG.md` §FIX-D.
+/// M3 (`tests/fixtures/chrome147/captured_macos_arm64.json`).
 ///
 /// Note: the top-level fields are the WebGL 2 surface (version "WebGL 2.0",
 /// SLV "GLSL ES 3.00"). FIX-D2 (done): the `webgl1` field carries the distinct
@@ -153,8 +151,7 @@ pub fn apple_m3_macos() -> GpuProfile {
 /// shared across the M3 chip family). Only the `unmasked_renderer` string
 /// differs. Use with [`presets::chrome_148_macos_sampled`]-class samplers
 /// that vary `cpu_cores` ∈ {10, 12} to stay cross-API-consistent with the
-/// chip's actual core count. See `docs/releases/v0.1.0-parity/audit/
-/// 16_DECISION_LOG.md` §FIX-E2.
+/// chip's actual core count.
 pub fn apple_m3_pro_macos() -> GpuProfile {
     apple_m3_family_profile("Apple M3 Pro")
 }
@@ -240,8 +237,8 @@ fn apple_m3_family_profile(chip_name: &str) -> GpuProfile {
 /// `EXT_disjoint_timer_query_webgl2` form is replaced by its WebGL-1 form
 /// `EXT_disjoint_timer_query`, and `WEBGL_color_buffer_float` is the WebGL-1
 /// counterpart to WebGL 2's `EXT_color_buffer_float`. The delta set was
-/// cross-checked against the Camoufox `webgl_data.db` Apple row's
-/// `webGl:` vs `webGl2:` supportedExtensions. Alphabetically ordered to match
+/// cross-checked against a reference capture's Apple row of WebGL 1 vs
+/// WebGL 2 supportedExtensions. Alphabetically ordered to match
 /// the WebGL 2 list's convention. 39 extensions.
 fn apple_m3_webgl1_surface() -> WebGL1Surface {
     WebGL1Surface {
@@ -619,8 +616,8 @@ mod tests {
     /// captured from a real Chrome 147 on M3
     /// (`tests/fixtures/chrome147/captured_macos_arm64.json`). Any
     /// drift between this preset and the captured ground truth is a
-    /// FIX-D regression — AWS WAF's challenge.js cross-checks these
-    /// fields and rejects on mismatch.
+    /// regression — fingerprinting scripts cross-check these fields and
+    /// reject on mismatch.
     #[test]
     fn apple_m3_matches_captured_chrome_147_fixture() {
         let gpu = apple_m3_macos();

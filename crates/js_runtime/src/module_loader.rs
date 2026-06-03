@@ -3,8 +3,8 @@
 //! Without it, `<script type="module">` entries — how every modern Vite/React/
 //! Vue SPA ships its app — throw `SyntaxError: Cannot use import statement
 //! outside a module` under classic `v8::Script::compile`, so the whole bundle is
-//! dropped and the engine serves only the server shell (the 1.8-13 KB "thin
-//! render" that loses douyin/duolingo/adidas/ozon/wildberries to camoufox v150).
+//! dropped and the engine serves only the server shell (a 1.8-13 KB "thin
+//! render" of a site that should fully hydrate into an SPA).
 //!
 //! This loader resolves relative specifiers against the referrer/document URL
 //! and fetches the import graph **on demand** through the same shared HTTP

@@ -8,13 +8,12 @@
 //!   render-incomplete `< 5 KB`.
 //! - `holistic_sweep.rs::classify` — interstitial gate `< 30 KB`,
 //!   blocked-word gate `< 5 KB`, thin `< 1000`, the ledger-authoritative
-//!   metric behind the 126-corpus count and the directive's re-measure
-//!   clause (10 regression tests pin its behavior).
+//!   metric behind the corpus count (10 regression tests pin its
+//!   behavior).
 //! - the vendor handlers — their own `≤ 4 KB` gates.
 //!
 //! The same body could be `Pass` in one and `*-CHL` in another, which is
-//! exactly how the "22 engine-addressable" count was inflated from a
-//! true ≈6 (master plan Phase 0.2).
+//! exactly how the engine-addressable count was historically inflated.
 //!
 //! This module is now the **single source of truth** for the marker set
 //! and the size gates. The canonical policy is byte-for-byte the old
@@ -96,8 +95,8 @@ const UNAMBIGUOUS: &[(&str, &str)] = &[
 /// (`window.REDFIN_APP_NAME`, real listings). Treating these as any-size
 /// UNAMBIGUOUS therefore false-FAILED redfin as AWS-WAF-CHL.
 ///
-/// The reliable discriminator (captured 2026-05-31, redfin solved vs amazon/imdb
-/// stub) is NOT the envelope config and NOT body size — it is the **active PoW
+/// The reliable discriminator (redfin solved vs amazon/imdb stub) is NOT the
+/// envelope config and NOT body size — it is the **active PoW
 /// loader**. A live, unsolved AWS-WAF challenge always pulls
 /// `token.awswaf.com/.../challenge.js` and calls
 /// `AwsWafIntegration.checkForceRefresh()`; a solved page drops that loader
@@ -278,7 +277,7 @@ pub fn engine_classify(body: &str) -> EngineClass {
 /// *post-mutation* DOM; CF's orchestrator rewrites the body, so the
 /// marker drops while `cf_clearance` was never issued and a
 /// body-mutated-but-unsolved CF page silently slips the retry gate
-/// (the doc-20 mutable-state-guard class). Single source of truth for
+/// (the mutable-state-guard class). Single source of truth for
 /// the CF-origin substrings.
 pub fn is_cf_challenge_doc(body: &str) -> bool {
     body.contains("_cf_chl_opt")
@@ -427,7 +426,7 @@ mod tests {
 
     // FP-B5 regression (redfin): AWS-WAF token-challenge markers
     // (`gokuProps` / `awswafcookiedomainlist`) are co-signed by an active PoW
-    // loader, NOT size-gated. Captured 2026-05-31: redfin's solved 392 KB
+    // loader, NOT size-gated. redfin's solved 392 KB
     // React app retains `awswafcookiedomainlist` but drops the
     // `token.awswaf.com` / `AwsWafIntegration.checkForceRefresh` loader — so it
     // must classify as a pass at ANY size. amazon/imdb's unsolved stub carries

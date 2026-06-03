@@ -29,11 +29,11 @@ use crate::error::NetError;
 ///    was the MLKEM768 post-quantum rollout at Chrome 131. There was no
 ///    TLS-stack change between 147 and 148 (consecutive majors, ~1 month
 ///    apart, May 2026), so the bytes real Chrome 148 puts on the wire are
-///    identical to this verified-real 147 capture. Doc 03 §1.1 records
-///    "byte-exact Chrome 147/148 values" — they are the same values.
+///    identical to this verified-real 147 capture: the byte-exact Chrome
+///    147 and 148 values are the same values.
 /// 2. **JA4 does not encode the Chrome version.** JA4 = TLS-version +
 ///    sorted cipher/extension counts + ALPN + sorted sigalgs. None of
-///    those differ 147↔148. A vendor's "JA4-vs-UA cross-check" verifies
+///    those differ 147↔148. A "JA4-vs-UA cross-check" verifies
 ///    the JA4 corresponds to *a Chrome* consistent with the UA *family*
 ///    — it cannot, even in principle, detect a 147-vs-148 minor/major
 ///    label difference.
@@ -97,14 +97,14 @@ const CURVES_DESKTOP: &[SslCurve] = &[
 
 /// Chrome Android elliptic curves. Kyber768Draft00 (deprecated) was the
 /// canonical Chrome 124-130 PQ curve; Chrome 131+ desktop replaced it with
-/// MLKEM768 (codepoint 4588). The lexiforest `chrome_131.0.6778.81_android`
-/// capture shows no PQ at all (just 29/23/24), but Chrome Android shares the
+/// MLKEM768 (codepoint 4588). A reference Chrome 131 Android capture
+/// shows no PQ at all (just 29/23/24), but Chrome Android shares the
 /// desktop codebase and by Chrome 147+ should have rolled MLKEM — verify
-/// against fresh Pixel capture if regressions appear.
+/// against a fresh Pixel capture if regressions appear.
 const CURVES_ANDROID: &[SslCurve] = CURVES_DESKTOP;
 
-/// iOS Safari 18 cipher suite list (20 ciphers, Apple's order). Per the
-/// canonical `lexiforest/curl-impersonate/tests/signatures/safari_18.0_iOS.yaml`.
+/// iOS Safari 18 cipher suite list (20 ciphers, Apple's order). Per a
+/// reference Safari iOS 18 TLS capture.
 /// Distinct from Chrome desktop (15 ciphers): includes 3DES_EDE_CBC_SHA at
 /// the tail and an extra RSA_WITH_3DES_EDE_CBC_SHA. Cipher order matters
 /// for JA3.
@@ -132,8 +132,8 @@ const CIPHER_LIST_SAFARI_IOS: &str = concat!(
 );
 
 /// iOS Safari signature algorithms (10 entries, includes the duplicated
-/// `rsa_pss_rsae_sha384` Apple bug we must reproduce verbatim per the audit).
-/// Both wreq-util and curl-impersonate include the duplicate.
+/// `rsa_pss_rsae_sha384` Apple quirk we must reproduce verbatim).
+/// Reference Safari TLS captures include the duplicate.
 const SIGALGS_LIST_SAFARI_IOS: &str = concat!(
     "ecdsa_secp256r1_sha256",
     ":rsa_pss_rsae_sha256",
@@ -158,14 +158,14 @@ const CURVES_SAFARI_IOS: &[SslCurve] = &[
 
 /// iOS Safari 18 extension permutation. Indices into BoringSSL's internal
 /// `BORING_SSLEXTENSION_PERMUTATION` table — see boring2 ssl/mod.rs for the
-/// canonical ordering. Per `safari_18.0_iOS.yaml` lexiforest signature, real
+/// canonical ordering. Per reference Safari iOS 18 TLS captures, real
 /// Safari emits its extensions in a FIXED order (no Fisher-Yates shuffle),
 /// roughly: server_name, extended_master_secret, renegotiate, supported_groups,
 /// ec_point_formats, ALPN, status_request, signature_algorithms,
 /// signed_certificate_timestamp, key_share, psk_key_exchange_modes,
 /// supported_versions, cert_compression. (GREASE and PADDING are auto-emitted
 /// by BoringSSL outside the permutation table; PADDING positional ordering
-/// requires raw extension injection — deferred per audit.)
+/// requires raw extension injection — deferred.)
 const SAFARI_IOS_EXTENSION_PERMUTATION: &[u8] = &[
     0,  // server_name
     2,  // extended_master_secret
@@ -181,8 +181,8 @@ const SAFARI_IOS_EXTENSION_PERMUTATION: &[u8] = &[
     17, // supported_versions
     21, // cert_compression (compress_certificate, type 27). boring2 kExtensions
         // index is 21 (proven by CHROME_EXTENSION_PERMUTATION, which emits 0x1b);
-        // the previous `22` is the PADDING slot — a live tls.peet.ws capture
-        // (2026-05-29) showed BO emitting ext 0x15 (padding) instead of 0x1b
+        // the previous `22` is the PADDING slot — a live TLS-fingerprint capture
+        // showed this index emitting ext 0x15 (padding) instead of 0x1b
         // here, giving JA4 t13d2013h2 vs real iOS-18 Safari's t13d2014h2. With
         // 21, compress_certificate is emitted and BoringSSL auto-appends padding
         // last by ClientHello length → the 14-extension Safari JA4.
@@ -193,8 +193,7 @@ const SAFARI_IOS_EXTENSION_PERMUTATION: &[u8] = &[
 /// (CHACHA before AES-256), then the ECDHE-ECDSA/RSA GCM pairs, then the CBC
 /// block (ECDSA before RSA, 256 before 128 in NSS's CBC ordering), then the
 /// two RSA-GCM and two RSA-CBC fallbacks. Yields the Firefox JA4 cipher hash
-/// `5b57614c22b0` (vs Chrome's). Per lwthiker/curl-impersonate firefox + a
-/// tls.peet.ws Firefox 135 capture.
+/// `5b57614c22b0` (vs Chrome's). Per reference Firefox TLS captures.
 const CIPHER_LIST_FIREFOX: &str = concat!(
     "TLS_AES_128_GCM_SHA256",
     ":TLS_CHACHA20_POLY1305_SHA256",
@@ -268,7 +267,7 @@ const FIREFOX_RECORD_SIZE_LIMIT: u16 = 0x4001;
 /// 5=ec_point_formats, 6=session_ticket, 7=ALPN, 8=status_request,
 /// 9=signature_algorithms, 14=key_share, 15=psk_kex_modes, 17=supported_versions,
 /// 22=delegated_credentials, 26=record_size_limit. Order verified against a
-/// tls.peet.ws Firefox 135 capture — iterate if the JA4 ext-hash diverges.
+/// reference Firefox 135 TLS capture — iterate if the JA4 ext-hash diverges.
 const FIREFOX_EXTENSION_PERMUTATION: &[u8] = &[
     0,  // server_name
     2,  // extended_master_secret
@@ -300,11 +299,10 @@ use rand::prelude::SliceRandom;
 /// source): Chrome shuffles ALL non-PSK extensions with a single Fisher-Yates
 /// pass — there is no documented bucket structure. The only positional
 /// constraint is psk_key_exchange_modes / pre_shared_key being last (BoringSSL
-/// enforces this). The previous 3-bucket scheme was folkore from earlier
+/// enforces this). The previous 3-bucket scheme was folklore from earlier
 /// public RE work; it reduced shuffle entropy by ~720,000× and put
 /// signature_algorithms always at position 16 — a deterministic positional
-/// tell that per-handshake classifiers (Akamai, Kasada) can detect as a
-/// soft-deny signal.
+/// pattern that per-handshake classifiers can detect as anomalous.
 const CHROME_EXTENSION_PERMUTATION: &[u8] = &[
     14, // key_share (51)
     1,  // encrypted_client_hello (65037)
@@ -334,9 +332,9 @@ fn shuffled_chrome_extension_permutation() -> Vec<u8> {
 
 /// Build an `SslConnector` configured with the TLS fingerprint matching
 /// `profile.device_class`. Currently all variants share Chrome 147 desktop
-/// configuration; Phase 2 branches here for Android and iOS Safari.
+/// configuration; this also branches for Android and iOS Safari.
 pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetError> {
-    // Phase 2/3 (2026-05-12): per-device_class branching.
+    // Per-device_class branching.
     //  - Desktop / Android: shared Chrome 147 cipher/sigalg/extension config.
     //    Android only diverges in the curves list (Kyber768Draft00 vs MLKEM).
     //  - MobileIOS: distinct Safari 18 cipher/sigalg/curves + skip Fisher-Yates
@@ -344,12 +342,12 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
     //    Per-connection ALPS and ECH grease are also skipped — see
     //    configure_connection() below.
     let is_safari_ios = profile.device_class == DeviceClass::MobileIOS;
-    // Firefox wire class (04_FIREFOX_WIRE): a desktop profile whose browser
-    // family is Firefox emits an NSS-class ClientHello (no GREASE, FFDHE
-    // groups, delegated_credentials + record_size_limit, fixed extension
-    // order) instead of Chrome's. Without this a firefox_135_* profile put a
-    // Chrome JA4 under a Firefox UA — an incoherent identity every JA4↔UA
-    // cross-checking vendor (DataDome, Cloudflare, Akamai) buckets as bot.
+    // Firefox wire class: a desktop profile whose browser family is Firefox
+    // emits an NSS-class ClientHello (no GREASE, FFDHE groups,
+    // delegated_credentials + record_size_limit, fixed extension order)
+    // instead of Chrome's. Without this a firefox_135_* profile put a
+    // Chrome JA4 under a Firefox UA — an incoherent identity that any JA4↔UA
+    // cross-check would flag.
     let is_firefox = profile.browser_name == "Firefox";
     let curves: &[SslCurve] = if is_firefox {
         CURVES_FIREFOX
@@ -398,7 +396,7 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
         .map_err(|e| NetError::Tls(e.to_string()))?;
 
     // TLS version range. Safari iOS 18.x advertises 4 versions (1.0, 1.1,
-    // 1.2, 1.3) in supported_versions per canonical safari_18.4_iOS.yaml —
+    // 1.2, 1.3) in supported_versions per reference Safari iOS captures —
     // visible as a length-difference on the extension. Servers still
     // negotiate 1.3 because no real server speaks 1.0/1.1 anymore, but the
     // ClientHello must advertise all four to fingerprint as Safari.
@@ -612,8 +610,8 @@ pub fn negotiated_alpn(stream: &SslStream<TcpStream>) -> Option<&[u8]> {
 mod tests {
     use super::*;
 
-    /// Master plan §4 Phase 1 **G7** — the self-verifying JA4 drift
-    /// guard + UA/TLS coherence assert. Network-free.
+    /// Self-verifying JA4 drift guard + UA/TLS coherence assert.
+    /// Network-free.
     ///
     /// Pins every JA4 input (cipher list, sigalg list, supported-groups
     /// order, extension count) byte-/element-exact to the verified-real
@@ -707,8 +705,8 @@ rsa_pss_rsae_sha512:rsa_pkcs1_sha512";
     /// Source-code analysis of `boringssl/src/ssl/ssl_aead_ctx.cc:168-173`
     /// confirms `RecordVersion()` returns `TLS1_VERSION` (0x0301) for the
     /// initial ClientHello (null cipher, version_ == 0). This test verifies
-    /// it empirically — Option D #1 from the audit (BoringSSL vendor patch
-    /// for TLS 1.0 record version) is **NOT NEEDED**.
+    /// it empirically — a BoringSSL source patch for the TLS 1.0 record
+    /// version is **NOT NEEDED**.
     #[tokio::test]
     async fn safari_ios_emits_tls_1_0_record_version() {
         use tokio::io::AsyncReadExt;
@@ -763,8 +761,8 @@ rsa_pss_rsae_sha512:rsa_pkcs1_sha512";
         assert_eq!(
             record_version, 0x0301,
             "iOS Safari record version: got 0x{record_version:04x}, expected 0x0301 (TLS 1.0). \
-             If this is 0x0303 then Option D #1 BoringSSL vendor patch IS needed; if 0x0301 then \
-             our current build already matches Safari and the audit was conservative."
+             If this is 0x0303 then a BoringSSL source patch IS needed; if 0x0301 then \
+             our current build already matches Safari."
         );
     }
 

@@ -32,13 +32,13 @@
     const _maskFunction = globalThis._maskFunction;
     const _maskAsNative = globalThis._maskAsNative;
 
-    // ── Faithful global `Window` interface (doc 22 ESCALATION).
-    // Real Chrome 147 (verified CDP-free): typeof Window==="function",
+    // ── Faithful global `Window` interface.
+    // Real Chrome 147: typeof Window==="function",
     // window.constructor.name==="Window", window instanceof Window,
     // window instanceof EventTarget, chain
     //   window → Window.prototype → EventTarget.prototype → Object.prototype.
     // Our engine had NO global Window → fails the most universal
-    // real-browser invariant (every anti-bot checks it) and starved
+    // real-browser invariant (commonly checked) and starved
     // _buildRemoteRealm so iframe contentWindow.constructor was "Object".
     (function () {
         if (typeof globalThis.Window === "function") return;
@@ -83,7 +83,7 @@
             // mirror it so iframe contentWindow.constructor.name==="Window".
             // Main-window `window instanceof Window` parity needs a
             // deno_core-level global-prototype fix (Rust side) — tracked
-            // separately (doc 22), NOT a JS proto swap.
+            // separately, NOT a JS proto swap.
         } catch (_) {}
     })();
 
@@ -120,14 +120,14 @@
         return fallback;
     };
 
-    // W1.5 — iOS surface gating. Real iOS Safari has no UA-Client-Hints,
+    // iOS surface gating. Real iOS Safari has no UA-Client-Hints,
     // no `chrome` global, and no NetworkInformation / UserActivation /
     // deviceMemory / scheduling / IdleDetector / getInstalledRelatedApps.
-    // PerimeterX checks `('chrome' in window) || ('userActivation' in
+    // A script checking `('chrome' in window) || ('userActivation' in
     // navigator) || ('deviceMemory' in navigator) || ('connection' in
-    // navigator)` against an iOS UA — any positive hit adds ~50 risk
-    // points (research 05_PERIMETERX.md §6.3). These are Chrome-family
-    // APIs that must not appear on the iPhone 15 Pro Safari profile.
+    // navigator)` against an iOS UA would flag any positive hit as
+    // inconsistent. These are Chrome-family APIs that must not appear on
+    // the iPhone 15 Pro Safari profile.
     const _isMobileIOS = () => _p("device_class", "Desktop") === "MobileIOS";
 
     // ================================================================
@@ -247,9 +247,9 @@
     // Runtime count resolvers — clamped to physical array size so a probe
     // that walks plugins[i] for i<length never hits undefined.
     //
-    // Memoized on first call so repeated probes (creepjs's per-property
-    // lie-detection spreads `[...navigator.plugins]` for every WebIDL
-    // member it audits) hit a cached number instead of re-reading the
+    // Memoized on first call so repeated probes (some fingerprint scripts
+    // spread `[...navigator.plugins]` for every WebIDL
+    // member they audit) hit a cached number instead of re-reading the
     // profile and re-computing the clamp on each numeric-index getter.
     // The first call still happens at runtime — by which time the profile
     // IS installed (we cannot eager-cache here because window_bootstrap.js
@@ -392,8 +392,8 @@
             enumerable: false, configurable: true,
         });
         // Mask the per-instance item/namedItem so toString returns
-        // `function NAME() { [native code] }` instead of leaking source.
-        // Kasada blob field `npn1` captured the unmasked source string.
+        // `function NAME() { [native code] }` instead of leaking source,
+        // which a script inspecting these methods would otherwise see.
         try { _maskAsNative(p, 'item', 'namedItem'); } catch (_) {}
     });
 
@@ -467,8 +467,8 @@
 
     // Permission name → state map matching headed Chrome defaults.
     // W3C PermissionState enum: 'granted' | 'denied' | 'prompt'. Headless
-    // Chrome's well-known 'denied' return for notifications is the single
-    // biggest fingerprint tell this function fixes.
+    // Chrome's well-known 'denied' return for notifications differs from a
+    // real browser; this function matches the real-browser behavior.
     const _PERMISSION_STATE_MAP = {
         "notifications": "prompt",
         "geolocation": "prompt",
@@ -544,7 +544,7 @@
     // ================================================================
     // WebAuthn + FedCM (detection-shape only)
     // ----------------------------------------------------------------
-    // Anti-bot vendors (DataDome 2025+, Kasada 2024+) probe:
+    // Some scripts probe:
     //   typeof window.PublicKeyCredential
     //   PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
     //   PublicKeyCredential.isConditionalMediationAvailable()
@@ -628,7 +628,7 @@
 
     function _fedcmGet(_identity) {
         // No real IdP wiring. Reject the way Chrome does after the user dismisses
-        // (NotAllowedError) — anti-bot probes only assert reject-shape + delay.
+        // (NotAllowedError) — scripts probing this only assert reject-shape + delay.
         return new Promise((_, rej) => setTimeout(() =>
             rej(new DOMException("User declined or no eligible accounts.",
                 "NotAllowedError")), 200));
@@ -745,7 +745,7 @@
     Object.defineProperty(_navHid, Symbol.toStringTag, { value: "HID", configurable: true });
     Object.defineProperty(_navLocks, Symbol.toStringTag, { value: "LockManager", configurable: true });
 
-    // navigator.keyboard — Keyboard API (probed by CreepJS + DataDome).
+    // navigator.keyboard — Keyboard API (commonly probed by fingerprint scripts).
     // Real Chrome exposes a Keyboard instance with getLayoutMap() returning a
     // KeyboardLayoutMap: a Map<string, string> of physical key code → character.
     // An empty {} or missing getLayoutMap is an immediate lie signal.
@@ -817,8 +817,8 @@
         estimate() {
             // Real Chrome on modern macOS/Windows desktops reports ~60% of
             // free disk as quota. ~120 GB is a typical-disk plausible value
-            // — the previous 1 GB constant is a hard fingerprint tell because
-            // Chrome quota is always many tens of GB. Usage breakdown matches
+            // — the previous 1 GB constant differs from real Chrome, whose
+            // quota is always many tens of GB. Usage breakdown matches
             // Chrome's documented `usageDetails` shape so iteration probes
             // (e.g. `for (k in details)`) see the same key set.
             return Promise.resolve({
@@ -960,7 +960,7 @@
     // Scalar getters — read from stealth profile each call (idempotent).
     _defNav('userAgent', () => _p("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"));
     _defNav('platform', () => _p("platform", "Win32"));
-    // NAV-2 (parity-workflows): read vendor/vendorSub from the profile
+    // Read vendor/vendorSub from the profile
     // (default "Google Inc."/"") instead of hard-coding. The worker realm
     // already reads `_p("vendor")` (worker_bootstrap.js:152), so hard-coding
     // here leaked vendor="Google Inc." under a firefox_135_* preset (a
@@ -982,7 +982,7 @@
     // data:/http:/about:blank. Phase 7. Skip entirely on iOS (real
     // Safari has no NavigatorDeviceMemory interface).
     if (!_isMobileIOS()) {
-        // NAV-1 (parity-workflows): real Chrome clamps navigator.deviceMemory
+        // Real Chrome clamps navigator.deviceMemory
         // to a max of 8 (spec: one of 0.25/0.5/1/2/4/8). Some presets carry
         // device_memory=16 (for the Sec-CH-Device-Memory header + physical
         // coherence), which leaked a JS value Chrome never reports — a
@@ -995,11 +995,10 @@
     // webdriver: present on Navigator.prototype per W3C WebDriver spec.
     // Modern Chrome (>=89, incl. the Chrome-148 we impersonate) ALWAYS
     // defines navigator.webdriver: it returns `false` for normal
-    // browsing (`undefined` is the old/headless tell). Confirmed by the
-    // K2-DIFF decoded Kasada sensor (wdt.r="undefined" was flagged
-    // anomalous) and consistent with worker_bootstrap.js (already
-    // `false`). The prior "returns undefined" was a wrong assumption.
-    // Kasada wdd probe checks the getter source — _maskFunction native.
+    // browsing (`undefined` differs from a real modern browser). This is
+    // consistent with worker_bootstrap.js (already `false`). The prior
+    // "returns undefined" was a wrong assumption. Some scripts also check
+    // the getter source, so it is masked native via _maskFunction.
     Object.defineProperty(Navigator.prototype, 'webdriver', {
         get: _maskFunction(function() { return false; }, 'get webdriver'),
         enumerable: true,
@@ -1057,7 +1056,7 @@
     _defNavMethod('javaEnabled', function javaEnabled() { return false; });
     // Real sendBeacon: fires a fetch with keepalive=true so the server
     // actually receives the payload. A no-op stub silently drops data that
-    // challenge engines (Kasada, etc.) send on solve completion, blocking
+    // challenge scripts send on completion, blocking
     // the session from being upgraded.
     _defNavMethod('sendBeacon', function sendBeacon(url, data) {
         try {
@@ -1067,9 +1066,9 @@
                 // Empty url resolves to the document URL (real Chrome:
                 // sendBeacon('', data) POSTs to location.href). Handle it
                 // explicitly — our URL polyfill throws on `new URL('', base)`,
-                // which the outer catch swallowed, so the Akamai sec-cpt sensor
+                // which the outer catch swallowed, so a challenge
                 // beacon (sendBeacon('', sensorData)) silently failed with
-                // "relative URL without a base" and sec-cpt never solved.
+                // "relative URL without a base".
                 absUrl = (absUrl === '') ? _base : new URL(absUrl, _base).href;
             }
             let init = { method: 'POST', keepalive: true, credentials: 'include' };
@@ -1112,12 +1111,12 @@
         value: "BatteryManager", configurable: true,
     });
 
-    // Akamai's for..in probe (bt field) requires these to be enumerable.
-    // Standard WebIDL members are non-enumerable, but Akamai's custom
-    // sensor traversal expects to see these values. Moving them to 
+    // Some scripts use a for..in traversal that requires these to be
+    // enumerable. Standard WebIDL members are non-enumerable, but such a
+    // traversal expects to see these values. Moving them to
     // the prototype as enumerable getters satisfies both:
     // 1. Instance has 0 own properties (parity).
-    // 2. for..in on instance still finds them (Akamai parity).
+    // 2. for..in on instance still finds them (parity).
     const _defBatGetter = (name, val) => {
         const getter = function() { return val; };
         Object.defineProperty(BatteryManager.prototype, name, {
@@ -1141,7 +1140,7 @@
         _maskFunction(setter, `set ${name}`);
     };
 
-    // Per-session randomized values. The canonical CreepJS tell is
+    // Per-session randomized values. The canonical headless battery tell is
     // `{level:1, charging:true, chargingTime:0, dischargingTime:Infinity}`
     // — every headless browser ships that exact combination because the
     // default constants are intuitive. Real Chrome on a laptop varies:
@@ -1189,9 +1188,9 @@
     });
     _defNavMethod('webkitGetUserMedia', function webkitGetUserMedia(c, s, e) { if (e) e(new Error("Permission denied")); });
     _defNavMethod('mozGetUserMedia', function mozGetUserMedia(c, s, e) { if (e) e(new Error("Permission denied")); });
-    // Additional Navigator.prototype methods that Akamai BMP v3 walks via
-    // computed names (per the research agent). Missing any of these causes
-    // `nqz[computed_name](...) is not a function` errors in the sensor VM.
+    // Additional Navigator.prototype methods that some scripts walk via
+    // computed names. Missing any of these causes
+    // `obj[computed_name](...) is not a function` errors in such scripts.
     _defNavMethod('vibrate', function vibrate(pattern) { return false; });
     _defNavMethod('getGamepads', function getGamepads() { return [null, null, null, null]; });
     _defNavMethod('registerProtocolHandler', function registerProtocolHandler(scheme, url) {});
@@ -1200,8 +1199,8 @@
         // org.w3.clearkey is required by the W3C EME spec on all platforms.
         // com.widevine.alpha is available on Windows and macOS (not Linux desktop).
         // com.microsoft.playready is Windows-only.
-        // Returning NotSupportedError unconditionally is a bot signal probed by
-        // Kasada and Akamai BMP.
+        // Returning NotSupportedError unconditionally differs from a real
+        // browser and is commonly probed.
         const _ks = String(keySystem);
         const _os = _p("os_name", "Windows");
         const _isWin = _os === "Windows";
@@ -1258,8 +1257,8 @@
     _defNavMethod('clearAppBadge', function clearAppBadge() { return Promise.resolve(); });
     _defNavMethod('setAppBadge', function setAppBadge(count) { return Promise.resolve(); });
 
-    // Symbol.toStringTag — Akamai BMP v3 checks Object.prototype.toString.call(navigator)
-    // and expects "[object Navigator]". Without this, it returns "[object Object]".
+    // Symbol.toStringTag — some scripts check Object.prototype.toString.call(navigator)
+    // and expect "[object Navigator]". Without this, it returns "[object Object]".
     Object.defineProperty(_NavProto, Symbol.toStringTag, {
         value: "Navigator", configurable: true,
     });
@@ -1339,7 +1338,7 @@
 
     // Signal the Rust event loop that a navigation is pending. Without this,
     // `run_until_idle(30s)` runs to its full ceiling before the retry GET
-    // fires — too late for Kasada's 5-second tolerance window. With it,
+    // fires — too late for sites with a few-second navigation-timing window. With it,
     // run_until_idle returns within ~150ms (just enough microtask tail to
     // let in-flight fetch().then(setCookie) land in the jar). See
     // crates/js_runtime/src/extensions/nav_ext.rs.
@@ -1449,10 +1448,10 @@
 
     // screen — prototype-backed so own-descriptor probe returns undefined.
     const _ScreenProto = Screen.prototype;
-    // NAV-3 (parity-workflows): derive orientation from the profile's screen
+    // Derive orientation from the profile's screen
     // geometry instead of hard-coding landscape-primary. A portrait mobile
     // preset (iPhone: height > width) previously reported landscape-primary —
-    // a screen/orientation contradiction CreepJS and mobile-aware vendors
+    // a screen/orientation contradiction that fingerprint scripts
     // flag. Desktop presets (width >= height) keep landscape-primary.
     const _scrW0 = _pInt("screen_width", 1920);
     const _scrH0 = _pInt("screen_height", 1080);
@@ -1483,7 +1482,7 @@
         configurable: true
     });
 
-    // Misc globals anti-bot checks for
+    // Misc globals scripts commonly check for
     // isSecureContext: per-URL, computed from scheme on the Rust side
     // (https/wss/file or http://localhost). Drives the ~18
     // secure-context-only Web Platform APIs at IDL `[SecureContext]`.
@@ -1515,8 +1514,8 @@
     Object.defineProperty(globalThis, 'devicePixelRatio', { get: _maskFunction(function() { return _pFloat("device_pixel_ratio", 2.0); }, 'get devicePixelRatio'), configurable: true, enumerable: true });
 
     // Scroll + screen position — OWN accessor properties on the window
-    // instance (globalThis), per real Chrome (verified via Playwright
-    // MCP capture):
+    // instance (globalThis), per real Chrome (verified against a real
+    // browser):
     //
     //   Object.getOwnPropertyDescriptor(window, 'scrollX')
     //     → { get: f, set: f, enumerable: true, configurable: true }
@@ -1598,7 +1597,7 @@
     }).scrollBy;
     _maskFunction(globalThis.scrollBy, 'scrollBy');
 
-    // window.chrome (CRITICAL — every antibot system checks this object).
+    // window.chrome (CRITICAL — commonly checked object).
     //
     // Real Chrome: `window.chrome` is a special non-configurable plain
     // object; it is NOT wrapped in a named class like Navigator/Screen.
@@ -1648,16 +1647,16 @@
     // Real Chrome 147 on a regular page (no extensions): {app, csi, loadTimes}
     // chrome.runtime is ONLY present in extension contexts — absent on regular pages.
     // chrome.webstore was removed in Chrome 126.
-    // Adding either is a classic bot detection signal (Kasada, Cloudflare, DataDome).
-    // iOS Safari MUST NOT have `window.chrome` — PerimeterX `('chrome' in window)`
-    // check (research 05_PERIMETERX.md §6.3) flags it instantly.
+    // Adding either is a classic bot-detection signal.
+    // iOS Safari MUST NOT have `window.chrome` — a `('chrome' in window)`
+    // check against an iOS UA would flag it instantly.
     if (!_isMobileIOS()) {
         globalThis.chrome = {
             app: {
                 isInstalled: false,
                 InstallState: {DISABLED:"disabled",INSTALLED:"installed",NOT_INSTALLED:"not_installed"},
                 RunningState: {CANNOT_RUN:"cannot_run",READY_TO_RUN:"ready_to_run",RUNNING:"running"},
-                // Chrome 147 exposes these functions on chrome.app (bot detectors check them):
+                // Chrome 147 exposes these functions on chrome.app (commonly checked):
                 getDetails: function getDetails() { return null; },
                 getIsInstalled: function getIsInstalled() { return false; },
                 installState: function installState(cb) { if (typeof cb === 'function') setTimeout(() => cb('not_installed'), 0); },
@@ -1677,13 +1676,13 @@
     if (globalThis.navigator) {
         // Match Chrome 148's exact descriptor for webdriver:
         //   { get: ƒ, set: undefined, enumerable: true, configurable: true }
-        // BotD detector #16 (and Castle) verifies the enumerable bit
+        // Some scripts verify the enumerable bit
         // specifically — the older `enumerable: false`
         // here was a divergence. Real Chrome's webdriver getter is
         // owned-on-prototype and IS enumerable (visible to for..in on
         // Navigator.prototype).
         // webdriver: defined identically to the Navigator.prototype block
-        // above — `false` (Chrome-148-faithful; K2-DIFF wdt fix).
+        // above — `false` (Chrome-148-faithful).
         Object.defineProperty(_NavProto, 'webdriver', {
             get: _maskFunction(function() { return false; }, 'get webdriver'),
             enumerable: true,
@@ -1700,9 +1699,9 @@
     // getOwnPropertyDescriptor(navigator,'devicePixelRatio') === undefined).
     // devicePixelRatio is a Window-only property. The previous
     // `_defNav('devicePixelRatio', …)` added a property no real browser
-    // exposes — exactly the object Kasada's `dpi` probe reads
-    // (`getOwnPropertyDescriptor(navigator,'devicePixelRatio')`, 60/60
-    // receiver=Navigator per kasada_dpi_receiver.rs). Removed for parity.
+    // exposes — observable via
+    // `getOwnPropertyDescriptor(navigator,'devicePixelRatio')`.
+    // Removed for parity.
 
     if (globalThis.Screen) {
         const _ScreenProto = Screen.prototype;
@@ -1722,7 +1721,7 @@
     globalThis.document = _hunt(globalThis.document, 'document');
     // Only re-bind chrome where it was actually installed — assigning
     // `undefined` would still create a `chrome` own property and trip
-    // PerimeterX's `('chrome' in window)` check on iOS.
+    // a `('chrome' in window)` check on iOS.
     if (!_isMobileIOS()) {
         globalThis.chrome = _hunt(globalThis.chrome, 'chrome');
     }
@@ -1732,7 +1731,7 @@
     //
     // Every hint reads from the StealthProfile at call-time so HTTP
     // Sec-CH-UA-* headers and the JS surface never diverge (a classic
-    // FingerprintJS / CreepJS / Yandex Antirobot scoring axis). Eager
+    // fingerprint scoring axis). Eager
     // reads at bootstrap time would capture defaults because the V8
     // snapshot is built with no profile installed.
     //
@@ -1880,7 +1879,7 @@
     // Worker / SharedWorker / ServiceWorker classes. Our runtime has a
     // crates/workers module but doesn't auto-expose the constructor to JS.
     // Several fingerprint probes check `typeof Worker === 'function'` as a
-    // presence test, and CreepJS spawns a Worker to cross-check navigator.
+    // presence test, and some spawn a Worker to cross-check navigator.
     // This is a minimal stub that lets fingerprint probes pass their
     // Real Worker — spawns an OS thread with its own V8 isolate, drives
     // a poll loop that delivers parent←worker messages to onmessage.
@@ -1940,8 +1939,8 @@
 
                 // R-DUO-WORKER: pass the resolved script URL so the
                 // worker realm can install `self.location` consistent
-                // with real Chrome's WorkerLocation. Recaptcha and
-                // similar workers read `self.location.origin` to
+                // with real Chrome's WorkerLocation. Some workers
+                // read `self.location.origin` to
                 // gate execution; empty location silently bails.
                 this._id = _wops.op_worker_spawn(script, this._name, isModule, this._url);
                 if (this._id <= 0) {
@@ -2120,10 +2119,6 @@
     // Batch 2: additional Web API stubs for fingerprint coverage
     // Chrome 131 exposes these as globals; fingerprint probes do
     // `typeof X === 'function'` checks against them.
-    //
-    // Bisect on 2026-04-10 confirmed these don't regress Akamai BMP sites
-    // — homedepot's L3/L2 flip was Akamai's stochastic trust-profile
-    // scoring, not our code.
     // ================================================================
 
     if (!globalThis.FileReader) {
@@ -2259,13 +2254,11 @@
     }
 
     // Path2D DELIBERATELY NOT STUBBED. Our JS-class stub creates non-native
-    // method descriptors which Akamai BMP detects via `Object
+    // method descriptors observable via `Object
     // .getOwnPropertyDescriptor(Path2D.prototype, 'addPath')` — a class
     // method is a data descriptor, real Chrome's is a native accessor.
-    // Homedepot's Akamai config regresses from L3 → L2 interstitial when
-    // a fake Path2D is present. Better to report `typeof Path2D ===
-    // 'undefined'` than to lie unconvincingly. Verified via bisect
-    // 2026-04-10 by toggling this single addition on/off.
+    // Better to report `typeof Path2D === 'undefined'` than to expose a
+    // stub whose descriptors differ from real Chrome.
     // PerformanceObserver / PerformanceEntry / ReportingObserver
     if (!globalThis.PerformanceObserver) {
         globalThis.PerformanceObserver = class PerformanceObserver {
@@ -2341,10 +2334,9 @@
         };
     }
 
-    // v0.1.0-parity Fix 8 — proper MessageChannel / MessagePort
+    // Proper MessageChannel / MessagePort
     // implementation per HTML spec §9.4. The pre-fix no-op stub broke
-    // recaptcha enterprise (duolingo) and any worker that relays via
-    // a channel. Per 17_WEB_API_PARITY_MATRIX.md + 41_POW_WASM_WORKER_PATTERNS.md §4.4:
+    // any worker that relays via a channel. Behavior:
     //   - paired ports route postMessage bidirectionally
     //   - port stays in "non-started" mode until start() / onmessage
     //     setter / addEventListener('message') is called (HTML spec
@@ -2538,8 +2530,8 @@
     };
 
     // =========================================================
-    // P1 FIX: Intl timezone consistency (§P1 item 13)
-    // Yandex Antirobot and other scorers cross-check the IANA timezone
+    // Intl timezone consistency.
+    // Some scorers cross-check the IANA timezone
     // reported by `Intl.DateTimeFormat().resolvedOptions().timeZone` against
     // the IP geolocation and the `timezone` header hint. V8 uses the process
     // TZ env var (whatever the machine says), so a Moscow profile run from a
@@ -2635,7 +2627,7 @@
 
         // =========================================================
         // Date.prototype toString patches — print the profile's
-        // timezone, not UTC. Detection libraries probe
+        // timezone, not UTC. Some scripts probe
         // `new Date().toString()` because it's the cheapest TZ probe
         // available; UTC output on a macOS profile is a hard tell.
         //
@@ -2796,21 +2788,22 @@
     }
 
     // =========================================================
-    // P1 FIX: PerformanceNavigationTiming + PerformanceResourceTiming
-    // Akamai Bot Manager's sensor_data reads performance.getEntriesByType
+    // PerformanceNavigationTiming + PerformanceResourceTiming
+    // Some scripts read performance.getEntriesByType
     // ('navigation') and ('resource') to verify timing consistency against
-    // expected Chrome distributions. Returning empty arrays is a tell.
+    // expected Chrome distributions. Returning empty arrays differs from
+    // a real browser.
     //
     // We synthesize a realistic set of entries based on the time the page
     // has been loaded, with sub-timings that look like a real Chrome on
     // broadband.
     // =========================================================
     if (globalThis.performance) {
-        // v0.1.0-parity Fix 7: anchor performance.timeOrigin to the
+        // Anchor performance.timeOrigin to the
         // Rust-side PerfState origin (wall-clock at the moment t=0 was
         // captured for op_perf_now_humanized). This preserves the Web
         // Platform invariant `timeOrigin + performance.now() ≈ Date.now()`
-        // that Kasada's origin-skew probe checks. Pre-fix the local
+        // that some scripts check. Before the fix, the local
         // `Date.now() - loadEventEnd` computation drifted out of sync with
         // the Rust monotonic clock.
         const _perfOrigin = (() => {
@@ -2981,7 +2974,7 @@
             }
 
             if (entries.length === 0) {
-                // Fingerprint scripts (Kasada/DataDome/Akamai) probe
+                // Some scripts probe
                 // `performance.getEntriesByType('resource').length` and
                 // a near-empty list is a tell. Synthesize the typical
                 // resource shape of a generic page: favicon + main JS
@@ -3055,12 +3048,12 @@
             }
             return timing;
         });
-        // v0.1.0-parity Fix 7: timeOrigin is the modern HRT epoch (t=0
+        // timeOrigin is the modern HRT epoch (t=0
         // for performance.now()), NOT the legacy navigationStart
         // (`_perfTimingStart`, which trails by ~loadEventEnd ms to
         // synthesize a plausible navigation timeline). The Web Platform
         // invariant `timeOrigin + performance.now() ≈ Date.now()` is
-        // probed by Kasada and others — only the live wall-clock at the
+        // observable — only the live wall-clock at the
         // PerfState origin (per-page; the snapshot-captured `_perfOrigin`
         // is stale because the bootstrap runs at snapshot-build time)
         // satisfies it. Read the op on every access — cheap (returns a
@@ -3080,7 +3073,7 @@
             const entries = [_navEntry(), ..._buildResourceEntries()];
             const origin = globalThis.location ? globalThis.location.origin : "";
             
-            // Add Qrator/WBAAS fallback if not present
+            // Add challenge-resource fallback entries if not present
             if (!entries.some(e => e.name.includes('qauth') || e.name.includes('wbaas'))) {
                 const start = 12.5;
                 const dur = 45.2;
@@ -3143,7 +3136,7 @@
         });
         _defProtoMethod(_PerfProto, 'setResourceTimingBufferSize', function setResourceTimingBufferSize() {});
         _defProtoMethod(_PerfProto, 'toJSON', function toJSON() {
-            // v0.1.0-parity Fix 7: read live via the op so a snapshot-
+            // Read live via the op so a snapshot-
             // hosted value doesn't leak.
             let to = _perfOrigin;
             try {
@@ -3180,7 +3173,7 @@
     // Real Chrome exposes `window.crypto` as an instance of `Crypto`
     // with all methods on `Crypto.prototype` and a `subtle` accessor
     // returning an instance of `SubtleCrypto`. The `digest` method is
-    // native-code backed; Kasada and DataDome both call it to hash
+    // native-code backed; challenge scripts commonly call it to hash
     // challenge payloads (SHA-256 over TextEncoder-produced bytes).
     //
     // Previously we had `globalThis.crypto = {}` with `getRandomValues`
@@ -3218,7 +3211,7 @@
         }
     });
     // Stubs for sign/verify/encrypt/decrypt/generateKey/importKey/exportKey/deriveKey/deriveBits/wrapKey/unwrapKey.
-    // Real implementations are expensive; most antibots only call digest(),
+    // Real implementations are expensive; most callers only use digest(),
     // so we expose the methods as native-shaped no-ops that reject.
     const _subtleNotImplemented = (name) => function (...args) {
         return Promise.reject(new DOMException(`${name} not implemented`, "NotSupportedError"));
@@ -3264,7 +3257,7 @@
     // ================================================================
     // deno_core at our version ships without deno_web, so we have no
     // native TextEncoder. Our JS stub must match Chrome's exact shape
-    // because Kasada's ips.js (and CreepJS, and Castle) probe it:
+    // because some scripts probe it:
     //
     //   1. new TextEncoder().encoding === "utf-8"   (a GETTER on proto)
     //   2. TextEncoder.prototype.encodeInto exists
@@ -3274,9 +3267,9 @@
     //      returns an accessor descriptor ({ get: ƒ, set: undefined, ... })
     //
     // Prior bug: we exposed a plain `class TextEncoder { encode(){...} }`,
-    // which failed every one of these probes. Kasada's TextEncoder probe
-    // (the one that throws "Cannot read properties of undefined") was
-    // most likely `new TextEncoder().encoding.charCodeAt(0)` — `encoding`
+    // which failed every one of these probes. A common failing probe
+    // (the one that throws "Cannot read properties of undefined") is
+    // `new TextEncoder().encoding.charCodeAt(0)` — `encoding`
     // was undefined, so `.charCodeAt` threw.
     if (!globalThis.TextEncoder || !TextEncoder.prototype.encodeInto) {
         class TextEncoder {
@@ -3516,7 +3509,7 @@
             // V8 Proxy invariant: `has` must agree with `ownKeys` about what
             // keys exist. Without an explicit trap, V8 falls back to the empty
             // target object — which says "no keys" and contradicts ownKeys's
-            // real list. The reconciliation is hot work that creepjs hits
+            // real list. The reconciliation is hot work that fingerprint scripts hit
             // repeatedly via `'name' in storage` style probes.
             has(target, key) {
                 if (STORAGE_METHODS.includes(key)) return true;
@@ -3696,12 +3689,12 @@
 
     // XMLHttpRequest stub (built on fetch)
     // XMLHttpRequest — must extend EventTarget and expose the full Chrome
-    // shape. Akamai BMP v3 monkey-patches `XMLHttpRequest.prototype.send`
-    // and walks computed-name chains through the instance, so any missing
+    // shape. Some scripts monkey-patch `XMLHttpRequest.prototype.send`
+    // and walk computed-name chains through the instance, so any missing
     // property (upload, responseType, withCredentials, timeout, response,
     // responseXML, abort, dispatchEvent, etc.) surfaces as
-    //   `nqz[<computed>.<computed>.<computed>.<computed>] is not a function`
-    // during sensor execution.
+    //   `obj[<computed>.<computed>.<computed>.<computed>] is not a function`
+    // during their execution.
     globalThis.XMLHttpRequest = class XMLHttpRequest extends EventTarget {
         constructor() {
             super();
@@ -3811,11 +3804,11 @@
                     for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
                     bodyEncoded = 'b:' + btoa(bin);
                 } else if (typeof FormData !== 'undefined' && body instanceof FormData) {
-                    // FIX-FORMDATA (parity-workflows): same multipart serialization
+                    // Same multipart serialization
                     // the fetch path does — XHR.send(formData) must produce a real
                     // multipart/form-data body with a boundary, and the browser sets
                     // the Content-Type itself (overriding any setRequestHeader). Used
-                    // by anti-bot scripts (Kasada, AWS variants) that POST proofs via
+                    // by challenge scripts that POST proofs via
                     // synchronous XHR.
                     const boundary = '----browserOxideFormBoundary' +
                         Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -3848,10 +3841,10 @@
                 }
             }
 
-            // For synchronous XHR (async=false) — required by Kasada KPSDK which calls
-            // xhr.open('POST', '/tl', false) + xhr.send() and reads xhr.status immediately
+            // For synchronous XHR (async=false) — required by scripts that call
+            // xhr.open('POST', url, false) + xhr.send() and read xhr.status immediately
             // after send() returns. The async fetch() path can never satisfy this because
-            // it requires V8 to yield, which doesn't happen when a PoW busy-wait is running.
+            // it requires V8 to yield, which doesn't happen when a proof-of-work busy-wait is running.
             if (!xhr._async && typeof ops !== 'undefined' && typeof ops.op_net_xhr_sync === 'function') {
                 const startTime = performance.now();
                 try {
@@ -4067,7 +4060,7 @@
 
     // =========================================================
     // matchMedia — covers the 12 standard CSS Media Queries Level 5
-    // features that detection libraries probe. Profile-driven defaults
+    // features that fingerprint scripts probe. Profile-driven defaults
     // (light theme, fine pointer, hover-capable) for the desktop
     // chrome_130_* presets. Returns a real `class MediaQueryList
     // extends EventTarget` instead of a plain object literal so
@@ -4125,7 +4118,7 @@
                 case "scan": return "progressive";
                 case "grid": return "0";
                 case "color-gamut":
-                    // Per CreepJS / FingerprintJS Pro inconsistency probe:
+                    // Matches real-browser color-gamut reporting:
                     // real macOS/iPhone Chrome reports "p3" (wide gamut);
                     // Win/Linux/Android typically report "srgb". Profile-
                     // driven default with srgb fallback.
@@ -4631,8 +4624,8 @@
     }
 
     // --- OffscreenCanvas ---
-    // Chrome since 69 ships OffscreenCanvas as a global. Sensor VMs detect
-    // its absence as a "not really Chrome" signal. We expose a minimal class
+    // Chrome since 69 ships OffscreenCanvas as a global. Its absence reads
+    // as a "not really Chrome" signal. We expose a minimal class
     // that satisfies constructor checks and typeof checks; `getContext` is a
     // no-op stub that returns null (the sensor VM falls through to fallback
     // paths when null is returned).
@@ -5241,7 +5234,7 @@
             // Returning ONLY `{candidate: null}` is itself a tell — every
             // legitimate Chrome session yields at least one mDNS host.
             // The `<uuid>.local` form is privacy-preserving (no real IP).
-            // CreepJS / FingerprintJS open-source both probe candidate
+            // Some fingerprint scripts probe candidate
             // length; one mDNS host closes the parity gap without leaking.
             const _hex = (n) => Math.floor(Math.random() * 16).toString(16);
             const _uuid4 = () => {
@@ -5312,9 +5305,9 @@
 
         // document.fonts (FontFaceSet) — iterator yields actual FontFace
         // entries (real Chrome's `for (const f of document.fonts)` yields
-        // FontFace instances for every loaded face). Pre-W3.7 our iterators
-        // returned empty, which is the canonical headless "no faces ever
-        // loaded" tell. PLAN identifies as a blind Kasada `ao` candidate.
+        // FontFace instances for every loaded face). Previously our iterators
+        // returned empty, the canonical headless "no faces ever
+        // loaded" signal that differs from a real browser.
         if (globalThis.document) {
             // Materialize FontFace instances once for the system font list.
             const _fontFaces = _fonts.map(family => {
@@ -5435,11 +5428,10 @@
             "audio/webm", 'audio/webm; codecs="opus"', 'audio/webm; codecs="vorbis"',
             "audio/mpeg", "audio/ogg", 'audio/ogg; codecs="vorbis"', 'audio/ogg; codecs="opus"',
             "audio/wav", 'audio/wav; codecs="1"', "audio/flac",
-            // Chrome accepts these codec MIME aliases too. The Kasada
-            // smc probe (decrypted blob 0, 2026-05-10) tests audio/x-m4a
-            // and audio/aac (sic — they wrote "acc" too) and reads the
-            // verdict from MediaSource.isTypeSupported. Without these
-            // entries we return false where Chrome returns true.
+            // Chrome accepts these codec MIME aliases too. Some scripts test
+            // audio/x-m4a and audio/aac (and the common misspelling "acc")
+            // and read the verdict from MediaSource.isTypeSupported. Without
+            // these entries we return false where Chrome returns true.
             "audio/x-m4a", "audio/aac", "audio/acc",
             "audio/mp3", "audio/x-wav",
         ]);
@@ -5450,7 +5442,6 @@
         // The shim must be _maskFunction'd or its raw source leaks via
         // `el.canPlayType + ""`, `el.canPlayType.toString()`, AND
         // cross-realm `iframe.contentWindow.Function.prototype.toString.call(el.canPlayType)`.
-        // Discovered by check_tostring_audit_full (Tier 1.2 audit, 2026-05-12).
         if (globalThis.document) {
             const _canPlayTypeShim = function canPlayType(type) {
                 if (_supportedTypes.has(type)) return "probably";
@@ -5477,7 +5468,7 @@
 
         // MediaRecorder — Chrome ships this as a real constructor with
         // a static isTypeSupported(mimeType) for codec capability checks.
-        // Without it, the Kasada `mrs` probe throws
+        // Without it, a script reading isTypeSupported throws
         // "Cannot read properties of undefined (reading 'isTypeSupported')".
         // Stub class — produces no recordings but answers capability
         // probes correctly using the same _supportedTypes set.
@@ -5485,16 +5476,15 @@
     }
 
     // ================================================================
-    // Stubs for Web APIs that Kasada/DataDome probe. All defined
+    // Stubs for Web APIs that scripts commonly probe. All defined
     // as globalThis classes + (where applicable) navigator/window
     // accessors. These return defined-but-functionally-stub objects
-    // so antibot probes that read `.SOME_PROPERTY` get a non-undefined
+    // so scripts that read `.SOME_PROPERTY` get a non-undefined
     // receiver.
     // ================================================================
 
     // PressureObserver / PressureRecord — Compute Pressure API
-    // (https://w3c.github.io/compute-pressure/). Chrome 125+. Probed by
-    // Kasada esd.cpt.
+    // (https://w3c.github.io/compute-pressure/). Chrome 125+. Commonly probed.
     if (!globalThis.PressureObserver) {
         class PressureRecord {
             constructor(source = 'cpu', state = 'nominal') {
@@ -5532,7 +5522,7 @@
 
     // MediaSourceHandle — wraps MediaSource for transfer to Worker.
     // (https://w3c.github.io/media-source/#mediasourcehandle-interface).
-    // Probed by Kasada smc.o. Stub class with toString tag.
+    // Commonly probed. Stub class with toString tag.
     if (!globalThis.MediaSourceHandle) {
         class MediaSourceHandle {}
         Object.defineProperty(MediaSourceHandle.prototype, Symbol.toStringTag, {
@@ -5543,7 +5533,7 @@
 
     // DocumentPictureInPicture — Document Picture-in-Picture API
     // (https://wicg.github.io/document-picture-in-picture/). Chrome 116+.
-    // Probed by Kasada dpv. Singleton on window.
+    // Commonly probed. Singleton on window.
     if (!globalThis.DocumentPictureInPicture) {
         class DocumentPictureInPicture extends EventTarget {
             constructor() { super(); this._window = null; }
@@ -5570,7 +5560,7 @@
     // navigator.userActivation — UserActivation interface
     // (https://html.spec.whatwg.org/multipage/interaction.html#useractivation).
     // Reports whether the user has interacted with the page (gestures).
-    // Probed by Kasada bot1225 / various others.
+    // Probed by various scripts.
     // Chrome 88+ only — real Safari (any platform) has no UserActivation
     // interface. Skip the class install AND the navigator binding on iOS.
     if (!_isMobileIOS() && typeof globalThis.UserActivation === 'undefined') {
@@ -5596,7 +5586,7 @@
     }
 
     // --- Native code masking ---
-    // Anti-bot detectors check Function.prototype.toString() for polyfilled APIs.
+    // Some scripts check Function.prototype.toString() for polyfilled APIs.
     // Real Chrome returns "function X() { [native code] }" for built-in functions.
     // Wrap our polyfills so toString() returns the native format.
 
@@ -5644,10 +5634,10 @@
     }
 
     // ================================================================
-    // P0 FIX: Error stack trace filtering
+    // Error stack trace filtering.
     // Remove deno_core internal frames AND all browser_oxide bootstrap
-    // script names from Error.stack. A captured VM trace previously
-    // showed `at h (<init_script_0>:51:34)` — Kasada literally saw the
+    // script names from Error.stack. An earlier trace
+    // showed `at h (<init_script_0>:51:34)`, exposing a
     // browser_oxide-internal script name. Real Chrome's stack frames
     // never show such tags; they show either real URLs or <anonymous>.
     //
@@ -5694,7 +5684,7 @@
     //
     // Real Chrome 130 quantizes to 100 µs but with hardware/scheduler jitter
     // around the step. A perfect 100 µs grid (Math.round * 10 / 10) gives
-    // `set(diffs).size === 1` for hot loops — Kasada/DataDome flag this.
+    // `set(diffs).size === 1` for hot loops, which differs from real Chrome.
     //
     // The op applies LogNormal(μ=ln 8 µs, σ=0.4) jitter clamped [0,35] µs
     // plus rare exponential spike. Installed on Performance.prototype so the
@@ -5708,18 +5698,16 @@
     }
 
     // ================================================================
-    // VisualViewport — Chrome surface that fingerprinters probe to
+    // VisualViewport — Chrome surface that fingerprint scripts probe to
     // detect mobile vs desktop AND to detect headless absence. Real
     // Chrome exposes a singleton instance accessible as
     // MediaSource + MediaRecorder.isTypeSupported in window realm.
-    // Kasada's `mrs` probe (W4a 2026-05-11) reads .isTypeSupported.
+    // Some scripts read .isTypeSupported.
     (() => {
-        // Per the captured Kasada smc probe blob (2026-05-10), Kasada
-        // tests audio/x-m4a + audio/aac + audio/acc and reads the
-        // boolean verdict. Real Chrome returns true; without these
-        // entries we return false → captured `v:false` was a real engine
-        // gap. Bringing in line with the first _supportedTypes Set at
-        // line 4987 (the canPlayType one).
+        // Some scripts test audio/x-m4a + audio/aac + audio/acc and read
+        // the boolean verdict. Real Chrome returns true; without these
+        // entries we return false, a real engine gap. Brought in line with
+        // the first _supportedTypes Set above (the canPlayType one).
         const _supportedTypes = new Set([
             "video/mp4", 'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
             'video/mp4;codecs="avc1.640028"', "video/webm",
@@ -5727,7 +5715,7 @@
             'video/webm;codecs="vp9,opus"', "audio/mp4",
             'audio/mp4;codecs="mp4a.40.2"', "audio/webm",
             'audio/webm;codecs=opus', 'audio/webm;codecs=vorbis',
-            // Kasada smc probe — captured blob 2026-05-10:
+            // Codec MIME aliases some scripts test:
             "audio/x-m4a", "audio/aac", "audio/acc",
             "audio/mpeg", "audio/ogg", "audio/wav", "audio/flac",
             "audio/mp3", "audio/x-wav",
@@ -5759,8 +5747,8 @@
         }
         _maskFunction(SourceBufferList, "SourceBufferList");
 
-        // Replace stubs with real (non-throwing) constructors so Kasada VM
-        // can call `new MediaSource()` during smc probe init without aborting.
+        // Replace stubs with real (non-throwing) constructors so a script
+        // can call `new MediaSource()` during init without aborting.
         (() => {
             class MediaSource extends EventTarget {
                 constructor() {
@@ -5950,10 +5938,9 @@
     // ================================================================
     // MediaCapabilities — `navigator.mediaCapabilities` is a real
     // `MediaCapabilities` instance in every modern Chrome / Safari /
-    // Firefox. Kasada (ips.js handler #45), DataDome, FingerprintJS and
-    // CreepJS all probe it; when the property is `undefined` the probe
-    // throws `Cannot read properties of undefined (reading '…')` and
-    // the resulting error fingerprint is the "headless" signal.
+    // Firefox. Many scripts probe it; when the property is `undefined`
+    // the probe throws `Cannot read properties of undefined (reading '…')`
+    // and the resulting error differs from a real browser.
     // Spec: https://w3c.github.io/media-capabilities/
     // Gated to non-Gecko UAs: Firefox's MediaCapabilities returns
     // {supported: true} for fewer codec families and exact shape match
@@ -5968,8 +5955,8 @@
         ]);
         const _normaliseMime = (s) => String(s || "").trim().toLowerCase();
         // Codec families that real Chrome reports as supported on
-        // desktop. Conservative: only the common families Kasada lists
-        // in its probe matrix (mp4/h264/h265, vp8/vp9, av1, opus, mp4a).
+        // desktop. Conservative: only the common families commonly probed
+        // (mp4/h264/h265, vp8/vp9, av1, opus, mp4a).
         const _supportedFamilies = [
             "video/mp4", "video/webm", "video/h264", "video/h265", "video/hevc",
             "video/avc", "video/vp8", "video/vp9", "video/av1", "video/avs3",
@@ -6056,7 +6043,7 @@
     // HTMLVideoElement.prototype.requestVideoFrameCallback — Chrome/Safari.
     // Firefox added it in 132 but with subtly different metadata shape.
     // Adding our Chrome-shaped impl to a Firefox profile creates a tell
-    // detected by PerimeterX (firefox v3 regressed wayfair). Gate to
+    // that fingerprint scripts can detect. Gate to
     // non-Gecko profiles. Spec: https://wicg.github.io/video-rvfc/
     // ================================================================
     const _isGeckoUA = /Firefox\/|Gecko\/20100101/.test(
@@ -6111,7 +6098,7 @@
     }
 
     // ================================================================
-    // P2 STUBS: Emerging APIs that anti-bot scripts probe for existence
+    // Emerging APIs that scripts commonly probe for existence
     // ================================================================
 
     // navigator.gpu (WebGPU) — prototype getter so own-descriptor probe
@@ -6121,8 +6108,8 @@
         // set, and adapter info. The previous stub had `limits: {}` (so
         // `adapter.limits.maxTextureDimension2D === undefined`), an empty
         // feature set, no `.info`, a bogus `.name` (real GPUAdapter has none),
-        // and a rejecting requestDevice — a strong headless tell that anti-bot
-        // fingerprints collect as `gpuSupportedLimits` / `gpuAdapterInfo`.
+        // and a rejecting requestDevice — a strong headless signal that
+        // fingerprint scripts collect as `gpuSupportedLimits` / `gpuAdapterInfo`.
         // Chrome BUCKETS WebGPU limits for anti-fingerprinting, so these values
         // are standardized across GPUs; info matches the macOS/Metal profile
         // (Apple Silicon, consistent with the ANGLE Metal WebGL renderer).
@@ -6239,7 +6226,7 @@
 
     // ================================================================
     // Trusted Types API (Chrome 83+)
-    // Anti-bot scripts and CSP policies check window.trustedTypes presence.
+    // Some scripts and CSP policies check window.trustedTypes presence.
     // ================================================================
     if (!globalThis.trustedTypes) {
         const _ttPolicies = new Map();
@@ -6278,7 +6265,7 @@
 
     // ================================================================
     // Scheduler API (Chrome 104+)
-    // window.scheduler.postTask / scheduler.yield are checked by bot detectors.
+    // window.scheduler.postTask / scheduler.yield are commonly checked.
     // ================================================================
     if (!globalThis.scheduler) {
         const _SProto = globalThis.Scheduler && globalThis.Scheduler.prototype;
@@ -6317,7 +6304,7 @@
     // ================================================================
     // Touch / TouchEvent constructors — present in Chrome on all platforms.
     // Desktop Chrome defines them even though touch isn't available.
-    // Anti-bot scripts check typeof Touch / typeof TouchEvent.
+    // Some scripts check typeof Touch / typeof TouchEvent.
     // ================================================================
     if (!globalThis.Touch) {
         globalThis.Touch = function Touch(init) {
@@ -6474,9 +6461,9 @@
     // Spec: https://wicg.github.io/event-timing/#eventcounts
     // Real Chrome 147 pre-populates this with 36 known event-type keys
     // at value 0. Insertion order matches Chromium's EventTypeNames
-    // enumeration — anti-bot scripts probe `eventCounts.size > 0` and
+    // enumeration — some scripts probe `eventCounts.size > 0` and
     // `Array.from(eventCounts.keys()).slice(0, 10)`. First-10 captured
-    // from Playwright MCP confirm: pointerdown, touchend, input,
+    // from a real browser confirm: pointerdown, touchend, input,
     // keydown, mouseleave, mouseenter, drop, beforeinput, pointerenter,
     // dragend. Phase 7.
     if (globalThis.performance && typeof globalThis.performance.eventCounts === "undefined") {
@@ -6513,7 +6500,7 @@
         // exposes eventCounts as a prototype getter so
         // Object.getOwnPropertyNames(performance) is empty. If we set it
         // as an own property, fingerprint scripts that count
-        // performance's own props (CreepJS) flag it as "modified
+        // performance's own props would flag it as "modified
         // performance".
         try {
             const _PerfProto = globalThis.Performance && globalThis.Performance.prototype
@@ -6792,7 +6779,7 @@
     }
 
     // (12) Document.prototype.hasPrivateToken / hasRedemptionRecord (Trust Tokens API)
-    // Chrome 130+ ad-fraud prevention APIs. Absence is a headless tell.
+    // Chrome 130+ ad-fraud prevention APIs. Absence differs from real Chrome.
     if (globalThis.Document && typeof globalThis.Document.prototype.hasPrivateToken === "undefined") {
         const _hasPrivateToken = function hasPrivateToken() { 
             return Promise.reject(new DOMException("The Trust Token API is not supported.", "NotSupportedError"));
@@ -6821,8 +6808,8 @@
     // "basic-card" methods — matches real Chrome with no enrolled card
     // (handler is registered, instrument is not). hasEnrolledInstrument()
     // resolves false: Chrome/Edge-only method that mirrors a fresh profile.
-    // No public stealth framework ships PaymentRequest; anti-bot scripts
-    // (Stripe, Sift, e-commerce sensors) feature-detect it as a real-browser
+    // PaymentRequest is rarely stubbed by competing engines; some scripts
+    // feature-detect it as a real-browser
     // signal even when they don't drive the show() flow.
     //
     // interfaces_bootstrap.js installs an illegal-constructor stub first,
@@ -6946,7 +6933,7 @@
     // (14) navigator.getInstalledRelatedApps — Get Installed Related Apps API.
     // Spec: https://wicg.github.io/get-installed-related-apps/
     // Chrome/Edge-only. Returns Promise<[]> on a fresh profile (no PWAs
-    // installed). Absence under a Chrome UA is itself a tell — anti-bot
+    // installed). Absence under a Chrome UA is itself a signal — some
     // scripts can probe `'getInstalledRelatedApps' in navigator` against
     // the UA family. Skip on iOS (Safari has no such method).
     if (!_isMobileIOS() && typeof navigator !== "undefined" && typeof navigator.getInstalledRelatedApps !== "function") {

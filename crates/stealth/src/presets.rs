@@ -108,16 +108,17 @@ pub fn chrome_148_windows() -> StealthProfile {
     }
 }
 
-/// Chrome 148 on macOS 15. (UA bumped 2026-05-13 — anti-bot vendors flag old Chrome
-/// versions. Real Chrome shipped 148 in early May 2026 per chromiumdash.appspot.com:
-/// current stable = 148.0.7778.168 (Mac/Windows), 148.0.7778.167 (Linux).
-/// TLS impersonation label is still `chrome_147` — internal codename; not on wire.
+/// Chrome 148 on macOS 15. Real Chrome shipped 148 in early May 2026 per
+/// chromiumdash.appspot.com: current stable = 148.0.7778.168 (Mac/Windows),
+/// 148.0.7778.167 (Linux). Tracking the current stable version matters because
+/// an outdated Chrome version is itself a reliable signal. The TLS impersonation
+/// label is still `chrome_147` — an internal codename; not on the wire.
 ///
 /// **CRITICAL**: navigator.userAgent reports `Chrome/148.0.0.0` (FROZEN minor versions
 /// per Chrome's User-Agent reduction since March 2023 / Chrome 110+). The full version
 /// `148.0.7778.168` is ONLY exposed via sec-ch-ua-full-version-list. Sending the full
-/// version in the UA string is a 100% reliable bot signal — verified 2026-04-27 by
-/// comparing httpbin.org/headers from playwright vs our pipeline.)
+/// version in the UA string is a divergence from real Chrome behavior — confirmed by
+/// comparing real-browser header captures against our pipeline.
 pub fn chrome_148_macos() -> StealthProfile {
     StealthProfile {
         enforce_csp: true,
@@ -137,7 +138,7 @@ pub fn chrome_148_macos() -> StealthProfile {
 
         // Phase 7 — match real Chrome 148 on macOS arm64 (M3 MacBook Pro):
         // 1512x982 viewport, availHeight 949 (982 - 33 top), colorDepth 30,
-        // 8 cpu cores. Verified against Playwright MCP probe_mcp_secure.json.
+        // 8 cpu cores. Verified against a real-browser secure-context probe capture.
         screen_width: 1512,
         screen_height: 982,
         screen_avail_width: 1512,
@@ -176,8 +177,7 @@ pub fn chrome_148_macos() -> StealthProfile {
         audio_seed: 0x0987654321fedcba,
         // Apple Silicon M3 reports 48000 Hz native; this is the value
         // real Chrome on M3 returns from `new AudioContext().sampleRate`.
-        // See `docs/releases/v0.1.0-parity/audit/03_HARDWARE_SPOOFING_DIFF.md`
-        // §FIX-C for the cross-page-load consistency rationale.
+        // Held constant across page loads for cross-load consistency.
         audio_sample_rate: 48000,
 
         has_platform_authenticator: true,
@@ -395,14 +395,13 @@ pub fn chrome_148_jp() -> StealthProfile {
 
 // ===== Firefox 135 presets =====
 //
-// Per the Camoufox network capture (`/tmp/cam_capture/summary.txt`), real
-// Firefox 135 sends a distinctly different request shape than Chrome — no
-// `sec-ch-ua*` headers, different `accept` and `accept-language` quality
-// values, no `priority` header. Several anti-bot vendors (DataDome,
-// Disney+, Akamai-protected adidas) treat Firefox more leniently than
-// Chrome because Chrome is ~70% of bot traffic, so vendors invest
-// disproportionately in Chrome detection. Adding a Firefox profile lets
-// callers swap to it for sites where Chrome class is being detected.
+// Per a real Firefox network capture, real Firefox 135 sends a distinctly
+// different request shape than Chrome — no `sec-ch-ua*` headers, different
+// `accept` and `accept-language` quality values, no `priority` header. Some
+// sites treat Firefox more leniently than Chrome because Chrome is the
+// majority of traffic and receives disproportionate detection investment.
+// Adding a Firefox profile lets callers swap to it for sites where the
+// Chrome class is being detected.
 //
 // Firefox-specific spec details:
 // - `navigator.vendor === ""` (Chrome reports "Google Inc.")
@@ -412,11 +411,9 @@ pub fn chrome_148_jp() -> StealthProfile {
 //   default (Firefox 113+ enables this for non-Nightly to reduce passive
 //   fingerprint surface)
 // - `tls_impersonate` is set to `firefox_135` here as a forward-compatible
-//   string; the actual TLS-class swap is gated by Phase B.3 (rquest's
-//   `Impersonate::Firefox*` enum). Until B.3 lands, the network layer
-//   falls back to the chrome_147 cipher suite — coherent for now since
-//   most sites that flip on Firefox UA do so based on the UA + headers,
-//   not TLS.
+//   string; when the Firefox TLS-class swap is not active the network layer
+//   falls back to the Chrome cipher suite — coherent for now since most
+//   sites that flip on Firefox UA do so based on the UA + headers, not TLS.
 
 /// Firefox 135 on macOS.
 pub fn firefox_135_macos() -> StealthProfile {
@@ -467,9 +464,8 @@ pub fn firefox_135_macos() -> StealthProfile {
         // bytes are emitted by `crates/net` via boring2/BoringSSL with a
         // Chrome-tuned ClientHello. A real Firefox JA4 swap requires
         // reconfiguring boring2's cipher list / extension order to match
-        // NSS — substantial work tracked as a future item. Many sites
-        // (including the Camoufox-passing leboncoin/disneyplus) flip on
-        // UA+headers alone, so this gap is acceptable for Phase B.
+        // NSS — substantial work tracked as a future item. Many sites flip
+        // on UA+headers alone, so this gap is acceptable for now.
         device_class: DeviceClass::Desktop,
         tls_impersonate: "firefox_135".into(),
         connection_effective_type: "4g".into(),
@@ -687,9 +683,9 @@ pub fn random_desktop() -> StealthProfile {
 /// count, RAM, and fingerprint seeds independently sampled from
 /// realistic Apple Silicon distributions. Use this in benchmarking
 /// / sweep / production loops where issuing the SAME profile from the
-/// SAME datacenter IP across many requests trips AWS WAF IP-clustering
-/// (per `docs/releases/v0.1.0-parity/audit/15_FIX_PRIORITY_RANKED.md`
-/// §FIX-E — Camoufox v150 ships 67 macOS variants vs BO's 1).
+/// SAME datacenter IP across many requests trips IP-based fingerprint
+/// clustering. Real-browser tooling ships dozens of macOS variants;
+/// sampling avoids presenting a single static device fingerprint.
 ///
 /// Sampled axes (all common on shipping Apple Silicon Macs):
 /// - **Screen** — `(width, height, avail_height)` from a 4-config pool
@@ -726,7 +722,7 @@ pub fn chrome_148_macos_sampled() -> StealthProfile {
 /// tests can pin determinism.
 ///
 /// **Cross-API consistency.** Sampled values MUST stay self-consistent
-/// because anti-bot fingerprinters cross-check related surfaces:
+/// because fingerprinters cross-check related surfaces:
 /// `navigator.hardwareConcurrency` is expected to match the chip
 /// claimed by `WEBGL_UNMASKED_RENDERER`. So the sampler picks ONE chip
 /// per call (M3 base / M3 Pro / M3 Max) and constrains `cpu_cores`,
@@ -734,9 +730,9 @@ pub fn chrome_148_macos_sampled() -> StealthProfile {
 /// chip's shipping configurations.
 ///
 /// Verified empirically: an earlier sampler version that varied cores
-/// independently of GPU regressed an 8-site AWS WAF sweep from
-/// 1/8 flips → 0/8. The narrower M3-only fix passed cross-API checks.
-/// FIX-E2 widens the pool again by adding `apple_m3_pro_macos()` /
+/// independently of GPU regressed a multi-site sweep because the cross-API
+/// surfaces no longer agreed. The narrower M3-only fix passed cross-API
+/// checks. The pool is widened again by adding `apple_m3_pro_macos()` /
 /// `apple_m3_max_macos()` GpuProfile variants that match the chip
 /// variant being sampled.
 ///
@@ -816,7 +812,7 @@ pub fn chrome_148_macos_sampled_with_rng(rng: &mut impl rand::RngExt) -> Stealth
 
     // Fully randomize the canvas + audio fingerprint seeds so two
     // instances of this sampler produce distinct canvas / DynamicsCompressor
-    // hashes (defeats per-fingerprint clustering on the AWS WAF side).
+    // hashes, avoiding per-fingerprint clustering across instances.
     p.canvas_seed = rng.random();
     p.audio_seed = rng.random();
 
@@ -1048,7 +1044,7 @@ mod tests {
 
     #[test]
     fn http3_disabled_by_default_on_all_presets() {
-        // Gap #33: vanilla quinn-proto emits randomized transport_parameters
+        // vanilla quinn-proto emits randomized transport_parameters
         // per handshake; advertising h3 is worse than not speaking it. All
         // shipped presets must default allow_http3 to false until we
         // vendor-fork quinn with a Chrome-fixed-order patch.
@@ -1245,11 +1241,11 @@ mod tests {
 
     #[test]
     fn macos_sampler_keeps_per_chip_cross_api_consistency() {
-        // FIX-E2 invariant: every sample's (cpu_cores, gpu_renderer,
+        // Cross-API invariant: every sample's (cpu_cores, gpu_renderer,
         // device_memory) tuple must describe ONE real Apple Silicon
         // device. An earlier sampler version that varied cores
-        // independently of GPU regressed an 8-site AWS WAF sweep from
-        // 1/8 → 0/8.
+        // independently of GPU regressed a multi-site sweep because the
+        // cross-API surfaces no longer agreed.
         for _ in 0..50 {
             let p = chrome_148_macos_sampled();
             let r = &p.gpu_profile.unmasked_renderer;

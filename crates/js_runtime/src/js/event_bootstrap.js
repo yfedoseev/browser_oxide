@@ -2,10 +2,10 @@
     const _listeners = new Map(); // nodeId → Map<eventType, [{callback, capture, once}]>
     // ---- Trusted-event authenticity (v0.1.0 behavioral E1) ----------------
     // `isTrusted` MUST be both unforgeable and shaped like a real browser's:
-    //   * a GETTER on Event.prototype — NOT an own data property. Anti-bots
-    //     (DataDome/Akamai/Kasada/PerimeterX) read
-    //     `getOwnPropertyDescriptor(evt,'isTrusted')` and flag an own-data
-    //     `isTrusted` as synthetic (real browsers expose it via the prototype).
+    //   * a GETTER on Event.prototype — NOT an own data property. Scripts
+    //     that read `getOwnPropertyDescriptor(evt,'isTrusted')` can flag an
+    //     own-data `isTrusted` as synthetic (real browsers expose it via
+    //     the prototype).
     //   * backed by a MODULE-PRIVATE WeakSet that page JS cannot reach. The
     //     old design keyed trust off `Symbol.for('__bo_trusted__')` — the
     //     GLOBAL symbol registry — so any page could re-derive the symbol and
@@ -451,10 +451,10 @@
         delete origNodeProto.dispatchEvent;
     }
 
-    // Native-code masking — PerimeterX/HUMAN run
+    // Native-code masking — some scripts run
     // `Function.prototype.toString.call(addEventListener)` against both
     // window-level and prototype-level methods. Each must serialize as
-    // `function NAME() { [native code] }`.
+    // `function NAME() { [native code] }`, as in a real browser.
     if (typeof _maskFunction === 'function') {
         _maskFunction(_addEventListener, 'addEventListener');
         _maskFunction(_removeEventListener, 'removeEventListener');

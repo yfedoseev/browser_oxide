@@ -97,8 +97,8 @@
             // customElements, devicePixelRatio, etc.). Real Chrome
             // exposes them as Window globals — calling `new` on a
             // function throws `TypeError: X is not a constructor`,
-            // NOT `Illegal constructor`. The Kasada `nppm` probe
-            // captured our stub error and used it as a headless signal.
+            // NOT `Illegal constructor`. An earlier stub threw the wrong
+            // error message here, which differs from real Chrome.
             // Skip stubbing them as classes; if they aren't installed
             // by a later bootstrap (e.g. structured_clone.js), they
             // remain undefined and `typeof X === "undefined"` matches

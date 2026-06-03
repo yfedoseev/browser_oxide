@@ -156,6 +156,9 @@ impl WebGLContext {
 
     pub fn create_shader(&mut self, shader_type: u32) -> u32 {
         let id = self.alloc_id();
+        // SAFETY: GL context is current on this thread (the file-wide
+        // invariant established by `new`); `create_shader` only allocates
+        // a GL name from an enum and touches no caller-supplied pointers.
         let shader = unsafe { self.gl.create_shader(shader_type).ok() };
         if let Some(s) = shader {
             self.shaders.insert(id, s);
@@ -165,12 +168,17 @@ impl WebGLContext {
 
     pub fn shader_source(&self, shader_id: u32, source: &str) {
         if let Some(s) = self.shaders.get(&shader_id) {
+            // SAFETY: GL context is current; `*s` is a live `glow::Shader`
+            // handle we created and stored in `self.shaders`, and `source`
+            // is a Rust `&str` glow copies into GL for the call's duration.
             unsafe { self.gl.shader_source(*s, source) };
         }
     }
 
     pub fn compile_shader(&self, shader_id: u32) {
         if let Some(s) = self.shaders.get(&shader_id) {
+            // SAFETY: GL context is current; `*s` is a live `glow::Shader`
+            // handle we created and stored in `self.shaders`.
             unsafe { self.gl.compile_shader(*s) };
         }
     }
@@ -185,6 +193,9 @@ impl WebGLContext {
             return 0;
         }
         if let Some(s) = self.shaders.get(&shader_id) {
+            // SAFETY: GL context is current; `*s` is a live `glow::Shader`
+            // handle we created and stored in `self.shaders`; the call only
+            // reads the compile-status state and returns a bool.
             unsafe {
                 if self.gl.get_shader_compile_status(*s) {
                     1
@@ -199,6 +210,8 @@ impl WebGLContext {
 
     pub fn get_shader_info_log(&self, shader_id: u32) -> String {
         if let Some(s) = self.shaders.get(&shader_id) {
+            // SAFETY: GL context is current; `*s` is a live `glow::Shader`
+            // handle we created and stored; the call only reads the info log.
             unsafe { self.gl.get_shader_info_log(*s) }
         } else {
             String::new()
@@ -207,6 +220,8 @@ impl WebGLContext {
 
     pub fn create_program(&mut self) -> u32 {
         let id = self.alloc_id();
+        // SAFETY: GL context is current; `create_program` allocates a GL
+        // program name and touches no caller-supplied pointers.
         let program = unsafe { self.gl.create_program().ok() };
         if let Some(p) = program {
             self.programs.insert(id, p);
@@ -216,12 +231,16 @@ impl WebGLContext {
 
     pub fn attach_shader(&self, program_id: u32, shader_id: u32) {
         if let (Some(p), Some(s)) = (self.programs.get(&program_id), self.shaders.get(&shader_id)) {
+            // SAFETY: GL context is current; `*p` and `*s` are live
+            // `glow::Program`/`glow::Shader` handles we created and stored.
             unsafe { self.gl.attach_shader(*p, *s) };
         }
     }
 
     pub fn link_program(&self, program_id: u32) {
         if let Some(p) = self.programs.get(&program_id) {
+            // SAFETY: GL context is current; `*p` is a live `glow::Program`
+            // handle we created and stored in `self.programs`.
             unsafe { self.gl.link_program(*p) };
         }
     }
@@ -235,6 +254,8 @@ impl WebGLContext {
             return 0;
         }
         if let Some(p) = self.programs.get(&program_id) {
+            // SAFETY: GL context is current; `*p` is a live `glow::Program`
+            // handle we created and stored; the call only reads link status.
             unsafe {
                 if self.gl.get_program_link_status(*p) {
                     1
@@ -253,6 +274,8 @@ impl WebGLContext {
         } else {
             self.programs.get(&program_id).copied()
         };
+        // SAFETY: GL context is current; `p` is either `None` (unbind) or a
+        // live `glow::Program` handle we created and stored in `self.programs`.
         unsafe { self.gl.use_program(p) };
     }
 
@@ -262,6 +285,9 @@ impl WebGLContext {
         let Some(p) = self.programs.get(&program_id).copied() else {
             return -1;
         };
+        // SAFETY: GL context is current; `p` is a live `glow::Program`
+        // handle we created and stored; `name` is a Rust `&str` glow copies
+        // into a C string for the call's duration.
         let Some(loc) = (unsafe { self.gl.get_uniform_location(p, name) }) else {
             return -1;
         };
@@ -281,6 +307,9 @@ impl WebGLContext {
 
     pub fn get_attrib_location(&self, program_id: u32, name: &str) -> i32 {
         if let Some(p) = self.programs.get(&program_id) {
+            // SAFETY: GL context is current; `*p` is a live `glow::Program`
+            // handle we created and stored; `name` is a Rust `&str` glow
+            // copies into a C string for the call's duration.
             unsafe {
                 self.gl
                     .get_attrib_location(*p, name)
@@ -294,18 +323,27 @@ impl WebGLContext {
 
     pub fn uniform1f(&self, location: i32, v0: f32) {
         if let Some(loc) = self.uniform_location(location) {
+            // SAFETY: GL context is current; `loc` is a live
+            // `glow::UniformLocation` we obtained from this context and
+            // stored in `self.uniform_locations`.
             unsafe { self.gl.uniform_1_f32(Some(loc), v0) };
         }
     }
 
     pub fn uniform4f(&self, location: i32, v0: f32, v1: f32, v2: f32, v3: f32) {
         if let Some(loc) = self.uniform_location(location) {
+            // SAFETY: GL context is current; `loc` is a live
+            // `glow::UniformLocation` we obtained from this context and
+            // stored in `self.uniform_locations`.
             unsafe { self.gl.uniform_4_f32(Some(loc), v0, v1, v2, v3) };
         }
     }
 
     pub fn uniform1i(&self, location: i32, v0: i32) {
         if let Some(loc) = self.uniform_location(location) {
+            // SAFETY: GL context is current; `loc` is a live
+            // `glow::UniformLocation` we obtained from this context and
+            // stored in `self.uniform_locations`.
             unsafe { self.gl.uniform_1_i32(Some(loc), v0) };
         }
     }
@@ -315,6 +353,10 @@ impl WebGLContext {
             return;
         }
         if let Some(loc) = self.uniform_location(location) {
+            // SAFETY: GL context is current; `loc` is a live
+            // `glow::UniformLocation` we obtained from this context and
+            // stored; `data` is checked to be exactly 16 floats above, the
+            // length a 4x4 matrix upload requires.
             unsafe {
                 self.gl
                     .uniform_matrix_4_f32_slice(Some(loc), transpose, data)
@@ -326,6 +368,8 @@ impl WebGLContext {
 
     pub fn create_buffer(&mut self) -> u32 {
         let id = self.alloc_id();
+        // SAFETY: GL context is current; `create_buffer` allocates a GL
+        // buffer name and touches no caller-supplied pointers.
         let buf = unsafe { self.gl.create_buffer().ok() };
         if let Some(b) = buf {
             self.buffers.insert(id, b);
@@ -339,10 +383,15 @@ impl WebGLContext {
         } else {
             self.buffers.get(&buffer_id).copied()
         };
+        // SAFETY: GL context is current; `b` is either `None` (unbind) or a
+        // live `glow::Buffer` handle we created and stored in `self.buffers`.
         unsafe { self.gl.bind_buffer(target, b) };
     }
 
     pub fn buffer_data(&self, target: u32, data: &[u8], usage: u32) {
+        // SAFETY: GL context is current; `data` is a Rust `&[u8]` whose
+        // length glow passes to GL, so the upload reads only valid bytes
+        // for the slice's lifetime (the duration of the call).
         unsafe { self.gl.buffer_data_u8_slice(target, data, usage) };
     }
 
@@ -355,6 +404,9 @@ impl WebGLContext {
         stride: i32,
         offset: i32,
     ) {
+        // SAFETY: GL context is current; this only records vertex-attrib
+        // pointer state (offset is a byte offset into the bound buffer, not
+        // a host pointer) and dereferences no caller-supplied pointers.
         unsafe {
             self.gl
                 .vertex_attrib_pointer_f32(index, size, data_type, normalized, stride, offset);
@@ -362,28 +414,42 @@ impl WebGLContext {
     }
 
     pub fn enable_vertex_attrib_array(&self, index: u32) {
+        // SAFETY: GL context is current; this is a state-only call that
+        // touches no caller-supplied pointers.
         unsafe { self.gl.enable_vertex_attrib_array(index) };
     }
 
     // --- Drawing ---
 
     pub fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) {
+        // SAFETY: GL context is current; this is a state-only call that
+        // touches no caller-supplied pointers.
         unsafe { self.gl.clear_color(r, g, b, a) };
     }
 
     pub fn clear(&self, mask: u32) {
+        // SAFETY: GL context is current; clears the framebuffer bound to
+        // the live OSMesa context and touches no caller-supplied pointers.
         unsafe { self.gl.clear(mask) };
     }
 
     pub fn viewport(&self, x: i32, y: i32, w: i32, h: i32) {
+        // SAFETY: GL context is current; this is a state-only call that
+        // touches no caller-supplied pointers.
         unsafe { self.gl.viewport(x, y, w, h) };
     }
 
     pub fn draw_arrays(&self, mode: u32, first: i32, count: i32) {
+        // SAFETY: GL context is current; draws from the currently bound
+        // program/buffers and touches no caller-supplied pointers. Invalid
+        // `first`/`count` values produce a GL error, not UB.
         unsafe { self.gl.draw_arrays(mode, first, count) };
     }
 
     pub fn draw_elements(&self, mode: u32, count: i32, element_type: u32, offset: i32) {
+        // SAFETY: GL context is current; `offset` is a byte offset into the
+        // bound element-array buffer (not a host pointer); draws from the
+        // currently bound program/buffers and touches no host pointers.
         unsafe { self.gl.draw_elements(mode, count, element_type, offset) };
     }
 
@@ -392,6 +458,10 @@ impl WebGLContext {
     pub fn read_pixels(&self, x: i32, y: i32, w: i32, h: i32, format: u32, type_: u32) -> Vec<u8> {
         let size = (w * h * 4) as usize; // RGBA
         let mut pixels = vec![0u8; size];
+        // SAFETY: GL context is current; `pixels` is a `Vec<u8>` sized to
+        // `w*h*4` (RGBA) which matches the region read, and the
+        // `PixelPackData::Slice` borrows it mutably for the call's duration
+        // so GL writes only within the allocation.
         unsafe {
             self.gl.read_pixels(
                 x,
@@ -451,6 +521,8 @@ impl WebGLContext {
 
     pub fn create_texture(&mut self) -> u32 {
         let id = self.alloc_id();
+        // SAFETY: GL context is current; `create_texture` allocates a GL
+        // texture name and touches no caller-supplied pointers.
         let tex = unsafe { self.gl.create_texture().ok() };
         if let Some(t) = tex {
             self.textures.insert(id, t);
@@ -464,10 +536,14 @@ impl WebGLContext {
         } else {
             self.textures.get(&texture_id).copied()
         };
+        // SAFETY: GL context is current; `t` is either `None` (unbind) or a
+        // live `glow::Texture` handle we created and stored in `self.textures`.
         unsafe { self.gl.bind_texture(target, t) };
     }
 
     pub fn tex_parameteri(&self, target: u32, pname: u32, param: i32) {
+        // SAFETY: GL context is current; this sets sampler/texture state on
+        // the bound texture and touches no caller-supplied pointers.
         unsafe { self.gl.tex_parameter_i32(target, pname, param) };
     }
 
@@ -482,6 +558,9 @@ impl WebGLContext {
         type_: u32,
         data: Option<&[u8]>,
     ) {
+        // SAFETY: GL context is current; `data` is an `Option<&[u8]>` whose
+        // length glow validates against width*height*format for the upload,
+        // and the slice is borrowed only for the duration of the call.
         unsafe {
             self.gl.tex_image_2d(
                 target,
@@ -500,26 +579,38 @@ impl WebGLContext {
     // --- State ---
 
     pub fn enable(&self, cap: u32) {
+        // SAFETY: GL context is current; this is a state-only call that
+        // touches no caller-supplied pointers.
         unsafe { self.gl.enable(cap) };
     }
 
     pub fn disable(&self, cap: u32) {
+        // SAFETY: GL context is current; this is a state-only call that
+        // touches no caller-supplied pointers.
         unsafe { self.gl.disable(cap) };
     }
 
     pub fn blend_func(&self, sfactor: u32, dfactor: u32) {
+        // SAFETY: GL context is current; this is a state-only call that
+        // touches no caller-supplied pointers.
         unsafe { self.gl.blend_func(sfactor, dfactor) };
     }
 
     pub fn depth_func(&self, func: u32) {
+        // SAFETY: GL context is current; this is a state-only call that
+        // touches no caller-supplied pointers.
         unsafe { self.gl.depth_func(func) };
     }
 
     pub fn pixel_storei(&self, pname: u32, param: i32) {
+        // SAFETY: GL context is current; this is a state-only call that
+        // touches no caller-supplied pointers.
         unsafe { self.gl.pixel_store_i32(pname, param) };
     }
 
     pub fn get_error(&self) -> u32 {
+        // SAFETY: GL context is current; reads and clears the GL error flag,
+        // touching no caller-supplied pointers.
         unsafe { self.gl.get_error() }
     }
 
@@ -527,6 +618,8 @@ impl WebGLContext {
 
     pub fn create_framebuffer(&mut self) -> u32 {
         let id = self.alloc_id();
+        // SAFETY: GL context is current; `create_framebuffer` allocates a GL
+        // framebuffer name and touches no caller-supplied pointers.
         let fb = unsafe { self.gl.create_framebuffer().ok() };
         if let Some(f) = fb {
             self.framebuffers.insert(id, f);
@@ -540,10 +633,14 @@ impl WebGLContext {
         } else {
             self.framebuffers.get(&fb_id).copied()
         };
+        // SAFETY: GL context is current; `f` is either `None` (bind default)
+        // or a live `glow::Framebuffer` handle we created and stored.
         unsafe { self.gl.bind_framebuffer(target, f) };
     }
 
     pub fn check_framebuffer_status(&self, target: u32) -> u32 {
+        // SAFETY: GL context is current; reads the completeness status of
+        // the bound framebuffer and touches no caller-supplied pointers.
         unsafe { self.gl.check_framebuffer_status(target) }
     }
 
@@ -556,6 +653,9 @@ impl WebGLContext {
         level: i32,
     ) {
         let t = self.textures.get(&texture_id).copied();
+        // SAFETY: GL context is current; `t` is either `None` or a live
+        // `glow::Texture` handle we created and stored; attaches it to the
+        // bound framebuffer and touches no caller-supplied pointers.
         unsafe {
             self.gl
                 .framebuffer_texture_2d(target, attachment, textarget, t, level);
@@ -566,30 +666,45 @@ impl WebGLContext {
 
     pub fn delete_shader(&mut self, shader_id: u32) {
         if let Some(s) = self.shaders.remove(&shader_id) {
+            // SAFETY: GL context is current; `s` is a live `glow::Shader`
+            // handle removed from `self.shaders`, so it is deleted exactly
+            // once and never used again.
             unsafe { self.gl.delete_shader(s) };
         }
     }
 
     pub fn delete_program(&mut self, program_id: u32) {
         if let Some(p) = self.programs.remove(&program_id) {
+            // SAFETY: GL context is current; `p` is a live `glow::Program`
+            // handle removed from `self.programs`, so it is deleted exactly
+            // once and never used again.
             unsafe { self.gl.delete_program(p) };
         }
     }
 
     pub fn delete_buffer(&mut self, buffer_id: u32) {
         if let Some(b) = self.buffers.remove(&buffer_id) {
+            // SAFETY: GL context is current; `b` is a live `glow::Buffer`
+            // handle removed from `self.buffers`, so it is deleted exactly
+            // once and never used again.
             unsafe { self.gl.delete_buffer(b) };
         }
     }
 
     pub fn delete_texture(&mut self, texture_id: u32) {
         if let Some(t) = self.textures.remove(&texture_id) {
+            // SAFETY: GL context is current; `t` is a live `glow::Texture`
+            // handle removed from `self.textures`, so it is deleted exactly
+            // once and never used again.
             unsafe { self.gl.delete_texture(t) };
         }
     }
 
     pub fn delete_framebuffer(&mut self, fb_id: u32) {
         if let Some(f) = self.framebuffers.remove(&fb_id) {
+            // SAFETY: GL context is current; `f` is a live
+            // `glow::Framebuffer` handle removed from `self.framebuffers`, so
+            // it is deleted exactly once and never used again.
             unsafe { self.gl.delete_framebuffer(f) };
         }
     }
@@ -620,6 +735,9 @@ impl Drop for WebGLContext {
         }
 
         // Destroy OSMesa context
+        // SAFETY: `self.osmesa_ctx` is the non-null context created in
+        // `new` and never replaced; `Drop` runs exactly once, so the
+        // context is destroyed exactly once and not used afterwards.
         unsafe {
             osmesa_ffi::OSMesaDestroyContext(self.osmesa_ctx);
         }

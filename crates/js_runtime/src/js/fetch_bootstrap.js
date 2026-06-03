@@ -195,10 +195,9 @@
                     // Empty url resolves to the document URL itself (real Chrome:
                     // fetch('') hits location.href). The previous `if (url && …)`
                     // guard skipped the empty case, so fetch('') reached op_fetch
-                    // unresolved → "relative URL without a base" → the Akamai
-                    // sec-cpt sensor POST (fetch('') / sendBeacon('')) silently
-                    // failed and sec-cpt never solved (homedepot Akamai-CHL,
-                    // deterministic). Our URL polyfill throws on `new URL('',base)`,
+                    // unresolved → "relative URL without a base" → a
+                    // challenge POST (fetch('') / sendBeacon('')) silently
+                    // failed. Our URL polyfill throws on `new URL('',base)`,
                     // so handle empty explicitly.
                     url = (url === "") ? base : new URL(url, base).href;
                 }
@@ -255,7 +254,7 @@
         method = (init.method ?? "GET").toUpperCase();
         // Body can be: string, ArrayBuffer, TypedArray (Uint8Array), Blob,
         // FormData, URLSearchParams, or null. We must preserve binary
-        // fidelity for Kasada-style `application/octet-stream` POSTs.
+        // fidelity for `application/octet-stream` POSTs.
         //
         // Rust op_fetch accepts the body as a marker-prefixed string:
         //   "s:<text>"   — plain UTF-8 string body
@@ -286,11 +285,11 @@
             for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
             body = "b:" + btoa(bin);
         } else if (_isFormData) {
-            // FIX-FORMDATA (parity-workflows): serialize FormData → multipart
-            // with a generated boundary. AWS-WAF's challenge.js POSTs its proof
-            // as FormData; without this we sent the literal "[object FormData]"
-            // and AWS rejected the POST with 400 "Invalid boundary for
-            // multipart/form-data request" — blocking the amazon-TLD cluster.
+            // Serialize FormData → multipart with a generated boundary.
+            // Some challenge scripts POST their proof as FormData; without
+            // this we sent the literal "[object FormData]" and the server
+            // rejected the POST with 400 "Invalid boundary for
+            // multipart/form-data request".
             multipartBoundary =
                 "----browserOxideFormBoundary" +
                 Math.random().toString(36).slice(2) +
@@ -369,7 +368,7 @@
             }
 
             // Sync cookies from the net jar into document.cookie so subsequent JS
-            // reads (including the WBAAS challenge polling loop) see Set-Cookie
+            // reads (including challenge polling loops) see Set-Cookie
             // values that arrived via this response.
             await _syncCookiesFromNet(url);
             return new Response(result.body, {
@@ -443,9 +442,9 @@
         value: _drainCspViolations, enumerable: false, configurable: true,
     });
 
-    // Mask Function.prototype.toString so antibot probes (Kasada `sfc`
-    // field) see `function fetch() { [native code] }` instead of our
-    // literal source.
+    // Mask Function.prototype.toString so scripts that inspect it
+    // see `function fetch() { [native code] }` (as in real Chrome)
+    // instead of our literal source.
     if (typeof globalThis._maskFunction === 'function') {
         try { globalThis._maskFunction(globalThis.fetch, 'fetch'); } catch (_) {}
         if (globalThis.Request) try { globalThis._maskFunction(globalThis.Request, 'Request'); } catch (_) {}
