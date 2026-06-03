@@ -83,7 +83,6 @@ Workspace of 15 crates. Single responsibility per crate:
 | `stealth` | Fingerprint profiles + navigator spoofing. |
 | `protocol` | CDP server (Puppeteer/Playwright drop-in). |
 | `browser` | Top-level `Browser` / `Page` API. |
-| `akamai` | Akamai BMP sensor payload encoder. |
 
 When adding a new file, put it under the crate that owns the
 responsibility. If it doesn't fit, that's a design discussion — open an

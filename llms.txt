@@ -73,4 +73,3 @@ cargo fmt --all -- --check
 - `stealth` — fingerprint profiles + navigator spoofing.
 - `protocol` — CDP server (Puppeteer/Playwright drop-in).
 - `browser` — top-level `Browser` / `Page` API.
-- `akamai` — Akamai BMP sensor payload encoder.

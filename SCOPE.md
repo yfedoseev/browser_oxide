@@ -78,7 +78,7 @@ asked them?* If yes, you're fine. If no, this is the wrong tool.
   exceptions in `deny.toml`. Drop-in for proprietary downstream is
   intentional.
 - **Reproducible measurement.** Every claim in `README.md` traces to
-  a test in `crates/browser/tests/` or a benchmark in `benches/`. If
+  a test in `crates/browser/tests/` or a benchmark in `crates/browser/benches/`. If
   it doesn't, it doesn't go in the README.
 
 ## Reporting misuse

@@ -8,8 +8,9 @@
 #
 # Policy summary:
 #   - Licenses: permissive only (MIT, Apache-2.0, BSD-3, ISC, Zlib, Unicode,
-#     CDLA-Permissive-2.0). NO MPL, NO AGPL, NO GPL/LGPL. The "no copyleft"
-#     pledge in the README is mechanically enforced here.
+#     CDLA-Permissive-2.0). NO AGPL, NO GPL/LGPL. MPL-2.0 is denied EXCEPT two
+#     cited transitive/optional exceptions (cooked-waker, adblock) carved out
+#     in [licenses.exceptions] below. Mechanically enforced here.
 #   - Sources: crates.io only. Reject git/path/registry alternatives.
 #   - Advisories: fail on any known security vulnerability.
 
