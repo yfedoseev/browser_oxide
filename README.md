@@ -53,32 +53,37 @@ vendor-stripped open-source engine — no per-vendor bypass code in the
 tree. Same machine, same IP, same hour, same classifier
 (`browser::engine_classify`).
 
-| browser_oxide profile        | **Pass** (real render, ≥15 KB) | L3-tag (loose) |
+| browser_oxide profile        | **Pass** (real render, ≥15 KB) | loose `L3` tag |
 |------------------------------|--:|--:|
-| `chrome_148_macos`           | 102 | 116 |
-| `firefox_135_macos`          | 101 | 115 |
-| `pixel_9_pro_chrome_148`     | 104 | 119 |
-| `iphone_15_pro_safari_18`    | 106 | 120 |
-| **best-of-4 routed**         | **110** | **122** |
+| `chrome_148_macos`           | **115** | 119 |
+| `firefox_135_macos`          | **112** | 116 |
+| `pixel_9_pro_chrome_148`     | **113** | 117 |
+| `iphone_15_pro_safari_18`    | **115** | 119 |
+| **best-of-4 routed**         | **118** | 122 |
 
-Two numbers per row because the corpus contains 10–15 SPA-bootstrap
-sites (amazon stubs, imdb, booking, …) that ship a 2–13 KB shell to
-*any* non-real-browser HTTP client — they get tagged `L3-RENDERED` by
-absence of a challenge marker but the body isn't a real render. The
-strict `Pass` column requires `≥15 KB` of actual content
-(`ChallengeVerdict::Pass`, the rule the engine's own audit harness
-uses). "Routed" = the caller picks the best profile per domain, which
-most real scraping pipelines do naturally.
+The headline `Pass` column is the honest gate: the engine's `L3-RENDERED`
+tag **and** `≥15 KB` of actual content (`ChallengeVerdict::Pass`, the rule
+the engine's own audit harness uses). The loose column counts the
+`L3-RENDERED` tag alone — it over-counts by ~4, because the corpus has
+10–15 SPA-bootstrap sites that ship a 2–13 KB shell to *any* HTTP client
+and get tagged `L3-RENDERED` by the *absence* of a challenge marker even
+though no real render happened (e.g. `duolingo` returns a 13.5 KB shell —
+**not** a pass). "Routed" = the caller picks the best profile per domain,
+which most real scraping pipelines do naturally. Full breakdown and the
+scoring caveats (the strict gate also has a few false *negatives*) are in
+[`docs/BENCHMARK.md`](docs/BENCHMARK.md).
 
 (Built-in preset constructors `chrome_130_*` / `pixel_9_pro_chrome_147`
 are deprecated aliases that emit a current Chrome 148 UA — the profile
 labels above reflect the actual emitted User-Agent, not the legacy
 function name.)
 
-**The hard residual** is exactly three Kasada-protected pages —
-`canadagoose.com`, `hyatt.com`, `realtor.com`. DataDome's interactive
-captcha pages (`yelp.com`, `etsy.com`) are human-gated and out of
-scope; they pass on some profiles and block on others.
+**The hard residual** is seven sites that render no real content on any
+profile: three Kasada pages (`canadagoose.com`, `hyatt.com`,
+`realtor.com` — no OSS tool publicly passes Kasada from scratch),
+`etsy.com` (DataDome interactive Device-Check, human-gated, out of
+scope), `adidas.com` (Akamai lazy-chunk graph), `duolingo.com` (CSR SPA
+that only reaches its shell), and `wildberries.ru` (WBAAS).
 
 > **The engine carries the number, not bypass code.** A/B measurements
 > with per-vendor challenge solvers enabled vs fully removed from the
@@ -91,8 +96,8 @@ scope; they pass on some profiles and block on others.
 
 - **Anti-bot responses are noisy.** Single sweep runs vary by ±5 sites
   from WAF lottery alone (measured per-site 3× re-tests: amazon variants
-  have ~1-in-3 pass rate per fetch). The routed `110` is the central
-  tendency, not a guaranteed per-run result.
+  have ~1-in-3 pass rate per fetch). The routed `118` is the central
+  tendency of one cleanroom run, not a guaranteed per-run result.
 - **Kasada is the OSS-wide gap.** No open-source tool publicly passes
   Kasada from scratch.
 
@@ -109,6 +114,8 @@ warm binary cache:
 
 A warm `PagePool` amortizes V8 isolate + snapshot setup across
 navigations (the `PagePool::navigate(url)` API).
+
+Full per-profile + per-site breakdown: [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
 
 ## Challenge solving
 

@@ -1,6 +1,6 @@
 //! Phase 7 A/B probe — run the SAME comprehensive probe that captured
-//! `.playwright-mcp/captures/probe_mcp.json` (insecure data: URL) and
-//! `.playwright-mcp/captures/probe_mcp_secure.json` (https://example.com)
+//! `the reference captures/probe_mcp.json` (insecure data: URL) and
+//! `the reference captures/probe_mcp_secure.json` (https://example.com)
 //! through our engine, dump the result, and produce a byte-exact diff
 //! catalogue.
 //!
@@ -373,9 +373,9 @@ async fn phase7_d3_scroll_eventcounts_grease() {
 /// Phase 7 D2 gate — 18 [SecureContext] APIs return undefined on
 /// insecure contexts (about:blank/data:/http:) and are present on
 /// secure contexts (https:). Byte-exact match against
-/// `.playwright-mcp/captures/probe_mcp.json` (insecure).
+/// `the reference captures/probe_mcp.json` (insecure).
 #[tokio::test]
-#[ignore = "FIXME: navigator.virtualKeyboard / DevicePosture / WebTransport stub installs are not stripped on insecure context — cleanup_bootstrap purge path is incomplete (see window_bootstrap.js:6605 comment)"]
+#[ignore = "not yet implemented: insecure-context stripping of optional Web API stubs"]
 async fn phase7_d2_secure_context_gating() {
     use browser::Page;
     use stealth::presets::chrome_148_macos;

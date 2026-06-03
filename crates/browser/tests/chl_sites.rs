@@ -1,4 +1,4 @@
-//! Live CHL site validation — a 7-site target set that Playwright
+//! Live CHL site validation — a 7-site target set that a reference browser
 //! succeeds against from this same machine but browser_oxide previously
 //! failed. All `#[ignore]` (network-dependent).
 //!

@@ -17,7 +17,7 @@
 //!
 //! 2. From the same machine, drive real Chrome 148 (headed, via
 //!    `google-chrome --user-data-dir=/tmp/cdrun https://tls.peet.ws/api/all`
-//!    or via Playwright MCP). Save the response as
+//!    or via a reference browser capture). Save the response as
 //!    `/tmp/real_chrome_tls.json`.
 //!
 //! 3. `diff <(jq -S . /tmp/oxide_tls.json) <(jq -S . /tmp/real_chrome_tls.json)`.

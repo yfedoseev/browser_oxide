@@ -2400,7 +2400,7 @@ async fn worker_hardware_concurrency_matches_window() {
 #[tokio::test]
 async fn screen_avail_top_macos_is_33() {
     // Phase 7 — Chrome 147 macOS arm64 (M3) reports availTop=33,
-    // not 25. Verified against Playwright MCP.
+    // not 25. Verified against a reference browser capture.
     use stealth::presets;
     let profile = presets::chrome_148_macos();
     let mut page = Page::from_html(&html(""), Some(profile)).await.unwrap();
@@ -5820,7 +5820,7 @@ async fn native_code_mask_audit() {
 // of 12 anti-bot vendors hash canvas 2D output. Full real-Chrome
 // pixel parity is filed as R-FIX-4 in 15_OPEN_QUESTIONS.md (needs
 // `crates/browser/tests/captures/canvas_chrome_148.json` captured via
-// Playwright + CDP). This engine-side test asserts two weaker but
+// a CDP automation driver). This engine-side test asserts two weaker but
 // still-required properties:
 //
 //   (a) Same draw sequence on the SAME profile produces the SAME

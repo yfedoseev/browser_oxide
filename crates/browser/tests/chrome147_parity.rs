@@ -3,8 +3,8 @@
 //! `tests/fixtures/chrome147/captured_macos_arm64.json`.
 //!
 //! The fixture was captured on 2026-04-28 from Google Chrome 147.0.7727.117
-//! running headless on macOS arm64 via puppeteer-core. This is the same
-//! Chrome that Playwright MCP launches, so passing these tests means
+//! running headless on macOS arm64 via a CDP automation driver. This is the same
+//! Chrome that a reference browser capture launches, so passing these tests means
 //! browser_oxide produces engine-coherent output by the same metrics
 //! anti-bot detectors apply.
 
@@ -153,7 +153,7 @@ async fn parity_rect_height_0_5px() {
 // Iframe realm purity — exact bool match to Chrome 147
 // ================================================================
 #[tokio::test]
-#[ignore = "FIXME: iframe mirror-realm only applies to some constructors — see realm_purity.rs iframe_* ignores"]
+#[ignore = "not yet implemented: per-realm constructor identity for iframe contexts"]
 async fn parity_iframe_navigator_distinct() {
     let r = evaluate(
         "(()=>{ const f = document.createElement('iframe'); document.body.appendChild(f); return f.contentWindow.Navigator !== Navigator; })()",
@@ -239,7 +239,7 @@ async fn parity_chrome_app_exists() {
 
 /// Real non-automation Chrome 147 on a regular page does NOT expose
 /// `chrome.runtime` — only extension contexts do. The captured fixture
-/// shows it `true` because puppeteer-core launches in automation mode,
+/// shows it `true` because a CDP automation driver launches in automation mode,
 /// which is exactly the signal anti-bot detectors flag. browser_oxide
 /// correctly omits `chrome.runtime` to look like a clean user session.
 #[tokio::test]
