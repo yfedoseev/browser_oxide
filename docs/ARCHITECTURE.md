@@ -2,7 +2,12 @@
 
 A from-scratch headless browser engine in Rust. Stealth by design, MIT/Apache-2.0 licensed.
 
-**Target: SOTA 2026** — passes Cloudflare Turnstile, DataDome, Akamai, HUMAN/PerimeterX, and Kasada.
+Designed to render through 2026-class anti-bot stacks (Cloudflare, Akamai,
+AWS WAF, DataDome, HUMAN/PerimeterX) from a from-scratch TLS + fingerprint +
+V8 engine — no per-vendor bypass code in the tree. For *measured* per-protection
+results (routed 118/126, and the Kasada/DataDome residual that does **not** pass),
+see [`BENCHMARK.md`](BENCHMARK.md). Kasada is the standing open gap — no
+open-source tool publicly passes it from scratch.
 
 ## Why
 
@@ -21,7 +26,7 @@ browser_oxide is the missing piece: a **Rust-native headless browser** where ste
 3. **100% MIT/Apache-2.0** — Every component, including CSS parser and selectors, is permissively licensed
 4. **V8-powered** — Full ES2024+, WebAssembly, and JIT performance via rusty_v8 (MIT). Required for Cloudflare Turnstile WASM challenges and heavy SPA bundles
 5. **Composable crates** — Each component is a standalone crate usable outside browser_oxide
-6. **Anti-bot SOTA** — Designed against 2026 detection: JA4 TLS, HTTP/2 frames, WASM proof-of-work, canvas rendering verification, behavioral ML
+6. **Anti-bot by design** — Built against 2026-class detection: JA4 TLS, HTTP/2 frames, WASM proof-of-work, canvas rendering verification, behavioral ML (measured results in [`BENCHMARK.md`](BENCHMARK.md))
 
 ## Workspace Structure
 
@@ -115,11 +120,17 @@ browser_oxide/
 
 ## Anti-Bot Detection Coverage
 
-| Anti-Bot System | Detection Method | How browser_oxide Handles It |
-|---|---|---|
-| **Cloudflare Turnstile** | WASM proof-of-work + canvas render + env checks | V8 runs WASM natively; tiny-skia renders canvas; all env APIs spoofed |
-| **Cloudflare Managed** | JA4 TLS + HTTP/2 frames + JS fingerprint | rquest/BoringSSL for TLS; correct HTTP/2 SETTINGS; clean JS surface |
-| **DataDome** | Canvas + behavioral ML + device graph | Real canvas rendering; behavioral hooks; consistent profiles |
-| **Akamai** | 150+ sensor signals + timing + rendering | Full navigator/window API surface; correct performance.now() resolution |
-| **HUMAN/PerimeterX** | Prototype integrity + iframe isolation + behavioral | Native function toString; iframe support; behavior simulation |
-| **Kasada** | Polymorphic WASM challenges + timing | V8 WASM at native speed; no instrumentation overhead |
+Engine mechanism vs. **measured** outcome on the 126-site corpus (see
+[`BENCHMARK.md`](BENCHMARK.md) for the full table and caveats). "Mostly" =
+passes on at least one routed profile for most corpus sites of that class;
+anti-bot responses are noisy (±1–2 sites/run from WAF lottery).
+
+| Anti-Bot System | Detection Method | Engine mechanism | Measured |
+|---|---|---|---|
+| **Cloudflare Turnstile** | WASM PoW + canvas render + env checks | V8 runs WASM natively; tiny-skia renders canvas; native env APIs | mostly passes |
+| **Cloudflare Managed** | JA4 TLS + HTTP/2 frames + JS fingerprint | BoringSSL TLS; correct HTTP/2 SETTINGS; clean JS surface | mostly passes |
+| **Akamai** (BMP/sec-cpt) | 150+ sensor signals + timing + rendering | Full navigator/window surface; correct `performance.now()` | mostly passes; flaky tail (adidas, homedepot) |
+| **AWS WAF** | token challenge + cookie handshake | challenge.js runs inline; cookie persistence | mostly passes |
+| **DataDome** | canvas + behavioral ML + device graph | real canvas; consistent profiles; FF-TLS arm | partial — interactive Device-Check (etsy) is human-gated, does **not** pass |
+| **HUMAN/PerimeterX** | prototype integrity + iframe isolation + behavioral | native `toString`; iframe execution; behavior sim | partial |
+| **Kasada** | polymorphic WASM challenges + timing | V8 WASM at native speed; no instrumentation | **open gap** — canadagoose/hyatt/realtor do **not** pass (no OSS tool does, from scratch) |
