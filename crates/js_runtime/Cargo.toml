@@ -36,7 +36,7 @@ rustfft = "6"
 base64 = "0.22"
 sha1 = "0.10"
 sha2 = "0.10"
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 lazy_static = "1"
 tracing = "0.1"
