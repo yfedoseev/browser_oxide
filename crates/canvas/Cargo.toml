@@ -19,6 +19,14 @@ webgl-render = ["glow"]
 # `git-sync-deps` to fetch the entire Skia tree.
 skia-safe = "0.97"
 png = "0.17"
+# zlib-rs is a pure-Rust port of zlib, bit-compatible with the C library.
+# Selecting it through flate2 makes the `png` crate emit deterministic DEFLATE
+# bytes (vs. miniz_oxide, whose output drifts between versions) — the
+# prerequisite for canvas SHA-256 fingerprint stability (CreepJS-style
+# lies-canvas probes hash the data URL, so unstable IDAT bytes = unstable
+# fingerprint = a bot tell). No direct `use` (it's a backend selection), hence
+# the cargo-shear ignore below.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 base64 = "0.22"
 # Used for Blink-compatible PeriodicWave inverse-FFT wavetable generation
 # (crates/canvas/src/periodic_wave.rs). Pure Rust, MIT.
@@ -41,3 +49,8 @@ sha2 = "0.10"
 
 [lints]
 workspace = true
+
+# flate2 has no direct `use` — it's present only to select the png crate's
+# zlib-rs DEFLATE backend (deterministic canvas fingerprint). Keep it.
+[package.metadata.cargo-shear]
+ignored = ["flate2"]
