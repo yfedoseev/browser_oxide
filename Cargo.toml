@@ -16,6 +16,9 @@ members = [
     "crates/workers",
     "crates/stealth",
     "crates/protocol",
+    "crates/browser_oxide_host",
+    "crates/browser_oxide_mcp",
+    "crates/browser_oxide_py",
 ]
 
 [workspace.package]
@@ -59,6 +62,7 @@ workers = { version = "0.1.0", path = "crates/workers" }
 stealth = { version = "0.1.0", path = "crates/stealth" }
 protocol = { version = "0.1.0", path = "crates/protocol" }
 browser = { version = "0.1.0", path = "crates/browser" }
+browser_oxide_host = { version = "0.1.0", path = "crates/browser_oxide_host" }
 
 # Async runtime + common derive deps shared by multiple crates.
 tokio = { version = "1", features = ["full"] }

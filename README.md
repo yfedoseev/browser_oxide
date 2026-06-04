@@ -222,6 +222,31 @@ YAML and JSON are both supported; format is picked by extension. See
 schema. The struct definition (`StealthProfile` in `crates/stealth/src/
 profile.rs`) is the source of truth — every field is documented there.
 
+### Python
+
+```python
+from browser_oxide import Browser, Profile, Verdict
+
+with Browser(profile=Profile.chrome()) as b:
+    page = b.navigate("https://example.com")
+    print(page.title, len(page.html), page.verdict)
+    if page.verdict == Verdict.PASS:
+        print(page.evaluate("navigator.userAgent"))
+```
+
+`pip install browser-oxide` (or `maturin develop` from source). Full guide:
+[docs/getting-started-python.md](docs/getting-started-python.md).
+
+### MCP server (for AI agents)
+
+A Model Context Protocol server (`browser-oxide-mcp`) lets an AI agent drive the
+stealth engine — tools: `fetch_page`, `evaluate`, and `check_protection` (*"is
+this URL behind Akamai/DataDome/Kasada, and did a real render get through?"*).
+
+```json
+{ "mcpServers": { "browser-oxide": { "command": "browser-oxide-mcp" } } }
+```
+
 ### CDP server (Puppeteer/Playwright drop-in)
 
 ```rust
@@ -253,6 +278,7 @@ binaries are present; it is `#[ignore]` by default.
 | Guide | Description |
 |---|---|
 | [Getting started (Rust)](docs/getting-started-rust.md) | Install, navigate, read the page, verdicts, pooling |
+| [Getting started (Python)](docs/getting-started-python.md) | `pip install browser-oxide`; the `Browser`/`Page`/`Profile` API |
 | [Profiles](docs/guides/PROFILES.md) | Choosing & customizing browser identities; routing |
 | [Challenges](docs/guides/CHALLENGES.md) | Verdict semantics + the `ChallengeSolver` extension point |
 | [Stealth FAQ](docs/guides/STEALTH_FAQ.md) | What's native vs. not — the honest boundary |

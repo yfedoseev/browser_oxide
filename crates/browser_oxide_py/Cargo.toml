@@ -1,0 +1,20 @@
+[package]
+name = "browser_oxide_py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Python bindings for browser_oxide (PyO3) — built into a wheel by maturin"
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+browser_oxide_host = { workspace = true }
+# extension-module: resolve CPython symbols at runtime (no libpython link), so a
+# plain `cargo build` of the cdylib works and maturin produces a portable wheel.
+pyo3 = { version = "0.28", features = ["abi3-py38", "extension-module"] }

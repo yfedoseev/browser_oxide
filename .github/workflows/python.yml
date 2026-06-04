@@ -1,0 +1,70 @@
+name: Python wheels
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Build abi3 wheels across platforms with maturin. abi3-py38 → one wheel per
+  # platform covers Python 3.8+. The Rust engine fetches a ~130 MB prebuilt V8.
+  wheels:
+    name: wheel (${{ matrix.platform.target }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { runner: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
+          - { runner: macos-14,       target: aarch64-apple-darwin }
+          - { runner: macos-13,       target: x86_64-apple-darwin }
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          # manylinux container for portable Linux wheels
+          manylinux: ${{ startsWith(matrix.platform.runner, 'ubuntu') && 'auto' || '' }}
+      - name: Smoke test (offline)
+        if: ${{ !contains(matrix.platform.target, 'aarch64') }}
+        shell: bash
+        run: |
+          python -m pip install pytest
+          python -m pip install --find-links dist browser-oxide
+          python -m pytest python/tests/ -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.target }}
+          path: dist/*.whl
+
+  # Publish to PyPI on a version tag (needs a PYPI_API_TOKEN secret / trusted publisher).
+  publish:
+    name: publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: wheels
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

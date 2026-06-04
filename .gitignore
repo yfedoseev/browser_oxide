@@ -47,3 +47,11 @@ crates/*/decoded_*.bin
 crates/*/decoded_*.txt
 docs/benchmarks/runs/
 docs/handoffs/
+
+# Python bindings build artifacts
+/dist/
+__pycache__/
+*.py[cod]
+python/**/*.so
+.venv/
+*.egg-info/

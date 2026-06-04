@@ -1,0 +1,19 @@
+[package]
+name = "browser_oxide_host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Send/Sync handle over the !Send browser_oxide engine — dedicated thread + channel marshalling, the shared base for the Python and MCP bindings"
+publish = false
+
+[dependencies]
+browser = { workspace = true }
+stealth = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros"] }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
