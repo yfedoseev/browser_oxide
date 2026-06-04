@@ -25,7 +25,7 @@ stealth = { workspace = true }
 net = { workspace = true }
 canvas = { workspace = true }
 layout = { workspace = true }
-deno_core = "0.311"
+deno_core = "0.403"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
