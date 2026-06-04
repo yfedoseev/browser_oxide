@@ -1,9 +1,14 @@
 # browser_oxide
 
-A headless browser engine written from scratch in Rust. Real HTML/CSS/DOM
-parser, V8-backed JS runtime, own CSS engine (not Servo's MPL crates), own
-stealth-grade HTTP stack with BoringSSL TLS impersonation, CDP-compatible
-remote-debugging surface, no Chromium underneath.
+**A stealth headless browser engine, written from scratch in Rust.** Real
+HTML/CSS/DOM parser, V8-backed JS runtime, own CSS engine (not Servo's MPL
+crates), own HTTP stack with BoringSSL TLS impersonation, native fingerprint,
+CDP-compatible remote-debugging surface — **no Chromium, no CDP driver
+underneath**. The stealth is the engine, not a plugin: you control every surface
+from the TLS handshake through WASM to canvas, so the fingerprint is *native*
+rather than *injected*.
+
+**New here?** Start with **[docs/getting-started-rust.md](docs/getting-started-rust.md)**.
 
 > **Status: research-grade, pre-1.0.** Works against a 126-site corpus of
 > commercially-protected pages (see "What it can do" below for measured
@@ -173,17 +178,31 @@ copyleft so this does not infect downstream code. An optional
 
 ## Quick start
 
+The engine is `!Send` (V8 isolates are per-thread), so run it on a current-thread
+runtime + `LocalSet`:
+
 ```rust
-use browser::Page;
+use browser::{ChallengeVerdict, Page};
 
-// Built-in preset
-let profile = stealth::presets::chrome_148_macos();
-let page = Page::navigate_stealth("https://example.com", profile).await?;
-println!("{}", page.title());
+fn main() {
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    tokio::task::LocalSet::new().block_on(&rt, async {
+        let profile = stealth::presets::chrome_148_macos();   // built-in identity
+        let mut page = Page::navigate("https://example.com", profile, 5).await.unwrap();
 
-// Evaluate JavaScript
-let result = page.evaluate("document.querySelectorAll('a').length")?;
+        println!("{}", page.title());
+        println!("{}", page.evaluate("document.querySelectorAll('a').length").unwrap());
+
+        // challenge pages return HTTP 200 — trust the verdict, not the status:
+        if page.challenge_verdict() == ChallengeVerdict::Pass {
+            println!("real content rendered");
+        }
+    });
+}
 ```
+
+Runnable: `cargo run --release -p browser --example getting_started -- https://example.com`.
+Full walkthrough: [docs/getting-started-rust.md](docs/getting-started-rust.md).
 
 ### Configurable browser identity
 
@@ -195,7 +214,7 @@ use stealth::StealthProfile;
 
 let profile = StealthProfile::load_from_file("profiles/chrome_148_macos.yaml")?;
 profile.validate()?;
-let page = Page::navigate_stealth("https://example.com", profile).await?;
+let mut page = Page::navigate("https://example.com", profile, 5).await?;
 ```
 
 YAML and JSON are both supported; format is picked by extension. See
@@ -228,6 +247,20 @@ The browser-comparison harness (`crates/browser/tests/browser_comparison
 binaries are present; it is `#[ignore]` by default.
 
 ## Documentation
+
+**Using it**
+
+| Guide | Description |
+|---|---|
+| [Getting started (Rust)](docs/getting-started-rust.md) | Install, navigate, read the page, verdicts, pooling |
+| [Profiles](docs/guides/PROFILES.md) | Choosing & customizing browser identities; routing |
+| [Challenges](docs/guides/CHALLENGES.md) | Verdict semantics + the `ChallengeSolver` extension point |
+| [Stealth FAQ](docs/guides/STEALTH_FAQ.md) | What's native vs. not — the honest boundary |
+| [Debugging](docs/guides/DEBUGGING.md) | Thin renders, fetch logs, JS errors, the probes |
+| [CDP server](docs/guides/CDP.md) | Puppeteer/Playwright drop-in |
+| [Benchmark](docs/BENCHMARK.md) | Measured anti-bot pass rates |
+
+**Engine internals**
 
 | Doc | Description |
 |---|---|
