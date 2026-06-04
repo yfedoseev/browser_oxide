@@ -34,7 +34,7 @@ boring2 = { version = "4.15", features = [
 ] }
 boring-sys2 = "4.15"
 tokio-boring2 = "4.15"
-webpki-root-certs = "0.26"
+webpki-root-certs = "1.0"
 
 # HTTP/2 (wreq's fork of h2 with PseudoOrder/SettingsOrder support)
 http2 = { version = "0.5", features = ["unstable"] }
