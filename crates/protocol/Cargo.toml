@@ -6,12 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Chrome DevTools Protocol (CDP) server for browser_oxide"
-publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
+publish = false                                                         # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [dependencies]
 browser = { workspace = true }
-dom = { workspace = true }
-js_runtime = { workspace = true }
 stealth = { workspace = true }
 net = { workspace = true }
 tokio = { version = "1", features = ["full"] }
@@ -19,8 +17,6 @@ tokio-tungstenite = "0.27"
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-url = "2"
-thiserror = "2"
 tracing = "0.1"
 
 [dev-dependencies]

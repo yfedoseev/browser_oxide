@@ -1,24 +1,24 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/css_parser",
-    "crates/css_selectors",
-    "crates/css_values",
-    "crates/css_cascade",
-    "crates/dom",
-    "crates/html_parser",
-    "crates/js_runtime",
-    "crates/event_loop",
-    "crates/browser",
-    "crates/canvas",
-    "crates/layout",
-    "crates/net",
-    "crates/workers",
-    "crates/stealth",
-    "crates/protocol",
-    "crates/browser_oxide_host",
-    "crates/browser_oxide_mcp",
-    "crates/browser_oxide_py",
+  "crates/css_parser",
+  "crates/css_selectors",
+  "crates/css_values",
+  "crates/css_cascade",
+  "crates/dom",
+  "crates/html_parser",
+  "crates/js_runtime",
+  "crates/event_loop",
+  "crates/browser",
+  "crates/canvas",
+  "crates/layout",
+  "crates/net",
+  "crates/workers",
+  "crates/stealth",
+  "crates/protocol",
+  "crates/browser_oxide_host",
+  "crates/browser_oxide_mcp",
+  "crates/browser_oxide_py",
 ]
 
 [workspace.package]
@@ -58,7 +58,6 @@ canvas = { version = "0.1.0", path = "crates/canvas" }
 layout = { version = "0.1.0", path = "crates/layout" }
 net = { version = "0.1.0", path = "crates/net" }
 event_loop = { version = "0.1.0", path = "crates/event_loop" }
-workers = { version = "0.1.0", path = "crates/workers" }
 stealth = { version = "0.1.0", path = "crates/stealth" }
 protocol = { version = "0.1.0", path = "crates/protocol" }
 browser = { version = "0.1.0", path = "crates/browser" }

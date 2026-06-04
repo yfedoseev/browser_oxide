@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Stealth fingerprint profiles for browser_oxide — consistent browser identities"
-publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
+publish = false                                                                                # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -15,8 +15,6 @@ serde_yaml_ng = "0.10"
 rand = "0.10"
 rand_chacha = "0.10"
 rand_distr = "0.6"
-sha2 = "0.10"
-hex = "0.4"
 
 [lints]
 workspace = true

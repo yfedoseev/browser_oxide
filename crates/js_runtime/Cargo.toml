@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "V8 JavaScript runtime with DOM bindings for browser_oxide"
-publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
+publish = false                                                           # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [features]
 default = []
@@ -33,12 +33,9 @@ url = "2"
 rand = "0.10"
 rand_distr = "0.6"
 rustfft = "6"
-thiserror = "2"
 base64 = "0.22"
 sha1 = "0.10"
 sha2 = "0.10"
-hmac = "0.12"
-rand_core = "0.10"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 lazy_static = "1"

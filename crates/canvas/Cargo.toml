@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Canvas 2D rendering (skia-safe), WebGL stubs, AudioContext fingerprint"
-publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
+publish = false                                                                        # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [features]
 default = []
@@ -19,16 +19,7 @@ webgl-render = ["glow"]
 # `git-sync-deps` to fetch the entire Skia tree.
 skia-safe = "0.97"
 png = "0.17"
-# zlib-rs is a pure-Rust port of zlib bit-compatible with the C library.
-# Enabling it through flate2 makes the `png` crate emit deterministic
-# DEFLATE bytes (vs. miniz_oxide whose output drifts between versions),
-# which is the prerequisite for canvas SHA-256 fingerprint stability —
-# CreepJS-style lies-canvas probes hash the data URL, so unstable IDAT
-# bytes mean each run produces a different fingerprint.
-flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 base64 = "0.22"
-thiserror = "2"
-ab_glyph = "0.2"
 # Used for Blink-compatible PeriodicWave inverse-FFT wavetable generation
 # (crates/canvas/src/periodic_wave.rs). Pure Rust, MIT.
 rustfft = "6"
@@ -39,7 +30,10 @@ rustfft = "6"
 fontdb = { version = "0.23", default-features = false }
 rustybuzz = "0.20"
 swash = "0.2"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = [
+  "png",
+  "jpeg",
+] }
 glow = { version = "0.17", optional = true }
 
 [dev-dependencies]

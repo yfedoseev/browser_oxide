@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Top-level headless browser API: Page, script execution, content extraction"
-publish = false  # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
+publish = false                                                                            # 9 of 16 crate names collide on crates.io; flip per-crate when renamed
 
 [features]
 default = []
@@ -21,7 +21,6 @@ dom = { workspace = true }
 html_parser = { workspace = true }
 js_runtime = { workspace = true }
 event_loop = { workspace = true }
-css_selectors = { workspace = true }
 net = { workspace = true }
 stealth = { workspace = true }
 async-trait = "0.1"
@@ -29,7 +28,6 @@ deno_core = "0.311"
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 url = "2"
-thiserror = "2"
 tracing = "0.1"
 
 [dev-dependencies]
