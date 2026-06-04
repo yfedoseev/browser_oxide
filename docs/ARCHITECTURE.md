@@ -1,4 +1,4 @@
-# browser_oxide Architecture
+# BrowserOxide Architecture
 
 A from-scratch headless browser engine in Rust. Stealth by design, MIT/Apache-2.0 licensed.
 
@@ -17,7 +17,7 @@ Every existing approach to stealth web scraping is fundamentally flawed:
 - **Servo**: 14 years in, still not production-ready. MPL-2.0 license on critical CSS components.
 - **Lightpanda** (Zig): Proves the concept works (11x faster than Chrome) but is AGPL-3.0 — incompatible with MIT. Cannot pass canvas/WebGL challenges.
 
-browser_oxide is the missing piece: a **Rust-native headless browser** where stealth isn't bolted on — it's the default, because you control every API surface from TLS handshake through WASM execution to canvas rendering.
+BrowserOxide is the missing piece: a **Rust-native headless browser** where stealth isn't bolted on — it's the default, because you control every API surface from TLS handshake through WASM execution to canvas rendering.
 
 ## Design Principles
 
@@ -25,7 +25,7 @@ browser_oxide is the missing piece: a **Rust-native headless browser** where ste
 2. **Minimal rendering** — No full GPU pipeline, but real Canvas 2D rendering (via tiny-skia/skia) and WebGL parameter stubs for fingerprint challenges
 3. **100% MIT/Apache-2.0** — Every component, including CSS parser and selectors, is permissively licensed
 4. **V8-powered** — Full ES2024+, WebAssembly, and JIT performance via rusty_v8 (MIT). Required for Cloudflare Turnstile WASM challenges and heavy SPA bundles
-5. **Composable crates** — Each component is a standalone crate usable outside browser_oxide
+5. **Composable crates** — Each component is a standalone crate usable outside BrowserOxide
 6. **Anti-bot by design** — Built against 2026-class detection: JA4 TLS, HTTP/2 frames, WASM proof-of-work, canvas rendering verification, behavioral ML (measured results in [`BENCHMARK.md`](BENCHMARK.md))
 
 ## Workspace Structure

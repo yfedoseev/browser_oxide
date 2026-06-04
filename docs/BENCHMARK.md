@@ -1,6 +1,6 @@
 # Benchmark — anti-bot corpus rendering
 
-browser_oxide is measured against a **126-site corpus** of commercially-protected
+BrowserOxide is measured against a **126-site corpus** of commercially-protected
 pages (Cloudflare, Akamai, DataDome, PerimeterX, Kasada, Shape/F5, AWS WAF, …),
 release build, same machine, same IP, same hour, classified by the engine's own
 `browser::engine_classify`. **These numbers are from the vendor-stripped

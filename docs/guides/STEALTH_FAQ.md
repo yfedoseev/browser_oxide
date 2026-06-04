@@ -1,6 +1,6 @@
 # Guide: stealth FAQ — what's native, what's not
 
-`browser_oxide`'s bet is that a fingerprint is most convincing when it's
+BrowserOxide's bet is that a fingerprint is most convincing when it's
 *native* — a property of a real engine — rather than *injected* over someone
 else's browser. This guide is the honest boundary of what that buys you.
 
@@ -12,7 +12,7 @@ else's browser. This guide is the honest boundary of what that buys you.
   no CDP here at all.
 - **Patched Chromium/Firefox forks**: inherit the base engine's detection vectors
   (or ride a low-market-share engine, itself a signal).
-- `browser_oxide` controls every surface from the TLS handshake through WASM to
+- BrowserOxide controls every surface from the TLS handshake through WASM to
   canvas, so the properties are coherent by construction. Whether that's the
   *right* bet is empirical — see [../BENCHMARK.md](../BENCHMARK.md).
 

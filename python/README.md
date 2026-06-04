@@ -1,4 +1,4 @@
-# browser-oxide (Python)
+# BrowserOxide (Python) — `browser-oxide` on PyPI
 
 **A stealth headless browser engine, in Rust, with Python bindings.** A real
 HTML/CSS/DOM/JavaScript browser built from scratch — own BoringSSL TLS stack,

@@ -1,7 +1,7 @@
 # browser-oxide-mcp
 
 **An MCP (Model Context Protocol) server that gives an AI agent a stealth
-headless browser.** Backed by `browser_oxide` — a real HTML/CSS/DOM/JS engine
+headless browser.** Backed by BrowserOxide — a real HTML/CSS/DOM/JS engine
 with its own BoringSSL TLS stack and a native fingerprint (no Chromium, no CDP).
 
 ## Tools

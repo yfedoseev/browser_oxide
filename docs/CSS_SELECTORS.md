@@ -183,12 +183,12 @@ css_selectors/
 ### 1. Generic over DOM representation
 
 The `Element` trait lets css_selectors work with:
-- browser_oxide's own DOM
+- BrowserOxide's own DOM
 - `html5ever` + `markup5ever_rcdom` trees
 - `scraper` crate's nodes
 - Any custom tree structure
 
-This makes the crate useful outside browser_oxide.
+This makes the crate useful outside BrowserOxide.
 
 ### 2. Right-to-left matching
 

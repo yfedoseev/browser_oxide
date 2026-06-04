@@ -1,6 +1,6 @@
 # Stealth profiles
 
-A `StealthProfile` is the browser identity browser_oxide presents to a
+A `StealthProfile` is the browser identity BrowserOxide presents to a
 site: User-Agent, screen geometry, GPU, locale, Client Hints, TLS
 ClientHello label, fingerprint seeds, and more. It is a plain serde
 struct, so you can use a built-in preset, clone-and-tweak one, or load

@@ -1,4 +1,4 @@
-# browser_oxide — stealth headless browser engine in Rust (anti-bot, from scratch, no Chromium)
+# BrowserOxide — Headless Stealth Browser with Rust Core
 
 *A from-scratch stealth browser engine in Rust — own BoringSSL TLS/JA4 fingerprint, real JS, no Chromium, no CDP. Python + MCP bindings.*
 
@@ -8,7 +8,7 @@
 [![Anti-bot corpus: routed 118/126](https://img.shields.io/badge/anti--bot%20corpus-routed%20118%2F126-brightgreen.svg)]()
 [![Bindings: Rust · Python · MCP](https://img.shields.io/badge/bindings-Rust%20%C2%B7%20Python%20%C2%B7%20MCP-informational.svg)]()
 
-**browser_oxide is a stealth headless browser engine written from scratch in
+**BrowserOxide is a stealth headless browser engine written from scratch in
 Rust** for web scraping, archival, and AI agents. It implements a real
 HTML/CSS/DOM/JS browser — including its own BoringSSL TLS stack and a *native*
 (not injected) browser fingerprint — with **no Chromium and no Chrome DevTools
@@ -19,7 +19,7 @@ injected.
 > **TL;DR.** Every other native-fingerprint stealth browser is either Python-only
 > (camoufox, a Firefox fork) or drives Chrome over CDP (nodriver, Obscura), where
 > the automation is itself detectable. **As of 2026 there is no Rust equivalent to
-> camoufox** — browser_oxide is built to be exactly that. In a same-machine,
+> camoufox** — BrowserOxide is built to be exactly that. In a same-machine,
 > same-IP cleanroom run it routed **118 of 126** commercially-protected sites
 > (Cloudflare, Akamai, DataDome, PerimeterX, Kasada) to a real render with **zero
 > per-vendor bypass code**. Kasada is the one honest open gap.
@@ -36,7 +36,7 @@ lose to `Function.prototype.toString` checks. Patched-Chromium forks still
 inherit Chromium's CDP detection vectors. Patched-Firefox forks ride a
 browser engine with low market share, which is itself a fingerprint signal.
 
-`browser_oxide` is a different bet: build the engine from the parser up so
+BrowserOxide is a different bet: build the engine from the parser up so
 the fingerprint properties are *native*, not *injected*. There is no
 Chrome process, no CDP client, no WebDriver, no patched-fork inheritance.
 Whether that's the *right* bet is empirical — see the numbers section.
@@ -64,11 +64,11 @@ A complete browser engine for scraping, archival, and AI agent workloads:
 
 ## How it compares
 
-The native-fingerprint stealth-browser field, and where browser_oxide sits:
+The native-fingerprint stealth-browser field, and where BrowserOxide sits:
 
 | Tool | Language | Engine | No CDP/WebDriver | Native fingerprint | Runs JS | TLS impersonation |
 |---|---|---|:--:|:--:|:--:|:--:|
-| **browser_oxide** | **Rust (+ Python, MCP)** | **from-scratch (own HTML/CSS/DOM/JS + BoringSSL TLS)** | ✅ | ✅ | ✅ (V8) | ✅ (JA3/JA4) |
+| **BrowserOxide** | **Rust (+ Python, MCP)** | **from-scratch (own HTML/CSS/DOM/JS + BoringSSL TLS)** | ✅ | ✅ | ✅ (V8) | ✅ (JA3/JA4) |
 | camoufox | Python | Firefox fork | ✅ | ✅ (patched into Firefox) | ✅ (Gecko) | partial (Firefox NSS) |
 | nodriver / Obscura | Python | real Chrome (CDP) | ❌ (uses CDP) | ❌ (injected) | ✅ (Chrome) | ❌ (real Chrome TLS) |
 | undetected-chromedriver | Python | real Chrome (WebDriver) | ❌ (WebDriver) | ❌ (injected) | ✅ (Chrome) | ❌ |
@@ -78,7 +78,7 @@ The native-fingerprint stealth-browser field, and where browser_oxide sits:
 Python-only Firefox fork. CDP-driven tools (nodriver, Obscura) inherit Chrome's
 automation-detection surface. curl_cffi nails the TLS handshake but runs no
 JavaScript, so it loses to any JS challenge. **As of 2026 there is no Rust
-equivalent to camoufox** — browser_oxide fills that gap: native fingerprint, no
+equivalent to camoufox** — BrowserOxide fills that gap: native fingerprint, no
 CDP, real JS, and a Rust core with Python + MCP bindings.
 
 ## What it can do (measured, not estimated)
@@ -90,7 +90,7 @@ vendor-stripped open-source engine — no per-vendor bypass code in the
 tree. Same machine, same IP, same hour, same classifier
 (`browser::engine_classify`).
 
-| browser_oxide profile        | **Pass** (real render, ≥15 KB) | loose `L3` tag |
+| BrowserOxide profile        | **Pass** (real render, ≥15 KB) | loose `L3` tag |
 |------------------------------|--:|--:|
 | `chrome_148_macos`           | **114** | 118 |
 | `firefox_135_macos`          | **111** | 115 |
@@ -159,26 +159,26 @@ Full per-profile + per-site breakdown: [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
 ## FAQ
 
 ### Is there a Rust equivalent to camoufox?
-browser_oxide is built to be exactly that. camoufox is a native-fingerprint
+BrowserOxide is built to be exactly that. camoufox is a native-fingerprint
 stealth browser, but it's a Python-only Firefox fork. As of 2026 there is no other
-from-scratch stealth browser engine in Rust — browser_oxide provides a native
+from-scratch stealth browser engine in Rust — BrowserOxide provides a native
 fingerprint, no CDP, real JavaScript execution, and a Rust core with Python and
 MCP bindings.
 
-### Is browser_oxide a Chromium or Firefox fork?
+### Is BrowserOxide a Chromium or Firefox fork?
 No. The HTML parser, CSS engine, DOM, layout, and TLS stack are written from
 scratch in Rust; JavaScript runs on V8 via `deno_core`. There is no Chrome
 process and no CDP driver, so it doesn't inherit Chromium's automation-detection
 vectors (`navigator.webdriver`, `cdc_*` variables, CDP WebSocket fingerprints).
 
 ### How is it different from nodriver, Obscura, or undetected-chromedriver?
-Those drive a real Chrome over CDP or WebDriver. browser_oxide is its own engine
+Those drive a real Chrome over CDP or WebDriver. BrowserOxide is its own engine
 — no automation protocol underneath — so the fingerprint is native rather than
 patched onto an automated Chrome that vendors can detect.
 
 ### How is it different from curl_cffi?
 curl_cffi impersonates a browser's TLS handshake but doesn't run JavaScript, so it
-fails any site needing JS or a real DOM. browser_oxide ships a full V8 runtime,
+fails any site needing JS or a real DOM. BrowserOxide ships a full V8 runtime,
 real DOM/CSS/layout/canvas **and** a Chrome-matched TLS fingerprint.
 
 ### Does it pass Cloudflare, Akamai, and DataDome?
@@ -189,7 +189,7 @@ pages — with no per-vendor bypass code. DataDome's interactive Device-Check
 
 ### Does it pass Kasada?
 No. Kasada (e.g. canadagoose.com, hyatt.com, realtor.com) is the standing open
-gap; no open-source tool publicly passes Kasada from scratch, and browser_oxide
+gap; no open-source tool publicly passes Kasada from scratch, and BrowserOxide
 ships no Kasada solver.
 
 ### Can I use it from Python?

@@ -1,6 +1,6 @@
 # dom — Mutable DOM Tree + Web APIs + Shadow DOM + iframes
 
-The core data structure of browser_oxide. Every other crate either produces, queries, or mutates this tree.
+The core data structure of BrowserOxide. Every other crate either produces, queries, or mutates this tree.
 
 ## Scope
 

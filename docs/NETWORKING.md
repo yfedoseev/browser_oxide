@@ -78,7 +78,7 @@ Real Chrome negotiates protocols:
 4. Alt-Svc header may advertise HTTP/3 for future requests
 ```
 
-browser_oxide replicates this behavior, including Alt-Svc caching.
+BrowserOxide replicates this behavior, including Alt-Svc caching.
 
 ## TLS Fingerprint Matching (JA4)
 

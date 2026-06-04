@@ -1,4 +1,4 @@
-# browser_oxide — conventions for AI coding assistants
+# BrowserOxide — conventions for AI coding assistants
 
 This file documents conventions for AI coding assistants (Claude Code,
 Cursor, etc.) working in this repo. For human contributors, see

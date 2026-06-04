@@ -1,4 +1,4 @@
-# Contributing to browser_oxide
+# Contributing to BrowserOxide
 
 Thanks for your interest. This document is the quick orientation for
 contributors. The longer architectural references live in `docs/`.

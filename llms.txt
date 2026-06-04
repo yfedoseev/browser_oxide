@@ -1,4 +1,4 @@
-# browser_oxide — stealth headless browser engine in Rust (anti-bot, Python + MCP, camoufox alternative)
+# BrowserOxide — stealth headless browser engine in Rust (anti-bot, Python + MCP, camoufox alternative)
 
 > A from-scratch headless browser engine in Rust for web scraping, archival, and
 > AI agents: real HTML/CSS/DOM parser, V8 JavaScript (via deno_core), own CSS

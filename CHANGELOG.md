@@ -8,7 +8,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.0] — Initial public release
 
-First open-source release of browser_oxide: a from-scratch headless browser engine
+First open-source release of BrowserOxide: a from-scratch headless browser engine
 in Rust (own HTTP/1+2 + stealth-TLS stack via boring2, V8 via deno_core, from-scratch
 CSS/DOM/layout/canvas, configurable browser-identity profiles, CDP-compatible debugging
 surface). Dual-licensed MIT OR Apache-2.0.

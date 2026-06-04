@@ -1,6 +1,6 @@
 # Scope and intended use
 
-`browser_oxide` is a research-grade browser engine written from scratch
+BrowserOxide is a research-grade browser engine written from scratch
 in Rust. This document spells out what it's *for*, what it *isn't for*,
 and the values that drive triage decisions on this project.
 
@@ -83,7 +83,7 @@ asked them?* If yes, you're fine. If no, this is the wrong tool.
 
 ## Reporting misuse
 
-If you observe a deployment of `browser_oxide` that's clearly outside
+If you observe a deployment of BrowserOxide that's clearly outside
 this scope (e.g., a service marketed as a turn-key "bypass Cloudflare"
 product, or a public scraper aggressively abusing a site), please tell
 the maintainer privately. We can't police every downstream, but we

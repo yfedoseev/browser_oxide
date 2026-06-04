@@ -1,6 +1,6 @@
 # Getting started (Rust)
 
-`browser_oxide` is a **stealth headless browser engine** — a real HTML/CSS/DOM/JS
+BrowserOxide is a **stealth headless browser engine** — a real HTML/CSS/DOM/JS
 browser built from the parser up in Rust, with its own BoringSSL TLS stack and a
 native fingerprint. No Chromium, no CDP driver. You drive it as a library: give it
 a URL and a browser identity, get back a rendered page you can read and script.

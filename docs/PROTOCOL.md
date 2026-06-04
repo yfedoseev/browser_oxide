@@ -1,11 +1,11 @@
 # protocol — CDP Server (Puppeteer/Playwright Compatibility)
 
-browser_oxide exposes a Chrome DevTools Protocol (CDP) server so it can be driven by existing tools: Puppeteer, Playwright, scraper_oxide's browser layer.
+BrowserOxide exposes a Chrome DevTools Protocol (CDP) server so it can be driven by existing tools: Puppeteer, Playwright, scraper_oxide's browser layer.
 
 ## Why Implement CDP
 
 - **Drop-in replacement**: Existing automation code that uses Puppeteer/Playwright works without changes
-- **scraper_oxide integration**: scraper_oxide already speaks CDP — browser_oxide just needs to respond to it
+- **scraper_oxide integration**: scraper_oxide already speaks CDP — BrowserOxide just needs to respond to it
 - **Ecosystem compatibility**: Testing tools, debugging tools, and CI/CD pipelines speak CDP
 - **Lightpanda validates this approach**: They implemented CDP and achieved Puppeteer/Playwright compatibility
 
@@ -77,13 +77,13 @@ protocol/
 CDP uses JSON-RPC over WebSocket:
 
 ```json
-// Request (client → browser_oxide)
+// Request (client → BrowserOxide)
 {"id": 1, "method": "Page.navigate", "params": {"url": "https://example.com"}}
 
-// Response (browser_oxide → client)
+// Response (BrowserOxide → client)
 {"id": 1, "result": {"frameId": "main", "loaderId": "loader1"}}
 
-// Event (browser_oxide → client, no id)
+// Event (BrowserOxide → client, no id)
 {"method": "Page.loadEventFired", "params": {"timestamp": 1234567890.123}}
 ```
 
@@ -96,4 +96,4 @@ We use V8 (same as Chrome), but our `Runtime.enable` implementation avoids the d
 3. **Console interception at the Rust layer** — We intercept `console.*` calls via V8 ops before they reach the CDP event stream. No V8 preview serialization is triggered.
 4. **No unconditional serialization** — Only serialize console arguments when a CDP client explicitly requests it AND the arguments are from the page context (not from automation).
 
-This means `Runtime.enable` is safe by default in browser_oxide, even though we use V8.
+This means `Runtime.enable` is safe by default in BrowserOxide, even though we use V8.

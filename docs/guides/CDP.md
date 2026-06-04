@@ -1,6 +1,6 @@
 # Guide: CDP server (Puppeteer / Playwright drop-in)
 
-`browser_oxide` exposes a **Chrome DevTools Protocol** surface, so existing
+BrowserOxide exposes a **Chrome DevTools Protocol** surface, so existing
 Puppeteer/Playwright clients can drive it over a WebSocket — no Chrome process,
 no CDP detection vectors, the stealth engine underneath.
 

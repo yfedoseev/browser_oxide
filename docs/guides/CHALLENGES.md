@@ -1,7 +1,7 @@
 # Guide: challenge verdicts & solvers
 
 Anti-bot endpoints answer with HTTP 200 and a *challenge* body, so status codes
-don't tell you whether you got real content. `browser_oxide` classifies the
+don't tell you whether you got real content. BrowserOxide classifies the
 result for you, and exposes a pluggable hook for custom challenge handling.
 
 ## The verdict

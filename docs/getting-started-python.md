@@ -1,6 +1,6 @@
 # Getting started (Python)
 
-Python bindings for the `browser_oxide` stealth headless browser engine — a real
+Python bindings for the BrowserOxide stealth headless browser engine — a real
 HTML/CSS/DOM/JS browser with its own BoringSSL TLS stack and a native
 fingerprint. No Chromium, no CDP driver, no Selenium.
 

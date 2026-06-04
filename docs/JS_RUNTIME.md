@@ -1,6 +1,6 @@
 # js_runtime — V8 Engine + DOM Bindings + WebAssembly
 
-Executes page JavaScript and WebAssembly with full access to browser_oxide's DOM and Web APIs.
+Executes page JavaScript and WebAssembly with full access to BrowserOxide's DOM and Web APIs.
 
 ## Engine: V8 via rusty_v8 + deno_core
 
@@ -141,7 +141,7 @@ V8 provides WASM for free. Critical for:
 
 Implementation: WASM modules loaded via `WebAssembly.compile()` / `WebAssembly.instantiate()` run natively in V8. No additional work needed beyond exposing the standard WebAssembly global (which V8 provides by default).
 
-Key consideration: WASM timing must be realistic. Running in a debugger or instrumented V8 adds overhead that Kasada detects. browser_oxide runs V8 without debugging hooks by default.
+Key consideration: WASM timing must be realistic. Running in a debugger or instrumented V8 adds overhead that Kasada detects. BrowserOxide runs V8 without debugging hooks by default.
 
 ## Module Loading
 

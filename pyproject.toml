@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "browser-oxide"
 version = "0.1.0"
-description = "Stealth headless browser engine (Rust) — real HTML/CSS/DOM/JS, own BoringSSL TLS, native fingerprint, no Chromium"
+description = "BrowserOxide — stealth headless browser engine in Rust (Python bindings) — real HTML/CSS/DOM/JS, own BoringSSL TLS, native fingerprint, no Chromium"
 readme = "python/README.md"
 requires-python = ">=3.8"
 license = { text = "MIT OR Apache-2.0" }
