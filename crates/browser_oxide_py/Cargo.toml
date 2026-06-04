@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Python bindings for browser_oxide (PyO3) — built into a wheel by maturin"
+description = "Python bindings (PyO3) for browser_oxide — a stealth headless browser in Rust for web scraping & AI agents: native fingerprint + BoringSSL TLS, no Chromium/CDP; a camoufox alternative"
 publish = false
 
 [lib]

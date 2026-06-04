@@ -1,4 +1,4 @@
-# browser_oxide — stealth headless browser engine (Rust, Python, MCP)
+# browser_oxide — stealth headless browser engine in Rust (anti-bot, Python + MCP, camoufox alternative)
 
 > A from-scratch headless browser engine in Rust for web scraping, archival, and
 > AI agents: real HTML/CSS/DOM parser, V8 JavaScript (via deno_core), own CSS
@@ -72,7 +72,7 @@ AI agent browser, MCP browser, scraping in Python, scraping in Rust.
 ## Measured coverage (see BENCHMARK.md)
 
 126-site anti-bot corpus, release build, honest gate (rendered tag AND ≥15 KB):
-routed best-of-4 ≈ 118/126. Residual that does not pass: Kasada
+routed best-of-4 118/126. Residual that does not pass: Kasada
 (canadagoose/hyatt/realtor), DataDome interactive (etsy), plus flaky Akamai
 (adidas/homedepot) and a couple of CSR SPAs. Kasada is the open gap — no
 open-source tool publicly passes it from scratch.

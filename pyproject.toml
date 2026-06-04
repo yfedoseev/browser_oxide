@@ -11,13 +11,21 @@ requires-python = ">=3.8"
 license = { text = "MIT OR Apache-2.0" }
 authors = [{ name = "Yury Fedoseev" }]
 keywords = [
-  "browser",
-  "headless",
-  "scraping",
-  "stealth",
+  "stealth-browser",
+  "headless-browser",
+  "anti-detect-browser",
+  "web-scraping",
   "anti-bot",
-  "tls",
-  "fingerprint",
+  "camoufox-alternative",
+  "tls-fingerprint",
+  "ja4",
+  "browser-fingerprint",
+  "undetected-browser",
+  "bypass-cloudflare",
+  "datadome",
+  "mcp",
+  "ai-agents",
+  "rust",
 ]
 classifiers = [
   "Programming Language :: Rust",

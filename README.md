@@ -1,18 +1,32 @@
-# browser_oxide
+# browser_oxide — stealth headless browser engine in Rust (anti-bot, from scratch, no Chromium)
 
-**A stealth headless browser engine, written from scratch in Rust.** Real
-HTML/CSS/DOM parser, V8-backed JS runtime, own CSS engine (not Servo's MPL
-crates), own HTTP stack with BoringSSL TLS impersonation, native fingerprint,
-CDP-compatible remote-debugging surface — **no Chromium, no CDP driver
-underneath**. The stealth is the engine, not a plugin: you control every surface
-from the TLS handshake through WASM to canvas, so the fingerprint is *native*
-rather than *injected*.
+*A from-scratch stealth browser engine in Rust — own BoringSSL TLS/JA4 fingerprint, real JS, no Chromium, no CDP. Python + MCP bindings.*
 
-**New here?** Start with **[docs/getting-started-rust.md](docs/getting-started-rust.md)**.
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)]()
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)]()
+[![Status: pre-1.0](https://img.shields.io/badge/status-research--grade%20pre--1.0-yellow.svg)]()
+[![Anti-bot corpus: routed 118/126](https://img.shields.io/badge/anti--bot%20corpus-routed%20118%2F126-brightgreen.svg)]()
+[![Bindings: Rust · Python · MCP](https://img.shields.io/badge/bindings-Rust%20%C2%B7%20Python%20%C2%B7%20MCP-informational.svg)]()
 
-> **Status: research-grade, pre-1.0.** Works against a 126-site corpus of
-> commercially-protected pages (see "What it can do" below for measured
-> numbers). API surfaces are not stable. License is MIT OR Apache-2.0.
+**browser_oxide is a stealth headless browser engine written from scratch in
+Rust** for web scraping, archival, and AI agents. It implements a real
+HTML/CSS/DOM/JS browser — including its own BoringSSL TLS stack and a *native*
+(not injected) browser fingerprint — with **no Chromium and no Chrome DevTools
+Protocol (CDP) driver** underneath. You control every surface from the TLS
+handshake through WASM to canvas, so the fingerprint is native rather than
+injected.
+
+> **TL;DR.** Every other native-fingerprint stealth browser is either Python-only
+> (camoufox, a Firefox fork) or drives Chrome over CDP (nodriver, Obscura), where
+> the automation is itself detectable. **As of 2026 there is no Rust equivalent to
+> camoufox** — browser_oxide is built to be exactly that. In a same-machine,
+> same-IP cleanroom run it routed **118 of 126** commercially-protected sites
+> (Cloudflare, Akamai, DataDome, PerimeterX, Kasada) to a real render with **zero
+> per-vendor bypass code**. Kasada is the one honest open gap.
+
+**Get started:** [Rust](docs/getting-started-rust.md) · [Python](docs/getting-started-python.md) (`pip install browser-oxide`) · [MCP for AI agents](#mcp-server-for-ai-agents) · [Benchmark](docs/BENCHMARK.md) · [How it compares](#how-it-compares)
+
+> **Status: research-grade, pre-1.0.** API surfaces are not stable. License is MIT OR Apache-2.0.
 
 ## Why this exists
 
@@ -46,8 +60,26 @@ A complete browser engine for scraping, archival, and AI agent workloads:
 - **EventSource (SSE)** for streaming endpoints
 - **Configurable browser identity** — load profiles from YAML or JSON at
   runtime, or use the built-in `chrome_148_*` / `firefox_135_*` /
-  `pixel_9_pro_chrome_147` / `iphone_15_pro_safari_18` presets (the
-  `pixel_9_pro_chrome_147` constructor emits a current Chrome 148 UA)
+  `pixel_9_pro_chrome_148` / `iphone_15_pro_safari_18` presets
+
+## How it compares
+
+The native-fingerprint stealth-browser field, and where browser_oxide sits:
+
+| Tool | Language | Engine | No CDP/WebDriver | Native fingerprint | Runs JS | TLS impersonation |
+|---|---|---|:--:|:--:|:--:|:--:|
+| **browser_oxide** | **Rust (+ Python, MCP)** | **from-scratch (own HTML/CSS/DOM/JS + BoringSSL TLS)** | ✅ | ✅ | ✅ (V8) | ✅ (JA3/JA4) |
+| camoufox | Python | Firefox fork | ✅ | ✅ (patched into Firefox) | ✅ (Gecko) | partial (Firefox NSS) |
+| nodriver / Obscura | Python | real Chrome (CDP) | ❌ (uses CDP) | ❌ (injected) | ✅ (Chrome) | ❌ (real Chrome TLS) |
+| undetected-chromedriver | Python | real Chrome (WebDriver) | ❌ (WebDriver) | ❌ (injected) | ✅ (Chrome) | ❌ |
+| curl_cffi | Python | none (HTTP/TLS only) | n/a | n/a | ❌ | ✅ (JA3/JA4) |
+
+**The takeaway:** camoufox proved native-fingerprint stealth works, but it's a
+Python-only Firefox fork. CDP-driven tools (nodriver, Obscura) inherit Chrome's
+automation-detection surface. curl_cffi nails the TLS handshake but runs no
+JavaScript, so it loses to any JS challenge. **As of 2026 there is no Rust
+equivalent to camoufox** — browser_oxide fills that gap: native fingerprint, no
+CDP, real JS, and a Rust core with Python + MCP bindings.
 
 ## What it can do (measured, not estimated)
 
@@ -78,10 +110,8 @@ which most real scraping pipelines do naturally. Full breakdown and the
 scoring caveats (the strict gate also has a few false *negatives*) are in
 [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
 
-(Built-in preset constructors `chrome_130_*` / `pixel_9_pro_chrome_147`
-are deprecated aliases that emit a current Chrome 148 UA — the profile
-labels above reflect the actual emitted User-Agent, not the legacy
-function name.)
+(Profile labels reflect the actual emitted User-Agent. All presets ship a
+current Chrome 148 / Firefox 135 / Safari 18 identity.)
 
 **The hard residual** is seven sites that returned no real content on any
 profile: three Kasada pages (`canadagoose.com`, `hyatt.com`,
@@ -125,6 +155,57 @@ A warm `PagePool` amortizes V8 isolate + snapshot setup across
 navigations (the `PagePool::navigate(url)` API).
 
 Full per-profile + per-site breakdown: [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
+
+## FAQ
+
+### Is there a Rust equivalent to camoufox?
+browser_oxide is built to be exactly that. camoufox is a native-fingerprint
+stealth browser, but it's a Python-only Firefox fork. As of 2026 there is no other
+from-scratch stealth browser engine in Rust — browser_oxide provides a native
+fingerprint, no CDP, real JavaScript execution, and a Rust core with Python and
+MCP bindings.
+
+### Is browser_oxide a Chromium or Firefox fork?
+No. The HTML parser, CSS engine, DOM, layout, and TLS stack are written from
+scratch in Rust; JavaScript runs on V8 via `deno_core`. There is no Chrome
+process and no CDP driver, so it doesn't inherit Chromium's automation-detection
+vectors (`navigator.webdriver`, `cdc_*` variables, CDP WebSocket fingerprints).
+
+### How is it different from nodriver, Obscura, or undetected-chromedriver?
+Those drive a real Chrome over CDP or WebDriver. browser_oxide is its own engine
+— no automation protocol underneath — so the fingerprint is native rather than
+patched onto an automated Chrome that vendors can detect.
+
+### How is it different from curl_cffi?
+curl_cffi impersonates a browser's TLS handshake but doesn't run JavaScript, so it
+fails any site needing JS or a real DOM. browser_oxide ships a full V8 runtime,
+real DOM/CSS/layout/canvas **and** a Chrome-matched TLS fingerprint.
+
+### Does it pass Cloudflare, Akamai, and DataDome?
+In a measured 126-site cleanroom run it routed 118/126 commercially-protected
+sites to a real render, including most Cloudflare, Akamai, AWS WAF, and DataDome
+pages — with no per-vendor bypass code. DataDome's interactive Device-Check
+(human-gated, e.g. etsy.com) is not cleared.
+
+### Does it pass Kasada?
+No. Kasada (e.g. canadagoose.com, hyatt.com, realtor.com) is the standing open
+gap; no open-source tool publicly passes Kasada from scratch, and browser_oxide
+ships no Kasada solver.
+
+### Can I use it from Python?
+Yes — `pip install browser-oxide`, then `Browser` / `Page` / `Profile` / `Verdict`
+(the GIL is released during navigation). There's also an MCP server so AI agents
+can drive the engine. See [docs/getting-started-python.md](docs/getting-started-python.md).
+
+### Does it work with Puppeteer or Playwright?
+Yes, via a CDP-compatible WebSocket server (`CdpServer::start_navigable`) as a
+drop-in target — but nothing drives a real browser underneath. There is no
+Selenium/WebDriver support.
+
+### Is it production-ready?
+It's research-grade and pre-1.0; APIs are not stable and the crates aren't on
+crates.io yet. Anti-bot pass rates are point-in-time and vary ±5 sites per run
+from WAF noise. MIT OR Apache-2.0.
 
 ## Challenge solving
 

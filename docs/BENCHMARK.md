@@ -75,10 +75,9 @@ tendency, not a guaranteed per-run figure.
   calls when reproducing, or token-clustering produces false failures.
 - **Re-measure per release.** These are point-in-time numbers; live sites and
   their defenses change. Treat the table as "what a fresh cleanroom sweep produced
-  on 2026-05-31," not a standing guarantee.
-- Preset constructors `chrome_130_*` / `pixel_9_pro_chrome_147` are deprecated
-  aliases that emit a current Chrome 148 UA — the profile labels reflect the actual
-  emitted User-Agent.
+  on 2026-06-03," not a standing guarantee.
+- Profile labels reflect the actual emitted User-Agent; all presets ship a current
+  Chrome 148 / Firefox 135 / Safari 18 identity.
 
 ## Reproduce
 
