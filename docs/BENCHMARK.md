@@ -25,35 +25,46 @@ Neither gate is perfect: the strict gate also has a few **false negatives** — 
 site whose genuine full page is small (e.g. `areyouheadless.com` renders a real
 3.6 KB results page) fails the `≥15 KB` cut despite rendering correctly.
 
-## Result (latest full 4-profile cleanroom run, 2026-05-31)
+## Result (latest full 4-profile cleanroom run, 2026-06-03)
 
 | Profile | Rendered / 126 (`≥15 KB`) | loose `L3` tag |
 |---|--:|--:|
-| `chrome_148_macos` | **115** | 119 |
-| `firefox_135_macos` | **112** | 116 |
-| `pixel_9_pro_chrome_148` | **113** | 117 |
-| `iphone_15_pro_safari_18` | **115** | 119 |
-| **best-of-4 routed** | **118** | 122 |
+| `chrome_148_macos` | **114** | 118 |
+| `firefox_135_macos` | **111** | 115 |
+| `pixel_9_pro_chrome_148` | **114** | 118 |
+| `iphone_15_pro_safari_18` | **118** | 121 |
+| **best-of-4 routed** | **118** | 121 |
 
 "Routed" = the caller picks the best profile per domain, which most real scraping
 pipelines do naturally (the `≥15 KB` routed union covers 118/126).
 
 ## The hard residual
 
-**Seven** sites return no real content on **any** profile:
+**Seven** sites returned no real content on **any** profile in this run:
 
 | Site | Protection | Why |
 |---|---|---|
-| `canadagoose.com` | Kasada | no OSS tool publicly passes Kasada from scratch |
+| `canadagoose.com` | Kasada | no OSS tool publicly passes Kasada from scratch (challenge times out) |
 | `hyatt.com` | Kasada | same |
-| `realtor.com` | Kasada | same |
+| `realtor.com` | Kasada | `Kasada-CHL` interstitial, all profiles |
 | `etsy.com` | DataDome | interactive Device-Check / human-gate (out of scope) |
-| `adidas.com` | Akamai | lazy-loaded chunk graph not fully driven to a render |
-| `duolingo.com` | (CSR SPA) | renders a 13.5 KB shell; full client render not reached |
-| `wildberries.ru` | WBAAS | handshake reaches the storefront intermittently; flagged from repeat testing |
+| `duolingo.com` | (CSR SPA) | renders a ~13.5 KB shell; full client render not reached |
+| `wildberries.ru` | WBAAS | reaches storefront intermittently; ~1.8 KB interstitial this run |
+| `homedepot.com` | Akamai (sec-cpt) | **flaky** — times out on a bad risk-roll (has rendered in other runs) |
 
-`areyouheadless.com` is *not* in this list as a block — it renders correctly but
-its real page is 3.6 KB, below the strict gate (see scoring note above).
+Two sites that look like fails but aren't hard blocks:
+- **`adidas.com` passes** via routing — `chrome` (1.5 MB) and `iphone` (1.38 MB)
+  render the full storefront; `firefox`/`pixel` stay at the 2.5 KB Akamai
+  interstitial. It's **profile-split + flaky**, not a hard fail. (The firefox
+  miss is a side effect of coherent Firefox-TLS impersonation — Akamai's firefox
+  bot-model catches it where the old `UA=Firefox + TLS=Chrome` edge case slipped
+  through. Correct global tradeoff; chrome/iphone routing still wins the site.)
+- **`areyouheadless.com`** renders correctly (`L3-RENDERED`, 3.6 KB) but its real
+  page is below the 15 KB strict gate — a gate false-negative, not a block.
+
+`adidas` and `homedepot` are both **flaky Akamai** (±risk-roll): on any given
+cleanroom run, one or both may flip pass↔fail. Routed `118` is the central
+tendency, not a guaranteed per-run figure.
 
 ## Caveats
 

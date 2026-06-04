@@ -55,11 +55,11 @@ tree. Same machine, same IP, same hour, same classifier
 
 | browser_oxide profile        | **Pass** (real render, ≥15 KB) | loose `L3` tag |
 |------------------------------|--:|--:|
-| `chrome_148_macos`           | **115** | 119 |
-| `firefox_135_macos`          | **112** | 116 |
-| `pixel_9_pro_chrome_148`     | **113** | 117 |
-| `iphone_15_pro_safari_18`    | **115** | 119 |
-| **best-of-4 routed**         | **118** | 122 |
+| `chrome_148_macos`           | **114** | 118 |
+| `firefox_135_macos`          | **111** | 115 |
+| `pixel_9_pro_chrome_148`     | **114** | 118 |
+| `iphone_15_pro_safari_18`    | **118** | 121 |
+| **best-of-4 routed**         | **118** | 121 |
 
 The headline `Pass` column is the honest gate: the engine's `L3-RENDERED`
 tag **and** `≥15 KB` of actual content (`ChallengeVerdict::Pass`, the rule
@@ -78,12 +78,16 @@ are deprecated aliases that emit a current Chrome 148 UA — the profile
 labels above reflect the actual emitted User-Agent, not the legacy
 function name.)
 
-**The hard residual** is seven sites that render no real content on any
+**The hard residual** is seven sites that returned no real content on any
 profile: three Kasada pages (`canadagoose.com`, `hyatt.com`,
 `realtor.com` — no OSS tool publicly passes Kasada from scratch),
 `etsy.com` (DataDome interactive Device-Check, human-gated, out of
-scope), `adidas.com` (Akamai lazy-chunk graph), `duolingo.com` (CSR SPA
-that only reaches its shell), and `wildberries.ru` (WBAAS).
+scope), `duolingo.com` (CSR SPA that only reaches its shell),
+`wildberries.ru` (WBAAS), and `homedepot.com` (Akamai sec-cpt — flaky;
+renders on a good risk-roll). `adidas.com` is *not* in this set — it
+passes via routing (chrome + iphone render the 1.5 MB storefront; firefox
++ pixel stay at the interstitial). `adidas`/`homedepot` are both flaky
+Akamai, so the exact residual shifts ±1–2 sites run to run.
 
 > **The engine carries the number, not bypass code.** A/B measurements
 > with per-vendor challenge solvers enabled vs fully removed from the
