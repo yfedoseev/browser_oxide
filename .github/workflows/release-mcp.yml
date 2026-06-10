@@ -35,7 +35,7 @@ jobs:
           [ "${{ runner.os }}" = "Windows" ] && bin="$bin.exe"
           tar -czf "browser-oxide-mcp-${{ matrix.target }}.tar.gz" \
             -C "target/${{ matrix.target }}/release" "$bin"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           files: browser-oxide-mcp-${{ matrix.target }}.tar.gz
