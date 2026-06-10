@@ -32,7 +32,7 @@ jobs:
           fi
       - name: Open/refresh tracking issue
         if: steps.outdated.outputs.has_outdated == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           REPORT: ${{ steps.outdated.outputs.report }}
         with:
