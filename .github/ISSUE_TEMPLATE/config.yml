@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/yfedoseev/browser_oxide/security/advisories/new
+    about: Report a security vulnerability privately. Do NOT open a public issue.
+  - name: Question or discussion
+    url: https://github.com/yfedoseev/browser_oxide/discussions
+    about: Usage questions, design discussion, "how do I…" — use Discussions.

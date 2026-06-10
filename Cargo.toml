@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/browser_oxide",
+  "crates/browser_oxide_mcp",
+]
+# browser_oxide_py is a STANDALONE workspace (own [workspace] in its Cargo.toml),
+# excluded here so `cargo build --workspace` for the engine skips the V8-cdylib.
+# On Linux it requires a from-source V8 build (V8_FROM_SOURCE=1) for a shared-lib-
+# safe TLS model; it is built on its own track via maturin (python.yml).
+exclude = [
+  "crates/browser_oxide_py",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Yury Fedoseev"]
+repository = "https://github.com/yfedoseev/browser_oxide"
+homepage = "https://github.com/yfedoseev/browser_oxide"
+rust-version = "1.84"
+
+# Central lint policy. CI runs `cargo clippy --workspace -- -D warnings`;
+# the few `allow`s below are deliberate, documented exceptions rather
+# than per-site `#[allow]` scattered through the tree. Everything else
+# is denied. Each crate opts in with `[lints] workspace = true`.
+[workspace.lints.clippy]
+# Harsh escape-hatch policy: every `#[allow(...)]` in the tree MUST carry a
+# `reason = "..."`. A bare `#[allow(dead_code)]` (or any bare allow) is a CI
+# error under `-D warnings`. This forbids silent suppression — suppressing a
+# lint requires a written justification that survives review.
+allow_attributes_without_reason = "deny"
+# Engine entry points (Page::navigate_*, biquad_coeffs, profile builders)
+# legitimately take many parameters; splitting them into structs would
+# be churn without clarity.
+too_many_arguments = "allow"
+# Stylistic rustdoc list-formatting lints — the docs render correctly;
+# not worth reflowing every bullet list in the tree.
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+
+[workspace.dependencies]
+# The single engine crate — depended on by browser_oxide_mcp. Explicit
+# version pinned to the workspace version so cargo-deny's `wildcards =
+# "deny"` rule doesn't trip on path-only `version = "*"` resolution.
+browser_oxide = { version = "0.1.0", path = "crates/browser_oxide" }
+
+# Async runtime + common derive deps shared by multiple crates.
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+# cargo test --release uses this profile
+[profile.release.package."*"]
+opt-level = 3

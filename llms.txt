@@ -1,0 +1,85 @@
+# BrowserOxide — stealth headless browser engine in Rust (anti-bot, Python + MCP, camoufox alternative)
+
+> A from-scratch headless browser engine in Rust for web scraping, archival, and
+> AI agents: real HTML/CSS/DOM parser, V8 JavaScript (via deno_core), own CSS
+> engine (Syntax L3, Selectors L4, cascade), arena DOM, Canvas 2D (tiny-skia),
+> and its own stealth HTTP/TLS stack (boring2/BoringSSL) with a Chrome/Firefox-
+> accurate fingerprint (JA3/JA4, HTTP/2). Not a Chromium fork, not a Firefox
+> fork, no CDP driver — the stealth is native to the engine. Renders through
+> Cloudflare, Akamai, AWS WAF, and much of DataDome from a from-scratch stack
+> (no per-vendor bypass code shipped). MIT OR Apache-2.0, pre-1.0.
+
+- Rust: add via git dependency (`browser = { git = "https://github.com/yfedoseev/browser_oxide" }`); crates are `publish = false` pending a single-crate release
+- Python: `pip install browser-oxide`
+- MCP server (for AI agents): `cargo install --git https://github.com/yfedoseev/browser_oxide browser_oxide_mcp` → `browser-oxide-mcp`
+- Repository: https://github.com/yfedoseev/browser_oxide
+- License: MIT OR Apache-2.0 (no GPL/LGPL/AGPL; one MPL-2.0 transitive `cooked-waker`, plus optional `blocker` feature adds MPL-2.0 `adblock` — both `deny.toml` exceptions)
+- Workspace: 18 Rust crates (15 engine + host/python/mcp bindings)
+- Maturity: pre-1.0, API not yet stable
+
+## Keywords
+
+stealth browser, headless browser, anti-bot, anti-detect browser, web scraping,
+Rust browser engine, TLS fingerprint, JA3, JA4, BoringSSL impersonation,
+Cloudflare alternative, Akamai, DataDome, PerimeterX, Kasada, Puppeteer
+alternative, Playwright alternative, Selenium alternative, undetected browser,
+AI agent browser, MCP browser, scraping in Python, scraping in Rust.
+
+## Getting started
+
+- [Getting started — Rust](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/getting-started-rust.md): the `!Send`/LocalSet pattern, `Page::navigate`, content extraction, `challenge_verdict`, `PagePool`
+- [Getting started — Python](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/getting-started-python.md): `pip install browser-oxide`; `Browser` / `Page` / `Profile` / `Verdict`
+- [Profiles guide](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/guides/PROFILES.md): identities + multi-profile routing
+- [Challenges guide](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/guides/CHALLENGES.md): verdict semantics + the `ChallengeSolver` extension point
+- [Stealth FAQ](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/guides/STEALTH_FAQ.md): what's native vs. not (honest boundary)
+- [Benchmark](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/BENCHMARK.md): measured anti-bot pass rates
+- [Architecture](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/docs/ARCHITECTURE.md): the crates + dependency graph
+- [SCOPE.md](https://raw.githubusercontent.com/yfedoseev/browser_oxide/main/SCOPE.md): what it's for / not for
+
+## Top-level Rust API (crate `browser`)
+
+- `browser::Page::navigate(url, profile, max_iterations) -> Result<Page>` — cold, humanized navigation.
+- `browser::Page::from_html(html, Some(profile))` — render a literal HTML string (no network).
+- `page.title()`, `page.content()` (outerHTML), `page.text_content()`, `page.text_of(selector)` — extract content.
+- `page.evaluate(js) -> Result<String>` — run JavaScript in the page realm.
+- `page.challenge_verdict() -> ChallengeVerdict` — Pass / ThinShell / RenderIncomplete / EdgeBlock / SensorFail / ChallengeIncomplete (HTTP status lies on challenge pages).
+- `browser::PagePool::new(n)` + `pool.navigate(url, profile)` — warm-isolate reuse for benign high-throughput pages.
+- `browser::ChallengeSolver` trait + `Page::navigate_with_solvers(...)` — pluggable per-vendor handling (engine ships an empty solver set).
+- `protocol::CdpServer::start_navigable(port)` — Puppeteer/Playwright drop-in over WebSocket.
+
+## Python API (`pip install browser-oxide`)
+
+- `Browser(profile=Profile.chrome())` — context-managed; spawns the engine thread.
+- `b.navigate(url, max_iterations=5) -> Page` — GIL released during the call.
+- `page.url / .title / .html / .text / .verdict / .is_challenge` — properties.
+- `page.evaluate(js)`, `page.query_text(selector)` — scripting.
+- `Profile.chrome() / .firefox() / .iphone() / .pixel() / .from_file(path)`.
+- `Verdict.PASS / THIN_SHELL / RENDER_INCOMPLETE / EDGE_BLOCK / SENSOR_FAIL / CHALLENGE_INCOMPLETE`.
+
+## MCP tools (`browser-oxide-mcp`, stdio JSON-RPC)
+
+- `fetch_page(url, profile?, format?)` — render and return text/html + verdict.
+- `evaluate(url, js, profile?)` — render then run JS.
+- `check_protection(url, profile?)` — report whether a URL is bot-walled and whether a real render got through.
+
+## Stealth / fingerprint profiles (crate `stealth`)
+
+- `stealth::StealthProfile` — coherent browser identity (UA, screen, locale, GPU, TLS impersonation label, canvas/audio seeds, …).
+- `stealth::StealthProfile::load_from_file(path)` — YAML or JSON (auto-detected); runs `validate()`.
+- Built-in presets: `chrome_148_{macos,windows,linux,ru,cn,de,jp}`, `firefox_135_{macos,windows,linux}`, `pixel_9_pro_chrome_148`, `iphone_15_pro_safari_18`.
+- Example YAML: `crates/stealth/profiles/chrome_148_macos.yaml`.
+
+## Measured coverage (see BENCHMARK.md)
+
+126-site anti-bot corpus, release build, honest gate (rendered tag AND ≥15 KB):
+routed best-of-4 118/126. Residual that does not pass: Kasada
+(canadagoose/hyatt/realtor), DataDome interactive (etsy), plus flaky Akamai
+(adidas/homedepot) and a couple of CSR SPAs. Kasada is the open gap — no
+open-source tool publicly passes it from scratch.
+
+## Build and test
+
+```bash
+cargo build --workspace
+cargo test --workspace -- --test-threads=1    # V8 isolates are per-thread
+```

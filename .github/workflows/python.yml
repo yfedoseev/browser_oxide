@@ -1,0 +1,114 @@
+name: Python wheels
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to PyPI (false = dry-run: build + twine check only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Build abi3 wheels across platforms with maturin. abi3-py38 → one wheel per
+  # platform covers Python 3.8+. The Rust engine fetches a ~130 MB prebuilt V8.
+  wheels:
+    name: wheel (${{ matrix.platform.target }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { runner: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
+          - { runner: macos-14,       target: aarch64-apple-darwin }
+          - { runner: macos-13,       target: x86_64-apple-darwin }
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc }
+    env:
+      # The cdylib links V8. On Linux/ELF, the prebuilt V8 emits a TLS
+      # relocation (R_X86_64_TPOFF32 against v8::internal::g_current_isolate_)
+      # that cannot link into a `-shared` object — so Linux must build V8 from
+      # source, where the v8 crate auto-injects `-DV8_TLS_USED_IN_LIBRARY` (the
+      # shared-library-safe TLS model) and auto-downloads gn/ninja. macOS
+      # (Mach-O) and Windows (PE) link the prebuilt V8 fine.
+      V8_FROM_SOURCE: ${{ startsWith(matrix.platform.runner, 'ubuntu') && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          # manylinux_2_28 (Rocky 8) has a modern toolchain; V8 from source needs
+          # clang. macOS/Windows use the default (prebuilt V8) path.
+          manylinux: ${{ startsWith(matrix.platform.runner, 'ubuntu') && '2_28' || '' }}
+          # Linux only: install the V8-from-source build prerequisites (clang +
+          # cmake; gn/ninja are auto-downloaded by the v8 crate).
+          before-script-linux: |
+            dnf install -y clang cmake python3 || yum install -y clang cmake python3 || true
+      - name: Smoke test (offline)
+        if: ${{ !contains(matrix.platform.target, 'aarch64') }}
+        shell: bash
+        run: |
+          python -m pip install pytest
+          python -m pip install --find-links dist browser-oxide
+          python -m pytest python/tests/ -q
+      # Dry-run gate: every build validates the wheel metadata with twine. This
+      # always runs (PR, branch, tag, manual) so a broken wheel is caught before
+      # any publish, mirroring pdf_oxide's build/validate-then-publish split.
+      - name: Validate wheel (twine check — dry run)
+        shell: bash
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine check dist/*.whl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.target }}
+          path: dist/*.whl
+
+  # Publish to PyPI. Gated: only a version tag OR a manual run with publish=true
+  # actually uploads. Plain pushes/PRs stop at the twine-check dry run above.
+  # Requires the PYPI_API_TOKEN repo secret (set via: gh secret set PYPI_API_TOKEN).
+  publish:
+    name: publish to PyPI
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish)
+    needs: wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Harsh check: on a tag, the tag must equal pyproject.toml's version,
+      # else we'd ship a wrong-versioned wheel. Mirrors the crates.io gate.
+      - name: Validate tag matches pyproject version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION=$(grep -m1 -E '^version *= *"' pyproject.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          if [ "${TAG#v}" != "$VERSION" ]; then
+            echo "::error::tag $TAG does not match pyproject version $VERSION (expected tag v$VERSION)"
+            exit 1
+          fi
+          echo "tag $TAG == pyproject $VERSION ✓"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          password: ${{ secrets.PYPI_API_TOKEN }}

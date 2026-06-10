@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body>
+<pre id="out"></pre>
+<script>
+// Chrome 147 fixture capture. Outputs a JSON object that the harness extracts.
+async function capture() {
+  const out = {};
+  const r = (k, fn) => { try { out[k] = fn(); } catch (e) { out[k] = "ERR:" + e.message; } };
+
+  // ---- V8 / engine identifiers ----
+  r("eval_to_string_length", () => eval.toString().length);
+  r("eval_to_string", () => eval.toString());
+  r("function_to_string_self", () => Function.prototype.toString.call(Function.prototype.toString));
+  r("function_to_string_math_sin", () => Function.prototype.toString.call(Math.sin));
+  r("function_to_string_fetch", () => Function.prototype.toString.call(fetch));
+  r("function_to_string_query_selector", () => Function.prototype.toString.call(document.querySelector));
+  r("error_stack_format", () => { try { null.foo } catch(e) { return e.stack.split('\n').slice(0,3).join('\n'); } });
+
+  // ---- Math constants (CreepJS table) ----
+  r("math_cos_13e", () => Math.cos(13 * Math.E));
+  r("math_cos_57e", () => Math.cos(57 * Math.E));
+  r("math_acos_0_123", () => Math.acos(0.123));
+  r("math_acosh_1e308", () => Math.acosh(1e308));
+  r("math_atan_2", () => Math.atan(2));
+  r("math_sin_pi", () => Math.sin(Math.PI));
+  r("math_tan_neg1e300", () => Math.tan(-1e300));
+
+  // ---- Globals enumeration ----
+  r("global_property_count", () => Object.getOwnPropertyNames(globalThis).length);
+  r("global_property_names_first_50", () => Object.getOwnPropertyNames(globalThis).slice(0, 50));
+  r("navigator_proto_names", () => Object.getOwnPropertyNames(Navigator.prototype));
+  r("navigator_proto_names_count", () => Object.getOwnPropertyNames(Navigator.prototype).length);
+  r("document_proto_names_count", () => Object.getOwnPropertyNames(Document.prototype).length);
+  r("html_element_proto_names_count", () => Object.getOwnPropertyNames(HTMLElement.prototype).length);
+
+  // ---- Navigator / hardware ----
+  r("navigator_user_agent", () => navigator.userAgent);
+  r("navigator_app_version", () => navigator.appVersion);
+  r("navigator_platform", () => navigator.platform);
+  r("navigator_vendor", () => navigator.vendor);
+  r("navigator_product", () => navigator.product);
+  r("navigator_product_sub", () => navigator.productSub);
+  r("navigator_languages", () => navigator.languages);
+  r("navigator_hardware_concurrency", () => navigator.hardwareConcurrency);
+  r("navigator_device_memory", () => navigator.deviceMemory);
+  r("navigator_max_touch_points", () => navigator.maxTouchPoints);
+  r("navigator_pdf_viewer_enabled", () => navigator.pdfViewerEnabled);
+  r("navigator_webdriver", () => navigator.webdriver);
+  r("navigator_cookie_enabled", () => navigator.cookieEnabled);
+  r("navigator_do_not_track", () => navigator.doNotTrack);
+
+  // ---- Performance / memory ----
+  r("performance_memory_heap_limit", () => performance.memory && performance.memory.jsHeapSizeLimit);
+  r("performance_memory_total", () => performance.memory && performance.memory.totalJSHeapSize);
+  r("performance_now_resolution", () => {
+    const samples = [];
+    let last = performance.now();
+    for (let i = 0; i < 1000; i++) {
+      const cur = performance.now();
+      if (cur > last) { samples.push(cur - last); last = cur; }
+    }
+    samples.sort((a,b)=>a-b);
+    return samples[0]; // smallest non-zero delta
+  });
+
+  // ---- Screen ----
+  r("screen_width", () => screen.width);
+  r("screen_height", () => screen.height);
+  r("screen_avail_width", () => screen.availWidth);
+  r("screen_avail_height", () => screen.availHeight);
+  r("screen_color_depth", () => screen.colorDepth);
+  r("screen_pixel_depth", () => screen.pixelDepth);
+  r("device_pixel_ratio", () => devicePixelRatio);
+
+  // ---- Permissions matrix ----
+  r("notification_permission", () => Notification.permission);
+  // Permission state for notifications via async API
+  await navigator.permissions.query({name:'notifications'}).then(p => out.permission_query_notifications = p.state).catch(e => out.permission_query_notifications = "ERR");
+
+  // ---- Iframe / realm purity (the real thing! captured from real Chrome) ----
+  const f = document.createElement('iframe');
+  f.srcdoc = '<!DOCTYPE html><html><body></body></html>';
+  document.body.appendChild(f);
+  await new Promise(res => f.onload = res);
+  r("iframe_navigator_distinct", () => f.contentWindow.Navigator !== Navigator);
+  r("iframe_navigator_proto_distinct", () => f.contentWindow.Navigator.prototype !== Navigator.prototype);
+  r("iframe_array_distinct", () => f.contentWindow.Array !== Array);
+  r("iframe_array_instanceof_false", () => ([] instanceof f.contentWindow.Array));
+  r("iframe_function_toString_native", () => f.contentWindow.Function.prototype.toString.call(window.fetch).includes('[native code]'));
+  r("iframe_navigator_proto_names_match", () => {
+    const a = Object.getOwnPropertyNames(f.contentWindow.Navigator.prototype).sort().join(',');
+    const b = Object.getOwnPropertyNames(Navigator.prototype).sort().join(',');
+    return a === b;
+  });
+
+  // ---- Sub-pixel layout ----
+  const probe = document.createElement('div');
+  probe.style.cssText = 'width:1.3px;height:0.5px;position:absolute;';
+  document.body.appendChild(probe);
+  r("rect_width_1_3px", () => probe.getBoundingClientRect().width);
+  r("rect_height_0_5px", () => probe.getBoundingClientRect().height);
+  probe.remove();
+
+  // ---- Canvas fingerprint (CreepJS-style) ----
+  const canvas = document.createElement('canvas');
+  canvas.width = 220; canvas.height = 30;
+  const ctx = canvas.getContext('2d');
+  ctx.textBaseline = "top";
+  ctx.font = "14px 'Arial'";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#f60";
+  ctx.fillRect(125, 1, 62, 20);
+  ctx.fillStyle = "#069";
+  ctx.fillText("Cwm fjordbank glyphs vext quiz, 😃", 2, 15);
+  ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
+  ctx.fillText("Cwm fjordbank glyphs vext quiz, 😃", 4, 17);
+  r("canvas_data_url_length", () => canvas.toDataURL().length);
+  r("canvas_data_url_sha256", async () => {
+    const url = canvas.toDataURL();
+    const buf = new TextEncoder().encode(url);
+    const hash = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+  });
+  out.canvas_data_url_sha256 = await out.canvas_data_url_sha256;
+
+  // measureText
+  r("measure_text_hello_world", () => {
+    const m = ctx.measureText("Hello World");
+    return {
+      width: m.width,
+      actualBoundingBoxLeft: m.actualBoundingBoxLeft,
+      actualBoundingBoxRight: m.actualBoundingBoxRight,
+      actualBoundingBoxAscent: m.actualBoundingBoxAscent,
+      actualBoundingBoxDescent: m.actualBoundingBoxDescent,
+    };
+  });
+
+  // ---- WebGL ----
+  const gl = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl');
+  if (gl) {
+    r("webgl_version", () => gl.getParameter(gl.VERSION));
+    r("webgl_vendor", () => gl.getParameter(gl.VENDOR));
+    r("webgl_renderer", () => gl.getParameter(gl.RENDERER));
+    r("webgl_shading_lang_version", () => gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
+    r("webgl_max_texture_size", () => gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    r("webgl_max_viewport_dims", () => Array.from(gl.getParameter(gl.MAX_VIEWPORT_DIMS)));
+    r("webgl_max_renderbuffer_size", () => gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+    r("webgl_max_vertex_attribs", () => gl.getParameter(gl.MAX_VERTEX_ATTRIBS));
+    r("webgl_aliased_line_width_range", () => Array.from(gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE)));
+    r("webgl_aliased_point_size_range", () => Array.from(gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)));
+    r("webgl_supported_extensions", () => gl.getSupportedExtensions());
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    if (ext) {
+      r("webgl_unmasked_vendor", () => gl.getParameter(ext.UNMASKED_VENDOR_WEBGL));
+      r("webgl_unmasked_renderer", () => gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));
+    }
+    r("webgl_shader_precision_high_float", () => {
+      const f = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+      return { rangeMin: f.rangeMin, rangeMax: f.rangeMax, precision: f.precision };
+    });
+  }
+
+  // ---- AudioContext (CreepJS canonical) ----
+  try {
+    const oac = new OfflineAudioContext(1, 5000, 44100);
+    const osc = oac.createOscillator();
+    osc.type = 'triangle'; osc.frequency.value = 10000;
+    const comp = oac.createDynamicsCompressor();
+    comp.threshold.value = -50; comp.knee.value = 40; comp.ratio.value = 12;
+    comp.attack.value = 0; comp.release.value = 0.25;
+    osc.connect(comp); comp.connect(oac.destination); osc.start(0);
+    const buf = await oac.startRendering();
+    const data = buf.getChannelData(0);
+    let sum = 0;
+    for (let i = 4500; i < 5000; i++) sum += Math.abs(data[i]);
+    out.audio_compressor_sum = sum;
+    out.audio_sample_4500 = data[4500];
+    out.audio_sample_4750 = data[4750];
+  } catch (e) { out.audio = "ERR:" + e.message; }
+
+  // ---- Intl ----
+  r("intl_date_time_format_resolved_options", () => {
+    const o = new Intl.DateTimeFormat().resolvedOptions();
+    return { locale: o.locale, timeZone: o.timeZone, calendar: o.calendar, numberingSystem: o.numberingSystem };
+  });
+  r("intl_relative_time_format_en_year", () => new Intl.RelativeTimeFormat('en', {numeric:'auto'}).format(1, 'year'));
+  r("intl_display_names_en", () => new Intl.DisplayNames(['en'], {type:'language'}).of('en-US'));
+
+  // ---- Promise / microtask order ----
+  r("promise_with_resolvers_exists", () => typeof Promise.withResolvers === 'function');
+  r("structured_clone_exists", () => typeof structuredClone === 'function');
+  r("request_idle_callback_exists", () => typeof requestIdleCallback === 'function');
+
+  // ---- chrome.* legacy stubs ----
+  r("chrome_app_exists", () => typeof chrome !== 'undefined' && typeof chrome.app === 'object');
+  r("chrome_runtime_exists", () => typeof chrome !== 'undefined' && typeof chrome.runtime === 'object');
+  r("chrome_loadTimes_exists", () => typeof chrome !== 'undefined' && typeof chrome.loadTimes === 'function');
+
+  // chrome.app sub-shape: enumerate own-property names + call each method
+  // and record return shapes. Real non-automation Chrome 147 should expose
+  // {isInstalled, InstallState, RunningState, getDetails, getIsInstalled,
+  //  installState, runningState}. Validating this is the entire point of
+  //  the chrome.app shape capture.
+  if (typeof chrome !== 'undefined' && typeof chrome.app === 'object') {
+    r("chrome_app_keys", () => Object.getOwnPropertyNames(chrome.app).sort());
+    r("chrome_app_is_installed", () => chrome.app.isInstalled);
+    r("chrome_app_InstallState", () => chrome.app.InstallState);
+    r("chrome_app_RunningState", () => chrome.app.RunningState);
+    r("chrome_app_getDetails_returns", () => chrome.app.getDetails());
+    r("chrome_app_getIsInstalled_returns", () => chrome.app.getIsInstalled());
+    r("chrome_app_runningState_returns", () => chrome.app.runningState());
+    // installState is async (callback). Capture both that the function
+    // accepts a callback and the value it passes.
+    await new Promise(res => {
+      try { chrome.app.installState(s => { out.chrome_app_installState_returns = s; res(); }); }
+      catch (e) { out.chrome_app_installState_returns = "ERR:" + e.message; res(); }
+      // Safety: timeout in case the impl never calls back.
+      setTimeout(() => res(), 200);
+    });
+  }
+
+  // ---- UA-CH ----
+  if (navigator.userAgentData) {
+    r("ua_data_brands", () => navigator.userAgentData.brands);
+    r("ua_data_mobile", () => navigator.userAgentData.mobile);
+    r("ua_data_platform", () => navigator.userAgentData.platform);
+    try {
+      const hi = await navigator.userAgentData.getHighEntropyValues(['architecture','platformVersion','model','uaFullVersion','formFactors']);
+      out.ua_data_high_entropy = hi;
+    } catch (e) { out.ua_data_high_entropy = "ERR"; }
+  }
+
+  document.getElementById("out").textContent = JSON.stringify(out, null, 2);
+  document.title = "DONE";
+}
+capture();
+</script>
+</body></html>

@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # Cargo workspace dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "rust"
+    open-pull-requests-limit: 5
+    # Group V8/deno_core bumps so we can review them together.
+    groups:
+      v8-toolchain:
+        patterns:
+          - "deno_core"
+          - "deno_ast"
+          - "deno_*"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - "dependencies"
+      - "ci"

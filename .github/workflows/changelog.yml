@@ -1,0 +1,41 @@
+name: Changelog Gate
+
+# Refuse to merge if CHANGELOG.md has no section for the version in
+# Cargo.toml's [workspace.package]. Keeps releases from shipping with a
+# stale or missing changelog entry.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ["release/**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-changelog:
+    name: Validate CHANGELOG for workspace version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Extract [workspace.package] version
+        id: ver
+        run: |
+          VERSION=$(awk '/^\[workspace.package\]/{p=1} p&&/^version[[:space:]]*=/{gsub(/[",]/,""); print $3; exit}' Cargo.toml)
+          [ -n "$VERSION" ] || { echo "::error::could not parse [workspace.package] version"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "workspace version: $VERSION"
+      - name: Require a CHANGELOG section for this version
+        run: |
+          V='${{ steps.ver.outputs.version }}'
+          if grep -qE "^##+ \[?${V//./\\.}\]?" CHANGELOG.md; then
+            echo "CHANGELOG has a section for $V ✔"
+          else
+            echo "::error file=CHANGELOG.md::no '## [$V]' section found in CHANGELOG.md"
+            exit 1
+          fi

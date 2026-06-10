@@ -1,0 +1,10 @@
+name: "browser_oxide CodeQL config"
+
+# Test/example/bench code carries intentional patterns (fixed seeds,
+# hardcoded fixtures, deliberate fingerprint constants) that don't reach
+# production paths — exclude it from SAST.
+paths-ignore:
+  - "**/tests/**"
+  - "**/*test*.rs"
+  - "**/examples/**"
+  - "**/benches/**"

@@ -1,0 +1,104 @@
+[package]
+name = "browser_oxide"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Stealth headless browser engine in Rust: real HTML/CSS/DOM/JS, V8 via deno_core, own BoringSSL TLS/JA4 fingerprint, no Chromium, no CDP — for anti-bot web scraping, archival, and AI agents"
+keywords = ["stealth-browser", "headless-browser", "anti-bot", "web-scraping", "tls-fingerprint"]
+categories = ["web-programming", "network-programming", "api-bindings"]
+readme = "../../README.md"
+
+[features]
+default = []
+# Links the OSMesa software-GL backend so the full WebGL fingerprint is
+# emitted. Off by default: OSMesa adds ~15 MB and is not on the critical
+# path for any tracked blocker site.
+webgl-render = ["glow"]
+# Optional in-engine ad/tracker blocker (MPL-2.0 `adblock`); off by default.
+blocker = ["dep:adblock"]
+
+[dependencies]
+# --- runtime / async ---
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+async-trait = "0.1"
+# --- V8 / JS ---
+deno_core = "0.403"
+deno_error = "0.7"
+# --- serialization ---
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+# --- parsing / text ---
+html5ever = "0.39"
+markup5ever = "0.39"
+url = "2"
+percent-encoding = "2"
+httparse = "1"
+# --- HTTP / TLS / net ---
+boring2 = { version = "4.15", features = ["pq-experimental", "cert-compression"] }
+boring-sys2 = "4.15"
+tokio-boring2 = "4.15"
+webpki-root-certs = "0.26"
+webpki-roots = "1"
+http = "1"
+http2 = { version = "0.5", features = ["unstable"] }
+bytes = "1"
+foreign-types = "0.5"
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
+quinn = "0.11"
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+adblock = { version = "0.12", optional = true }
+# --- compression ---
+# zlib-rs backend: canvas pins exact PNG output bytes (png_byte_parity test),
+# which the miniz_oxide default backend does not reproduce.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+brotli = "7"
+zstd = "0.13"
+# --- crypto / hashing / rng ---
+sha1 = "0.10"
+sha2 = "0.10"
+rand = "0.10"
+rand_chacha = "0.10"
+rand_distr = "0.6"
+# --- canvas / graphics / fonts ---
+skia-safe = "0.97"
+png = "0.17"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+fontdb = { version = "0.23", default-features = false }
+rustybuzz = "0.20"
+swash = "0.2"
+rustfft = "6"
+glow = { version = "0.17", optional = true }
+# --- layout ---
+taffy = "0.8"
+# --- misc ---
+chrono = "0.4"
+thiserror = "2"
+base64 = "0.22"
+lazy_static = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+hex = "0.4"
+tokio-tungstenite = "0.27"
+futures-util = "0.3"
+url = "2"
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "page_throughput"
+harness = false
+
+[lints]
+workspace = true

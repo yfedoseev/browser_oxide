@@ -1,0 +1,24 @@
+[package]
+name = "browser_oxide_mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Model Context Protocol (MCP) server for BrowserOxide — a stealth headless browser an AI agent can drive: fetch_page, evaluate, check_protection"
+keywords = ["mcp", "ai-agents", "stealth-browser", "web-scraping", "headless-browser"]
+categories = ["web-programming", "command-line-utilities", "api-bindings"]
+readme = "README.md"
+
+[[bin]]
+name = "browser-oxide-mcp"
+path = "src/main.rs"
+
+[dependencies]
+browser_oxide = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

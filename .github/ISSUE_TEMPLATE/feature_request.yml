@@ -1,0 +1,81 @@
+name: Feature Request
+description: Propose a feature or API addition
+title: "[feat]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please give us enough context to
+        understand the *use case* — engine work is expensive and we
+        prioritise items where the underlying use case is clear.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today? What workaround are you using?
+      placeholder: When I try to …, the engine …
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What would the API or behavior look like?
+      placeholder: Add `Page::foo()` that …
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing primitives you tried, similar APIs in other engines.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - css_parser / css_selectors / css_values / css_cascade
+        - dom
+        - html_parser
+        - js_runtime (V8 / deno_core)
+        - canvas
+        - layout
+        - net / TLS / HTTP
+        - event_loop
+        - workers
+        - stealth (profile / fingerprint)
+        - protocol (CDP)
+        - browser (top-level Page API)
+        - tooling / examples / docs
+        - other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      description: Confirm fit with project scope (see SCOPE.md)
+      options:
+        - label: This is for archival, accessibility, AI agent, security-research, CTF, or other legitimate-use scenarios.
+          required: true
+        - label: I have read SCOPE.md.
+          required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I am willing to help implement (optional).
+          required: false
