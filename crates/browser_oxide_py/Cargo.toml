@@ -1,0 +1,31 @@
+# NOTE: this crate is a STANDALONE workspace, excluded from the root workspace
+# (`[workspace] exclude` in the top-level Cargo.toml), so `cargo build
+# --workspace` for the engine does NOT try to build it. It links V8 into a
+# `-shared` cdylib, which on Linux requires V8 compiled with the shared-library-
+# safe TLS model (`-DV8_TLS_USED_IN_LIBRARY`) — only produced by a *from-source*
+# V8 build (`V8_FROM_SOURCE=1`). The prebuilt V8 the engine uses is fine for
+# macOS/Windows wheels but fails to link on Linux. The Python wheel is therefore
+# built on its own track via maturin (see .github/workflows/python.yml); on
+# Linux that job sets `V8_FROM_SOURCE=1`.
+[workspace]
+
+[package]
+name = "browser_oxide_py"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+license = "MIT OR Apache-2.0"
+authors = ["Yury Fedoseev"]
+repository = "https://github.com/yfedoseev/browser_oxide"
+description = "Python bindings (PyO3) for BrowserOxide — a stealth headless browser in Rust for web scraping & AI agents: native fingerprint + BoringSSL TLS, no Chromium/CDP; a camoufox alternative"
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+browser_oxide = { path = "../browser_oxide" }
+# extension-module: resolve CPython symbols at runtime (no libpython link), so a
+# plain `cargo build` of the cdylib works and maturin produces a portable wheel.
+pyo3 = { version = "0.28", features = ["abi3-py38", "extension-module"] }

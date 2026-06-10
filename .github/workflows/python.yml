@@ -1,0 +1,176 @@
+name: Python wheels
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to PyPI (false = dry-run: build + twine check only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Build abi3 wheels across platforms with maturin. abi3-py38 → one wheel per
+  # platform covers Python 3.8+. The Rust engine fetches a ~130 MB prebuilt V8.
+  wheels:
+    name: wheel (${{ matrix.platform.target }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # NOTE: the Linux x86_64 wheel is intentionally NOT built for v0.1.0.
+          # The PyO3 cdylib links V8, but the prebuilt V8 (149.2.0) uses a
+          # local-exec TLS model (R_X86_64_TPOFF32 against g_current_isolate_)
+          # that cannot link into a `-shared` object, and a from-source rebuild
+          # is impossible from the crates.io v8 tarball (it omits the
+          # third_party/rust/chromium_crates_io vendor tree). The Linux package
+          # is tracked as a 0.1.1 follow-up via a sidecar binary (ship the engine
+          # executable + a thin Python client) or a custom TLS-safe V8 archive.
+          # macOS (Mach-O) and Windows (PE) link the prebuilt V8 fine.
+          # Both macOS wheels build on macos-latest (Apple Silicon): aarch64
+          # natively, x86_64 via cross-compile. The deprecated Intel `macos-13`
+          # pool is backlogged/unavailable, so we don't depend on it. Linux is
+          # deferred to 0.1.1 (sidecar).
+          - { runner: macos-latest,   target: aarch64-apple-darwin }
+          - { runner: macos-latest,   target: x86_64-apple-darwin }
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc }
+    env:
+      # The cdylib links V8. On Linux/ELF, the prebuilt V8 emits a TLS
+      # relocation (R_X86_64_TPOFF32 against v8::internal::g_current_isolate_)
+      # that cannot link into a `-shared` object — so Linux must build V8 from
+      # source, where the v8 crate auto-injects `-DV8_TLS_USED_IN_LIBRARY` (the
+      # shared-library-safe TLS model) and auto-downloads gn/ninja. macOS
+      # (Mach-O) and Windows (PE) link the prebuilt V8 fine.
+      V8_FROM_SOURCE: ${{ startsWith(matrix.platform.runner, 'ubuntu') && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The from-source V8 build (Linux) is disk-heavy; free host space (which
+      # the docker build shares). large-packages stays false (keeps llvm/clang).
+      - name: Free disk space (Linux)
+        if: startsWith(matrix.platform.runner, 'ubuntu')
+        uses: jlumbroso/free-disk-space@main
+        with: { tool-cache: true, android: true, dotnet: true, haskell: true, large-packages: false, swap-storage: true }
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          # abi3-py38 → build against the 3.8 floor so the wheel is cp38-abi3
+          # (runs on Python 3.8+). On Linux maturin resolves `python3.8` to the
+          # manylinux container's bundled /opt/python/cp38; macOS/Windows use the
+          # runner's setup-python.
+          args: --release --out dist ${{ startsWith(matrix.platform.runner, 'ubuntu') && '-i python3.8' || '' }}
+          # manylinux_2_28 has a modern toolchain; V8 from source needs clang.
+          # macOS/Windows use the default (prebuilt V8) path.
+          manylinux: ${{ startsWith(matrix.platform.runner, 'ubuntu') && '2_28' || '' }}
+          # Forward V8_FROM_SOURCE into the manylinux container — the host env is
+          # NOT inherited by the docker build, and prebuilt V8 emits a TLS
+          # relocation (R_X86_64_TPOFF32) that can't link into the -shared cdylib.
+          docker-options: ${{ startsWith(matrix.platform.runner, 'ubuntu') && '-e V8_FROM_SOURCE=1' || '' }}
+          # Linux only: V8-from-source prereqs (clang + cmake; gn/ninja auto-
+          # downloaded by the v8 crate) + skia's freetype/fontconfig link deps.
+          # Then patch the v8 crate: its vendored source omits
+          # third_party/icu/common/icudtl.dat (the GN build needs it to embed
+          # ICU), but ships a version-matched copy under chromecast_video/. We
+          # pre-fetch sources and copy it into place (cargo won't re-extract the
+          # crate, so the patch persists into the build).
+          before-script-linux: |
+            (dnf install -y clang cmake fontconfig-devel freetype-devel \
+              || yum install -y clang cmake fontconfig-devel freetype-devel) || true
+            export PATH="$HOME/.cargo/bin:/usr/local/cargo/bin:/root/.cargo/bin:$PATH"
+            [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env" || true
+            CARGO="$(command -v cargo || echo /usr/local/cargo/bin/cargo)"
+            echo "before-script: using cargo=$CARGO  CARGO_HOME=${CARGO_HOME:-unset}  HOME=$HOME"
+            "$CARGO" fetch --manifest-path crates/browser_oxide_py/Cargo.toml || echo "WARN cargo fetch failed"
+            # `cargo fetch` only fills registry/cache/*.crate; it does NOT extract
+            # sources to registry/src (that happens at build time). `cargo metadata`
+            # reads every dep's Cargo.toml, forcing extraction — so the patch below
+            # can find and edit the v8 source tree.
+            "$CARGO" metadata --manifest-path crates/browser_oxide_py/Cargo.toml --format-version 1 >/dev/null 2>&1 || echo "WARN cargo metadata failed"
+            # Patch the v8 crate's missing third_party/icu/common/icudtl.dat (GN
+            # uses data_dir=common on Linux) from the version-matched copy under
+            # chromecast_video/. Search every plausible cargo registry base.
+            for base in "$HOME/.cargo" /usr/local/cargo /root/.cargo "${CARGO_HOME:-/nonexistent}"; do
+              for d in $(find "$base/registry/src" -maxdepth 2 -type d -name 'v8-*' 2>/dev/null); do
+                icu="$d/third_party/icu"
+                if [ -d "$icu" ] && [ ! -f "$icu/common/icudtl.dat" ]; then
+                  mkdir -p "$icu/common"
+                  src="$icu/chromecast_video/icudtl.dat"
+                  [ -f "$src" ] || src="$(find "$icu" -name icudtl.dat 2>/dev/null | head -1)"
+                  if [ -n "$src" ] && [ -f "$src" ]; then
+                    cp "$src" "$icu/common/icudtl.dat"
+                    echo "PATCHED $icu/common/icudtl.dat <- $src"
+                  fi
+                fi
+              done
+            done
+      - name: Smoke test (offline)
+        # Run only on native combos (wheel arch == runner arch): aarch64-mac on
+        # the Apple-Silicon runner, and Windows x86_64. Skip the cross-compiled
+        # x86_64-apple-darwin wheel — it can't execute on the arm64 runner.
+        if: ${{ matrix.platform.target != 'x86_64-apple-darwin' }}
+        shell: bash
+        run: |
+          python -m pip install pytest
+          python -m pip install --find-links dist browser-oxide
+          python -m pytest python/tests/ -q
+      # Dry-run gate: every build validates the wheel metadata with twine. This
+      # always runs (PR, branch, tag, manual) so a broken wheel is caught before
+      # any publish, mirroring pdf_oxide's build/validate-then-publish split.
+      - name: Validate wheel (twine check — dry run)
+        shell: bash
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine check dist/*.whl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.target }}
+          path: dist/*.whl
+
+  # Publish to PyPI. Gated: only a version tag OR a manual run with publish=true
+  # actually uploads. Plain pushes/PRs stop at the twine-check dry run above.
+  # Requires the PYPI_API_TOKEN repo secret (set via: gh secret set PYPI_API_TOKEN).
+  publish:
+    name: publish to PyPI
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish)
+    needs: wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Harsh check: on a tag, the tag must equal pyproject.toml's version,
+      # else we'd ship a wrong-versioned wheel. Mirrors the crates.io gate.
+      - name: Validate tag matches pyproject version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION=$(grep -m1 -E '^version *= *"' pyproject.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          if [ "${TAG#v}" != "$VERSION" ]; then
+            echo "::error::tag $TAG does not match pyproject version $VERSION (expected tag v$VERSION)"
+            exit 1
+          fi
+          echo "tag $TAG == pyproject $VERSION ✓"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          password: ${{ secrets.PYPI_API_TOKEN }}

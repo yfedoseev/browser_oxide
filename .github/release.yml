@@ -1,0 +1,19 @@
+changelog:
+  exclude:
+    labels: [skip-changelog]
+    authors: [dependabot]
+  categories:
+    - title: "⚡ Performance"
+      labels: [performance]
+    - title: "🐛 Bug Fixes"
+      labels: [bug, fix]
+    - title: "✨ New Features"
+      labels: [enhancement, feature]
+    - title: "🕵️ Stealth / Anti-bot"
+      labels: [stealth, anti-bot]
+    - title: "🔧 Maintenance"
+      labels: [chore, maintenance]
+    - title: "📝 Documentation"
+      labels: [documentation]
+    - title: "Other Changes"
+      labels: ["*"]

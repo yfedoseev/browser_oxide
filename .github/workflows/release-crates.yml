@@ -1,0 +1,128 @@
+name: Release (crates.io)
+
+# Publishes the two public crates to crates.io: `browser_oxide` (the engine)
+# then `browser_oxide_mcp` (which depends on it). PyPI wheels are handled by
+# python.yml and the MCP binaries by release-mcp.yml — both also tag-triggered.
+on:
+  push:
+    tags: ["v*.*.*"]
+  # PR dry-run: build + test + `cargo publish --dry-run` on release-relevant
+  # changes so packaging/version failures surface on the PR, never post-tag
+  # (publishing is irreversible). The mutating job is hard-gated to never run
+  # on a pull_request.
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/release-crates.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to crates.io (false = dry-run: build + test + package only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Gate: the same testing the CI lane runs, plus a real package+verify of the
+  # crate as crates.io would build it. Nothing publishes unless this is green.
+  verify:
+    name: verify (test + package)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full history + branches for the on-main check
+      - name: Install skia system deps (freetype + fontconfig)
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Resolve workspace version
+        id: ver
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(json.load(sys.stdin)["packages"][0]["version"])')" >> "$GITHUB_OUTPUT"
+
+      # --- harsh pre-publish checks (mirror pdf_oxide's validate gate) ---
+      - name: Validate tag matches Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if [ "${TAG#v}" != "$VERSION" ]; then
+            echo "::error::tag $TAG does not match workspace version $VERSION (expected tag v$VERSION)"
+            exit 1
+          fi
+          echo "tag $TAG == version $VERSION ✓"
+      - name: Validate version consistency across manifests
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          py_cargo=$(grep -m1 '^version = ' crates/browser_oxide_py/Cargo.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          pyproject=$(grep -m1 -E '^version *= *"' pyproject.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          bad=0
+          for pair in "browser_oxide_py/Cargo.toml:$py_cargo" "pyproject.toml:$pyproject"; do
+            name="${pair%%:*}"; v="${pair##*:}"
+            if [ "$v" != "$VERSION" ]; then echo "::error::$name version $v != workspace $VERSION"; bad=1; fi
+          done
+          [ "$bad" = 0 ] && echo "all manifests == $VERSION ✓" || exit 1
+      - name: Verify the tag is on main
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if ! git branch -r --contains "$GITHUB_SHA" | grep -qE 'origin/main$'; then
+            echo "::error::tagged commit $GITHUB_SHA is not on origin/main — release only from main"
+            exit 1
+          fi
+          echo "tagged commit is on main ✓"
+
+      - name: Build
+        run: cargo build --workspace
+      - name: Test (single-threaded — V8 is per-thread)
+        run: cargo test --workspace --no-fail-fast -- --test-threads=1
+      - name: Package + verify (browser_oxide)
+        run: cargo publish -p browser_oxide --dry-run
+
+  # Mutating publish. Hard-gated: a pull_request can NEVER publish; only a real
+  # tag push, or a manual run with publish=true. Crates are published in
+  # dependency order and skipped if already on crates.io (idempotent reruns).
+  publish-crates:
+    name: publish to crates.io
+    needs: verify
+    if: >-
+      github.event_name != 'pull_request' &&
+      (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/browser_oxide
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install skia system deps (freetype + fontconfig)
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Publish browser_oxide then browser_oxide_mcp
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          V: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          for crate in browser_oxide browser_oxide_mcp; do
+            if curl -sf "https://crates.io/api/v1/crates/$crate/$V" -H "User-Agent: browser_oxide-release-ci" >/dev/null; then
+              echo "$crate $V already on crates.io — skipping"
+            else
+              echo "publishing $crate $V"
+              cargo publish -p "$crate"
+              # let the index settle so the dependent crate resolves the just-published version
+              [ "$crate" = browser_oxide ] && sleep 30 || true
+            fi
+          done

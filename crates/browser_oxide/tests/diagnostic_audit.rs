@@ -1,0 +1,18 @@
+#[cfg(test)]
+mod tests {
+    use browser_oxide::Page;
+
+    #[tokio::test]
+    #[ignore = "network: live HTTP against sinceyouarrived.world"]
+    async fn audit_sinceyouarrived_oxide() {
+        let profile = browser_oxide::stealth::presets::chrome_148_macos();
+        let mut page = Page::navigate("https://sinceyouarrived.world/taken", profile, 5)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+
+        let r = page.evaluate("document.body.innerText").unwrap();
+        println!("SINCEYOUARRIVED OXIDE: {}", r);
+    }
+}

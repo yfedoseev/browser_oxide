@@ -1,0 +1,283 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Gating jobs: fmt, clippy (-D warnings), test, msrv, deny.
+  # Clippy lint policy is centralised in the root Cargo.toml
+  # `[workspace.lints.clippy]` table. `cargo build` / `cargo test` keep
+  # default warning levels.
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    # Gating: clippy must pass with no warnings. The central lint policy
+    # lives in the root Cargo.toml `[workspace.lints.clippy]` table; any
+    # remaining per-site `#[allow(...)]` carries a justifying comment.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo clippy --all-targets --workspace -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }}, ${{ matrix.rust }})
+    runs-on: ${{ matrix.os }}
+    # Warnings-as-errors only on the channel we ship (stable). beta/nightly
+    # still build/test/doc so a real break is visible, but a NEW upstream lint
+    # can't turn the whole matrix red (toolchain-drift policy).
+    env:
+      RUSTFLAGS: ${{ matrix.rust == 'stable' && '-D warnings' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable]
+        include:
+          # Catch upcoming Rust changes on Linux only (beta + nightly).
+          - os: ubuntu-latest
+            rust: beta
+          - os: ubuntu-latest
+            rust: nightly
+    steps:
+      - name: Free disk space (Linux)
+        if: runner.os == 'Linux'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          # large-packages removes `^llvm-.*` (incl. libclang), which breaks
+          # boring-sys2's bindgen ("stddef.h not found"). The other categories
+          # free ~20 GB without touching the C/LLVM toolchain.
+          large-packages: false
+          swap-storage: true
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ matrix.rust }}
+
+      # skia-safe links system freetype + fontconfig on Linux (macOS uses
+      # CoreText, Windows DirectWrite, so neither needs them).
+      - name: Install skia system deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
+
+      - name: Build (debug)
+        run: cargo build --workspace
+
+      # V8 isolates are per-thread — the project enforces single-threaded
+      # tests (see CLAUDE.md). Network-bound and live anti-bot tests are
+      # `#[ignore]` and not run here.
+      - name: Test (single-threaded — V8 constraint)
+        run: cargo test --workspace --no-fail-fast -- --test-threads=1
+        env:
+          CARGO_INCREMENTAL: "0"
+
+      - name: Build examples
+        run: cargo build --workspace --examples
+
+      - name: Build documentation (warnings as errors on stable)
+        run: cargo doc --no-deps --workspace
+        env:
+          RUSTDOCFLAGS: ${{ matrix.rust == 'stable' && '-D warnings' || '' }}
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      # 1.91 is the real floor: deno_core 0.403 uses const `TypeId::of`
+      # (cppgc.rs), stabilized in Rust 1.91, but declares no rust-version — so
+      # the resolver doesn't catch it; only an actual build does (1.90 fails,
+      # 1.91 builds). Declared dep floors are lower (home/image 1.88,
+      # icu_*/temporal 1.86-1.87; a skia-bindings build-dep needs edition2024 =
+      # 1.85). Bump with the tree.
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # MSRV
+        with:
+          toolchain: "1.91"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
+      - run: cargo build --workspace
+
+  deny:
+    name: cargo-deny (licenses + advisories + sources)
+    runs-on: ubuntu-latest
+    # Mechanical enforcement of the workspace policy at deny.toml:
+    # MIT/Apache-only licenses, crates.io-only sources, fail on advisories.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      # Use the current cargo-deny CLI rather than the action: the action bundles
+      # an older cargo-deny whose advisory-db parser chokes on newer RUSTSEC
+      # entries (e.g. RUSTSEC-2026-0124). The current CLI parses them fine.
+      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+        with:
+          # Pin a version new enough to parse current advisory-db entries
+          # (older cargo-deny chokes on e.g. RUSTSEC-2026-0124).
+          tool: cargo-deny@0.19.4
+      - run: cargo deny check all
+
+  audit:
+    name: Security audit (cargo-audit / RUSTSEC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      # Use the current cargo-audit CLI rather than rustsec/audit-check: the
+      # action bundles an older rustsec parser that chokes on newer advisory-db
+      # entries. cargo-audit reads the ignore list from audit.toml.
+      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+        with:
+          # Pin a version new enough to parse current advisory-db entries
+          # (the action's default older cargo-audit chokes on RUSTSEC-2026-0124).
+          tool: cargo-audit@0.22.1
+      - run: cargo audit
+
+  taplo:
+    name: TOML format (taplo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+        with:
+          tool: taplo-cli
+      - run: taplo fmt --check
+
+  shear:
+    name: Unused deps (cargo-shear)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+        with:
+          tool: cargo-shear
+      - run: cargo shear
+
+  geiger:
+    name: Unsafe-code report (cargo-geiger, informational)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: geiger
+      - run: cargo install --locked cargo-geiger
+      # Informational: surfaces the unsafe footprint of our crates (we have
+      # documented `unsafe` blocks) + the dep tree. Never fails the build.
+      - run: cargo geiger --workspace 2>/dev/null || true
+
+  features-powerset:
+    name: Feature matrix (cargo-hack --each-feature)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with: { tool-cache: true, android: true, dotnet: true, haskell: true, large-packages: false, swap-storage: false }
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: hack
+      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+        with:
+          tool: cargo-hack
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
+      # Build each feature singly + default + all-features (catches cfg-rot on
+      # the `webgl-render` and `blocker` features without an O(2^n) powerset).
+      - run: cargo hack check --workspace --each-feature --no-dev-deps
+
+  semver-checks:
+    name: Public-API semver (PR, non-blocking pre-1.0)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    # Pre-1.0 the public surface is still moving; report API breaks but don't
+    # block. CHANGELOG is the source of truth until we cut 1.0.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: obi1kenobi/cargo-semver-checks-action@7272cc2caa468d3e009a2b0a9cc366839348237b # v2
+
+  coverage:
+    name: Code coverage (informational)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with: { tool-cache: true, android: true, dotnet: true, haskell: true, large-packages: false, swap-storage: false }
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
+      # Single-threaded (V8 per-thread constraint). No hard threshold: a large
+      # share of the engine is exercised only by #[ignore] live-network tests,
+      # so a line-% gate would be misleading. Reported + uploaded, not enforced.
+      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info -- --test-threads=1
+      - uses: codecov/codecov-action@v4
+        with:
+          files: ./lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  bench:
+    name: Benchmark smoke (compile only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
+      - run: cargo bench --workspace --no-run
+
+  dco:
+    name: DCO sign-off
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
+      - name: Check Signed-off-by on PR commits
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          missing=0
+          while IFS= read -r sha; do
+            git log -1 --pretty=full "$sha" | grep -q "^Signed-off-by:" || {
+              echo "::error::commit $sha missing Signed-off-by trailer"; missing=$((missing+1)); }
+          done < <(git log --pretty=format:"%H" "${base}..${head}")
+          [ "$missing" -eq 0 ] || exit 1

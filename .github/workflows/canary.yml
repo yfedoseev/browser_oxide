@@ -1,0 +1,61 @@
+name: Render canary (quality regression)
+
+# Live "did we degrade quality" guard. Renders a handful of STABLE, unprotected
+# sites and asserts they still produce real content (>=15 KB). These aren't
+# anti-bot walls, so a failure means a real engine regression — not WAF lottery.
+# The full protected-corpus number is in BENCHMARK.md (too flaky for per-PR CI).
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *" # daily 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: Stable-site render canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        # large-packages removes `^llvm-.*` (libclang/lld) → breaks boring-sys2
+        # bindgen + lld linking. Keep it false; the rest still frees ~20 GB.
+        with: { tool-cache: true, android: true, dotnet: true, haskell: true, large-packages: false, swap-storage: false }
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install skia system deps (freetype + fontconfig)
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
+      - name: Build sweep_metrics
+        run: cargo build --release -p browser_oxide --example sweep_metrics
+      - name: Render stable sites + assert real content
+        run: |
+          cat > /tmp/canary.json <<'JSON'
+          [
+            {"cat":"stable","name":"example","url":"https://example.com/"},
+            {"cat":"stable","name":"wikipedia","url":"https://en.wikipedia.org/wiki/Web_scraping"},
+            {"cat":"stable","name":"hackernews","url":"https://news.ycombinator.com/"},
+            {"cat":"stable","name":"rustlang","url":"https://www.rust-lang.org/"}
+          ]
+          JSON
+          target/release/examples/sweep_metrics chrome_148_macos /tmp/canary.json /tmp/canary_out.json || true
+          python3 - <<'PY'
+          import json, sys
+          res = json.load(open("/tmp/canary_out.json"))["results"]
+          bad = []
+          for r in res:
+              # example.com is legitimately tiny (~1.2 KB) — only require it renders.
+              floor = 1000 if r["name"] == "example" else 15000
+              ok = (r.get("tag") == "L3-RENDERED") and (r.get("len") or 0) >= floor
+              print(f'{r["name"]:12} tag={r.get("tag")} len={r.get("len")} {"OK" if ok else "FAIL"}')
+              if not ok:
+                  bad.append(r["name"])
+          if bad:
+              print(f"::error::stable sites failed to render: {bad}")
+              sys.exit(1)
+          print("canary OK — no render regression")
+          PY
