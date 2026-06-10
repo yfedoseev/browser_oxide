@@ -77,7 +77,7 @@ swash = "0.2"
 rustfft = "6"
 glow = { version = "0.17", optional = true }
 # --- layout ---
-taffy = "0.8"
+taffy = "0.10"
 # --- misc ---
 chrono = "0.4"
 thiserror = "2"
