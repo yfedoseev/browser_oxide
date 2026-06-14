@@ -17,8 +17,12 @@ jobs:
       matrix:
         include:
           - { runner: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
-          - { runner: macos-14,       target: aarch64-apple-darwin }
-          - { runner: macos-13,       target: x86_64-apple-darwin }
+          # Both macOS targets build on macos-latest (Apple Silicon): aarch64
+          # natively, x86_64 via cross-compile. The deprecated Intel macos-13
+          # pool is backlogged/unavailable, so we don't depend on it. The MCP
+          # server is an executable, so prebuilt V8 links fine on every target.
+          - { runner: macos-latest,   target: aarch64-apple-darwin }
+          - { runner: macos-latest,   target: x86_64-apple-darwin }
           - { runner: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@v4
@@ -38,17 +42,34 @@ jobs:
           [ "${{ runner.os }}" = "Windows" ] && bin="$bin.exe"
           tar -czf "browser-oxide-mcp-${{ matrix.target }}.tar.gz" \
             -C "target/${{ matrix.target }}/release" "$bin"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcp-${{ matrix.target }}
+          path: browser-oxide-mcp-${{ matrix.target }}.tar.gz
+
+  # Single release job — gathers all binaries and creates the GitHub Release
+  # once. Release-notes generation runs only here (Linux), so the bash/awk/sed in
+  # extract-release-notes.sh never runs under BSD tools on the macOS/Windows
+  # builders (which previously failed the per-runner notes step).
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
       - name: Generate release notes from CHANGELOG
         id: notes
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
         run: |
           ver="${GITHUB_REF_NAME#v}"
           bash .github/scripts/extract-release-notes.sh "$ver"
           echo "title=$(cat release-title.txt)" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/v')
         with:
-          files: browser-oxide-mcp-${{ matrix.target }}.tar.gz
+          files: dist/*.tar.gz
           name: ${{ steps.notes.outputs.title }}
           body_path: release-notes.md

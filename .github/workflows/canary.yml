@@ -36,21 +36,21 @@ jobs:
         run: |
           cat > /tmp/canary.json <<'JSON'
           [
-            {"cat":"stable","name":"example","url":"https://example.com/"},
             {"cat":"stable","name":"wikipedia","url":"https://en.wikipedia.org/wiki/Web_scraping"},
             {"cat":"stable","name":"hackernews","url":"https://news.ycombinator.com/"},
             {"cat":"stable","name":"rustlang","url":"https://www.rust-lang.org/"}
           ]
           JSON
+          # NOTE: example.com is intentionally NOT a canary target — it's a ~0.5-1 KB
+          # placeholder that classifies as THIN-BODY, which is not a meaningful
+          # "real content renders" signal. We assert on substantial real pages.
           target/release/examples/sweep_metrics chrome_148_macos /tmp/canary.json /tmp/canary_out.json || true
           python3 - <<'PY'
           import json, sys
           res = json.load(open("/tmp/canary_out.json"))["results"]
           bad = []
           for r in res:
-              # example.com is legitimately tiny (~1.2 KB) — only require it renders.
-              floor = 1000 if r["name"] == "example" else 15000
-              ok = (r.get("tag") == "L3-RENDERED") and (r.get("len") or 0) >= floor
+              ok = (r.get("tag") == "L3-RENDERED") and (r.get("len") or 0) >= 15000
               print(f'{r["name"]:12} tag={r.get("tag")} len={r.get("len")} {"OK" if ok else "FAIL"}')
               if not ok:
                   bad.append(r["name"])
