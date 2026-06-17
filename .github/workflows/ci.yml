@@ -247,7 +247,7 @@ jobs:
       # share of the engine is exercised only by #[ignore] live-network tests,
       # so a line-% gate would be misleading. Reported + uploaded, not enforced.
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info -- --test-threads=1
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v7
         with:
           files: ./lcov.info
           fail_ci_if_error: false
