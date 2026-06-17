@@ -36,7 +36,7 @@ jobs:
     outputs:
       version: ${{ steps.ver.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # need full history + branches for the on-main check
       - name: Install skia system deps (freetype + fontconfig)
@@ -103,7 +103,7 @@ jobs:
       name: crates-io
       url: https://crates.io/crates/browser_oxide
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install skia system deps (freetype + fontconfig)
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
       - uses: dtolnay/rust-toolchain@stable
