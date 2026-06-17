@@ -22,7 +22,7 @@ jobs:
     name: Validate CHANGELOG for workspace version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v4
       - name: Extract [workspace.package] version
         id: ver
         run: |
