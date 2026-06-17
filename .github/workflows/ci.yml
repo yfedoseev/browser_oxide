@@ -142,7 +142,7 @@ jobs:
       # Use the current cargo-deny CLI rather than the action: the action bundles
       # an older cargo-deny whose advisory-db parser chokes on newer RUSTSEC
       # entries (e.g. RUSTSEC-2026-0124). The current CLI parses them fine.
-      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2
         with:
           # Pin a version new enough to parse current advisory-db entries
           # (older cargo-deny chokes on e.g. RUSTSEC-2026-0124).
@@ -157,7 +157,7 @@ jobs:
       # Use the current cargo-audit CLI rather than rustsec/audit-check: the
       # action bundles an older rustsec parser that chokes on newer advisory-db
       # entries. cargo-audit reads the ignore list from audit.toml.
-      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2
         with:
           # Pin a version new enough to parse current advisory-db entries
           # (the action's default older cargo-audit chokes on RUSTSEC-2026-0124).
@@ -169,7 +169,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2
         with:
           tool: taplo-cli
       - run: taplo fmt --check
@@ -179,7 +179,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2
         with:
           tool: cargo-shear
       - run: cargo shear
@@ -210,7 +210,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: hack
-      - uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2
         with:
           tool: cargo-hack
       - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
