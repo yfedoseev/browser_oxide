@@ -1,11 +1,11 @@
-[build-system]
+﻿[build-system]
 requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "browser-oxide"
-version = "0.1.0"
-description = "BrowserOxide — stealth headless browser engine in Rust (Python bindings) — real HTML/CSS/DOM/JS, own BoringSSL TLS, native fingerprint, no Chromium"
+version = "0.1.2"
+description = "BrowserOxide â€” stealth headless browser engine in Rust (Python bindings) â€” real HTML/CSS/DOM/JS, own BoringSSL TLS, native fingerprint, no Chromium"
 readme = "python/README.md"
 requires-python = ">=3.8"
 license = { text = "MIT OR Apache-2.0" }
