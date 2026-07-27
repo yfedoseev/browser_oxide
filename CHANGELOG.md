@@ -67,10 +67,14 @@ supersedes the open Dependabot PRs
 ([#22](https://github.com/yfedoseev/browser_oxide/pull/22)–[#31](https://github.com/yfedoseev/browser_oxide/pull/31)),
 whose commits are cherry-picked here with authorship preserved.
 
-- `deno_core` 0.403 → **0.408** (V8 149.2 → 149.4). This also resolves the
-  `deno_error` resolution failure reported in #32 — that conflict came from a
-  `^0.7.3` requirement; the workspace uses `^0.7`, which resolves to 0.7.1
-  alongside `deno_core` 0.408.
+- `deno_core` 0.403 → **0.404**. This also resolves the `deno_error` resolution
+  failure reported in #32 — that conflict came from a `^0.7.3` requirement;
+  the workspace uses `^0.7`, which resolves cleanly here.
+  0.408 was tried first and reverted: it builds and passes the full suite in
+  release, but **aborts (SIGABRT) during V8 isolate construction in debug
+  builds on Linux** — `basic_js_execution`, which only builds a runtime and
+  evaluates `1 + 2`, dies before printing a result. Tracked separately; the
+  bump needs a debug repro before it can land.
 - `taffy` 0.8 → **0.11** (adds safe-alignment keywords).
 - `sha1` and `sha2` 0.10 → **0.11**. These must move together: `sha2` 0.11
   pulls `digest` 0.11, which makes the in-scope `Digest` trait incompatible
