@@ -102,7 +102,14 @@ jobs:
       # tests (see CLAUDE.md). Network-bound and live anti-bot tests are
       # `#[ignore]` and not run here.
       - name: Test (single-threaded — V8 constraint)
-        run: cargo test --workspace --no-fail-fast -- --test-threads=1
+        # `--nocapture` matters for more than verbosity here. libtest captures
+        # each test's stdout/stderr and only replays it on failure — so when a
+        # test *aborts* the process (V8 FATAL, or a panic in a V8 callback that
+        # cannot unwind), the captured reason dies with it and the log shows a
+        # bare `signal: 6, SIGABRT` with no diagnosis. That is exactly what
+        # happened investigating #37. Streaming output unbuffered means the last
+        # thing printed before an abort is the abort's own message.
+        run: cargo test --workspace --no-fail-fast -- --test-threads=1 --nocapture
         env:
           CARGO_INCREMENTAL: "0"
 
