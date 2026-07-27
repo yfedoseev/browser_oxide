@@ -6,6 +6,61 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1]
+
+### Fixed
+- **`PagePool` / warm reuse leaked V8 heap without bound**
+  ([#33](https://github.com/yfedoseev/browser_oxide/issues/33)). Reusing a
+  `Page` across navigations grew V8's live (non-collectable) heap by ~10 MB
+  per page, eventually OOMing long batches. Every one of the engine's reapers
+  was wired only to `Page::drop`, which a pool by definition never reaches,
+  and the bootstrap JS keeps several registries scoped to the `JsRuntime`
+  rather than to the document. Now reaped on reuse:
+  - all registered event listeners (`__cancelAllListeners()` in
+    `event_bootstrap.js`) — `window`-bound listeners were keyed against the
+    one object that outlives every navigation, so their closures pinned the
+    previous page's entire object graph, and `_nodeListeners` was a strong
+    `Map` that was never pruned at all;
+  - the DOM node-wrapper cache, scroll state, `MutationObserver` registry,
+    and iframe/frame registries (`__resetDomRegistries()`);
+  - custom-element definitions (`__resetCustomElements()`);
+  - globals the page hung off `window` (`__resetPageGlobals()`), diffed
+    against a baseline the engine marks before any page script runs.
+- **Warm reuse misfired the previous page's handlers on the new document.**
+  `_nodeListeners` and the node-wrapper cache are keyed by `nodeId`, and node
+  IDs restart at zero when `replace_dom` swaps the document — so the old
+  page's listener for node 42 fired on the new page's node 42, and the new
+  page's node could be handed the old page's wrapper (with its expandos).
+  Fixed by the same reset.
+- **Custom elements could not be re-defined across a warm navigation.**
+  `customElements.define()` for a name the *previous* page had registered was
+  a silent no-op, so the new page's class never upgraded.
+- `Page::navigate_warm` left `__keepLongTimersRefed` set after a challenge
+  page, pinning long timers on every subsequent navigation of that `Page`.
+- **The CDP protocol server leaked the same way.** `Page.navigate` swaps the
+  document with `reload_html` on a `Page` the session keeps alive for its
+  whole lifetime, so it accumulated the previous document's state for as long
+  as a client stayed connected. It now resets between documents.
+- Page-assigned `on*` handlers (`window.onscroll = …`, `document.onclick = …`)
+  survived reuse. These already exist as own properties at bootstrap, so a
+  key-set diff cannot see the assignment; handler *values* are now snapshotted
+  at baseline and restored, which clears page assignments while preserving the
+  engine's own `window.onerror` instrumentation.
+
+### Added
+- `Page::reset_for_reuse()` — public, bundles every cross-navigation reaper
+  (timers, listeners, DOM registries, custom elements, page globals, orphan
+  Workers, child iframe isolates). Consumers that hand-roll page reuse — e.g.
+  calling `Page::reload_html` on a `Page` they keep alive — should call this
+  between documents; `PagePool`, `Page::navigate_warm` and the CDP server
+  already do.
+- `Page::v8_heap_used_bytes()` and `Page::collect_garbage()` (also on
+  `BrowserJsRuntime`) — lets pool operators verify heap health directly.
+  Sample after each navigation; a healthy pool stays flat.
+
+### Removed
+- Dead `_listeners` registry in `event_bootstrap.js` (declared, never read).
+
 ## [0.1.0] — 2026-06-13
 
 > First open-source release of BrowserOxide — a from-scratch stealth headless

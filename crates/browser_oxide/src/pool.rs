@@ -45,6 +45,16 @@ impl PagePool {
             // Note: In a real implementation, we might want to check if the
             // page's profile matches the requested one. For now, we'll
             // just reload it with a blank state.
+            //
+            // `reset_for_reuse` FIRST: the reapers it runs (timers,
+            // listeners, DOM registries, custom elements, page globals,
+            // orphan Workers) are all keyed to the outgoing document, and
+            // every one of them was previously wired only to `Page::drop` —
+            // which a pool, by definition, never reaches. Without this the
+            // isolate's live heap grows ~10 MB per acquire, without ceiling.
+            // Callers that reach `acquire` directly get the same treatment
+            // as the `navigate` path.
+            page.reset_for_reuse();
             page.reload_html("<html><head></head><body></body></html>", "about:blank");
             return Ok(page);
         }

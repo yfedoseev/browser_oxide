@@ -402,6 +402,14 @@ async fn handle_connection(
                         if let Ok(resp) = client.get(&url).await {
                             let html = resp.text();
                             let mut borrow = page.borrow_mut();
+                            // Same warm-reuse contract as `PagePool` (#33):
+                            // this session keeps ONE `Page` alive for its whole
+                            // lifetime, so without an explicit reset the
+                            // previous document's listeners, DOM registries and
+                            // window properties accumulate for as long as the
+                            // client stays connected — and its listeners misfire
+                            // on the new document, since node IDs restart.
+                            borrow.reset_for_reuse();
                             borrow.reload_html(&html, &url);
                             // Re-inject scripts registered via addScriptToEvaluateOnNewDocument
                             for script in &session.scripts_on_new_document {
