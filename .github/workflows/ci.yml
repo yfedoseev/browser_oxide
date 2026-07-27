@@ -277,7 +277,11 @@ jobs:
           head="${{ github.event.pull_request.head.sha }}"
           missing=0
           while IFS= read -r sha; do
-            git log -1 --pretty=full "$sha" | grep -q "^Signed-off-by:" || {
+            # `--format=%B` emits the RAW commit body. Do not use
+            # `--pretty=full` here: it indents the body by four spaces, so a
+            # `^Signed-off-by:` anchor never matches and the check fails even
+            # on correctly signed-off commits.
+            git log -1 --format=%B "$sha" | grep -q "^Signed-off-by:" || {
               echo "::error::commit $sha missing Signed-off-by trailer"; missing=$((missing+1)); }
           done < <(git log --pretty=format:"%H" "${base}..${head}")
           [ "$missing" -eq 0 ] || exit 1
