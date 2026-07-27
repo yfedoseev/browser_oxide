@@ -83,6 +83,31 @@ whose commits are cherry-picked here with authorship preserved.
   applies.
 - `chrono` 0.4.44 → 0.4.45, `http2` 0.5.17 → 0.5.19, plus `cargo update` across
   the tree for all remaining semver-compatible upgrades.
+
+### Security
+Two advisories in the dependency tree are resolved by the `cargo update` above.
+Neither is reachable through a public `browser_oxide` API, but both are worth
+noting for anyone auditing the tree:
+
+- **`quinn-proto` 0.11.14 → 0.11.16** — [RUSTSEC-2026-0185], remote memory
+  exhaustion via unbounded out-of-order stream reassembly. This one sits in the
+  HTTP/3 path, so it is reachable from a hostile server on an h3 connection.
+- **`crossbeam-epoch` 0.9.18 → 0.9.20** — [RUSTSEC-2026-0204], invalid pointer
+  dereference in the `fmt::Pointer` impl for `Atomic`/`Shared`.
+- `anyhow` 1.0.102 → 1.0.104 also clears [RUSTSEC-2026-0190] (unsoundness in
+  `Error::downcast_mut()`).
+
+`deny.toml`: added documented ignores for [RUSTSEC-2026-0206] (`rustybuzz`) and
+[RUSTSEC-2026-0192] (`ttf-parser`) — both *unmaintained* notices rather than
+vulnerabilities, on the direct text-shaping stack, with no maintained pure-Rust
+replacement. Dropped the now-stale `adler` ignore, which the `deno_core` bump
+resolved.
+
+[RUSTSEC-2026-0185]: https://rustsec.org/advisories/RUSTSEC-2026-0185
+[RUSTSEC-2026-0204]: https://rustsec.org/advisories/RUSTSEC-2026-0204
+[RUSTSEC-2026-0190]: https://rustsec.org/advisories/RUSTSEC-2026-0190
+[RUSTSEC-2026-0206]: https://rustsec.org/advisories/RUSTSEC-2026-0206
+[RUSTSEC-2026-0192]: https://rustsec.org/advisories/RUSTSEC-2026-0192
 - CI actions: `actions/checkout` 4 → 6, `actions/upload-artifact` 4 → 7,
   `codecov/codecov-action` 4 → 7, `taiki-e/install-action` 2.49.40 → 2.81.11,
   `github/codeql-action` 4.36.0 → 4.36.2 (all SHA-pinned).
