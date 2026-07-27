@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "browser_oxide"
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Stealth headless browser engine in Rust: real HTML/CSS/DOM/JS, V8 via deno_core, own BoringSSL TLS/JA4 fingerprint, no Chromium, no CDP — for anti-bot web scraping, archival, and AI agents"
+description = "Stealth headless browser engine in Rust: real HTML/CSS/DOM/JS, V8 via deno_core, own BoringSSL TLS/JA4 fingerprint, no Chromium, no CDP â€” for anti-bot web scraping, archival, and AI agents"
 keywords = [
   "stealth-browser",
   "headless-browser",
@@ -74,8 +74,8 @@ flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 brotli = "7"
 zstd = "0.13"
 # --- crypto / hashing / rng ---
-sha1 = "0.10"
-sha2 = "0.10"
+sha1 = "0.11"
+sha2 = "0.11"
 rand = "0.10"
 rand_chacha = "0.10"
 rand_distr = "0.6"
@@ -104,7 +104,7 @@ tracing = "0.1"
 tokio = { version = "1", features = ["full", "test-util"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 tokio-tungstenite = "0.27"
 futures-util = "0.3"
