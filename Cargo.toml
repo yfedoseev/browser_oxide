@@ -8,7 +8,7 @@ members = ["crates/browser_oxide", "crates/browser_oxide_mcp"]
 exclude = ["crates/browser_oxide_py"]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Yury Fedoseev"]
@@ -39,7 +39,7 @@ doc_overindented_list_items = "allow"
 # The single engine crate — depended on by browser_oxide_mcp. Explicit
 # version pinned to the workspace version so cargo-deny's `wildcards =
 # "deny"` rule doesn't trip on path-only `version = "*"` resolution.
-browser_oxide = { version = "0.1.2", path = "crates/browser_oxide" }
+browser_oxide = { version = "0.1.3", path = "crates/browser_oxide" }
 
 # Async runtime + common derive deps shared by multiple crates.
 tokio = { version = "1", features = ["full"] }

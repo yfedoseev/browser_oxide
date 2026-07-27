@@ -6,6 +6,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] — unreleased
+
+### Planned
+- `deno_core` 0.404 → 0.408
+  ([#37](https://github.com/yfedoseev/browser_oxide/issues/37)). Deferred from
+  0.1.2: 0.408 builds and passes the full suite in release, but aborts
+  (SIGABRT) during V8 isolate construction in debug builds on Linux. Needs a
+  debug repro and a 0.405–0.408 bisect before it can land.
+
 ## [0.1.2]
 
 ### Fixed
