@@ -33,7 +33,7 @@ tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 async-trait = "0.1"
 # --- V8 / JS ---
-deno_core = "0.403"
+deno_core = "0.404"
 deno_error = "0.7"
 # --- serialization ---
 serde = { version = "1", features = ["derive"] }
