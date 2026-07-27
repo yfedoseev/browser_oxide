@@ -192,7 +192,8 @@ async fn reset_preserves_engine_installed_on_handlers() {
     page.reload_html(BLANK, "about:blank");
 
     assert_eq!(
-        page.evaluate("window.onerror && window.onerror.name").unwrap(),
+        page.evaluate("window.onerror && window.onerror.name")
+            .unwrap(),
         "engineHandler",
         "reset did not restore the engine's own on* handler — either it was \
          nulled (breaking instrumentation) or the page's was left in place"

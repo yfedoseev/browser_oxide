@@ -26,7 +26,7 @@ async fn debug_probe(url: &str, profile: browser_oxide::stealth::StealthProfile)
             println!("  Body preview (first 2000 chars):");
             println!(
                 "    {}",
-                &body[..body.len().min(2000)].replace('\n', "\n    ")
+                body[..body.len().min(2000)].replace('\n', "\n    ")
             );
 
             // Detection signals

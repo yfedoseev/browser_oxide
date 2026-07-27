@@ -70,9 +70,7 @@ async fn heap_is_flat_across_warm_reuses() {
     let growth = end.saturating_sub(start);
     let per_iter = growth / ITERATIONS;
 
-    println!(
-        "with reset:    start={start} end={end} growth={growth} ({per_iter} B/iteration)"
-    );
+    println!("with reset:    start={start} end={end} growth={growth} ({per_iter} B/iteration)");
 
     assert!(
         per_iter < 200_000,
@@ -91,9 +89,7 @@ async fn heap_grows_without_reset_control_arm() {
     let growth = end.saturating_sub(start);
     let per_iter = growth / ITERATIONS;
 
-    println!(
-        "without reset: start={start} end={end} growth={growth} ({per_iter} B/iteration)"
-    );
+    println!("without reset: start={start} end={end} growth={growth} ({per_iter} B/iteration)");
 
     assert!(
         per_iter > 200_000,

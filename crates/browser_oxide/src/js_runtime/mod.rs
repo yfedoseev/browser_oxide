@@ -140,7 +140,10 @@ impl BrowserJsRuntime {
     /// Note this is V8 heap only — it excludes external/`ArrayBuffer` backing
     /// stores and everything Rust-side, so it is not process RSS.
     pub fn v8_heap_used_bytes(&mut self) -> usize {
-        self.inner.v8_isolate().get_heap_statistics().used_heap_size()
+        self.inner
+            .v8_isolate()
+            .get_heap_statistics()
+            .used_heap_size()
     }
 
     /// Ask V8 to perform a full garbage collection.

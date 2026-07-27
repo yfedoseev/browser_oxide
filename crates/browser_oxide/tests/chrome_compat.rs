@@ -5864,7 +5864,14 @@ async fn canvas_hash_for(profile: browser_oxide::stealth::StealthProfile) -> Str
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(data_url.as_bytes());
-    format!("{:x}", h.finalize())
+    // `digest` 0.11 (sha2 0.11) returns `Array<u8, N>`, which — unlike the
+    // old `GenericArray` — does not implement `LowerHex`, so `{:x}` no
+    // longer compiles. Hex-encode the bytes directly.
+    h.finalize().iter().fold(String::new(), |mut s, b| {
+        use std::fmt::Write as _;
+        let _ = write!(s, "{b:02x}");
+        s
+    })
 }
 
 #[tokio::test]
