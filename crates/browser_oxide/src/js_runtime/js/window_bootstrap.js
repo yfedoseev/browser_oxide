@@ -7081,4 +7081,21 @@
     for (let i = 0; i < 5; i++) _defineIframeGetter(i);
 
     Object.defineProperty(globalThis, Symbol.toStringTag, { value: "Window", configurable: true });
+
+    // Warm-reuse custom-element reaper. Both registries hold page-supplied
+    // constructors (and, for `whenDefined`, unresolved promise resolvers)
+    // for the life of the `JsRuntime`, so on a pooled `Page` they retain
+    // every class every previously-loaded document ever defined. Clearing
+    // also fixes a correctness bug: re-`define()`ing a name the *previous*
+    // page had already registered is a no-op today, so the new page's
+    // element class never upgrades. Called by `Page::reset_for_reuse`.
+    Object.defineProperty(globalThis, '__resetCustomElements', {
+        value: function __resetCustomElements() {
+            _customElementsRegistry.clear();
+            _whenDefinedPromises.clear();
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false,
+    });
 })(globalThis);

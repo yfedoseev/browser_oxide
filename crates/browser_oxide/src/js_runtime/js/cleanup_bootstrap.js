@@ -633,6 +633,123 @@
         internals.push('SharedArrayBuffer');
     }
 
+    // -- Warm-reuse global-namespace reset ---------------------------
+    // The last retention source for a pooled `Page`: properties page
+    // scripts hang straight off the global (`window.__APP_STATE = …`,
+    // `window.onscroll = …`, framework singletons). `globalThis` is the
+    // same object for the whole life of the `JsRuntime`, so on the warm
+    // path every one of those — and everything they transitively
+    // reference — survives into the next navigation. A real browser gives
+    // each navigation a fresh global; this is the closest equivalent that
+    // keeps the expensive bootstrap intact.
+    //
+    // `__markGlobalsBaseline()` snapshots the engine-owned key set;
+    // `__resetPageGlobals()` deletes everything added since. Rust re-marks
+    // the baseline once more after it installs the post-bootstrap
+    // instrumentation (`__cookieWrites` / `__scriptErrors` / the fetch +
+    // XHR wrappers), which is why those names are also allowlisted below —
+    // construction paths that skip the re-mark must not lose them.
+    // Note `window === globalThis` here (dom_bootstrap.js), so scrubbing
+    // the global object covers both.
+    // Guarded: this file is executed TWICE per page — once from
+    // `BrowserJsRuntime`'s constructor (before any page script) and again
+    // from `build_page_with_scripts_*` after the document's scripts have
+    // run. Only the first execution may seed the baseline; re-running the
+    // definitions would also reset the closure variable and throw the real
+    // baseline away.
+    if (typeof globalThis.__resetPageGlobals !== 'function') {
+        let _globalsBaseline = null;
+        let _onHandlerBaseline = null;
+        const _BASELINE_ALWAYS = [
+            '_browser_oxide', '__cookieWrites', '__scriptErrors',
+            '__bo_input_events', '__jsCookies',
+        ];
+
+        // `on*` handlers need value-level treatment, not just key-level.
+        // `onscroll`, `onerror`, … already EXIST as own properties of the
+        // global at bootstrap (default `null`), so a page that assigns
+        // `window.onscroll = fn` mutates a baseline key rather than adding
+        // one — the key-set diff below cannot see it, and the closure (plus
+        // everything it captures) survives the navigation.
+        //
+        // Blanket-nulling them is wrong: the engine itself installs
+        // `window.onerror` as its script-error instrumentation, once, and
+        // does NOT re-install it on the warm path. So snapshot the values
+        // at baseline and RESTORE them, which nulls page assignments while
+        // preserving the engine's.
+        const _snapshotOnHandlers = (target) => {
+            const m = new Map();
+            if (!target) return m;
+            let names;
+            try { names = Object.getOwnPropertyNames(target); } catch (_e) { return m; }
+            for (const k of names) {
+                if (!k.startsWith('on')) continue;
+                try { m.set(k, target[k]); } catch (_e) {}
+            }
+            return m;
+        };
+        const _restoreOnHandlers = (target, baseline) => {
+            if (!target || !baseline) return;
+            let names;
+            try { names = Object.getOwnPropertyNames(target); } catch (_e) { return; }
+            for (const k of names) {
+                if (!k.startsWith('on')) continue;
+                try {
+                    if (typeof target[k] !== 'function') continue;
+                    const orig = baseline.get(k);
+                    // Already the engine's own handler ⇒ leave it alone.
+                    if (orig === target[k]) continue;
+                    target[k] = (typeof orig === 'function') ? orig : null;
+                } catch (_e) {}
+            }
+        };
+
+        Object.defineProperty(globalThis, '__markGlobalsBaseline', {
+            value: function __markGlobalsBaseline() {
+                const seen = new Set(_BASELINE_ALWAYS);
+                for (const k of Object.getOwnPropertyNames(globalThis)) seen.add(k);
+                for (const s of Object.getOwnPropertySymbols(globalThis)) seen.add(s);
+                _globalsBaseline = seen;
+                // `document` is a singleton that survives `replace_dom`, so
+                // `document.onclick = fn` persists exactly like the window
+                // case and needs the same treatment.
+                _onHandlerBaseline = {
+                    global: _snapshotOnHandlers(globalThis),
+                    document: _snapshotOnHandlers(globalThis.document),
+                };
+            },
+            writable: true, configurable: true, enumerable: false,
+        });
+        Object.defineProperty(globalThis, '__resetPageGlobals', {
+            value: function __resetPageGlobals() {
+                // No baseline ⇒ nothing to compare against; deleting on a
+                // guess would strip the engine's own globals.
+                if (!_globalsBaseline) return 0;
+                let removed = 0;
+                const keys = Object.getOwnPropertyNames(globalThis)
+                    .concat(Object.getOwnPropertySymbols(globalThis));
+                for (const k of keys) {
+                    if (_globalsBaseline.has(k)) continue;
+                    // Best-effort: a page can install a non-configurable
+                    // property, and `delete` cannot remove those.
+                    try { if (delete globalThis[k]) removed++; } catch (_e) {}
+                }
+                if (_onHandlerBaseline) {
+                    _restoreOnHandlers(globalThis, _onHandlerBaseline.global);
+                    _restoreOnHandlers(globalThis.document, _onHandlerBaseline.document);
+                }
+                return removed;
+            },
+            writable: true, configurable: true, enumerable: false,
+        });
+        // Seed the baseline on this first execution: it runs as the last
+        // bootstrap, before anything page-authored, so the global namespace
+        // is exactly the engine's. Rust re-marks once more after installing
+        // the post-bootstrap instrumentation. The `internals` purge below
+        // only ever REMOVES keys, so marking before it is safe.
+        globalThis.__markGlobalsBaseline();
+    }
+
     for (const name of internals) {
         [globalThis, globalThis.window].forEach(obj => {
             if (!obj || !(name in obj)) return;
@@ -648,4 +765,5 @@
             }
         });
     }
+
 })(globalThis);

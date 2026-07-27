@@ -1,5 +1,4 @@
 ((globalThis) => {
-    const _listeners = new Map(); // nodeId → Map<eventType, [{callback, capture, once}]>
     // ---- Trusted-event authenticity (v0.1.0 behavioral E1) ----------------
     // `isTrusted` MUST be both unforgeable and shaped like a real browser's:
     //   * a GETTER on Event.prototype — NOT an own data property. Scripts
@@ -295,7 +294,40 @@
 
     // --- EventTarget core logic ---
     const _nodeListeners = new Map(); // nodeId → Map<eventType, [{callback, capture, once}]>
-    const _objListeners = new WeakMap(); // object → Map<eventType, [{callback, capture, once}]>
+    let _objListeners = new WeakMap(); // object → Map<eventType, [{callback, capture, once}]>
+
+    // Warm-reuse listener reaper — the events-side analogue of
+    // `timer_bootstrap.js`'s `__cancelAllTimers()`. A pooled `Page`
+    // (`PagePool` / `Page::navigate_warm`) keeps ONE `JsRuntime` alive across
+    // navigations, so both registries above outlive the document they were
+    // populated for. Two distinct failures follow:
+    //
+    //   * Leak. `_objListeners` is keyed by target *object*; listeners a page
+    //     attaches to `window`/`globalThis` (analytics, scroll handlers, …)
+    //     are keyed against the one global that is never collected for the
+    //     life of the isolate, so those callbacks — and every closure
+    //     variable they capture, which can be the page's whole object graph —
+    //     are retained forever. `_nodeListeners` is worse: it is a *strong*
+    //     Map that is never pruned at all. Measured at ~10 MB/page of live
+    //     (non-GC-able) V8 heap on real product pages, unbounded.
+    //   * Cross-page misfire. `_nodeListeners` is keyed by `nodeId`, and node
+    //     IDs restart from zero when `replace_dom` swaps the document. The
+    //     previous page's handler for node 42 therefore fires on the *new*
+    //     page's node 42.
+    //
+    // Called from `Page::reset_for_reuse` alongside `__cancelAllTimers()`.
+    // Non-enumerable so it does not widen `Object.getOwnPropertyNames(window)`.
+    Object.defineProperty(globalThis, '__cancelAllListeners', {
+        value: function __cancelAllListeners() {
+            _nodeListeners.clear();
+            // Reassign rather than clear: WeakMap has no `clear()`, and the
+            // whole point is to drop the `window`-keyed entry.
+            _objListeners = new WeakMap();
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false,
+    });
 
     const _getNodeIdOrMinusOne = (globalThis.__browser_oxide && globalThis.__browser_oxide._getNodeId)
         ? globalThis.__browser_oxide._getNodeId

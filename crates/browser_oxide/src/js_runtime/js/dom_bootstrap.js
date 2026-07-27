@@ -3349,4 +3349,40 @@
         configurable: true,
         writable: false,
     });
+
+    // Warm-reuse DOM-registry reaper. Every registry below is module-private
+    // and keyed by (or holding) state that belongs to ONE document, yet it
+    // lives as long as the `JsRuntime`. On the cold path that is exactly the
+    // life of the page, so nothing was ever pruned; on the warm path
+    // (`PagePool` / `Page::navigate_warm`) `replace_dom` swaps the document
+    // underneath them and they accumulate forever. See
+    // `Page::reset_for_reuse`, which calls this.
+    //
+    // `_nodeCache` is doubly wrong across a swap: it is keyed by `nodeId`, and
+    // node IDs restart at zero for the new document, so a surviving entry
+    // hands the NEW page's node the OLD page's wrapper (with the old page's
+    // expandos on it). The `WeakRef` values do not save us — an old wrapper
+    // stays alive as long as any listener closure references it.
+    Object.defineProperty(globalThis, '__resetDomRegistries', {
+        value: function __resetDomRegistries() {
+            _nodeCache.clear();
+            _scrollState.clear();
+            _syncFetchInFlight.clear();
+            // Observers registered by the previous page's scripts. Pages
+            // routinely never call `disconnect()`, so this only shrinks on
+            // reuse — each retained observer pins its callback closure and
+            // every observed target wrapper.
+            _moObservers.length = 0;
+            _appendedIframes.length = 0;
+            _frameRegistry.length = 0;
+            try { globalThis.__ifAppendCount = 0; } catch (_) {}
+            // Re-seed the document wrapper: `_wrapNode` must keep returning
+            // the singleton `_document` for the document node id, which
+            // `replace_dom` preserves.
+            try { _nodeCache.set(ops.op_dom_document_node(), new WeakRef(_document)); } catch (_) {}
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false,
+    });
 })(globalThis);

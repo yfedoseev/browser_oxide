@@ -130,6 +130,31 @@ impl BrowserJsRuntime {
         self.inner.v8_isolate().cancel_terminate_execution();
     }
 
+    /// V8's `used_heap_size` for this isolate, in bytes.
+    ///
+    /// Intended for monitoring warm reuse: pair with [`Self::collect_garbage`]
+    /// and sample after each navigation. On a healthy pool the value is flat
+    /// across navigations; a monotonic climb means something is retaining the
+    /// previous page (see `Page::reset_for_reuse`).
+    ///
+    /// Note this is V8 heap only — it excludes external/`ArrayBuffer` backing
+    /// stores and everything Rust-side, so it is not process RSS.
+    pub fn v8_heap_used_bytes(&mut self) -> usize {
+        self.inner.v8_isolate().get_heap_statistics().used_heap_size()
+    }
+
+    /// Ask V8 to perform a full garbage collection.
+    ///
+    /// Only meaningful for measurement: call it before
+    /// [`Self::v8_heap_used_bytes`] so the reading reflects *live* (reachable)
+    /// objects rather than not-yet-collected garbage. Without it, heap-growth
+    /// numbers are dominated by GC scheduling noise. Not a correctness tool —
+    /// never call it on a hot path.
+    pub fn collect_garbage(&mut self) {
+        let _guard = IsolateEnterGuard::enter(self.inner.v8_isolate());
+        self.inner.v8_isolate().low_memory_notification();
+    }
+
     /// Execute a JavaScript script and return the string representation of the result.
     ///
     /// Uses V8 directly in a single HandleScope — avoids the overhead of

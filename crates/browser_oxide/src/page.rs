@@ -982,6 +982,24 @@ impl Page {
         self.event_loop.execute_script(js)
     }
 
+    /// V8's `used_heap_size` for this page's isolate, in bytes.
+    ///
+    /// Useful for monitoring a [`crate::pool::PagePool`]: sample after each
+    /// navigation and the value should stay flat. A monotonic climb means
+    /// something is retaining the previous document — call
+    /// [`Page::reset_for_reuse`] between navigations. Call
+    /// [`Page::collect_garbage`] first if you want live-heap rather than
+    /// including uncollected garbage.
+    pub fn v8_heap_used_bytes(&mut self) -> usize {
+        self.event_loop.runtime_mut().v8_heap_used_bytes()
+    }
+
+    /// Ask V8 for a full garbage collection. Measurement aid only — see
+    /// [`Page::v8_heap_used_bytes`]. Never call this on a hot path.
+    pub fn collect_garbage(&mut self) {
+        self.event_loop.runtime_mut().collect_garbage();
+    }
+
     /// Run scripts and wait for completion.
     pub async fn evaluate_async(
         &mut self,
@@ -1489,15 +1507,38 @@ impl Page {
     }
 
     /// Reset all cross-navigation JS state on this Page so its V8 isolate
-    /// can be safely reused for a different URL. Called by
-    /// [`Page::navigate_warm`] and [`crate::pool::PagePool::navigate`].
+    /// can be safely reused for a different URL.
     ///
-    /// What gets cleared:
+    /// Call this before pointing a warm `Page` at new content.
+    /// [`Page::navigate_warm`] and [`crate::pool::PagePool`] already do;
+    /// any consumer that hand-rolls page reuse (e.g. calling
+    /// [`Page::reload_html`] on a `Page` it keeps alive) must call it
+    /// itself, otherwise the reapers below never run — every one of them
+    /// used to be wired only to `Page::drop`, so a pooling consumer
+    /// silently lost all of them.
+    ///
+    /// What gets reaped:
     /// - In-flight `setTimeout` / `setInterval` callbacks (via
     ///   `__cancelAllTimers()` generation bump in `timer_bootstrap.js`).
     ///   Without this, the previous page's `humanize.js` 30 pending
     ///   timers + recurring 4 s setInterval would fire on the new DOM
     ///   and dispatch synthetic mouse events into the wrong document.
+    /// - Every registered event listener (`__cancelAllListeners()` in
+    ///   `event_bootstrap.js`). Listeners bound to `window` are keyed
+    ///   against the one object that is never collected for the life of
+    ///   the isolate, so their closures pinned the previous page's whole
+    ///   object graph; node-keyed listeners additionally misfired on the
+    ///   next document, because node IDs restart at zero.
+    /// - DOM-side registries (`__resetDomRegistries()` in
+    ///   `dom_bootstrap.js`): node-wrapper cache, scroll state,
+    ///   MutationObservers, iframe/frame registries.
+    /// - Custom-element definitions (`__resetCustomElements()` in
+    ///   `window_bootstrap.js`).
+    /// - Globals the previous page's scripts hung off `window`
+    ///   (`__resetPageGlobals()` in `cleanup_bootstrap.js`) — everything
+    ///   added since the engine marked its baseline.
+    /// - Workers the page spawned but never `terminate()`d
+    ///   (`drain_owned_workers`), which `Page::drop` also does.
     /// - `_browser_oxide.__pendingNavigation` — spurious value left by the
     ///   `location.href = …` setter inside the previous build.
     /// - `_browser_oxide.__fetchLog` — DevTools-style network log; must
@@ -1509,17 +1550,23 @@ impl Page {
     ///   sensors read them on POST, so stale values would skew detection.
     /// - `globalThis.__jsCookies` — cookie cache snapshot (the real
     ///   source of truth is the HTTP client's jar, re-synced below).
+    /// - `globalThis.__keepLongTimersRefed` — per-navigation challenge
+    ///   flag; left set, it would pin long timers on every later page.
     ///
     /// What stays:
     /// - V8 isolate, bootstrap scripts (`window_bootstrap.js`,
     ///   `dom_bootstrap.js`, …), and the page-instrumentation wrappers
     ///   on `globalThis.fetch` / `document.cookie` / `XMLHttpRequest`.
     ///   These are the expensive bits we're reusing.
-    fn reset_warm_state(&mut self) {
+    pub fn reset_for_reuse(&mut self) {
         let _ = self.event_loop.execute_script(
             r#"(function() {
                 const g = globalThis;
                 try { g.__cancelAllTimers && g.__cancelAllTimers(); } catch (_) {}
+                try { g.__cancelAllListeners && g.__cancelAllListeners(); } catch (_) {}
+                try { g.__resetDomRegistries && g.__resetDomRegistries(); } catch (_) {}
+                try { g.__resetCustomElements && g.__resetCustomElements(); } catch (_) {}
+                try { delete g.__keepLongTimersRefed; } catch (_) {}
                 if (g._browser_oxide) {
                     g._browser_oxide.__pendingNavigation = null;
                     if (Array.isArray(g._browser_oxide.__fetchLog)) {
@@ -1543,6 +1590,11 @@ impl Page {
                     }
                 }
                 if (g.__jsCookies) g.__jsCookies = {};
+                // Last: drop everything the previous page's scripts hung
+                // off `window`. Runs after the buffer resets above so those
+                // engine-owned names are already back to a clean value (they
+                // are baseline-allowlisted, so this does not remove them).
+                try { g.__resetPageGlobals && g.__resetPageGlobals(); } catch (_) {}
             })();"#,
         );
         // Reap Workers the OUTGOING page spawned but never terminated. The
@@ -1559,6 +1611,10 @@ impl Page {
             let mut state = op_state.borrow_mut();
             crate::js_runtime::extensions::worker_ext::drain_owned_workers(&mut state);
         }
+        // Drop the previous document's iframe isolates. Children are newer
+        // isolates than this Page's, so clearing here keeps V8's
+        // reverse-creation-order drop requirement satisfied.
+        self.children.clear();
     }
 
     /// Navigate this *warm* Page to a new URL by reusing its V8 isolate
@@ -1800,8 +1856,8 @@ impl Page {
         // Cancel all in-flight timers from the previous page and clear
         // cross-nav JS buffers BEFORE swapping the DOM, so any straggler
         // callbacks that try to fire don't see a half-installed state.
-        self.reset_warm_state();
-        wmark!("reset_warm_state");
+        self.reset_for_reuse();
+        wmark!("reset_for_reuse");
 
         // Swap DOM (also resets `TimerState` Rust-side).
         self.event_loop.runtime_mut().replace_dom(dom, stylesheets);
@@ -3819,6 +3875,21 @@ impl Page {
             })();"#)
             .ok();
         mark!("install error + fetch/XHR instrumentation");
+
+        // Re-mark the global-namespace baseline now that every engine-owned
+        // global exists — bootstrap's own (marked at the end of
+        // cleanup_bootstrap.js) plus the instrumentation installed just
+        // above, which is install-once and is NOT re-applied on the warm
+        // path. Anything present after this line belongs to the engine;
+        // anything a page adds later is what `Page::reset_for_reuse`
+        // (`__resetPageGlobals`) sweeps. Must run BEFORE the page's own
+        // scripts, which start below.
+        event_loop
+            .execute_script(
+                "globalThis.__markGlobalsBaseline && globalThis.__markGlobalsBaseline();",
+            )
+            .ok();
+        mark!("__markGlobalsBaseline");
 
         // If the initial document is an anti-bot
         // challenge (AWS-WAF / sec-cpt / one of the other vendors), keep all
