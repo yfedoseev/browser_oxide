@@ -61,6 +61,32 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 - Dead `_listeners` registry in `event_bootstrap.js` (declared, never read).
 
+### Dependencies
+Closes [#32](https://github.com/yfedoseev/browser_oxide/issues/32) and
+supersedes the open Dependabot PRs
+([#22](https://github.com/yfedoseev/browser_oxide/pull/22)–[#31](https://github.com/yfedoseev/browser_oxide/pull/31)),
+whose commits are cherry-picked here with authorship preserved.
+
+- `deno_core` 0.403 → **0.408** (V8 149.2 → 149.4). This also resolves the
+  `deno_error` resolution failure reported in #32 — that conflict came from a
+  `^0.7.3` requirement; the workspace uses `^0.7`, which resolves to 0.7.1
+  alongside `deno_core` 0.408.
+- `taffy` 0.8 → **0.11** (adds safe-alignment keywords).
+- `sha1` and `sha2` 0.10 → **0.11**. These must move together: `sha2` 0.11
+  pulls `digest` 0.11, which makes the in-scope `Digest` trait incompatible
+  with a `sha1` still on `digest` 0.10.
+- `adblock` 0.12 → **0.13** (optional `blocker` feature). Required an API port
+  — `Engine::from_filter_set` → `new_with_filter_set`, `Request::new` gained a
+  fourth argument, `BlockerResult.matched` → `should_block()`. Ported by
+  [@Ran-Mewo](https://github.com/Ran-Mewo) in the SilvR-AI fork; adopted here
+  with thanks. The `deny.toml` MPL-2.0 exception is name-based and still
+  applies.
+- `chrono` 0.4.44 → 0.4.45, `http2` 0.5.17 → 0.5.19, plus `cargo update` across
+  the tree for all remaining semver-compatible upgrades.
+- CI actions: `actions/checkout` 4 → 6, `actions/upload-artifact` 4 → 7,
+  `codecov/codecov-action` 4 → 7, `taiki-e/install-action` 2.49.40 → 2.81.11,
+  `github/codeql-action` 4.36.0 → 4.36.2 (all SHA-pinned).
+
 ## [0.1.0] — 2026-06-13
 
 > First open-source release of BrowserOxide — a from-scratch stealth headless

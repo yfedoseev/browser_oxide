@@ -124,8 +124,8 @@ mod engine {
             format: FilterFormat::Standard,
             ..Default::default()
         };
-        filter_set.add_filter_list(&rules, parse_opts);
-        Some(Engine::from_filter_set(filter_set, true))
+        filter_set.add_filter_list(rules, parse_opts);
+        Some(Engine::new_with_filter_set(filter_set))
     }
 
     fn with_engine<R>(f: impl FnOnce(Option<&Engine>) -> R) -> R {
@@ -140,11 +140,11 @@ mod engine {
             let Some(eng) = opt_eng else { return false };
             // Falls back to `false` on any parse error — fail-open is safer
             // than fail-closed for an opt-in blocker.
-            let req = match Request::new(url, source_url, request_type) {
+            let req = match Request::new(url, source_url, request_type, "") {
                 Ok(r) => r,
                 Err(_) => return false,
             };
-            eng.check_network_request(&req).matched
+            eng.check_network_request(&req).should_block()
         })
     }
 }
