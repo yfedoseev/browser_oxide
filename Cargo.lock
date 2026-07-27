@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "browser_oxide"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "adblock",
  "async-trait",
@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "browser_oxide_mcp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "browser_oxide",
  "serde_json",
