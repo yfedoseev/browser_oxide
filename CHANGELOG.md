@@ -67,15 +67,31 @@ supersedes the open Dependabot PRs
 ([#22](https://github.com/yfedoseev/browser_oxide/pull/22)–[#31](https://github.com/yfedoseev/browser_oxide/pull/31)),
 whose commits are cherry-picked here with authorship preserved.
 
-- `deno_core` 0.403 → **0.404**. This also resolves the `deno_error` resolution
-  failure reported in #32 — that conflict came from a `^0.7.3` requirement;
-  the workspace uses `^0.7`, which resolves cleanly here.
-  0.408 was tried first and reverted: it builds and passes the full suite in
-  release, but **aborts (SIGABRT) during V8 isolate construction in debug
-  builds on Linux** — `basic_js_execution`, which only builds a runtime and
-  evaluates `1 + 2`, dies before printing a result. Tracked separately; the
+- `deno_core` 0.403 → **0.404**. 0.408 was tried and reverted: it builds and
+  passes the full suite in release, but **aborts (SIGABRT) during V8 isolate
+  construction in debug builds on Linux** — `basic_js_execution`, which only
+  builds a runtime and evaluates `1 + 2`, dies before printing a result. The
   bump needs a debug repro before it can land.
-- `taffy` 0.8 → **0.11** (adds safe-alignment keywords).
+- `taffy` 0.8 → **0.12** (adds safe-alignment keywords).
+- `skia-safe` 0.97 → **0.99**, `tokio-tungstenite` 0.27 → **0.30**,
+  `webpki-root-certs` 0.26 → **1.0**, `brotli` 7 → **8**, `base64` 0.22 →
+  **0.23**, `glow` 0.17 → **0.18** (behind the `webgl-render` feature).
+- **`png` deliberately held at 0.17.** 0.18 merges `FilterType` +
+  `AdaptiveFilterType` into one `Filter` enum, and while `Compression::Balanced`
+  does map back to the same flate2 level, `Filter::Adaptive` is *not*
+  equivalent to the `Paeth` + adaptive pair the canvas encoder uses. Measured
+  on the standard FingerprintJS canvas sequence, 0.18 emits a 9,646-byte data
+  URL where 0.17 emits 17,502 — i.e. a different canvas fingerprint for every
+  page. Added `examples/canvas_fp_probe.rs` so this is checkable in one command
+  before any future bump.
+
+On [#32](https://github.com/yfedoseev/browser_oxide/issues/32): the reported
+`deno_error` conflict is an artifact of how `cargo-outdated` probes. It
+synthesizes a manifest requiring the latest of *everything simultaneously*,
+which pairs `deno_core` 0.409 (whose own manifest pins `deno_error` **=0.7.1**)
+against `deno_error` 0.7.3 — a combination that cannot resolve upstream and
+does not exist in this workspace. It will keep recurring in the monthly
+`outdated` workflow until `deno_core` catches up with `deno_error`.
 - `sha1` and `sha2` 0.10 → **0.11**. These must move together: `sha2` 0.11
   pulls `digest` 0.11, which makes the in-scope `Digest` trait incompatible
   with a `sha1` still on `digest` 0.10.

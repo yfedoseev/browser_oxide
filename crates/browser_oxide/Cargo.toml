@@ -52,13 +52,13 @@ boring2 = { version = "4.15", features = [
 ] }
 boring-sys2 = "4.15"
 tokio-boring2 = "4.15"
-webpki-root-certs = "0.26"
+webpki-root-certs = "1.0"
 webpki-roots = "1"
 http = "1"
 http2 = { version = "0.5", features = ["unstable"] }
 bytes = "1"
 foreign-types = "0.5"
-tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 quinn = "0.11"
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
@@ -71,7 +71,7 @@ adblock = { version = "0.13", optional = true }
 # zlib-rs backend: canvas pins exact PNG output bytes (png_byte_parity test),
 # which the miniz_oxide default backend does not reproduce.
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
-brotli = "7"
+brotli = "8"
 zstd = "0.13"
 # --- crypto / hashing / rng ---
 sha1 = "0.11"
@@ -80,7 +80,7 @@ rand = "0.10"
 rand_chacha = "0.10"
 rand_distr = "0.6"
 # --- canvas / graphics / fonts ---
-skia-safe = "0.97"
+skia-safe = "0.99"
 png = "0.17"
 image = { version = "0.25", default-features = false, features = [
   "png",
@@ -90,13 +90,13 @@ fontdb = { version = "0.23", default-features = false }
 rustybuzz = "0.20"
 swash = "0.2"
 rustfft = "6"
-glow = { version = "0.17", optional = true }
+glow = { version = "0.18", optional = true }
 # --- layout ---
-taffy = "0.11"
+taffy = "0.12"
 # --- misc ---
 chrono = "0.4"
 thiserror = "2"
-base64 = "0.22"
+base64 = "0.23"
 lazy_static = "1"
 tracing = "0.1"
 
@@ -106,7 +106,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 hex = "0.4"
-tokio-tungstenite = "0.27"
+tokio-tungstenite = "0.30"
 futures-util = "0.3"
 url = "2"
 criterion = { version = "0.5", features = ["async_tokio"] }

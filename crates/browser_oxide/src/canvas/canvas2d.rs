@@ -1171,6 +1171,16 @@ impl Canvas2D {
             let mut encoder = png::Encoder::new(&mut buf, self.width, self.height);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
+            // DO NOT bump the `png` crate without re-validating canvas
+            // fingerprint output. png 0.18 merges `FilterType` +
+            // `AdaptiveFilterType` into a single `Filter` enum, and although
+            // `Compression::Balanced` does map back to the same flate2 level
+            // this uses, `Filter::Adaptive` is NOT equivalent to the
+            // `Paeth` + adaptive pair below: measured on the standard
+            // FingerprintJS canvas sequence, 0.18 emits a 9,646-byte data URL
+            // where 0.17 emits 17,502. That is a different fingerprint for
+            // every canvas the engine renders. See
+            // `examples/canvas_fp_probe.rs` for the A/B harness.
             encoder.set_compression(png::Compression::Default);
             encoder.set_filter(png::FilterType::Paeth);
             encoder.set_adaptive_filter(png::AdaptiveFilterType::Adaptive);
