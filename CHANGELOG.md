@@ -6,7 +6,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.1.1]
+## [0.1.2]
 
 ### Fixed
 - **`PagePool` / warm reuse leaked V8 heap without bound**
