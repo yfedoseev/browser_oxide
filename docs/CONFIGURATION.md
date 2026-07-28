@@ -54,6 +54,20 @@ or for benchmark fairness.
 | `BROWSER_OXIDE_NO_SHARED_ACCEPT_CH` | If set, don't carry learned `Accept-CH` client-hint upgrades across navigations. |
 | `BROWSER_OXIDE_COOKIE_COLLISION_PAIRS` | Opt-in fix for stale cross-domain cookie collisions (e.g. a site reachable under two eTLD+1 identities after a rebrand, where inherited cookies make the WAF serve a stub). Comma-separated `<domain-a>=<domain-b>` pairs, e.g. `BROWSER_OXIDE_COOKIE_COLLISION_PAIRS="twitter.com=x.com"`. When the current host matches either side and the jar holds cookies for both, both are cleared. Unset (default) = no scrub; the engine ships no hardcoded domain pairs. |
 
+## V8 heap limits
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `BROWSER_OXIDE_HEAP_MAX_MB` | `4096` (4 GB) | V8 heap **ceiling** per isolate, in MiB. The right value is a property of your deployment, not of the engine — a 512 MB container and a 64 GB scraping host want very different numbers. Lower it to fail fast instead of getting OOM-killed; raise it for fingerprint-heavy sites that legitimately allocate past 4 GB. |
+| `BROWSER_OXIDE_HEAP_INITIAL_MB` | `1024` (1 GB) | Initial heap **reservation**, in MiB. Not smaller by default deliberately: at 256 MB, fingerprint-heavy probes that allocate well past that in one pass made V8 compact old space repeatedly before growing the heap. A larger initial reservation trades virtual address space for skipping those early compactions. |
+
+Both are per-**isolate**, so a `PagePool` of N pages can commit up to N × the
+ceiling. Size accordingly.
+
+Unparseable or zero values are ignored with a warning and the default is used —
+a typo should not take down a scrape. An initial larger than the ceiling is
+clamped down to it, because V8 rejects that combination outright.
+
 ## V8 snapshot & performance
 
 | Variable | Default | Effect |
@@ -61,6 +75,15 @@ or for benchmark fairness.
 | `BROWSER_OXIDE_USE_SNAPSHOT` | unset (**off**) | Set to `1` to enable the V8 startup snapshot (faster cold start). **Disabled by default** on V8-149 — snapshot *restore* currently segfaults; the cold-bootstrap path is used instead. |
 | `BROWSER_OXIDE_NO_SNAPSHOT_CACHE` | unset | Disable the on-disk snapshot cache (forces an in-memory build per process). |
 | `BROWSER_OXIDE_SNAPSHOT_CACHE` | system temp dir | Override the snapshot cache directory. |
+
+> **Note on embedding:** as of `deno_core` 0.408 a V8 isolate must be created
+> inside an entered tokio runtime — deno_core captures
+> `tokio::runtime::Handle::try_current()` at construction and spawns V8's
+> delayed foreground tasks (GC memory-reducer work) on it, calling
+> `std::process::abort()` if there is no handle. `browser_oxide` handles this
+> for you: the synchronous constructors enter a process-lifetime fallback
+> runtime when the caller has none, so `BrowserJsRuntime::new` remains safe to
+> call from a plain `fn main` or `#[test]`.
 
 ## Debugging & tracing
 

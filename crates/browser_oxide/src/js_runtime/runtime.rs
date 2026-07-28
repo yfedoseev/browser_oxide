@@ -60,6 +60,108 @@ pub struct BrowserRuntimeOptions {
 /// (some sites expect a navigation to begin within a few seconds).
 /// Keeps this fn for existing callers
 /// that don't need the signal.
+/// Default V8 heap ceiling, in MiB. Overridable via
+/// `BROWSER_OXIDE_HEAP_MAX_MB`.
+pub const DEFAULT_HEAP_MAX_MB: usize = 4096;
+
+/// Default initial V8 heap reservation, in MiB. Overridable via
+/// `BROWSER_OXIDE_HEAP_INITIAL_MB`.
+///
+/// Not 256 MB: that caused early-growth GC pauses on fingerprint-heavy sites,
+/// where a heavy probe allocates well past 256 MB in a single pass and V8 spent
+/// time compacting old space before growing the heap. 1 GB skips those early
+/// compactions.
+pub const DEFAULT_HEAP_INITIAL_MB: usize = 1024;
+
+/// Resolve `(initial, max)` V8 heap limits in bytes.
+///
+/// Both are environment-tunable, which matters because the right ceiling is a
+/// property of the deployment, not of the engine: a 512 MB container and a
+/// 64 GB scraping host want very different numbers, and the previous
+/// hard-coded 4 GB silently over-committed the former.
+///
+/// - `BROWSER_OXIDE_HEAP_MAX_MB` — ceiling, default
+///   [`DEFAULT_HEAP_MAX_MB`] (4 GB).
+/// - `BROWSER_OXIDE_HEAP_INITIAL_MB` — initial reservation, default
+///   [`DEFAULT_HEAP_INITIAL_MB`] (1 GB).
+///
+/// Unparseable or zero values fall back to the defaults rather than failing:
+/// a typo in an env var should not take down a scrape. An initial larger than
+/// the max is clamped down to the max, since V8 treats that combination as a
+/// hard error.
+fn heap_limits() -> (usize, usize) {
+    fn mb_from_env(key: &str, default_mb: usize) -> usize {
+        match std::env::var(key) {
+            Ok(raw) => match raw.trim().parse::<usize>() {
+                Ok(mb) if mb > 0 => mb,
+                _ => {
+                    tracing::warn!(
+                        env = key,
+                        value = %raw,
+                        default_mb,
+                        "ignoring unparseable/zero heap limit; using default"
+                    );
+                    default_mb
+                }
+            },
+            Err(_) => default_mb,
+        }
+    }
+
+    let max_mb = mb_from_env("BROWSER_OXIDE_HEAP_MAX_MB", DEFAULT_HEAP_MAX_MB);
+    let initial_mb = mb_from_env("BROWSER_OXIDE_HEAP_INITIAL_MB", DEFAULT_HEAP_INITIAL_MB);
+    let initial_mb = initial_mb.min(max_mb);
+
+    const MIB: usize = 1024 * 1024;
+    (initial_mb * MIB, max_mb * MIB)
+}
+
+/// Guarantee a tokio runtime is entered for the duration of `JsRuntime`
+/// construction, falling back to a process-lifetime runtime if the caller has
+/// none.
+///
+/// Required as of `deno_core` 0.408. It captures
+/// `tokio::runtime::Handle::try_current()` at isolate-registration time
+/// (`runtime/jsruntime.rs`) and spawns V8's *delayed* foreground tasks — GC
+/// memory-reducer tasks and friends — on that handle. When the handle is
+/// `None`, `runtime/setup.rs::spawn_delayed_task` prints a diagnostic and calls
+/// `std::process::abort()`. Upstream aborts rather than panics deliberately:
+/// V8 invokes it from C++ frames Rust cannot unwind through.
+///
+/// Two things worth being precise about, because both misled the 0.1.2
+/// investigation (#37):
+///
+/// 1. **This is not debug-only.** The abort is unconditional. Release builds
+///    pass only while V8 happens not to post a delayed task in the window
+///    being exercised, which is timing, not safety.
+/// 2. **It is not the caller's bug to fix.** `BrowserJsRuntime::new` /
+///    `with_profile` / `with_options` are synchronous public API, callable from
+///    a plain `fn main` or a `#[test]`. Requiring every embedder to wrap
+///    construction in a runtime would be a silent breaking change whose
+///    failure mode is a process abort.
+///
+/// The captured handle must stay valid for the isolate's whole life, so the
+/// fallback runtime is a `OnceLock` living to process exit — a temporary would
+/// leave the isolate holding a handle to a dropped runtime.
+fn ensure_tokio_context() -> Option<tokio::runtime::EnterGuard<'static>> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return None;
+    }
+    static FALLBACK_RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    let rt = FALLBACK_RT.get_or_init(|| {
+        // Single worker + timer driver is all V8's delayed tasks need: they
+        // sleep, push onto the isolate's foreground queue, and wake it. The
+        // work itself is drained synchronously by our own event loop.
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_time()
+            .thread_name("browser-oxide-v8-delayed")
+            .build()
+            .expect("failed to build fallback tokio runtime for V8 delayed tasks")
+    });
+    Some(rt.enter())
+}
+
 pub fn create_runtime(dom: Dom, options: BrowserRuntimeOptions) -> JsRuntime {
     create_runtime_with_signals(dom, options).0
 }
@@ -115,13 +217,13 @@ pub fn create_runtime_with_signals(
     // property descriptors across every WebIDL interface). Real Chrome on
     // a desktop has 4 GB+ available per renderer; we mirror that.
     //
-    // HEAP_INITIAL was 256 MB but caused early-growth GC pauses on
-    // fingerprint-heavy sites (a heavy probe allocates well past 256 MB
-    // during its pass; V8 spent time compacting old space before
-    // growing the heap). 1 GB initial skips those early compactions.
-    const HEAP_INITIAL: usize = 1024 * 1024 * 1024; // 1 GB initial
-    const HEAP_MAX: usize = 4 * 1024 * 1024 * 1024; // 4 GB max
-    let create_params = deno_core::v8::CreateParams::default().heap_limits(HEAP_INITIAL, HEAP_MAX);
+    let (heap_initial, heap_max) = heap_limits();
+    let create_params = deno_core::v8::CreateParams::default().heap_limits(heap_initial, heap_max);
+
+    // Must outlive the `JsRuntime::new` call below — deno_core captures the
+    // current tokio handle during isolate registration. See
+    // `ensure_tokio_context`.
+    let _tokio_guard = ensure_tokio_context();
 
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![
@@ -339,6 +441,11 @@ pub fn create_worker_runtime(
     profile: Option<StealthProfile>,
     is_secure_context: bool,
 ) -> JsRuntime {
+    // Same requirement as the page runtime — worker realms are built on their
+    // own threads, which may not have a runtime entered. See
+    // `ensure_tokio_context`.
+    let _tokio_guard = ensure_tokio_context();
+
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![
             console_extension::init(),
