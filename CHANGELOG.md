@@ -6,14 +6,57 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.1.3] — unreleased
+## [0.1.3]
 
-### Planned
-- `deno_core` 0.404 → 0.408
-  ([#37](https://github.com/yfedoseev/browser_oxide/issues/37)). Deferred from
-  0.1.2: 0.408 builds and passes the full suite in release, but aborts
-  (SIGABRT) during V8 isolate construction in debug builds on Linux. Needs a
-  debug repro and a 0.405–0.408 bisect before it can land.
+### Fixed
+- **A V8 isolate constructed outside a tokio runtime aborted the process**
+  ([#37](https://github.com/yfedoseev/browser_oxide/issues/37)). `deno_core`
+  0.408 captures `tokio::runtime::Handle::try_current()` when it registers an
+  isolate and spawns V8's *delayed* foreground tasks — GC memory-reducer work —
+  on that handle; with no handle it prints a diagnostic and calls
+  `std::process::abort()`. The synchronous constructors
+  (`BrowserJsRuntime::new` / `with_profile` / `with_options`) are public API
+  callable from a plain `fn main` or a `#[test]`, so they now enter a
+  process-lifetime fallback runtime when the caller has none. Applies to both
+  the page and worker realms.
+
+  Worth being precise, because it shaped the 0.1.2 release: the abort is
+  **not** debug-gated and **not** platform-specific. Release builds passed only
+  while V8 happened not to post a delayed task inside the window under test —
+  i.e. a latent production abort, which is why the bump was held back from
+  0.1.2 rather than shipped. Reproduced on Linux, macOS and Windows.
+
+### Added
+- **Environment-tunable V8 heap limits.** The right ceiling is a property of
+  the deployment, not of the engine, and the previous hard-coded 4 GB silently
+  over-committed small containers.
+  - `BROWSER_OXIDE_HEAP_MAX_MB` — default `4096` (4 GB)
+  - `BROWSER_OXIDE_HEAP_INITIAL_MB` — default `1024` (1 GB)
+
+  Unparseable or zero values fall back to the defaults with a warning rather
+  than failing; an initial above the ceiling is clamped, since V8 rejects that
+  pairing. Both are per-**isolate**, so a `PagePool` of N pages can commit up
+  to N × the ceiling — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
+
+### Dependencies
+- `deno_core` 0.404 → **0.408** (V8 149.2.0 → 149.4.0), the bump deferred from
+  0.1.2.
+
+### Changed
+- CI runs `cargo test` with `--nocapture`. Not cosmetic: libtest captures each
+  test's output and replays it only on failure, so when a test *aborts* the
+  reason dies with it. That is why #37 first surfaced as a bare
+  `signal: 6, SIGABRT` with no diagnosis. Any future abort-on-construction
+  would otherwise be undiagnosable from CI logs alone.
+
+### Verified
+- Canvas fingerprint byte-identical across the V8 bump —
+  `examples/canvas_fp_probe.rs` reports `len=17502 fnv1a=5b1d42ee9bdc9713`, the
+  same value as 0.1.1 and 0.1.2.
+- Real-site regression vs `main`, 15 open sites, both engine paths: zero
+  regressions; the warm-reuse fix from 0.1.2 still holds (pool 11/15 → 12/15).
+- Full CI matrix green on ubuntu (stable/beta/nightly), macOS and Windows —
+  including the debug jobs that previously aborted.
 
 ## [0.1.2]
 
