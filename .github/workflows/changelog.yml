@@ -30,12 +30,16 @@ jobs:
           [ -n "$VERSION" ] || { echo "::error::could not parse [workspace.package] version"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "workspace version: $VERSION"
-      - name: Require a CHANGELOG section for this version
-        run: |
-          V='${{ steps.ver.outputs.version }}'
-          if grep -qE "^##+ \[?${V//./\\.}\]?" CHANGELOG.md; then
-            echo "CHANGELOG has a section for $V ✔"
-          else
-            echo "::error file=CHANGELOG.md::no '## [$V]' section found in CHANGELOG.md"
-            exit 1
-          fi
+      - name: Require a release-ready CHANGELOG section for this version
+        # Run the SAME validator the release workflows run, rather than a
+        # separate grep for the header. A header-only check passes while the
+        # release still fails, because `extract-release-notes.sh` additionally
+        # requires a `> subtitle` blockquote and at least one `### ` heading.
+        #
+        # That gap is not hypothetical: v0.1.2 passed this gate, was tagged and
+        # published to crates.io, and then `Release MCP binary` failed at
+        # "Generate release notes from CHANGELOG" with
+        #   No '> subtitle' blockquote found under '## [0.1.2]'
+        # A post-tag failure is the expensive kind — the tag is already public.
+        # Validating with the real script means the PR catches it instead.
+        run: bash .github/scripts/extract-release-notes.sh --check '${{ steps.ver.outputs.version }}'

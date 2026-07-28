@@ -8,6 +8,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.3]
 
+> Lands the `deno_core` 0.408 bump deferred from 0.1.2 — a V8 isolate must now be
+> constructed inside an entered tokio runtime or the process aborts — and makes
+> the V8 heap ceiling environment-tunable.
+
 ### Fixed
 - **A V8 isolate constructed outside a tokio runtime aborted the process**
   ([#37](https://github.com/yfedoseev/browser_oxide/issues/37)). `deno_core`
@@ -59,6 +63,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   including the debug jobs that previously aborted.
 
 ## [0.1.2]
+
+> Fixes an unbounded V8 heap leak in `PagePool` warm reuse that was also silently
+> corrupting render output — two real sites returned 9-byte bodies on the second
+> page through the pool. Adds `Page::reset_for_reuse()`, refreshes the dependency
+> tree, and clears two RUSTSEC advisories.
 
 ### Fixed
 - **`PagePool` / warm reuse leaked V8 heap without bound**
