@@ -721,9 +721,9 @@ dependencies = [
 
 [[package]]
 name = "deno_core"
-version = "0.408.0"
+version = "0.409.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c1d2bf3bf9a7dd3f4184cf3af56ce9f06b7bb9cab93497ec3acd04196c9db3f"
+checksum = "16b44f6f84139c39ec2f8d1b838412eb84ecaa9837103f7b12169896fd8778b4"
 dependencies = [
  "anyhow",
  "az",
@@ -757,6 +757,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "url",
+ "uuid",
  "v8",
  "wasm_dep_analyzer",
  "windows-sys 0.59.0",
@@ -789,9 +790,9 @@ dependencies = [
 
 [[package]]
 name = "deno_ops"
-version = "0.284.0"
+version = "0.285.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a12781597d3e7e407a83b9f11790d59fbcccb8cb32859f121b3b90291e1a026"
+checksum = "65c02fede673301e8b47d19368e0f3146d020e5dfcc5ee31d020cbbe542b2a50"
 dependencies = [
  "indexmap",
  "proc-macro2",
@@ -2627,9 +2628,9 @@ dependencies = [
 
 [[package]]
 name = "serde_v8"
-version = "0.317.0"
+version = "0.318.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f840e3a70bc8b320b014d4a6959c5d177c2a12e7aa561260843bd865cc86436"
+checksum = "eb994c8fd6bc9746ac605f1c38219fc5eaa99ca4509db1b6519eefa0219b04a0"
 dependencies = [
  "deno_error",
  "num-bigint",
@@ -3395,15 +3396,16 @@ version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
 dependencies = [
+ "getrandom 0.4.3",
  "js-sys",
  "wasm-bindgen",
 ]
 
 [[package]]
 name = "v8"
-version = "149.4.0"
+version = "150.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebfd8d6919bfb4b627ca778a67f85ca45e5fb442d352947ba093798bdf9b07e0"
+checksum = "42a978ff11f15b24e5c05a7123cf2b68f41e763546699781a924ef4e2cf43a49"
 dependencies = [
  "bindgen",
  "bitflags 2.13.1",
