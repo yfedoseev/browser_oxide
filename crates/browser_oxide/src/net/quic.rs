@@ -20,6 +20,7 @@ impl QuicClient {
             .with_root_certificates(Self::root_certs())
             .with_no_client_auth();
         tls_config.alpn_protocols = vec![b"h3".to_vec()];
+        tls_config.key_log = std::sync::Arc::new(rustls::KeyLogFile::new());
 
         // Chrome-like QUIC transport parameters
         let mut transport = quinn::TransportConfig::default();
