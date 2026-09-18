@@ -18,6 +18,7 @@ pub mod headers;
 // "internal testing/evaluation" carve-out. See ja4h.rs and LICENSE-NOTE.md.
 #[cfg(test)]
 pub(crate) mod ja4h;
+mod keylog;
 pub mod pool;
 pub mod proxy;
 pub mod quic;

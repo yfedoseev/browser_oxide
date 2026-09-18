@@ -17,6 +17,7 @@ use tokio::net::TcpStream;
 use tokio_boring2::SslStream;
 
 use crate::net::error::NetError;
+use crate::net::keylog;
 
 /// The Chrome major version whose **verified-real** ClientHello / H2
 /// fingerprint these constants reproduce, byte-exact.
@@ -473,21 +474,9 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
     }
     builder.set_cert_store(cert_store.build());
 
-    if let Ok(path) = std::env::var("SSLKEYLOGFILE") {
-        let file = std::sync::Arc::new(std::sync::Mutex::new(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|e| NetError::Tls(e.to_string()))?,
-        ));
-
+    if let Some(writer) = keylog::keylog_writer() {
         builder.set_keylog_callback(move |_ssl, line| {
-            use std::io::Write;
-
-            if let Ok(mut file) = file.lock() {
-                let _ = writeln!(file, "{line}");
-            }
+            writer.write_line(line);
         });
     }
 
