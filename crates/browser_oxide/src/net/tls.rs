@@ -473,6 +473,24 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
     }
     builder.set_cert_store(cert_store.build());
 
+    if let Ok(path) = std::env::var("SSLKEYLOGFILE") {
+        let file = std::sync::Arc::new(std::sync::Mutex::new(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(|e| NetError::Tls(e.to_string()))?,
+        ));
+
+        builder.set_keylog_callback(move |_ssl, line| {
+            use std::io::Write;
+
+            if let Ok(mut file) = file.lock() {
+                let _ = writeln!(file, "{line}");
+            }
+        });
+    }
+
     let connector = builder.build();
 
     // Extension order:
