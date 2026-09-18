@@ -1,6 +1,7 @@
 //! QUIC client for HTTP/3 transport.
 
 use crate::net::error::NetError;
+use crate::net::keylog;
 use quinn::VarInt;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -20,6 +21,10 @@ impl QuicClient {
             .with_root_certificates(Self::root_certs())
             .with_no_client_auth();
         tls_config.alpn_protocols = vec![b"h3".to_vec()];
+
+        if let Some(writer) = keylog::keylog_writer() {
+            tls_config.key_log = std::sync::Arc::new(writer);
+        }
 
         // Chrome-like QUIC transport parameters
         let mut transport = quinn::TransportConfig::default();

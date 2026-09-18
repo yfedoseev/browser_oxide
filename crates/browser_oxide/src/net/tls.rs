@@ -17,6 +17,7 @@ use tokio::net::TcpStream;
 use tokio_boring2::SslStream;
 
 use crate::net::error::NetError;
+use crate::net::keylog;
 
 /// The Chrome major version whose **verified-real** ClientHello / H2
 /// fingerprint these constants reproduce, byte-exact.
@@ -472,6 +473,12 @@ pub fn chrome_connector(profile: &StealthProfile) -> Result<SslConnector, NetErr
         let _ = cert_store.add_cert(x509);
     }
     builder.set_cert_store(cert_store.build());
+
+    if let Some(writer) = keylog::keylog_writer() {
+        builder.set_keylog_callback(move |_ssl, line| {
+            writer.write_line(line);
+        });
+    }
 
     let connector = builder.build();
 
