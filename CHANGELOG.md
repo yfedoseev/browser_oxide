@@ -6,6 +6,49 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **A deadline that fired after its script had already finished poisoned the
+  isolate — every later `evaluate()` failed, process-wide.**
+  `terminate_execution()` is an asynchronous *request*: V8 latches it as a
+  stack-guard interrupt and only materialises the termination exception when
+  the JS thread next checks. The navigation/build `V8DeadlineWatcher` could
+  deliver that request just after the script it targeted returned, and the two
+  cancel sites also raced the watcher (`cancel_terminate_execution()` ran
+  *before* `drop(_watcher)`, leaving a window in which the still-running
+  watcher re-armed it). The stale request then aborted the caller's first
+  `evaluate()` — and because nothing cleared it again, every subsequent one on
+  that isolate. Fresh `Browser()` instances were unaffected, so the failure
+  read as "the evaluate layer is dead".
+
+  Watchers are now dropped (joined) *before* the cancel, and the runtime
+  tracks whether a deadline is armed: a pending termination on an idle isolate
+  with no watcher is discarded before `execute_script` / `run_event_loop`,
+  while an armed watcher's interruption is still honored. The clear uses
+  `cancel_terminate_execution()` unconditionally rather than gating on
+  `is_execution_terminating()`, because that predicate only reports the
+  *materialised* exception and cannot see the still-pending interrupt flag.
+
+- **A crashed `evaluate()` took down the engine thread.** The host bridge
+  called `Page::evaluate` unguarded, so a Rust-side panic unwound out of
+  `engine_loop`; every later command on that handle then blocked forever in
+  `rx.recv()`. Evaluate is now panic-guarded and surfaces a `HostError`, and
+  the Page is discarded so the next `navigate()` rebuilds a clean isolate.
+
+- **Form state was missing, so gate flows keyed on it stalled** — closes the
+  side-bug in the same report.
+  - `HTMLSelectElement.value` / `.selectedIndex` were `undefined`;
+    `.options` / `.selectedOptions` / `.type` / `.length` did not exist, and
+    `<option>` had no `selected` / `value` / `text`. Now a full state model,
+    `<option>.value` falling back to the trimmed label per the HTML spec.
+  - `HTMLTextAreaElement.value` reflected to a bogus `value=""` attribute
+    instead of the element's text content (real Chrome never emits it, and the
+    form serializer never reads it). `defaultValue` / `type` / `name` /
+    `placeholder` / `disabled` / `readOnly` / `required` added too.
+  - `Element.click()` dispatched `click` without running the activation
+    behaviour, so `input.click()` never flipped `.checked`. It now toggles
+    checkboxes, enforces radio-group exclusivity, and fires `click` → `input`
+    → `change` in Chrome's order.
+
 ## [0.1.3]
 
 > Lands the `deno_core` 0.408 bump deferred from 0.1.2 — a V8 isolate must now be

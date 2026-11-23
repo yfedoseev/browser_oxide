@@ -198,11 +198,17 @@ fn engine_loop(rx: Receiver<Cmd>) {
                 }
                 Cmd::Evaluate { js, reply } => {
                     let res = match current.as_mut() {
-                        Some(p) => p
-                            .evaluate(&js)
-                            .map_err(|e| HostError::Engine(e.to_string())),
+                        Some(p) => eval_guarded(p, &js),
                         None => Err(HostError::NoPage),
                     };
+                    // A panicking evaluate can leave the isolate in an
+                    // indeterminate state; a later API call against it may
+                    // abort the process. Drop the page so the next navigate()
+                    // rebuilds a fresh isolate rather than reusing a suspect
+                    // one.
+                    if matches!(res, Err(HostError::Engine(msg)) if msg.starts_with("evaluate panicked")) {
+                        current = None;
+                    }
                     let _ = reply.send(res);
                 }
                 Cmd::QueryText { selector, reply } => {
@@ -215,4 +221,27 @@ fn engine_loop(rx: Receiver<Cmd>) {
             }
         }
     });
+}
+
+/// Run one `Page::evaluate`, converting a panic into a clean `HostError`
+/// instead of letting it unwind out of `engine_loop`.
+///
+/// A Rust-side panic under `execute_script` (an op panicking across the V8 FFI
+/// boundary) would otherwise kill the engine thread, after which every later
+/// command on this handle blocks forever in `rx.recv()` on the caller side.
+/// Catching it here keeps the thread serving commands.
+fn eval_guarded(page: &mut crate::Page, js: &str) -> Result<String, HostError> {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| page.evaluate(js)));
+    match outcome {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(e)) => Err(HostError::Engine(e.to_string())),
+        Err(panic) => {
+            let msg = panic
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "engine panicked".to_string());
+            Err(HostError::Engine(format!("evaluate panicked: {msg}")))
+        }
+    }
 }
