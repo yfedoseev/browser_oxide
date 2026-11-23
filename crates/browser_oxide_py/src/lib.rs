@@ -109,6 +109,27 @@ impl Browser {
         py.detach(move || engine.evaluate(&js)).map_err(to_pyerr)
     }
 
+    /// Number of child frames (iframes) the engine materialized for the
+    /// current page.
+    fn frame_count(&self, py: Python<'_>) -> PyResult<usize> {
+        let engine = Arc::clone(&self.engine);
+        py.detach(move || engine.frame_count()).map_err(to_pyerr)
+    }
+
+    /// Evaluate JS inside a child frame's own realm, by document order.
+    ///
+    /// The page realm cannot do this itself: a cross-origin frame's
+    /// `contentWindow.document` raises `SecurityError`, and a same-origin one
+    /// is still a separate V8 context. This is the equivalent of CDP's
+    /// `executionContextId` routing, using the child isolate the engine builds
+    /// at navigation time.
+    fn frame_evaluate(&self, py: Python<'_>, index: usize, js: &str) -> PyResult<String> {
+        let engine = Arc::clone(&self.engine);
+        let js = js.to_string();
+        py.detach(move || engine.frame_evaluate(index, &js))
+            .map_err(to_pyerr)
+    }
+
     /// `querySelector(selector).textContent` against the current page.
     fn query_text(&self, py: Python<'_>, selector: &str) -> PyResult<Option<String>> {
         let engine = Arc::clone(&self.engine);
@@ -176,6 +197,25 @@ impl Page {
         let engine = Arc::clone(&self.engine);
         let js = js.to_string();
         py.detach(move || engine.evaluate(&js)).map_err(to_pyerr)
+    }
+
+    /// Number of child frames (iframes) the engine materialized for this page.
+    fn frame_count(&self, py: Python<'_>) -> PyResult<usize> {
+        let engine = Arc::clone(&self.engine);
+        py.detach(move || engine.frame_count()).map_err(to_pyerr)
+    }
+
+    /// Evaluate JS inside a child frame's own realm, by document order.
+    ///
+    /// `page.evaluate()` cannot reach frame code: a cross-origin frame's
+    /// `contentWindow.document` raises `SecurityError`, and even a same-origin
+    /// one is a separate V8 context. This is the per-frame execution context
+    /// Chrome exposes via CDP's `executionContextId`.
+    fn frame_evaluate(&self, py: Python<'_>, index: usize, js: &str) -> PyResult<String> {
+        let engine = Arc::clone(&self.engine);
+        let js = js.to_string();
+        py.detach(move || engine.frame_evaluate(index, &js))
+            .map_err(to_pyerr)
     }
 
     fn query_text(&self, py: Python<'_>, selector: &str) -> PyResult<Option<String>> {

@@ -6,6 +6,33 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Child-frame evaluation (`frame_count()` / `frame_evaluate()`) on the host
+  bridge and the Python `Browser`/`Page`.** The engine already builds a real
+  V8 isolate per materialized `<iframe>` (`Page::child_iframe`), but nothing
+  outside the Rust crate could reach it: the Python binding and the MCP server
+  only exposed top-level `evaluate()`. Frame code was therefore unreachable —
+  and unreachable *for the same reason Chrome has per-frame execution
+  contexts*: a cross-origin frame's `contentWindow.document` throws
+  `SecurityError`, and a same-origin frame is still a separate context. This is
+  the CDP-`executionContextId` equivalent, without needing the CDP server.
+
+  ```python
+  with Browser() as b:
+      page = b.navigate("https://example.com")
+      for i in range(page.frame_count()):
+          print(page.frame_evaluate(i, "document.body.innerText[:80]"))
+  ```
+
+  `frame_evaluate` is panic-guarded like `evaluate`, so a frame-side panic
+  cannot unwind out of the engine thread. Out-of-range indexes return a
+  descriptive `NoFrame { index, count }` rather than failing opaquely.
+
+  Scope note: this drives frames the engine *materialized*. A frame whose
+  `src` was CSP-blocked or failed to fetch stays a DOM element with no realm,
+  and script-injected frames are only materialized on the challenge path
+  (`Page::rematerialize_iframes`).
+
 ### Fixed
 - **A deadline that fired after its script had already finished poisoned the
   isolate — every later `evaluate()` failed, process-wide.**
