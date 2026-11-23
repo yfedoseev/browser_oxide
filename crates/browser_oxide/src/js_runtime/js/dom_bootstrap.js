@@ -1018,7 +1018,53 @@
             return this._style;
         }
         // Interaction stubs
-        click() { this.dispatchEvent(new Event("click", { bubbles: true })); }
+        //
+        // `click()` must run the element's ACTIVATION BEHAVIOUR, not just
+        // dispatch an event: gate flows read back form state immediately
+        // (`if (box.checked) …`) and re-drive the flow from it. Without the
+        // toggle, `el.click()` looked successful (the event fired) but
+        // `.checked` never changed, so checkbox chains stalled. Chrome order
+        // is: legacy-pre-activation (toggle) → `click` → `input` → `change`.
+        click() {
+            const tag = (this.localName || "").toLowerCase();
+            let toggled = false;
+            if (tag === "input") {
+                const type = (this.getAttribute("type") || "text").toLowerCase();
+                if (type === "checkbox") {
+                    toggled = !this.hasAttribute("checked");
+                    if (toggled) this.setAttribute("checked", "");
+                    else this.removeAttribute("checked");
+                } else if (type === "radio") {
+                    // Radios are mutually exclusive per (form, name) group.
+                    const name = this.getAttribute("name");
+                    if (name) {
+                        let scope = null;
+                        try { scope = this.closest ? this.closest("form") : null; } catch (_) {}
+                        scope = scope || globalThis.document || null;
+                        if (scope && scope.querySelectorAll) {
+                            // Query the tag and filter, rather than relying on
+                            // an attribute-selector implementation: the peer set
+                            // must be found on every engine build.
+                            const peers = scope.querySelectorAll("input");
+                            for (let i = 0; i < peers.length; i++) {
+                                const peer = peers[i];
+                                if (peer === this) continue;
+                                if (!peer.getAttribute) continue;
+                                if ((peer.getAttribute("type") || "").toLowerCase() !== "radio") continue;
+                                if (peer.getAttribute("name") === name) peer.removeAttribute("checked");
+                            }
+                        }
+                    }
+                    toggled = !this.hasAttribute("checked");
+                    this.setAttribute("checked", "");
+                }
+            }
+            this.dispatchEvent(new Event("click", { bubbles: true }));
+            if (toggled) {
+                this.dispatchEvent(new Event("input", { bubbles: true }));
+                this.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+        }
         focus() { this.dispatchEvent(new Event("focus")); }
         blur() { this.dispatchEvent(new Event("blur")); }
         checkVisibility() { return true; }
@@ -1165,6 +1211,29 @@
     _reflectBool(HTMLInputElement.prototype, 'disabled');
     _reflectBool(HTMLInputElement.prototype, 'readOnly', 'readonly');
     _reflectBool(HTMLInputElement.prototype, 'required');
+    // `<textarea>` has no `value` attribute — its value is the element's text
+    // content, and its default is that same text. Reflecting it to an
+    // attribute would produce `<textarea value="...">`, which real Chrome
+    // never emits and the form serializer never reads.
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'value', {
+        get() { return this.textContent || ''; },
+        set(v) { this.textContent = String(v); },
+        enumerable: true, configurable: true,
+    });
+    _reflectStr(HTMLTextAreaElement.prototype, 'name');
+    _reflectStr(HTMLTextAreaElement.prototype, 'placeholder');
+    _reflectBool(HTMLTextAreaElement.prototype, 'disabled');
+    _reflectBool(HTMLTextAreaElement.prototype, 'readOnly', 'readonly');
+    _reflectBool(HTMLTextAreaElement.prototype, 'required');
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'type', {
+        get() { return 'textarea'; },
+        configurable: true, enumerable: true,
+    });
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'defaultValue', {
+        get() { return this.textContent || ''; },
+        set(v) { this.textContent = String(v); },
+        enumerable: true, configurable: true,
+    });
     _reflectStr(HTMLFormElement.prototype, 'action');
     _reflectStr(HTMLFormElement.prototype, 'method', 'method', 'get');
     _reflectStr(HTMLFormElement.prototype, 'enctype', 'enctype', 'application/x-www-form-urlencoded');
@@ -1237,6 +1306,103 @@
     class HTMLButtonElement extends HTMLElement {}
     class HTMLSelectElement extends HTMLElement {}
     class HTMLTextAreaElement extends HTMLElement {}
+
+    // ── Form state ────────────────────────────────────────────────────────
+    // Form state is what gate flows drive and read back: a solver sets
+    // `input.value = token`, ticks a checkbox, picks a `<select>` option,
+    // then reads the state to decide the next step. Every one of those
+    // accessors must round-trip through the DOM (attributes / text content),
+    // because that is the only store the Rust-side serializer
+    // (`HTMLFormElement.submit`) and `outerHTML` see. Without these:
+    //   * `select.value` / `select.selectedIndex` are `undefined`,
+    //   * `textarea.value` never reflects typed text,
+    //   * `option.selected` / `option.value` do not exist,
+    // so any flow keyed on form state silently stalls.
+    //
+    // `<option>` accessors are installed next to the HTMLOptionElement
+    // declaration further down, alongside the other late-declared classes.
+
+    // <select> — options collection plus the selected-option state model.
+    // `selectedIndex` is -1 when nothing is selected; `.value` falls back to
+    // '' like Chrome rather than throwing, so gate scripts can branch on it.
+    Object.defineProperty(HTMLSelectElement.prototype, 'options', {
+        get() {
+            const opts = this.querySelectorAll('option');
+            const len = opts.length;
+            const ctor = globalThis.HTMLOptionsCollection;
+            const wrap = ctor && ctor.prototype ? Object.create(ctor.prototype) : Object.create(null);
+            for (let i = 0; i < len; i++) {
+                Object.defineProperty(wrap, i, {
+                    value: opts[i], writable: false, configurable: true, enumerable: true,
+                });
+            }
+            Object.defineProperty(wrap, 'length', {
+                value: len, writable: false, configurable: true, enumerable: false,
+            });
+            Object.defineProperty(wrap, 'item', {
+                value: function item(i) { i = Math.trunc(+i); return i >= 0 && i < len ? wrap[i] : null; },
+                writable: true, configurable: true, enumerable: false,
+            });
+            Object.defineProperty(wrap, 'namedItem', {
+                value: function namedItem(n) {
+                    for (let i = 0; i < len; i++) { const o = opts[i]; if (o.id === n || o.name === n) return o; }
+                    return null;
+                },
+                writable: true, configurable: true, enumerable: false,
+            });
+            Object.defineProperty(wrap, Symbol.iterator, {
+                value: function* () { for (let i = 0; i < len; i++) yield wrap[i]; },
+                writable: true, configurable: true, enumerable: false,
+            });
+            return wrap;
+        },
+        configurable: true, enumerable: true,
+    });
+    Object.defineProperty(HTMLSelectElement.prototype, 'selectedOptions', {
+        get() {
+            const o = this.options; const r = [];
+            for (let i = 0; i < o.length; i++) if (o[i].selected) r.push(o[i]);
+            return r;
+        },
+        configurable: true, enumerable: true,
+    });
+    Object.defineProperty(HTMLSelectElement.prototype, 'selectedIndex', {
+        get() {
+            const o = this.options;
+            for (let i = 0; i < o.length; i++) if (o[i].selected) return i;
+            return -1;
+        },
+        set(v) {
+            const o = this.options; v = Math.trunc(+v);
+            for (let i = 0; i < o.length; i++) o[i].selected = (i === v);
+        },
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(HTMLSelectElement.prototype, 'value', {
+        get() {
+            const o = this.options;
+            for (let i = 0; i < o.length; i++) if (o[i].selected) return o[i].value;
+            return '';
+        },
+        set(v) {
+            const o = this.options; v = String(v);
+            for (let i = 0; i < o.length; i++) o[i].selected = (o[i].value === v);
+        },
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(HTMLSelectElement.prototype, 'length', {
+        get() { return this.options.length; },
+        configurable: true, enumerable: true,
+    });
+    Object.defineProperty(HTMLSelectElement.prototype, 'type', {
+        get() { return this.multiple ? 'select-multiple' : 'select-one'; },
+        configurable: true, enumerable: true,
+    });
+    _reflectBool(HTMLSelectElement.prototype, 'multiple');
+    _reflectBool(HTMLSelectElement.prototype, 'disabled');
+    _reflectBool(HTMLSelectElement.prototype, 'required');
+    _reflectStr(HTMLSelectElement.prototype, 'name');
+
     class HTMLCanvasElement extends HTMLElement {}
     Object.defineProperty(HTMLCanvasElement.prototype, "width", {
         get() {
@@ -1286,6 +1452,31 @@
     class HTMLTableSectionElement extends HTMLElement {}
     class HTMLLabelElement extends HTMLElement {}
     class HTMLOptionElement extends HTMLElement {}
+
+    // <option> state — value defaults to the trimmed text per the HTML spec.
+    Object.defineProperty(HTMLOptionElement.prototype, 'value', {
+        get() {
+            return this.hasAttribute('value')
+                ? this.getAttribute('value')
+                : (this.textContent || '').trim();
+        },
+        set(v) { this.setAttribute('value', String(v)); },
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(HTMLOptionElement.prototype, 'selected', {
+        get() { return this.hasAttribute('selected'); },
+        set(v) { if (v) this.setAttribute('selected', ''); else this.removeAttribute('selected'); },
+        enumerable: true, configurable: true,
+    });
+    Object.defineProperty(HTMLOptionElement.prototype, 'text', {
+        get() { return (this.textContent || '').trim(); },
+        set(v) { this.textContent = String(v); },
+        enumerable: true, configurable: true,
+    });
+    _reflectBool(HTMLOptionElement.prototype, 'defaultSelected', 'selected');
+    _reflectBool(HTMLOptionElement.prototype, 'disabled');
+    _reflectStr(HTMLOptionElement.prototype, 'label');
+
     class HTMLTemplateElement extends HTMLElement {}
     class HTMLPreElement extends HTMLElement {}
     class HTMLQuoteElement extends HTMLElement {}

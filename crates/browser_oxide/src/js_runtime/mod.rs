@@ -27,6 +27,13 @@ pub struct BrowserJsRuntime {
     /// short-circuit `run_until_idle` for fast nav handoff (some sites
     /// expect a navigation to begin within a few seconds).
     nav_signal: NavSignal,
+    /// True while a `V8DeadlineWatcher` is armed for this isolate. A pending
+    /// `terminate_execution()` means different things depending on this flag:
+    /// armed ⇒ it is the deadline doing its job and must be honored; not
+    /// armed ⇒ it is the stale-race leftover that would otherwise poison
+    /// every later script (see `execute_script`). The watcher is created and
+    /// dropped on the owning thread, so a plain bool suffices.
+    deadline_armed: bool,
 }
 
 /// RAII guard that enters a V8 isolate on creation and exits it on drop,
@@ -70,7 +77,11 @@ impl BrowserJsRuntime {
     pub fn new(dom: Dom) -> Self {
         let (inner, nav_signal) =
             create_runtime_with_signals(dom, BrowserRuntimeOptions::default());
-        Self { inner, nav_signal }
+        Self {
+            inner,
+            nav_signal,
+            deadline_armed: false,
+        }
     }
 
     /// Create with a stealth profile.
@@ -82,7 +93,11 @@ impl BrowserJsRuntime {
                 ..Default::default()
             },
         );
-        Self { inner, nav_signal }
+        Self {
+            inner,
+            nav_signal,
+            deadline_armed: false,
+        }
     }
 
     /// Create with full options.
@@ -98,7 +113,11 @@ impl BrowserJsRuntime {
             options.startup_snapshot = Some(snapshot::get_snapshot());
         }
         let (inner, nav_signal) = create_runtime_with_signals(dom, options);
-        Self { inner, nav_signal }
+        Self {
+            inner,
+            nav_signal,
+            deadline_armed: false,
+        }
     }
 
     /// Returns true iff JS has set a pending navigation since the last
@@ -118,8 +137,20 @@ impl BrowserJsRuntime {
     /// deadline expires — preempts CPU-bound JS spin loops that
     /// `tokio::time::timeout` cannot interrupt because they never yield
     /// to the tokio scheduler. The returned handle is `Send + Sync`.
+    ///
+    /// This is the *unarmed* accessor: obtaining a handle does not by itself
+    /// make a pending termination legitimate. Code that installs a deadline
+    /// watcher must call [`Self::arm_deadline_watcher`] alongside it.
     pub fn isolate_handle(&mut self) -> deno_core::v8::IsolateHandle {
         self.inner.v8_isolate().thread_safe_handle()
+    }
+
+    /// Declare that a `V8DeadlineWatcher` is now armed for this isolate, so a
+    /// pending `terminate_execution()` is a genuine deadline rather than the
+    /// stale-race leftover `execute_script` clears. [`Self::clear_pending_termination`]
+    /// disarms it again once the watcher is dropped/joined.
+    pub fn arm_deadline_watcher(&mut self) {
+        self.deadline_armed = true;
     }
 
     /// Cancel a previously-issued `terminate_execution()`. Required if
@@ -127,6 +158,30 @@ impl BrowserJsRuntime {
     /// after a deadline fired. Without this, the next `execute_script`
     /// returns "Uncaught Error: execution terminated".
     pub fn cancel_terminate_execution(&mut self) {
+        self.inner.v8_isolate().cancel_terminate_execution();
+    }
+
+    /// Make the isolate safe to drive again after a deadline watcher fired.
+    ///
+    /// `terminate_execution()` is an asynchronous *request*: `V8` stores it as
+    /// a stack-guard interrupt flag and only turns it into the termination
+    /// exception when the JS thread next reaches a check. If the script it was
+    /// aimed at has already returned, that flag stays armed on an idle isolate
+    /// and aborts the *next* script the embedder runs — a complete, fresh
+    /// `evaluate()`, or every later evaluate for the lifetime of the process.
+    /// Exactly the reported symptom.
+    ///
+    /// V8 splits the two halves: `is_execution_terminating()` only reports the
+    /// *materialized* exception slot, so it cannot see a pending flag. The
+    /// unconditional `cancel_terminate_execution()` is the correct clear: it
+    /// wipes both the interrupt flag (`stack_guard()->ClearTerminateExecution`)
+    /// and any materialized exception, and is a couple of atomic ops.
+    ///
+    /// Only safe when no watcher is armed (or right after disarming one): an
+    /// armed watcher's termination is a real deadline and must be honored.
+    /// `execute_script` / `run_event_loop` rely on that invariant.
+    pub fn clear_pending_termination(&mut self) {
+        self.deadline_armed = false;
         self.inner.v8_isolate().cancel_terminate_execution();
     }
 
@@ -168,6 +223,15 @@ impl BrowserJsRuntime {
         code: &str,
         name: Option<&str>,
     ) -> Result<String, deno_core::error::AnyError> {
+        // An outstanding `terminate_execution()` is only meaningful while a
+        // deadline watcher is armed. With no watcher, nothing can legitimately
+        // be interrupting us, so a latched request is the stale-race leftover
+        // that would otherwise poison this and every later script (see
+        // `clear_pending_termination`). When a watcher *is* armed the request
+        // is the deadline doing its job and must be honored, so we leave it.
+        if !self.deadline_armed {
+            self.clear_pending_termination();
+        }
         let __ctx = self.inner.main_context();
         // v8-149 + deno_core 0.403: a V8 isolate is entered (made the
         // thread-current isolate) when its `OwnedIsolate` is constructed and
@@ -238,6 +302,13 @@ impl BrowserJsRuntime {
 
     /// Run the V8 event loop until all pending work is done.
     pub async fn run_event_loop(&mut self) -> Result<(), deno_core::error::AnyError> {
+        // Mirror `execute_script`'s stale-termination defence: an armed
+        // deadline is a real interruption to honor, but on an idle isolate
+        // with no watcher the latched request would fail the drain on every
+        // later call. Same invariant, same fix.
+        if !self.deadline_armed {
+            self.clear_pending_termination();
+        }
         // v8-149: re-enter this runtime's own isolate so driving the event
         // loop (which runs JS, microtasks, and ops that build scopes) targets
         // the correct thread-current isolate even when a child-iframe runtime

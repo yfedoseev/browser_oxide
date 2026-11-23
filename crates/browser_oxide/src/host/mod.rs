@@ -44,6 +44,8 @@ pub enum HostError {
     Disconnected,
     #[error("no current page — call navigate() first")]
     NoPage,
+    #[error("no frame at index {index} — {count} frame(s) materialized (call frame_count())")]
+    NoFrame { index: usize, count: usize },
     #[error("engine error: {0}")]
     Engine(String),
 }
@@ -58,6 +60,14 @@ enum Cmd {
     Evaluate {
         js: String,
         reply: Sender<Result<String, HostError>>,
+    },
+    FrameEvaluate {
+        index: usize,
+        js: String,
+        reply: Sender<Result<String, HostError>>,
+    },
+    FrameCount {
+        reply: Sender<Result<usize, HostError>>,
     },
     QueryText {
         selector: String,
@@ -141,6 +151,48 @@ impl EngineHandle {
             .map_err(|_| HostError::Disconnected)?;
         rx.recv().map_err(|_| HostError::Disconnected)?
     }
+
+    /// Evaluate JS inside a child iframe's own realm.
+    ///
+    /// The parent realm cannot reach this: a cross-origin frame's
+    /// `contentWindow.document` throws `SecurityError`, and even a
+    /// same-origin one is a separate V8 context. Chrome's answer is
+    /// per-frame execution contexts (CDP `executionContextId`); this is the
+    /// equivalent, straight through to the child isolate the engine already
+    /// built at navigation time.
+    ///
+    /// `index` is the child's position in `Page::child_iframe` order, which
+    /// is document order of `<iframe>` elements that the engine materialized.
+    /// Use [`EngineHandle::frame_count`] to discover how many exist.
+    pub fn frame_evaluate(&self, index: usize, js: &str) -> Result<String, HostError> {
+        let (reply, rx) = channel();
+        self.tx
+            .lock()
+            .map_err(|_| HostError::Disconnected)?
+            .send(Cmd::FrameEvaluate {
+                index,
+                js: js.to_string(),
+                reply,
+            })
+            .map_err(|_| HostError::Disconnected)?;
+        rx.recv().map_err(|_| HostError::Disconnected)?
+    }
+
+    /// Number of child frames the engine materialized for the current page.
+    ///
+    /// Frames with a `src` are fetched and executed in their own V8 realm;
+    /// `srcdoc` frames likewise. Frames the engine could not materialize
+    /// (CSP-blocked, fetch failure, script-injected after load) are absent
+    /// from this count — they exist in the DOM but have no realm to drive.
+    pub fn frame_count(&self) -> Result<usize, HostError> {
+        let (reply, rx) = channel();
+        self.tx
+            .lock()
+            .map_err(|_| HostError::Disconnected)?
+            .send(Cmd::FrameCount { reply })
+            .map_err(|_| HostError::Disconnected)?;
+        rx.recv().map_err(|_| HostError::Disconnected)?
+    }
 }
 
 impl Drop for EngineHandle {
@@ -198,11 +250,17 @@ fn engine_loop(rx: Receiver<Cmd>) {
                 }
                 Cmd::Evaluate { js, reply } => {
                     let res = match current.as_mut() {
-                        Some(p) => p
-                            .evaluate(&js)
-                            .map_err(|e| HostError::Engine(e.to_string())),
+                        Some(p) => eval_guarded(p, &js),
                         None => Err(HostError::NoPage),
                     };
+                    // A panicking evaluate can leave the isolate in an
+                    // indeterminate state; a later API call against it may
+                    // abort the process. Drop the page so the next navigate()
+                    // rebuilds a fresh isolate rather than reusing a suspect
+                    // one.
+                    if matches!(res, Err(HostError::Engine(msg)) if msg.starts_with("evaluate panicked")) {
+                        current = None;
+                    }
                     let _ = reply.send(res);
                 }
                 Cmd::QueryText { selector, reply } => {
@@ -212,7 +270,72 @@ fn engine_loop(rx: Receiver<Cmd>) {
                     };
                     let _ = reply.send(res);
                 }
+                Cmd::FrameEvaluate { index, js, reply } => {
+                    let res = match current.as_mut() {
+                        Some(p) => match p.child_iframe(index) {
+                            Some(frame) => eval_frame_guarded(frame, &js),
+                            None => Err(HostError::NoFrame {
+                                index,
+                                count: p.child_iframe_count(),
+                            }),
+                        },
+                        None => Err(HostError::NoPage),
+                    };
+                    let _ = reply.send(res);
+                }
+                Cmd::FrameCount { reply } => {
+                    let res = match current.as_ref() {
+                        Some(p) => Ok(p.child_iframe_count()),
+                        None => Err(HostError::NoPage),
+                    };
+                    let _ = reply.send(res);
+                }
             }
         }
     });
+}
+
+/// Run one `Page::evaluate`, converting a panic into a clean `HostError`
+/// instead of letting it unwind out of `engine_loop`.
+///
+/// A Rust-side panic under `execute_script` (an op panicking across the V8 FFI
+/// boundary) would otherwise kill the engine thread, after which every later
+/// command on this handle blocks forever in `rx.recv()` on the caller side.
+/// Catching it here keeps the thread serving commands.
+fn eval_guarded(page: &mut crate::Page, js: &str) -> Result<String, HostError> {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| page.evaluate(js)));
+    match outcome {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(e)) => Err(HostError::Engine(e.to_string())),
+        Err(panic) => {
+            let msg = panic
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "engine panicked".to_string());
+            Err(HostError::Engine(format!("evaluate panicked: {msg}")))
+        }
+    }
+}
+
+/// Frame counterpart of [`eval_guarded`]. Same contract: a panic must not
+/// unwind out of `engine_loop`, or the engine thread dies and every later
+/// command blocks forever in `rx.recv()`.
+fn eval_frame_guarded(
+    frame: &mut crate::iframe::ChildIframe,
+    js: &str,
+) -> Result<String, HostError> {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| frame.evaluate(js)));
+    match outcome {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(e)) => Err(HostError::Engine(e.to_string())),
+        Err(panic) => {
+            let msg = panic
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "frame panicked".to_string());
+            Err(HostError::Engine(format!("frame evaluate panicked: {msg}")))
+        }
+    }
 }

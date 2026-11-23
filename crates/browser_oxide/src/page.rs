@@ -1878,6 +1878,9 @@ impl Page {
             self.event_loop.runtime_mut().isolate_handle(),
             Duration::from_millis(build_budget_ms),
         );
+        // Tell the runtime a real deadline is armed, so a delivered
+        // `terminate_execution()` is honored rather than treated as stale.
+        self.event_loop.runtime_mut().arm_deadline_watcher();
 
         // Seed `location` for this navigation. The `reset_nav_pending` now
         // scrubs the spurious `__pendingNavigation` the setter writes, so
@@ -2008,8 +2011,15 @@ impl Page {
             .event_loop
             .run_until_idle(Duration::from_millis(500))
             .await;
-        self.event_loop.runtime_mut().cancel_terminate_execution();
+        // ORDER MATTERS. Tear the watcher down FIRST (joining its thread so it
+        // can no longer fire), then clear any request it may already have
+        // delivered. Cancelling before the drop leaves a window in which the
+        // still-running watcher calls `terminate_execution()` right after our
+        // cancel — and that sticky request then fails the *next* `evaluate`
+        // on a perfectly healthy isolate (it is the caller's first script
+        // after navigation). This is the "evaluate dies process-wide" path.
         drop(_build_watcher);
+        self.event_loop.runtime_mut().clear_pending_termination();
         wmark!("drain done [READY]");
 
         Ok(())
@@ -2315,6 +2325,7 @@ impl Page {
             );
             let _watcher =
                 V8DeadlineWatcher::new(page.event_loop().runtime_mut().isolate_handle(), remaining);
+            page.event_loop().runtime_mut().arm_deadline_watcher();
 
             // Drain the event loop. Use the remaining nav budget (floored at 8s)
             // so that heavy PoW challenges (the VM can take 30+ seconds) can
@@ -2333,7 +2344,19 @@ impl Page {
             // If the watcher fired (or if we reached idle naturally), ensure
             // the isolate is ready for further script execution (draining
             // events, classification, etc.).
-            page.event_loop().runtime_mut().cancel_terminate_execution();
+            //
+            // ORDER MATTERS, twice over:
+            //  1. Drop the watcher first so its thread is joined and can no
+            //     longer deliver a `terminate_execution()` into the isolate.
+            //     Cancelling while it is still armed lets it fire *after* the
+            //     cancel, and that sticky request fails the caller's very next
+            //     `evaluate` — which is precisely the "every evaluate after a
+            //     navigation is dead" symptom.
+            //  2. Clear after the join, because the request may already be in.
+            // The Page escapes this loop to the caller, so a pending
+            // termination here is process-visible, not just iteration-local.
+            drop(_watcher);
+            page.event_loop().runtime_mut().clear_pending_termination();
 
             // NOTE: an earlier revision force-fired DOMContentLoaded/load +
             // readyState='complete' here for builds poisoned by a build-budget
@@ -3637,6 +3660,7 @@ impl Page {
             event_loop.runtime_mut().isolate_handle(),
             Duration::from_millis(build_budget_ms),
         );
+        event_loop.runtime_mut().arm_deadline_watcher();
 
         // Set location (URL-state setup, not a real navigation —
         // reset the nav-pending signal so subsequent run_until_idle calls
@@ -4224,9 +4248,11 @@ impl Page {
         // Cancel the build-phase watcher's terminate so the runtime is
         // usable for the drain phase (and downstream execute_script calls).
         // Drop the watcher first to stop the thread; then cancel any
-        // pending termination on the isolate.
+        // pending termination on the isolate. `clear_pending_termination`
+        // also disarms the deadline flag so the *next* `execute_script`
+        // does not treat a stale request as live.
         drop(_build_watcher);
-        event_loop.runtime_mut().cancel_terminate_execution();
+        event_loop.runtime_mut().clear_pending_termination();
         mark!("post-drain summary + iframes + watcher cleanup [DONE]");
 
         Ok(Self {
